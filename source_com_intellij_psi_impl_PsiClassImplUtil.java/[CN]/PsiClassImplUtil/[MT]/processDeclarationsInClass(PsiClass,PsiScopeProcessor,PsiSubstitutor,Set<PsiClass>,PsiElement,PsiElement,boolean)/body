@@ -1,12 +1,13 @@
 {
   if (visited.contains(aClass))   return true;
+  isRaw=isRaw || PsiUtil.isRawSubstitutor(aClass,substitutor);
   if (last instanceof PsiTypeParameterList)   return true;
   final Object data;
 synchronized (PsiLock.LOCK) {
     data=aClass.getUserData(ALL_MAPS_BUILT_FLAG);
   }
   if (last instanceof PsiReferenceList && data == null || aClass instanceof PsiTypeParameter) {
-    return processDeclarationsInClassNotCached(aClass,processor,substitutor,visited,last,place);
+    return processDeclarationsInClassNotCached(aClass,processor,substitutor,visited,last,place,isRaw);
   }
   final NameHint nameHint=processor.getHint(NameHint.class);
   final ElementClassHint classHint=processor.getHint(ElementClassHint.class);
@@ -50,11 +51,12 @@ synchronized (PsiLock.LOCK) {
             final Iterator<Pair<PsiClass,PsiSubstitutor>> iterator=list.iterator();
             while (iterator.hasNext()) {
               final Pair<PsiClass,PsiSubstitutor> candidate=iterator.next();
-              final PsiElement psiClass=candidate.getFirst().getParent();
-              if (psiClass instanceof PsiClass) {
-                PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(((PsiClass)psiClass),candidate.getSecond(),aClass,substitutor);
-                processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,psiClass);
-                if (!processor.execute(candidate.getFirst(),finalSubstitutor))                 return false;
+              final PsiClass inner=candidate.getFirst();
+              final PsiClass containingClass=inner.getContainingClass();
+              if (containingClass != null) {
+                PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(containingClass,candidate.getSecond(),aClass,substitutor);
+                processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,containingClass);
+                if (!processor.execute(inner,finalSubstitutor))                 return false;
               }
             }
           }
@@ -80,13 +82,21 @@ synchronized (PsiLock.LOCK) {
         while (iterator.hasNext()) {
           final Pair<PsiMethod,PsiSubstitutor> candidate=iterator.next();
           PsiMethod candidateMethod=candidate.getFirst();
-          PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(candidateMethod.getContainingClass(),candidate.getSecond(),aClass,substitutor);
-          processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,candidate.getFirst().getContainingClass());
-          if (!processor.execute(candidate.getFirst(),finalSubstitutor))           return false;
+          final PsiClass containingClass=candidateMethod.getContainingClass();
+          PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(containingClass,candidate.getSecond(),aClass,substitutor);
+          if (isRaw) {
+            final PsiTypeParameterList typeParameterList=candidateMethod.getTypeParameterList();
+            PsiTypeParameter[] methodTypeParameters=typeParameterList != null ? typeParameterList.getTypeParameters() : PsiTypeParameter.EMPTY_ARRAY;
+            for (int i=0; i < methodTypeParameters.length; i++) {
+              finalSubstitutor=((PsiSubstitutorEx)finalSubstitutor).inplacePut(methodTypeParameters[i],null);
+            }
+          }
+          processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,containingClass);
+          if (!processor.execute(candidateMethod,finalSubstitutor))           return false;
         }
       }
     }
     return true;
   }
-  return processDeclarationsInClassNotCached(aClass,processor,substitutor,visited,last,place);
+  return processDeclarationsInClassNotCached(aClass,processor,substitutor,visited,last,place,isRaw);
 }
