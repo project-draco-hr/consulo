@@ -1,0 +1,58 @@
+{
+  final PsiMethod methodCopy=(PsiMethod)myMethod.copy();
+  final PsiElement elementAt=methodCopy.getContainingFile().findElementAt(myTargetVariable.getTextRange().getStartOffset());
+  final PsiVariable variableCopy=PsiTreeUtil.getParentOfType(elementAt,PsiVariable.class);
+  try {
+    final PsiManager manager=myMethod.getManager();
+    final PsiElementFactory factory=manager.getElementFactory();
+    final PsiCodeBlock body=methodCopy.getBody();
+    if (body != null) {
+      body.accept(new PsiRecursiveElementVisitor(){
+        public void visitReferenceExpression(        PsiReferenceExpression expression){
+          final PsiExpression qualifier=expression.getQualifierExpression();
+          if (qualifier == null || qualifier instanceof PsiThisExpression) {
+            final PsiElement resolved=expression.resolve();
+            if (resolved instanceof PsiMember && ((PsiMember)resolved).getContainingClass().equals(methodCopy.getContainingClass())) {
+              try {
+                PsiReferenceExpression qualified=(PsiReferenceExpression)factory.createExpressionFromText(myOldClassParameterName + ".f",null);
+                qualified.getReferenceNameElement().replace(expression.getReferenceNameElement());
+                expression.replace(qualified);
+              }
+ catch (              IncorrectOperationException e) {
+                LOG.error(e);
+              }
+            }
+          }
+ else           if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).isReferenceTo(variableCopy)) {
+            try {
+              qualifier.delete();
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+          super.visitReferenceExpression(expression);
+        }
+        public void visitMethodCallExpression(        PsiMethodCallExpression expression){
+          if (expression.getMethodExpression().isReferenceTo(myMethod)) {
+            correctMethodCall(expression);
+          }
+          super.visitMethodCallExpression(expression);
+        }
+      }
+);
+    }
+    methodCopy.getModifierList().setModifierProperty(myTargetClass.isInterface() ? PsiModifier.PUBLIC : myNewVisibility,true);
+    if (myTargetVariable instanceof PsiParameter) {
+      final int index=myMethod.getParameterList().getParameterIndex((PsiParameter)myTargetVariable);
+      methodCopy.getParameterList().getParameters()[index].delete();
+    }
+    final PsiClassType type=factory.createType(myMethod.getContainingClass());
+    final PsiParameter parameter=factory.createParameter(myOldClassParameterName,type);
+    methodCopy.getParameterList().add(parameter);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  return methodCopy;
+}

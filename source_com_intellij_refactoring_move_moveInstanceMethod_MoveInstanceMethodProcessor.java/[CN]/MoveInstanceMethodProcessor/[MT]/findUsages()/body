@@ -1,3 +1,45 @@
 {
-  return new UsageInfo[0];
+  final PsiManager manager=myMethod.getManager();
+  final GlobalSearchScope searchScope=GlobalSearchScope.allScope(manager.getProject());
+  final PsiSearchHelper searchHelper=manager.getSearchHelper();
+  final PsiReference[] refs=searchHelper.findReferences(myMethod,searchScope,false);
+  final List<UsageInfo> usages=new ArrayList<UsageInfo>();
+  for (int i=0; i < refs.length; i++) {
+    final PsiElement element=refs[i].getElement();
+    if (element instanceof PsiReferenceExpression) {
+      usages.add(new MethodCallUsageInfo((PsiReferenceExpression)element));
+    }
+ else     if (element instanceof PsiDocTagValue) {
+      usages.add(new JavadocUsageInfo(((PsiDocTagValue)element)));
+    }
+ else {
+      LOG.assertTrue(false,"Unknown reference found");
+    }
+  }
+  if (myTargetClass.isInterface()) {
+    final PsiClass[] inheritors=searchHelper.findInheritors(myTargetClass,searchScope,false);
+    for (int i=0; i < inheritors.length; i++) {
+      PsiClass inheritor=inheritors[i];
+      usages.add(new InheritorUsageInfo(inheritor));
+    }
+  }
+  final PsiCodeBlock body=myMethod.getBody();
+  if (body != null) {
+    body.accept(new PsiRecursiveElementVisitor(){
+      public void visitReferenceExpression(      PsiReferenceExpression expression){
+        if (!expression.isQualified()) {
+          final PsiElement resolved=expression.resolve();
+          if (resolved.equals(myTargetVariable)) {
+            usages.add(new InternalUsageInfo(expression));
+          }
+ else           if (resolved instanceof PsiMember && ((PsiMember)resolved).getContainingClass().equals(myMethod.getContainingClass())) {
+            usages.add(new InternalUsageInfo(expression));
+          }
+        }
+        super.visitReferenceExpression(expression);
+      }
+    }
+);
+  }
+  return usages.toArray(new UsageInfo[usages.size()]);
 }

@@ -1,0 +1,53 @@
+{
+  if (elements.length != 1 || !(elements[0] instanceof PsiMethod))   return;
+  final PsiMethod method=((PsiMethod)elements[0]);
+  if (method.isConstructor()) {
+    String message="Cannot perform the refactoring.\n" + "Move method is not supported for constructors";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
+    return;
+  }
+  if (PsiSuperMethodUtil.findSuperMethods(method).length > 0 || method.getManager().getSearchHelper().findOverridingMethods(method,GlobalSearchScope.allScope(project),true).length > 0) {
+    String message="Cannot perform the refactoring.\n" + "Move method is not supported when method is a part of inheritance hierarchy";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
+    return;
+  }
+  List<PsiVariable> suitableVariables=new ArrayList<PsiVariable>();
+  List<PsiVariable> allVariables=new ArrayList<PsiVariable>();
+  allVariables.addAll(Arrays.asList(method.getParameterList().getParameters()));
+  allVariables.addAll(Arrays.asList(method.getContainingClass().getFields()));
+  boolean classTypesFound=false;
+  boolean resolvableClassesFound=false;
+  boolean classesInProjectFound=false;
+  for (Iterator<PsiVariable> iterator=allVariables.iterator(); iterator.hasNext(); ) {
+    PsiVariable variable=iterator.next();
+    final PsiType type=variable.getType();
+    if (type instanceof PsiClassType) {
+      classTypesFound=true;
+      final PsiClass psiClass=((PsiClassType)type).resolve();
+      if (psiClass != null) {
+        resolvableClassesFound=true;
+        final boolean inProject=method.getManager().isInProject(psiClass);
+        if (inProject) {
+          classesInProjectFound=true;
+          suitableVariables.add(variable);
+        }
+      }
+    }
+  }
+  if (suitableVariables.isEmpty()) {
+    String message=null;
+    if (!classTypesFound) {
+      message="There are no parameters that have a reference type";
+    }
+ else     if (!resolvableClassesFound) {
+      message="All reference type parametres have unknown types";
+    }
+ else     if (!classesInProjectFound) {
+      message="All reference type parameters have types that are not in project";
+    }
+    LOG.assertTrue(message != null);
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,"Cannot perform refactoring.\n" + message,HelpID.CONVERT_TO_INSTANCE_METHOD,project);
+    return;
+  }
+  new MoveInstanceMethodDialog(method,suitableVariables.toArray(new PsiVariable[suitableVariables.size()])).show();
+}
