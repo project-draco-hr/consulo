@@ -8,34 +8,41 @@
     if (myChangeInfo.isReturnTypeChanged) {
       myChangeInfo.newTypeElement=myChangeInfo.newReturnType.getType(myChangeInfo.getMethod());
     }
-    myMethodsToBeChanged=new HashSet<PsiMethod>();
     if (myGenerateDelegate) {
       generateDelegate();
     }
     for (int i=0; i < usages.length; i++) {
       UsageInfo usage=usages[i];
-      if (!(usage instanceof DefaultConstructorImplicitUsageInfo) && usage.getElement() instanceof PsiMethod) {
-        myMethodsToBeChanged.add((PsiMethod)usage.getElement());
+      if (usage instanceof CallerUsageInfo) {
+        final CallerUsageInfo callerUsageInfo=(CallerUsageInfo)usage;
+        processCallerMethod(callerUsageInfo.getMethod(),null,callerUsageInfo.isToInsertParameter(),callerUsageInfo.isToInsertException());
       }
-    }
-    if (myChangeInfo.isExceptionSetOrOrderChanged) {
-      fixThrowsLists(getChangedExceptionInfo(myChangeInfo));
+ else       if (usage instanceof OverriderUsageInfo) {
+        OverriderUsageInfo info=(OverriderUsageInfo)usage;
+        final PsiMethod method=info.getElement();
+        final PsiMethod baseMethod=info.getBaseMethod();
+        if (info.isOriginalOverrider()) {
+          processPrimaryMethod(method,baseMethod,false);
+        }
+ else {
+          processCallerMethod(method,baseMethod,info.isToInsertArgs(),info.isToCatchExceptions());
+        }
+      }
     }
     for (int i=0; i < usages.length; i++) {
       UsageInfo usage=usages[i];
-      if (!usage.getElement().isValid())       continue;
+      if (usage.getElement() == null)       continue;
       if (usage instanceof DefaultConstructorImplicitUsageInfo) {
-        addSuperCall(((DefaultConstructorImplicitUsageInfo)usage).getConstructor());
+        final DefaultConstructorImplicitUsageInfo defConstructorUsage=(DefaultConstructorImplicitUsageInfo)usage;
+        addSuperCall(defConstructorUsage.getConstructor(),defConstructorUsage.getBaseConstructor());
       }
  else       if (usage instanceof NoConstructorClassUsageInfo) {
         addDefaultConstructor(((NoConstructorClassUsageInfo)usage).getPsiClass());
       }
- else       if (usage.getElement() instanceof PsiMethod) {
-        processMethod((PsiMethod)usage.getElement(),false);
-      }
  else       if (usage.getElement() instanceof PsiJavaCodeReferenceElement) {
-        if (RefactoringUtil.isMethodUsage(usage.getElement())) {
-          processMethodUsage((PsiJavaCodeReferenceElement)usage.getElement(),myChangeInfo);
+        if (usage instanceof MethodCallUsageInfo) {
+          final MethodCallUsageInfo methodCallInfo=((MethodCallUsageInfo)usage);
+          processMethodUsage(methodCallInfo.getElement(),myChangeInfo,methodCallInfo.isToChangeArguments(),methodCallInfo.isToCatchExceptions(),methodCallInfo.getReferencedMethod());
         }
  else {
           String newName=((MyParameterUsageInfo)usage).newParameterName;
@@ -44,14 +51,14 @@
         }
       }
  else       if (usage.getElement() instanceof PsiEnumConstant) {
-        fixActualArgumentsList(((PsiEnumConstant)usage.getElement()).getArgumentList(),myChangeInfo,false);
+        fixActualArgumentsList(((PsiEnumConstant)usage.getElement()).getArgumentList(),myChangeInfo,true);
       }
  else {
         postponedUsages.add(usage);
       }
     }
     LOG.assertTrue(myChangeInfo.getMethod().isValid());
-    processMethod(myChangeInfo.getMethod(),true);
+    processPrimaryMethod(myChangeInfo.getMethod(),null,true);
     for (Iterator<UsageInfo> i=postponedUsages.iterator(); i.hasNext(); ) {
       UsageInfo usageInfo=i.next();
       PsiReference reference=usageInfo.getElement().getReference();
@@ -75,11 +82,6 @@
           reference.bindToElement(target);
         }
       }
-    }
-    fixJavadocsForChangedMethod(myChangeInfo.getMethod());
-    for (Iterator<PsiMethod> iterator=myMethodsToBeChanged.iterator(); iterator.hasNext(); ) {
-      PsiMethod method=iterator.next();
-      fixJavadocsForChangedMethod(method);
     }
     LOG.assertTrue(myChangeInfo.getMethod().isValid());
   }
