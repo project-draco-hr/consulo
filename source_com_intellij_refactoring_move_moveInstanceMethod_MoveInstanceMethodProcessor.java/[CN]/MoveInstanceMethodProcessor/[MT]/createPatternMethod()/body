@@ -12,20 +12,20 @@
         public void visitReferenceExpression(        PsiReferenceExpression expression){
           try {
             final PsiExpression qualifier=expression.getQualifierExpression();
-            if (qualifier == null || qualifier instanceof PsiThisExpression) {
+            if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).isReferenceTo(variableCopy)) {
+              qualifier.delete();
+            }
+ else {
               final PsiElement resolved=expression.resolve();
               if (variableCopy.equals(resolved)) {
                 PsiThisExpression thisExpression=(PsiThisExpression)factory.createExpressionFromText("this",null);
                 expression.replace(thisExpression);
               }
- else               if (resolved instanceof PsiMember && ((PsiMember)resolved).getContainingClass().equals(methodCopy.getContainingClass())) {
+ else               if (MoveMethodUtil.isClassInstanceReference(expression,methodCopy.getContainingClass())) {
                 PsiReferenceExpression qualified=(PsiReferenceExpression)factory.createExpressionFromText(myOldClassParameterName + ".f",null);
                 qualified.getReferenceNameElement().replace(expression.getReferenceNameElement());
                 expression.replace(qualified);
               }
-            }
- else             if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).isReferenceTo(variableCopy)) {
-              qualifier.delete();
             }
             super.visitReferenceExpression(expression);
           }
@@ -33,9 +33,28 @@
             LOG.error(e);
           }
         }
+        public void visitNewExpression(        PsiNewExpression expression){
+          try {
+            final PsiExpression qualifier=expression.getQualifier();
+            if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).isReferenceTo(variableCopy)) {
+              qualifier.delete();
+            }
+ else {
+              if (MoveMethodUtil.isClassInstanceReference(expression,methodCopy.getContainingClass())) {
+                if (qualifier != null)                 qualifier.delete();
+                final PsiExpression newExpression=factory.createExpressionFromText(myOldClassParameterName + "." + expression.getText(),null);
+                expression.replace(newExpression);
+              }
+            }
+            super.visitNewExpression(expression);
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
         public void visitMethodCallExpression(        PsiMethodCallExpression expression){
           if (expression.getMethodExpression().isReferenceTo(myMethod)) {
-            correctMethodCall(expression);
+            correctMethodCall(expression,true);
           }
           super.visitMethodCallExpression(expression);
         }
@@ -47,9 +66,11 @@
       final int index=myMethod.getParameterList().getParameterIndex((PsiParameter)myTargetVariable);
       methodCopy.getParameterList().getParameters()[index].delete();
     }
-    final PsiClassType type=factory.createType(myMethod.getContainingClass());
-    final PsiParameter parameter=factory.createParameter(myOldClassParameterName,type);
-    methodCopy.getParameterList().add(parameter);
+    if (myOldThisNeeded) {
+      final PsiClassType type=factory.createType(myMethod.getContainingClass());
+      final PsiParameter parameter=factory.createParameter(myOldClassParameterName,type);
+      methodCopy.getParameterList().add(parameter);
+    }
     final List<PsiParameter> newParameters=Arrays.asList(methodCopy.getParameterList().getParameters());
     RefactoringUtil.fixJavadocsForParams(methodCopy,new HashSet<PsiParameter>(newParameters));
   }

@@ -1,14 +1,19 @@
 {
   try {
     final PsiManager manager=myMethod.getManager();
-    PsiExpression qualifier=expression.getMethodExpression().getQualifierExpression();
-    if (qualifier == null)     qualifier=manager.getElementFactory().createExpressionFromText("this",null);
+    final PsiExpression oldQualifier=expression.getMethodExpression().getQualifierExpression();
     PsiExpression newQualifier=null;
     if (myTargetVariable instanceof PsiParameter) {
       final int index=myMethod.getParameterList().getParameterIndex((PsiParameter)myTargetVariable);
       final PsiExpression[] arguments=expression.getArgumentList().getExpressions();
       if (index < arguments.length) {
-        newQualifier=(PsiExpression)arguments[index].copy();
+        if (isInternalCall && (oldQualifier == null || isTrivialThisQualifier(oldQualifier))) {
+          LOG.assertTrue(myOldThisNeeded);
+          newQualifier=manager.getElementFactory().createExpressionFromText(myOldClassParameterName,null);
+        }
+ else {
+          newQualifier=(PsiExpression)arguments[index].copy();
+        }
         arguments[index].delete();
       }
     }
@@ -16,10 +21,13 @@
       VisibilityUtil.escalateVisibility((PsiField)myTargetVariable,expression);
       newQualifier=manager.getElementFactory().createExpressionFromText(myTargetVariable.getName(),null);
     }
-    expression.getArgumentList().add(qualifier);
+    if (myOldThisNeeded) {
+      PsiExpression qualifier=expression.getMethodExpression().getQualifierExpression();
+      if (qualifier == null)       qualifier=manager.getElementFactory().createExpressionFromText("this",null);
+      expression.getArgumentList().add(qualifier);
+    }
     if (newQualifier != null) {
-      if ((newQualifier instanceof PsiThisExpression && ((PsiThisExpression)newQualifier).getQualifier() == null)) {
-        final PsiExpression oldQualifier=expression.getMethodExpression().getQualifierExpression();
+      if (isTrivialThisQualifier(newQualifier)) {
         if (oldQualifier != null)         oldQualifier.delete();
       }
  else {
