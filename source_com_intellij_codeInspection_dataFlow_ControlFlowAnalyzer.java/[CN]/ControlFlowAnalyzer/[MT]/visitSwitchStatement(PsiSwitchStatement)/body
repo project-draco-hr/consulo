@@ -1,0 +1,44 @@
+{
+  startElement(statement);
+  PsiElementFactory psiFactory=statement.getManager().getElementFactory();
+  PsiExpression caseExpression=statement.getExpression();
+  if (caseExpression != null && !(caseExpression instanceof PsiReferenceExpression)) {
+    caseExpression.accept(this);
+    addInstruction(new PopInstruction());
+  }
+  PsiCodeBlock body=statement.getBody();
+  if (body != null) {
+    PsiStatement[] statements=body.getStatements();
+    PsiSwitchLabelStatement defaultLabel=null;
+    for (int i=0; i < statements.length; i++) {
+      PsiStatement aStatement=statements[i];
+      if (aStatement instanceof PsiSwitchLabelStatement) {
+        PsiSwitchLabelStatement psiLabelStatement=(PsiSwitchLabelStatement)aStatement;
+        if (psiLabelStatement.isDefaultCase()) {
+          defaultLabel=psiLabelStatement;
+        }
+ else {
+          try {
+            int offset=getStartOffset(aStatement);
+            PsiExpression caseValue=psiLabelStatement.getCaseValue();
+            if (caseExpression instanceof PsiReferenceExpression && caseValue.getManager().getConstantEvaluationHelper().computeConstantExpression(caseValue) != null) {
+              PsiExpression psiComparison=psiFactory.createExpressionFromText(caseExpression.getText() + "==" + caseValue.getText(),statement);
+              psiComparison.accept(this);
+            }
+ else {
+              pushUnknown();
+            }
+            addInstruction(new ConditionalGotoInstruction(offset,false,aStatement));
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
+      }
+    }
+    int offset=defaultLabel != null ? getStartOffset(defaultLabel) : getEndOffset(body);
+    addInstruction(new GotoInstruction(offset));
+    body.accept(this);
+  }
+  finishElement(statement);
+}

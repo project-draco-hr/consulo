@@ -1,0 +1,73 @@
+{
+  final int start=displayToPhysical(displayStart);
+  final int end=displayToPhysical(displayEnd);
+  final PomModel model=getProject().getModel();
+  final XmlAspect aspect=model.getModelAspect(XmlAspect.class);
+  final CharTable table=SharedImplUtil.findCharTableByTree(this);
+  if (start == end)   return;
+  try {
+    model.runTransaction(new PomTransaction(){
+      public PomModelEvent run() throws IncorrectOperationException {
+        final String oldText=getText();
+        final LeafElement firstAffectedLeaf=findLeafElementAt(start);
+        final LeafElement lastAffectedLeaf;
+        final int lastAffectedLeafOffset;
+        final int startOffsetInStartToken=start - firstAffectedLeaf.getStartOffsetInParent();
+{
+          LeafElement current=firstAffectedLeaf;
+          int endOffset=current.getStartOffsetInParent();
+          while (current != null && (endOffset+=current.getTextLength(table)) <= end) {
+            final LeafElement toDelete=current;
+            current=(LeafElement)current.getTreeNext();
+            if (toDelete != firstAffectedLeaf)             ChangeUtil.removeChild(XmlTextImpl.this,toDelete);
+          }
+          lastAffectedLeaf=current;
+          lastAffectedLeafOffset=endOffset - (current != null ? current.getTextLength(table) : 0);
+        }
+        LeafElement tokenToChange;
+        int deletedAreaStartOffset=0;
+        int deletedAreaEndOffset=0;
+        if (lastAffectedLeafOffset < end && lastAffectedLeaf != firstAffectedLeaf) {
+          final LeafElement merged=mergeElements(firstAffectedLeaf,lastAffectedLeaf,table);
+          if (merged == null) {
+            ChangeUtil.removeChild(XmlTextImpl.this,split(firstAffectedLeaf,startOffsetInStartToken));
+            ChangeUtil.removeChild(XmlTextImpl.this,split(lastAffectedLeaf,end - lastAffectedLeafOffset).getTreePrev());
+          }
+ else {
+            ChangeUtil.replaceAll(new LeafElement[]{firstAffectedLeaf,lastAffectedLeaf},merged);
+            deletedAreaStartOffset=startOffsetInStartToken;
+            deletedAreaEndOffset=end - lastAffectedLeafOffset + firstAffectedLeaf.getTextLength(table) - startOffsetInStartToken;
+          }
+          tokenToChange=merged;
+        }
+ else {
+          tokenToChange=firstAffectedLeaf;
+          final int textLength=firstAffectedLeaf.getTextLength(table);
+          deletedAreaStartOffset=startOffsetInStartToken;
+          deletedAreaEndOffset=Math.min(end - firstAffectedLeaf.getStartOffsetInParent(),textLength);
+        }
+        if (tokenToChange != null) {
+          final int textLength=tokenToChange.getTextLength(table);
+          if (deletedAreaStartOffset > 0 || deletedAreaEndOffset < textLength) {
+            String text=tokenToChange.getText(table);
+            text=text.substring(0,deletedAreaStartOffset) + text.substring(deletedAreaEndOffset);
+            final LeafElement newLeaf=Factory.createSingleLeafElement(firstAffectedLeaf.getElementType(),text.toCharArray(),0,text.length(),table,null);
+            ChangeUtil.replaceChild(XmlTextImpl.this,tokenToChange,newLeaf);
+          }
+ else {
+            final TreeElement treeNext=tokenToChange.getTreeNext();
+            final TreeElement treePrev=tokenToChange.getTreePrev();
+            final LeafElement merged=mergeElements((LeafElement)treePrev,(LeafElement)treeNext,table);
+            ChangeUtil.removeChild(XmlTextImpl.this,tokenToChange);
+            if (merged != null)             ChangeUtil.replaceAll(new LeafElement[]{(LeafElement)treePrev,(LeafElement)treeNext},merged);
+          }
+        }
+        return XmlTextChanged.createXmlTextChanged(model,XmlTextImpl.this,oldText);
+      }
+    }
+,aspect);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

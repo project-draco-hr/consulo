@@ -1,0 +1,60 @@
+{
+  ArrayList<PsiReferenceExpression> refsVector=new ArrayList<PsiReferenceExpression>();
+  ArrayList<PsiBlockStatement> addedBracesVector=new ArrayList<PsiBlockStatement>();
+  myAddedClassInitializers=new HashMap<PsiField,PsiClassInitializer>();
+  for (int i=0; i < refs.length; i++) {
+    refs[i].putCopyableUserData(MARK_KEY,"");
+  }
+  RefLoop:   for (int i=0; i < refs.length; i++) {
+    PsiReferenceExpression ref=refs[i];
+    if (!ref.isValid())     continue;
+    PsiElement parentStatement=RefactoringUtil.getParentStatement(ref,true);
+    if (parentStatement != null) {
+      PsiElement parent=ref.getParent();
+      while (!parent.equals(parentStatement)) {
+        if (parent instanceof PsiStatement && !(parent instanceof PsiDeclarationStatement)) {
+          String text="{\n}";
+          PsiBlockStatement blockStatement=(PsiBlockStatement)myFactory.createStatementFromText(text,null);
+          blockStatement=(PsiBlockStatement)myCodeStyleManager.reformat(blockStatement);
+          blockStatement=(PsiBlockStatement)parent.getParent().addAfter(blockStatement,parent);
+          PsiCodeBlock body=blockStatement.getCodeBlock();
+          PsiElement newStatement=body.add(parent);
+          parent.delete();
+          addMarkedElements(refsVector,newStatement);
+          addedBracesVector.add(blockStatement);
+          continue RefLoop;
+        }
+        parent=parent.getParent();
+      }
+    }
+ else {
+      final PsiField field=PsiTreeUtil.getParentOfType(ref,PsiField.class);
+      if (field != null) {
+        field.normalizeDeclaration();
+        final PsiExpression initializer=field.getInitializer();
+        LOG.assertTrue(initializer != null);
+        PsiClassInitializer classInitializer=myFactory.createClassInitializer();
+        final PsiClass containingClass=field.getContainingClass();
+        classInitializer=(PsiClassInitializer)containingClass.addAfter(classInitializer,field);
+        final PsiCodeBlock body=classInitializer.getBody();
+        PsiExpressionStatement statement=(PsiExpressionStatement)myFactory.createStatementFromText(field.getName() + " = 0;",body);
+        statement=(PsiExpressionStatement)body.add(statement);
+        final PsiAssignmentExpression assignment=(PsiAssignmentExpression)statement.getExpression();
+        assignment.getLExpression().replace(RenameUtil.createFieldReference(field,assignment));
+        assignment.getRExpression().replace(initializer);
+        addMarkedElements(refsVector,statement);
+        if (field.hasModifierProperty(PsiModifier.STATIC)) {
+          classInitializer.getModifierList().setModifierProperty(PsiModifier.STATIC,true);
+        }
+        myAddedClassInitializers.put(field,classInitializer);
+        continue RefLoop;
+      }
+    }
+    refsVector.add(ref);
+  }
+  for (int i=0; i < refs.length; i++) {
+    refs[i].putCopyableUserData(MARK_KEY,null);
+  }
+  myAddedBraces=addedBracesVector.toArray(new PsiBlockStatement[addedBracesVector.size()]);
+  return refsVector.toArray(new PsiReferenceExpression[refsVector.size()]);
+}

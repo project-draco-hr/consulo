@@ -1,0 +1,71 @@
+{
+  if (!checkedVariables.add(var))   return;
+  PsiManager manager=var.getManager();
+  PsiSearchHelper helper=manager.getSearchHelper();
+  SearchScope searchScope=new LocalSearchScope(scopeFile);
+  if ((flags & (CHECK_USAGE | CHECK_DOWN)) != 0) {
+    PsiReference[] varRefs=helper.findReferences(var,searchScope,false);
+    for (int i=0; i < varRefs.length; i++) {
+      PsiElement ref=varRefs[i].getElement();
+      if ((flags & CHECK_USAGE) != 0) {
+        PsiType type=guessElementTypeFromReference(myMethodPatternMap,ref,rangeToIgnore);
+        if (type != null && !(type instanceof PsiPrimitiveType)) {
+          typesSet.add(type);
+        }
+      }
+      if ((flags & CHECK_DOWN) != 0) {
+        if (ref.getParent() instanceof PsiExpressionList && ref.getParent().getParent() instanceof PsiMethodCallExpression) {
+          PsiExpressionList list=(PsiExpressionList)ref.getParent();
+          PsiExpression[] args=list.getExpressions();
+          int argIndex=-1;
+          for (int j=0; j < args.length; j++) {
+            PsiExpression arg=args[j];
+            if (arg.equals(ref)) {
+              argIndex=j;
+              break;
+            }
+          }
+          PsiMethodCallExpression methodCall=(PsiMethodCallExpression)list.getParent();
+          PsiMethod method=(PsiMethod)methodCall.getMethodExpression().resolve();
+          if (method != null) {
+            PsiParameter[] parameters=method.getParameterList().getParameters();
+            if (argIndex < parameters.length) {
+              addTypesByVariable(typesSet,parameters[argIndex],method.getContainingFile(),checkedVariables,flags | CHECK_USAGE,rangeToIgnore);
+            }
+          }
+        }
+      }
+    }
+  }
+  if ((flags & CHECK_UP) != 0) {
+    if (var instanceof PsiParameter && var.getParent() instanceof PsiParameterList && var.getParent().getParent() instanceof PsiMethod) {
+      PsiParameterList list=(PsiParameterList)var.getParent();
+      PsiParameter[] parameters=list.getParameters();
+      int argIndex=-1;
+      for (int i=0; i < parameters.length; i++) {
+        PsiParameter parameter=parameters[i];
+        if (parameter.equals(var)) {
+          argIndex=i;
+          break;
+        }
+      }
+      PsiMethod method=(PsiMethod)var.getParent().getParent();
+      PsiReference[] methodRefs=helper.findReferences(method,searchScope,false);
+      for (int i=0; i < methodRefs.length; i++) {
+        PsiElement ref=methodRefs[i].getElement();
+        if (ref.getParent() instanceof PsiMethodCallExpression) {
+          PsiMethodCallExpression methodCall=(PsiMethodCallExpression)ref.getParent();
+          PsiExpression[] args=methodCall.getArgumentList().getExpressions();
+          if (args.length <= argIndex)           continue;
+          PsiExpression arg=args[argIndex];
+          if (arg instanceof PsiReferenceExpression) {
+            PsiElement refElement=((PsiReferenceExpression)arg).resolve();
+            if (refElement instanceof PsiVariable) {
+              addTypesByVariable(typesSet,(PsiVariable)refElement,scopeFile,checkedVariables,flags | CHECK_USAGE,rangeToIgnore);
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  final UsageInfo[] usages=usageView.getUsages();
+  if (UsageViewUtil.hasReadOnlyUsages(usages)) {
+    WindowManager.getInstance().getStatusBar(myProject).setInfo("Occurrences found in read-only files");
+    return;
+  }
+  usageView.expandAll();
+  for (int i=0; i < usages.length; i++) {
+    final PsiFile psiFile=usages[i].getElement().getContainingFile();
+    if (!psiFile.isWritable())     continue;
+    final UsageInfo usageInfo=usages[i];
+    Runnable selectOnEditorRunnable=new Runnable(){
+      public void run(){
+        final VirtualFile virtualFile=psiFile.getVirtualFile();
+        if (virtualFile != null && ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+          public Boolean compute(){
+            return virtualFile.isValid() ? Boolean.TRUE : Boolean.FALSE;
+          }
+        }
+).booleanValue()) {
+          int startOffset=usageView.getTextOffset(usageInfo);
+          int endOffset=usageView.getTextEndOffset(usageInfo);
+          Document document=FileDocumentManager.getInstance().getDocument(virtualFile);
+          if (endOffset <= document.getTextLength()) {
+            OpenFileDescriptor descriptor=new OpenFileDescriptor(myProject,virtualFile,startOffset);
+            FileEditorManager.getInstance(myProject).openTextEditor(descriptor,false);
+            descriptor=new OpenFileDescriptor(myProject,virtualFile,endOffset);
+            Editor editor=FileEditorManager.getInstance(myProject).openTextEditor(descriptor,false);
+            if (editor != null) {
+              editor.getSelectionModel().setSelection(startOffset,endOffset);
+            }
+            usageView.selectUsage(usageInfo);
+          }
+        }
+      }
+    }
+;
+    CommandProcessor.getInstance().executeCommand(myProject,selectOnEditorRunnable,"Select on Editor",null);
+    String title="Replace Usage " + (i + 1) + " of "+ usages.length+ " Found";
+    int result=FindManager.getInstance(myProject).showPromptDialog(viewDescriptor.getFindModel(),title);
+    if (result == PromptResult.CANCEL) {
+      return;
+    }
+    if (result == PromptResult.SKIP) {
+      continue;
+    }
+    final int currentNumber=i;
+    if (result == PromptResult.OK) {
+      Runnable runnable=new Runnable(){
+        public void run(){
+          doReplace(usageView,usages[currentNumber],viewDescriptor);
+          usageView.removeUsage(usages[currentNumber]);
+        }
+      }
+;
+      CommandProcessor.getInstance().executeCommand(myProject,runnable,"Replace",null);
+      if (usageView.getUsagesNodeCount() == 0) {
+        UsageViewManager.getInstance(myProject).closeContent(usageView);
+        return;
+      }
+    }
+    if (result == PromptResult.ALL_IN_THIS_FILE) {
+      final int[] nextNumber=new int[1];
+      Runnable runnable=new Runnable(){
+        public void run(){
+          int j=currentNumber;
+          for (; j < usages.length; j++) {
+            PsiFile otherPsiFile=usages[j].getElement().getContainingFile();
+            if (!otherPsiFile.equals(psiFile)) {
+              break;
+            }
+            doReplace(usageView,usages[j],viewDescriptor);
+            usageView.removeUsage(usages[j]);
+          }
+          if (j >= usages.length) {
+            UsageViewManager.getInstance(myProject).closeContent(usageView);
+          }
+          nextNumber[0]=j;
+        }
+      }
+;
+      CommandProcessor.getInstance().executeCommand(myProject,runnable,"Replace",null);
+      if (usageView.getUsagesNodeCount() == 0) {
+        UsageViewManager.getInstance(myProject).closeContent(usageView);
+        return;
+      }
+      i=nextNumber[0] - 1;
+    }
+    if (result == PromptResult.ALL_FILES) {
+      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+        public void run(){
+          for (int j=currentNumber; j < usages.length; j++) {
+            doReplace(usageView,usages[j],viewDescriptor);
+          }
+          UsageViewManager.getInstance(myProject).closeContent(usageView);
+        }
+      }
+,"Replace",null);
+      break;
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  ArrayList contentsToDelete=new ArrayList();
+  for (int i=0; i < myUsagesContents.size(); i++) {
+    Content content=(Content)myUsagesContents.get(i);
+    if (content.getComponent().getParent() == null) {
+      contentsToDelete.add(content);
+    }
+  }
+  for (int i=0; i < contentsToDelete.size(); i++) {
+    myUsagesContents.remove(contentsToDelete.get(i));
+  }
+  boolean isOpenInNewTabEnabled;
+  final boolean[] toOpenInNewTab=new boolean[1];
+  Content selectedContent=UsageViewManager.getInstance(myProject).getSelectedContent(true);
+  if (selectedContent != null && selectedContent.isPinned()) {
+    toOpenInNewTab[0]=true;
+    isOpenInNewTabEnabled=false;
+  }
+ else {
+    toOpenInNewTab[0]=myToOpenInNewTab;
+    isOpenInNewTabEnabled=(UsageViewManager.getInstance(myProject).getReusableContentsCount() > 0);
+  }
+  final FindManager findManager=FindManager.getInstance(myProject);
+  final FindModel findModel=(FindModel)findManager.getFindInProjectModel().clone();
+  findModel.setReplaceState(false);
+  findModel.setOpenInNewTabVisible(true);
+  findModel.setOpenInNewTabEnabled(isOpenInNewTabEnabled);
+  findModel.setOpenInNewTab(toOpenInNewTab[0]);
+  FindInProjectUtil.setDirectoryName(findModel,dataContext);
+  Editor editor=(Editor)dataContext.getData(DataConstants.EDITOR);
+  if (editor != null) {
+    String s=editor.getSelectionModel().getSelectedText();
+    if (s != null && (s.indexOf("\r") == -1) && (s.indexOf("\n") == -1)) {
+      findModel.setStringToFind(s);
+    }
+  }
+  if (!findManager.showFindDialog(findModel)) {
+    findModel.setOpenInNewTabVisible(false);
+    return;
+  }
+  findModel.setOpenInNewTabVisible(false);
+  final PsiDirectory psiDirectory=FindInProjectUtil.getPsiDirectory(findModel,myProject);
+  if (!findModel.isProjectScope() && findModel.getModuleName() == null && psiDirectory == null) {
+    return;
+  }
+  if (isOpenInNewTabEnabled) {
+    myToOpenInNewTab=toOpenInNewTab[0]=findModel.isOpenInNewTab();
+  }
+  AsyncFindUsagesCommand command=new AsyncFindUsagesCommand(){
+    FindProgressIndicator progress;
+    public void findUsages(    final AsyncFindUsagesProcessListener consumer){
+      myIsFindInProgress=true;
+      findManager.getFindInProjectModel().copyFrom(findModel);
+      final FindModel findModelCopy=(FindModel)findModel.clone();
+      progress=new FindProgressIndicator(myProject,FindInProjectUtil.getTitleForScope(findModelCopy));
+      final Runnable findUsagesRunnable=new Runnable(){
+        public void run(){
+          FindInProjectUtil.findUsages(findModelCopy,psiDirectory,myProject,consumer);
+        }
+      }
+;
+      Runnable showUsagesPanelRunnable=new Runnable(){
+        public void run(){
+          myIsFindInProgress=false;
+          if (consumer.getCount() == 0) {
+            if (!progress.isCanceled()) {
+              String title="No occurrences of '" + findModel.getStringToFind() + "' found in "+ FindInProjectUtil.getTitleForScope(findModelCopy);
+              Messages.showMessageDialog(myProject,title,"Find in Path",Messages.getInformationIcon());
+            }
+          }
+        }
+      }
+;
+      FindInProjectUtil.runProcessWithProgress(progress,findUsagesRunnable,showUsagesPanelRunnable,myProject);
+    }
+    public void stopAsyncSearch(){
+      progress.cancel();
+    }
+  }
+;
+  showUsagesPanel(new FindInProjectViewDescriptor(findModel,command),toOpenInNewTab[0]);
+}

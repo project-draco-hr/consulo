@@ -1,0 +1,60 @@
+{
+  PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+  int offset=myEditor.getCaretModel().getOffset();
+  PsiElement element=myFile.findElementAt(offset);
+  if (element == null)   return;
+  if (element.getParent() instanceof PsiAnonymousClass) {
+    try {
+      CodeStyleManager.getInstance(myProject).reformat(element.getParent());
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+    offset=element.getParent().getTextRange().getEndOffset() - 1;
+    myEditor.getCaretModel().moveToOffset(offset);
+    myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    myEditor.getSelectionModel().removeSelection();
+  }
+  final SmartPsiElementPointer pointer=SmartPointerManager.getInstance(myProject).createSmartPsiElementPointer(element);
+  ApplicationManager.getApplication().invokeLater(new Runnable(){
+    public void run(){
+      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+        public void run(){
+          PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+          PsiElement element=pointer.getElement();
+          if (element == null)           return;
+          while (true) {
+            if (element instanceof PsiFile)             return;
+            PsiElement parent=element.getParent();
+            if (parent instanceof PsiAnonymousClass)             break;
+            element=parent;
+          }
+          final PsiAnonymousClass aClass=(PsiAnonymousClass)element.getParent();
+          final CandidateInfo[] candidatesToImplement=OverrideImplementUtil.getMethodsToOverrideImplement(aClass,true);
+          boolean invokeOverride=candidatesToImplement.length == 0;
+          if (invokeOverride) {
+            chooseAndOverrideMethodsInAdapter(myProject,myEditor,aClass);
+          }
+ else {
+            ApplicationManager.getApplication().runWriteAction(new Runnable(){
+              public void run(){
+                try {
+                  PsiMethod[] prototypes=OverrideImplementUtil.overrideOrImplementMethods(aClass,candidatesToImplement,false,false);
+                  Object[] resultMembers=GenerateMembersUtil.insertMembersBeforeAnchor(aClass,null,prototypes);
+                  GenerateMembersUtil.positionCaret(myEditor,(PsiElement)resultMembers[0],true);
+                }
+ catch (                IncorrectOperationException ioe) {
+                  LOG.error(ioe);
+                }
+              }
+            }
+);
+          }
+          clear();
+        }
+      }
+,"generate anonymous body",null);
+    }
+  }
+);
+}

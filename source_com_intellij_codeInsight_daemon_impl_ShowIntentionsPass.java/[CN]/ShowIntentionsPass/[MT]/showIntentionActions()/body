@@ -1,0 +1,63 @@
+{
+  DaemonCodeAnalyzerImpl codeAnalyzer=(DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject);
+  if (myIsSecondPass)   codeAnalyzer.setShowPostIntentions(true);
+  if (LookupManager.getInstance(myProject).getActiveLookup() != null)   return;
+  LogicalPosition caretPos=myEditor.getCaretModel().getLogicalPosition();
+  Rectangle visibleArea=myEditor.getScrollingModel().getVisibleArea();
+  Point xy=myEditor.logicalPositionToXY(caretPos);
+  if (!visibleArea.contains(xy))   return;
+  ArrayList<IntentionAction> intentionsToShow=new ArrayList<IntentionAction>();
+  ArrayList<IntentionAction> fixesToShow=new ArrayList<IntentionAction>();
+  for (int i=0; i < myIntentionActions.length; i++) {
+    IntentionAction action=myIntentionActions[i];
+    if (action instanceof IntentionActionComposite) {
+      if (action instanceof QuickFixAction || action instanceof PostIntentionsQuickFixAction && codeAnalyzer.showPostIntentions()) {
+        List<IntentionAction> availableActions=((IntentionActionComposite)action).getAvailableActions(myEditor,myFile);
+        int offset=myEditor.getCaretModel().getOffset();
+        HighlightInfo info=codeAnalyzer.findHighlightByOffset(myEditor.getDocument(),offset,true);
+        if (info == null || info.getSeverity() == HighlightInfo.ERROR) {
+          fixesToShow.addAll(availableActions);
+        }
+ else {
+          intentionsToShow.addAll(availableActions);
+        }
+      }
+    }
+ else     if (action.isAvailable(myProject,myEditor,myFile)) {
+      intentionsToShow.add(action);
+    }
+  }
+  if (!intentionsToShow.isEmpty() || !fixesToShow.isEmpty()) {
+    boolean showBulb=false;
+    for (Iterator<IntentionAction> iterator=fixesToShow.iterator(); iterator.hasNext(); ) {
+      IntentionAction action=iterator.next();
+      if (IntentionManagerSettings.getInstance().isShowLightBulb(action)) {
+        showBulb=true;
+        break;
+      }
+    }
+    if (!showBulb) {
+      for (Iterator<IntentionAction> iterator=intentionsToShow.iterator(); iterator.hasNext(); ) {
+        IntentionAction action=iterator.next();
+        if (IntentionManagerSettings.getInstance().isShowLightBulb(action)) {
+          showBulb=true;
+          break;
+        }
+      }
+    }
+    if (showBulb) {
+      if (myIsSecondPass) {
+        IntentionHintComponent hintComponent=codeAnalyzer.getLastIntentionHint();
+        if (hintComponent != null) {
+          hintComponent.updateIfNotShowingPopup(fixesToShow,intentionsToShow);
+        }
+      }
+      if (!HintManager.getInstance().hasShownHintsThatWillHideByOtherHint()) {
+        IntentionHintComponent hintComponent=IntentionHintComponent.showIntentionHint(myProject,myEditor,intentionsToShow,fixesToShow,false);
+        if (!myIsSecondPass) {
+          codeAnalyzer.setLastIntentionHint(hintComponent);
+        }
+      }
+    }
+  }
+}

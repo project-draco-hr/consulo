@@ -1,0 +1,60 @@
+{
+  PsiReference[] refs=myManager.getSearchHelper().findReferences(resultVar,GlobalSearchScope.projectScope(myProject),false);
+  PsiAssignmentExpression assignment=null;
+  boolean isAssignmentUnique=false;
+  PsiReferenceExpression resultUsage=null;
+  for (int i=0; i < refs.length; i++) {
+    PsiReferenceExpression ref=(PsiReferenceExpression)refs[i];
+    if (ref.getParent() instanceof PsiAssignmentExpression && ((PsiAssignmentExpression)ref.getParent()).getLExpression().equals(ref)) {
+      if (assignment != null) {
+        isAssignmentUnique=false;
+      }
+ else {
+        assignment=(PsiAssignmentExpression)ref.getParent();
+        isAssignmentUnique=true;
+      }
+    }
+ else {
+      LOG.assertTrue(resultUsage == null);
+      resultUsage=ref;
+    }
+  }
+  if (!isAssignmentUnique)   return;
+  boolean condition=assignment.getParent() instanceof PsiExpressionStatement;
+  LOG.assertTrue(condition);
+  if (!(assignment.getParent().getParent() == resultVar.getParent().getParent()))   return;
+  if (resultUsage != null) {
+    String name=resultVar.getName();
+    PsiDeclarationStatement declaration=myFactory.createVariableDeclarationStatement(name,resultVar.getType(),assignment.getRExpression());
+    declaration=(PsiDeclarationStatement)assignment.getParent().replace(declaration);
+    resultVar.getParent().delete();
+    resultVar=(PsiVariable)declaration.getDeclaredElements()[0];
+    PsiElement parentStatement=RefactoringUtil.getParentStatement(resultUsage,true);
+    PsiElement next=declaration.getNextSibling();
+    boolean canInline=false;
+    while (true) {
+      if (next == null)       break;
+      if (parentStatement.equals(next)) {
+        canInline=true;
+        break;
+      }
+      if (next instanceof PsiStatement)       break;
+      next=next.getNextSibling();
+    }
+    if (canInline) {
+      final PsiExpression initializer=resultVar.getInitializer();
+      final PsiClass thisClass=ChangeContextUtil.getThisClass(initializer);
+      ChangeContextUtil.encodeContextInfo(initializer,false);
+      final PsiElement element=resultUsage.replace(resultVar.getInitializer());
+      ChangeContextUtil.decodeContextInfo(element,thisClass,element.getManager().getElementFactory().createExpressionFromText("this",null));
+      declaration.delete();
+    }
+  }
+ else {
+    PsiExpression expr=(PsiExpression)assignment.replace(assignment.getRExpression());
+    resultVar.getParent().delete();
+    if (expr.getParent() instanceof PsiExpressionStatement && isSimpleExpression(expr)) {
+      expr.getParent().delete();
+    }
+  }
+}

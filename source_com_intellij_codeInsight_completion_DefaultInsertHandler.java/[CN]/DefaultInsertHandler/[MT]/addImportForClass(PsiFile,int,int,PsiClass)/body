@@ -1,0 +1,43 @@
+{
+  SmartPsiElementPointer pointer=SmartPointerManager.getInstance(file.getProject()).createSmartPsiElementPointer(aClass);
+  LOG.assertTrue(CommandProcessor.getInstance().getCurrentCommand() != null);
+  LOG.assertTrue(ApplicationManager.getApplication().getCurrentWriteAction(null) != null);
+  final PsiManager manager=file.getManager();
+  final PsiResolveHelper helper=manager.getResolveHelper();
+  final Document document=PsiDocumentManager.getInstance(manager.getProject()).getDocument(file);
+  CharSequence chars=document.getCharsSequence();
+  int length=document.getTextLength();
+  PsiElement element=file.findElementAt(startOffset);
+  String refText=chars.subSequence(startOffset,endOffset).toString();
+  PsiClass refClass=helper.resolveReferencedClass(refText,element);
+  if (refClass != null && (refClass.getQualifiedName() == null || manager.areElementsEquivalent(aClass,refClass)))   return;
+  boolean insertSpace=endOffset < length && Character.isJavaIdentifierPart(chars.charAt(endOffset));
+  if (insertSpace) {
+    document.insertString(endOffset," ");
+  }
+  String name=aClass.getName();
+  document.replaceString(startOffset,endOffset,name);
+  endOffset=startOffset + name.length();
+  PsiDocumentManager.getInstance(manager.getProject()).commitAllDocuments();
+  element=file.findElementAt(startOffset);
+  if (element instanceof PsiIdentifier) {
+    PsiElement parent=element.getParent();
+    if (parent instanceof PsiJavaCodeReferenceElement && !((PsiJavaCodeReferenceElement)parent).isQualified()) {
+      PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)parent;
+      final PsiElement pointerElement=pointer.getElement();
+      if (pointerElement instanceof PsiClass) {
+        if (!(ref instanceof PsiImportStaticReferenceElement)) {
+          PsiJavaCodeReferenceElement newRef=(PsiJavaCodeReferenceElement)ref.bindToElement(pointerElement);
+          endOffset=newRef.getTextRange().getEndOffset();
+        }
+ else {
+          final PsiImportStaticStatement statement=((PsiImportStaticReferenceElement)ref).bindToTargetClass((PsiClass)pointerElement);
+          endOffset=statement.getTextRange().getEndOffset();
+        }
+      }
+    }
+  }
+  if (insertSpace) {
+    document.deleteString(endOffset,endOffset + 1);
+  }
+}

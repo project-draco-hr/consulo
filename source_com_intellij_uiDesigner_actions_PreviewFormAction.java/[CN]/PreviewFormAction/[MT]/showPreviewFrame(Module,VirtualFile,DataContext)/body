@@ -1,0 +1,93 @@
+{
+  if (module == null) {
+    throw new IllegalArgumentException("module cannot be null");
+  }
+  if (formFile == null) {
+    throw new IllegalArgumentException("formFile cannot be null");
+  }
+  final String tempPath;
+  try {
+    final File tempDirectory=FileUtil.createTempDirectory("FormPreview","");
+    tempPath=tempDirectory.getAbsolutePath();
+    CopyResourcesUtil.copyFormsRuntime(tempPath,true);
+  }
+ catch (  IOException e) {
+    Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ e.toString(),"Error");
+    return;
+  }
+  final PathsList sources=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.PROJECT_SOURCES);
+  final String classPath=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.FULL_CLASSPATH_RECURSIVE).getPathsString() + File.pathSeparator + sources.getPathsString()+ File.pathSeparator+ tempPath;
+  final ClassLoader loader=Form2ByteCodeCompiler.createClassLoader(classPath);
+  com.intellij.util.BcelUtils.initBcel(new ClassPath(classPath));
+  try {
+    final Document doc=FileDocumentManager.getInstance().getDocument(formFile);
+    final LwRootContainer rootContainer;
+    try {
+      rootContainer=Utils.getRootContainer(doc.getText(),new CompiledClassPropertiesProvider(loader));
+    }
+ catch (    Exception e) {
+      Messages.showErrorDialog(module.getProject(),"Cannot read form file '" + formFile.getPath().replace('/',File.separatorChar) + "'.\n"+ "Reason: "+ e.getMessage(),"Error");
+      return;
+    }
+    if (rootContainer.getComponentCount() == 0) {
+      Messages.showErrorDialog(module.getProject(),"Cannot preview an empty form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n","Error");
+      return;
+    }
+    rootContainer.setClassToBind(CLASS_TO_BIND_NAME);
+    FormEditingUtil.iterate(rootContainer,new FormEditingUtil.ComponentVisitor<LwComponent>(){
+      public boolean visit(      final LwComponent iComponent){
+        iComponent.setBinding(null);
+        return true;
+      }
+    }
+);
+    if (rootContainer.getComponentCount() == 1) {
+      ((LwComponent)rootContainer.getComponent(0)).setBinding("myComponent");
+    }
+    try {
+      final File tempFile=CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME,true);
+      CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$1",true);
+      CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MyWindowListener",true);
+      CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MyExitAction",true);
+      CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MyPackAction",true);
+      CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MySetLafAction",true);
+      final CodeGenerator codeGenerator=new CodeGenerator(rootContainer,tempFile,loader);
+      codeGenerator.patch();
+      final String[] errors=codeGenerator.getErrors();
+      if (errors.length != 0) {
+        Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ errors[0],"Error");
+        return;
+      }
+    }
+ catch (    Exception e) {
+      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ (e.getMessage() != null ? e.getMessage() : e.toString()),"Error");
+      return;
+    }
+    final JavaParameters parameters=new JavaParameters();
+    parameters.getClassPath().add(tempPath);
+    final List<String> paths=sources.getPathList();
+    for (Iterator<String> it=paths.iterator(); it.hasNext(); ) {
+      parameters.getClassPath().add(it.next());
+    }
+    try {
+      parameters.configureByModule(module,JavaParameters.JDK_AND_CLASSES);
+    }
+ catch (    CantRunException e) {
+      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ e.getMessage(),"Error");
+      return;
+    }
+    parameters.setMainClass("FormPreviewFrame");
+    parameters.setWorkingDirectory(tempPath);
+    try {
+      JavaProgramRunner defaultRunner=ExecutionRegistry.getInstance().getDefaultRunner();
+      RunStrategy.getInstance().execute(new MyRunProfile(module,parameters,formFile.getPresentableUrl() + " preview started"),dataContext,defaultRunner,null,null);
+    }
+ catch (    ExecutionException e) {
+      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\nReason: "+ e.getMessage(),"Error");
+      return;
+    }
+  }
+  finally {
+    BcelUtils.disposeBcel();
+  }
+}

@@ -1,0 +1,81 @@
+{
+  super.threadAction();
+  DebuggerTreeNodeImpl rootNode;
+  final ThreadReferenceProxyImpl currentThread=getDebuggerContext().getThreadProxy();
+  if (currentThread == null)   return;
+  try {
+    StackFrameProxyImpl frame=getDebuggerContext().getFrameProxy();
+    if (frame != null) {
+      NodeManagerImpl nodeManager=getNodeFactory();
+      rootNode=nodeManager.createNode(nodeManager.getStackFrameDescriptor(null,frame),getDebuggerContext().createEvaluationContext());
+    }
+ else {
+      rootNode=getNodeFactory().getDefaultNode();
+      SuspendManager suspendManager=getSuspendContext().getDebugProcess().getSuspendManager();
+      if (suspendManager.isSuspended(currentThread)) {
+        try {
+          if (currentThread.frameCount() == 0) {
+            rootNode.add(MessageDescriptor.THREAD_IS_EMPTY);
+          }
+ else {
+            rootNode.add(MessageDescriptor.DEBUG_INFO_UNAVAILABLE);
+          }
+        }
+ catch (        EvaluateException e) {
+          rootNode.add(new MessageDescriptor(e.getMessage()));
+        }
+      }
+ else {
+        rootNode.add(MessageDescriptor.THREAD_IS_RUNNING);
+      }
+    }
+  }
+ catch (  Exception ex) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(ex);
+    }
+    rootNode=getNodeFactory().getDefaultNode();
+    rootNode.add(MessageDescriptor.DEBUG_INFO_UNAVAILABLE);
+  }
+  final DebuggerTreeNodeImpl rootNode1=rootNode;
+  DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+    public void run(){
+      getMutableModel().setRoot(rootNode1);
+      treeChanged();
+      getModel().addTreeModelListener(new TreeModelAdapter(){
+        public void treeStructureChanged(        TreeModelEvent e){
+          Object[] path=e.getPath();
+          if (path.length > 0 && path[path.length - 1] == rootNode1) {
+            if (ViewsGeneralSettings.getInstance().AUTOSCROLL_TO_NEW_LOCALS) {
+              autoscrollToNewLocals(rootNode1);
+            }
+          }
+        }
+      }
+);
+    }
+    private void autoscrollToNewLocals(    DebuggerTreeNodeImpl frameNode){
+      for (Enumeration e=frameNode.rawChildren(); e.hasMoreElements(); ) {
+        DebuggerTreeNodeImpl child=(DebuggerTreeNodeImpl)e.nextElement();
+        NodeDescriptorImpl descriptor=child.getDescriptor();
+        if (descriptor != null) {
+          if (descriptor instanceof LocalVariableDescriptorImpl) {
+            if (((LocalVariableDescriptorImpl)descriptor).isNewLocal() && getDebuggerContext().getDebuggerSession().isSteppingThrough(getDebuggerContext().getThreadProxy())) {
+              TreePath treePath=new TreePath(child.getPath());
+              addSelectionPath(treePath);
+              scrollPathToVisible(treePath);
+              myAnyNewLocals=true;
+              descriptor.myIsSelected=true;
+            }
+ else {
+              removeSelectionPath(new TreePath(child.getPath()));
+              descriptor.myIsSelected=false;
+            }
+            ((LocalVariableDescriptorImpl)descriptor).setNewLocal(false);
+          }
+        }
+      }
+    }
+  }
+);
+}

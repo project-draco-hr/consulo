@@ -1,0 +1,81 @@
+{
+  LOG.assertTrue(ApplicationManager.getApplication().isDispatchThread());
+  List<HighlightInfo> array=new ArrayList<HighlightInfo>();
+  HighlightInfo[] oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
+  if (oldHighlights != null) {
+    for (int i=0; i < oldHighlights.length; i++) {
+      HighlightInfo info=oldHighlights[i];
+      RangeHighlighter highlighter=info.highlighter;
+      boolean toRemove;
+      if (!highlighter.isValid()) {
+        toRemove=true;
+      }
+ else {
+        toRemove=info.group == group && startOffset <= highlighter.getStartOffset() && highlighter.getEndOffset() <= endOffset;
+      }
+      if (toRemove) {
+        document.getMarkupModel(project).removeHighlighter(highlighter);
+      }
+ else {
+        array.add(info);
+      }
+    }
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Removed segment highlighters:" + (oldHighlights.length - array.size()));
+    }
+  }
+  for (int i=0; i < highlights.length; i++) {
+    HighlightInfo info=highlights[i];
+    int layer;
+    if (info.startOffset < startOffset || info.endOffset > endOffset)     continue;
+    HighlightInfo.Severity severity=info.getSeverity();
+    if (severity == HighlightInfo.INFORMATION) {
+      layer=HighlighterLayer.ADDITIONAL_SYNTAX;
+    }
+ else     if (severity == HighlightInfo.WARNING) {
+      layer=HighlighterLayer.WARNING;
+    }
+ else {
+      layer=HighlighterLayer.ERROR;
+    }
+    int infoEndOffset=info.endOffset;
+    if (infoEndOffset > document.getTextLength()) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Invalid HighlightInfo created: (" + info.startOffset + ":"+ infoEndOffset+ ")"+ info.description);
+      }
+      infoEndOffset=document.getTextLength();
+    }
+    RangeHighlighterEx highlighter=(RangeHighlighterEx)document.getMarkupModel(project).addRangeHighlighter(info.startOffset,infoEndOffset,layer,info.getTextAttributes(),HighlighterTargetArea.EXACT_RANGE);
+    info.highlighter=highlighter;
+    highlighter.setAfterEndOfLine(info.isAfterEndOfLine);
+    info.text=document.getCharsSequence().subSequence(info.startOffset,info.endOffset).toString();
+    info.group=group;
+    highlighter.setErrorStripeMarkColor(info.getErrorStripeMarkColor());
+    highlighter.setErrorStripeTooltip(info);
+    HashMap<TextRange,RangeMarker> ranges2markers=new HashMap<TextRange,RangeMarker>();
+    ranges2markers.put(new TextRange(info.startOffset,info.endOffset),info.highlighter);
+    if (info.quickFixActionRanges != null) {
+      info.quickFixActionMarkers=new ArrayList<Pair<IntentionAction,RangeMarker>>();
+      for (Iterator<Pair<IntentionAction,TextRange>> iterator=info.quickFixActionRanges.iterator(); iterator.hasNext(); ) {
+        Pair<IntentionAction,TextRange> pair=iterator.next();
+        TextRange range=pair.second;
+        RangeMarker marker=ranges2markers.get(range);
+        if (marker == null) {
+          marker=document.createRangeMarker(range.getStartOffset(),range.getEndOffset());
+          ranges2markers.put(range,marker);
+        }
+        info.quickFixActionMarkers.add(new Pair<IntentionAction,RangeMarker>(pair.first,marker));
+      }
+    }
+    info.fixMarker=ranges2markers.get(new TextRange(info.fixStartOffset,info.fixEndOffset));
+    if (info.fixMarker == null) {
+      info.fixMarker=document.createRangeMarker(info.fixStartOffset,info.fixEndOffset);
+    }
+    array.add(info);
+  }
+  HighlightInfo[] newHighlights=array.toArray(new HighlightInfo[array.size()]);
+  DaemonCodeAnalyzerImpl.setHighlights(document,newHighlights,project);
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("Added segment highlighters:" + highlights.length);
+  }
+}

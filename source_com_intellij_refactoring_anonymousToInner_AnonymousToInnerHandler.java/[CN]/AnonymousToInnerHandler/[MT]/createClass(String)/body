@@ -1,0 +1,54 @@
+{
+  PsiElementFactory factory=myAnonClass.getManager().getElementFactory();
+  CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(myProject);
+  final PsiNewExpression newExpression=(PsiNewExpression)myAnonClass.getParent();
+  final PsiMethod superConstructor=newExpression.resolveConstructor();
+  PsiClass aClass=factory.createClass(name);
+  if (!myTargetClass.isInterface()) {
+    aClass.getModifierList().setModifierProperty(PsiModifier.PRIVATE,true);
+  }
+  PsiModifierListOwner owner=PsiTreeUtil.getParentOfType(myAnonClass,PsiModifierListOwner.class);
+  if (owner != null && owner.hasModifierProperty(PsiModifier.STATIC)) {
+    aClass.getModifierList().setModifierProperty(PsiModifier.STATIC,true);
+  }
+  PsiJavaCodeReferenceElement baseClassRef=myAnonClass.getBaseClassReference();
+  PsiClass baseClass=(PsiClass)baseClassRef.resolve();
+  if (baseClass != null && baseClass.isInterface()) {
+    aClass.getImplementsList().add(baseClassRef);
+  }
+ else {
+    aClass.getExtendsList().add(baseClassRef);
+  }
+  renameReferences(myAnonClass);
+  copyClassBody(myAnonClass,aClass,myVariableInfos.length > 0);
+  if (myVariableInfos.length > 0) {
+    createFields(aClass);
+  }
+  PsiExpressionList exprList=newExpression.getArgumentList();
+  PsiExpression[] originalExpressions=exprList.getExpressions();
+  final PsiReferenceList superConstructorThrowsList=superConstructor != null && superConstructor.getThrowsList().getReferencedTypes().length > 0 ? superConstructor.getThrowsList() : null;
+  if (myVariableInfos.length > 0 || originalExpressions.length > 0 || superConstructorThrowsList != null) {
+    PsiMethod constructor=factory.createConstructor();
+    if (superConstructorThrowsList != null) {
+      constructor.getThrowsList().replace(superConstructorThrowsList);
+    }
+    if (originalExpressions.length > 0) {
+      createSuperStatement(constructor,originalExpressions);
+    }
+    if (myVariableInfos.length > 0) {
+      fillParameterList(constructor);
+      createAssignmentStatements(constructor);
+      appendClassInitializers(constructor);
+    }
+    constructor=(PsiMethod)codeStyleManager.reformat(constructor);
+    aClass.add(constructor);
+  }
+  if (!needsThis() && myMakeStatic) {
+    aClass.getModifierList().setModifierProperty(PsiModifier.STATIC,true);
+  }
+  PsiElement lastChild=aClass.getLastChild();
+  if (lastChild instanceof PsiJavaToken && ((PsiJavaToken)lastChild).getTokenType() == JavaTokenType.SEMICOLON) {
+    lastChild.delete();
+  }
+  return aClass;
+}

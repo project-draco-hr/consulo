@@ -1,0 +1,91 @@
+{
+  final CompileContext context=adapter.getCompileContext();
+  final FileProcessingCompilerStateCache cache=getFileProcessingCompilerCache(adapter.getCompiler());
+  final FileProcessingCompiler.ProcessingItem[] items=adapter.getProcessingItems();
+  if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+    return false;
+  }
+  final List<FileProcessingCompiler.ProcessingItem> toProcess=new ArrayList<FileProcessingCompiler.ProcessingItem>();
+  final Set<String> allUrls=new HashSet<String>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      for (int idx=0; idx < items.length; idx++) {
+        FileProcessingCompiler.ProcessingItem item=items[idx];
+        final VirtualFile file=item.getFile();
+        final String url=file.getUrl();
+        allUrls.add(url);
+        if (!forceCompile && cache.getTimestamp(url) == file.getTimeStamp()) {
+          final ValidityState state=cache.getExtState(url);
+          final ValidityState itemState=item.getValidityState();
+          if (state != null ? state.equalsTo(itemState) : itemState == null) {
+            continue;
+          }
+        }
+        toProcess.add(item);
+      }
+    }
+  }
+);
+  final String[] urls=cache.getUrls();
+  if (urls.length > 0) {
+    context.getProgressIndicator().pushState();
+    context.getProgressIndicator().setText("Processing outdated files...");
+    final CompileScope scope=context.getCompileScope();
+    final List<String> urlsToRemove=new ArrayList<String>();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (int idx=0; idx < urls.length; idx++) {
+          final String url=urls[idx];
+          if (!allUrls.contains(url)) {
+            if (scope.belongs(url)) {
+              urlsToRemove.add(url);
+            }
+          }
+        }
+      }
+    }
+);
+    if (urlsToRemove.size() > 0) {
+      for (Iterator<String> it=urlsToRemove.iterator(); it.hasNext(); ) {
+        final String url=it.next();
+        adapter.processOutdatedItem(context,url,cache.getExtState(url));
+        cache.remove(url);
+      }
+    }
+    context.getProgressIndicator().popState();
+  }
+  if (toProcess.size() == 0) {
+    return false;
+  }
+  context.getProgressIndicator().pushState();
+  final FileProcessingCompiler.ProcessingItem[] processed=adapter.process(toProcess.toArray(new FileProcessingCompiler.ProcessingItem[toProcess.size()]));
+  context.getProgressIndicator().popState();
+  if (processed.length > 0) {
+    context.getProgressIndicator().pushState();
+    context.getProgressIndicator().setText("Updating caches...");
+    try {
+      final VirtualFile[] vFiles=new VirtualFile[processed.length];
+      for (int idx=0; idx < processed.length; idx++) {
+        vFiles[idx]=processed[idx].getFile();
+      }
+      CompilerUtil.refreshVirtualFiles(vFiles);
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          for (int idx=0; idx < processed.length; idx++) {
+            FileProcessingCompiler.ProcessingItem item=processed[idx];
+            cache.update(item.getFile(),item.getValidityState());
+          }
+        }
+      }
+);
+    }
+  finally {
+      if (cache.isDirty()) {
+        context.getProgressIndicator().setText("Saving caches...");
+        cache.save();
+      }
+      context.getProgressIndicator().popState();
+    }
+  }
+  return true;
+}

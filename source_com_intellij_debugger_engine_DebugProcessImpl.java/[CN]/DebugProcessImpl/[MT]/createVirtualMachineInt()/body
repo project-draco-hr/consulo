@@ -1,0 +1,92 @@
+{
+  try {
+    if (myArguments != null) {
+      throw new IOException("DebugProcessImpl is already listening");
+    }
+    String address=myConnection.getAddress();
+    if (myConnection.isServerMode()) {
+      ListeningConnector connector=(ListeningConnector)findConnector(myConnection.isUseSockets() ? SOCKET_LISTENING_CONNECTOR_NAME : SHMEM_LISTENING_CONNECTOR_NAME);
+      if (connector == null) {
+        throw new CantRunException("Cannot listen using " + (!myConnection.isUseSockets() ? "shared memory" : "socket") + " transport: required connector not found. Check your JDK installation.");
+      }
+      myArguments=connector.defaultArguments();
+      if (myArguments == null) {
+        throw new CantRunException("The port to listen at unspecified");
+      }
+      if (address == null) {
+        throw new CantRunException("The port to listen at unspecified");
+      }
+      Connector.Argument portArg=myConnection.isUseSockets() ? (Connector.Argument)myArguments.get("port") : (Connector.Argument)myArguments.get("name");
+      if (portArg != null) {
+        portArg.setValue(address);
+      }
+      connector.startListening(myArguments);
+      myDebugProcessDispatcher.getMulticaster().connectorIsReady();
+      try {
+        return connector.accept(myArguments);
+      }
+  finally {
+        if (myArguments != null)         connector.stopListening(myArguments);
+      }
+    }
+ else {
+      AttachingConnector connector=(AttachingConnector)findConnector(myConnection.isUseSockets() ? SOCKET_ATTACHING_CONNECTOR_NAME : SHMEM_ATTACHING_CONNECTOR_NAME);
+      if (connector == null) {
+        throw new CantRunException("Cannot connect using " + (myConnection.isUseSockets() ? "socket" : "shared memory") + " transport: required connector not found. Check your JDK installation.");
+      }
+      myArguments=connector.defaultArguments();
+      Connector.Argument argument;
+      if (myConnection.isUseSockets()) {
+        argument=(Connector.Argument)myArguments.get("hostname");
+        if (argument != null && myConnection.getHostName() != null) {
+          argument.setValue(myConnection.getHostName());
+        }
+        if (address == null) {
+          throw new CantRunException("The port to attach to unspecified");
+        }
+        argument=(Connector.Argument)myArguments.get("port");
+        if (argument != null) {
+          argument.setValue(address);
+        }
+      }
+ else {
+        if (address == null) {
+          throw new CantRunException("Shared memory address unspecified");
+        }
+        argument=(Connector.Argument)myArguments.get("name");
+        if (argument != null) {
+          argument.setValue(address);
+        }
+      }
+      myDebugProcessDispatcher.getMulticaster().connectorIsReady();
+      try {
+        if (SOCKET_ATTACHING_CONNECTOR_NAME.equals(connector.name()) && Patches.SUN_BUG_338675) {
+          String portString=myConnection.getAddress();
+          String hostString=myConnection.getHostName();
+          if (hostString == null || hostString.length() == 0) {
+            hostString="localhost";
+          }
+          hostString=hostString + ":";
+          myConnectionService=((TransportService)connector.transport()).attach(hostString + portString);
+          return ((VirtualMachineManagerService)Bootstrap.virtualMachineManager()).createVirtualMachine(myConnectionService);
+        }
+ else {
+          return connector.attach(myArguments);
+        }
+      }
+ catch (      IllegalArgumentException e) {
+        throw new CantRunException("Connector myArguments invalid : " + e.getMessage());
+      }
+    }
+  }
+ catch (  IOException e) {
+    throw new ExecutionException(createConnectionStatusMessage(processError(e),myConnection),e);
+  }
+catch (  IllegalConnectorArgumentsException e) {
+    throw new ExecutionException(createConnectionStatusMessage(processError(e),myConnection),e);
+  }
+ finally {
+    myArguments=null;
+    myConnectionService=null;
+  }
+}

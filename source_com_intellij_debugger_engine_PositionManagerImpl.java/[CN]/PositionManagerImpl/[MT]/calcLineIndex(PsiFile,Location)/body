@@ -1,0 +1,59 @@
+{
+  LOG.assertTrue(myDebugProcess != null);
+  if (location == null) {
+    return -1;
+  }
+  int lineNumber;
+  try {
+    lineNumber=location.lineNumber() - 1;
+  }
+ catch (  InternalError e) {
+    lineNumber=-1;
+  }
+  if (psiFile instanceof PsiCompiledElement || lineNumber < 0) {
+    final String signature=location.method().signature();
+    final String name=location.method().name();
+    if (location.declaringType() == null)     return -1;
+    final String className=location.declaringType().name();
+    if (name == null || signature == null)     return -1;
+    final PsiClass[] compiledClass=new PsiClass[1];
+    final PsiMethod[] compiledMethod=new PsiMethod[1];
+    PsiRecursiveElementVisitor visitor=new PsiRecursiveElementVisitor(){
+      public void visitReferenceExpression(      PsiReferenceExpression expression){
+        expression.acceptChildren(this);
+      }
+      public void visitClass(      PsiClass aClass){
+        List<ReferenceType> allClasses=myDebugProcess.getPositionManager().getAllClasses(SourcePosition.createFromElement(aClass));
+        for (Iterator<ReferenceType> iterator=allClasses.iterator(); iterator.hasNext(); ) {
+          ReferenceType referenceType=iterator.next();
+          if (referenceType.name().equals(className)) {
+            compiledClass[0]=aClass;
+          }
+        }
+        aClass.acceptChildren(this);
+      }
+      public void visitMethod(      PsiMethod method){
+        try {
+          String methodName=method.isConstructor() ? "<init>" : method.getName();
+          PsiClass containingClass=method.getContainingClass();
+          if (containingClass != null && containingClass.equals(compiledClass[0]) && name.equals(methodName) && JVMNameUtil.getJVMSignature(method).getName(myDebugProcess).equals(signature)) {
+            compiledMethod[0]=method;
+          }
+        }
+ catch (        EvaluateException e) {
+          LOG.debug(e);
+        }
+      }
+    }
+;
+    psiFile.accept(visitor);
+    if (compiledMethod[0] != null) {
+      Document document=PsiDocumentManager.getInstance(myDebugProcess.getProject()).getDocument(psiFile);
+      if (document != null) {
+        return document.getLineNumber(compiledMethod[0].getTextOffset());
+      }
+    }
+    return -1;
+  }
+  return lineNumber;
+}

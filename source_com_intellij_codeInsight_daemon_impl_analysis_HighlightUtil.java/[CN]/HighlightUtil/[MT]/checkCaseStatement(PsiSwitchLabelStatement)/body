@@ -1,0 +1,65 @@
+{
+  final PsiSwitchStatement switchStatement=statement.getEnclosingSwitchStatement();
+  if (switchStatement == null) {
+    return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,statement,"Case statement outside switch");
+  }
+  if (switchStatement.getBody() == null)   return null;
+  Object value=null;
+  final PsiExpression caseValue=statement.getCaseValue();
+  final PsiConstantEvaluationHelper evalHelper=statement.getManager().getConstantEvaluationHelper();
+  boolean isEnumSwitch=false;
+  if (!statement.isDefaultCase() && caseValue != null) {
+    if (caseValue instanceof PsiReferenceExpression) {
+      PsiElement element=((PsiReferenceExpression)caseValue).resolve();
+      if (element instanceof PsiEnumConstant) {
+        isEnumSwitch=true;
+        value=((PsiEnumConstant)element).getName();
+        if (!(((PsiReferenceExpression)caseValue).getQualifier() == null)) {
+          String message="An enum switch case label must be the unqualified name of an enumeration constant";
+          return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,caseValue,message);
+        }
+      }
+    }
+    if (!isEnumSwitch) {
+      value=evalHelper.computeConstantExpression(caseValue);
+    }
+    if (value == null) {
+      return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,caseValue,"Constant expression required");
+    }
+  }
+  final PsiExpression switchExpression=switchStatement.getExpression();
+  if (caseValue != null && switchExpression != null) {
+    final HighlightInfo highlightInfo=checkAssignability(switchExpression.getType(),caseValue.getType(),caseValue,caseValue);
+    if (highlightInfo != null)     return highlightInfo;
+  }
+  final PsiStatement[] statements=switchStatement.getBody().getStatements();
+  for (int i=0; i < statements.length; i++) {
+    PsiStatement st=statements[i];
+    if (st == statement)     continue;
+    if (!(st instanceof PsiSwitchLabelStatement))     continue;
+    final PsiSwitchLabelStatement labelStatement=(PsiSwitchLabelStatement)st;
+    if (labelStatement.isDefaultCase() != statement.isDefaultCase())     continue;
+    final PsiExpression caseExpr=labelStatement.getCaseValue();
+    if (isEnumSwitch && caseExpr instanceof PsiReferenceExpression) {
+      final PsiElement element=((PsiReferenceExpression)caseExpr).resolve();
+      if (!(element instanceof PsiEnumConstant && Comparing.equal(((PsiEnumConstant)element).getName(),value)))       continue;
+    }
+ else     if (!Comparing.equal(evalHelper.computeConstantExpression(caseExpr),value))     continue;
+    String description=statement.isDefaultCase() ? "Duplicate default label" : MessageFormat.format("Duplicate label ''{0}''",new Object[]{value});
+    return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,value == null ? (PsiElement)statement : caseValue,description);
+  }
+  PsiElement lastChild=statement.getLastChild();
+  while (lastChild instanceof PsiComment || lastChild instanceof PsiWhiteSpace) {
+    lastChild=lastChild.getPrevSibling();
+  }
+  if (!(lastChild instanceof PsiJavaToken && ((PsiJavaToken)lastChild).getTokenType() == JavaTokenType.COLON)) {
+    String description=MessageFormat.format("''{0}'' expected",new Object[]{":"});
+    int start=statement.getTextRange().getEndOffset();
+    int end=statement.getTextRange().getEndOffset() + 1;
+    final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,start,end,description);
+    char[] chars=statement.getContainingFile().textToCharArray();
+    highlightInfo.isAfterEndOfLine=end >= chars.length || chars[start] == '\n' || chars[start] == '\r';
+    return highlightInfo;
+  }
+  return null;
+}

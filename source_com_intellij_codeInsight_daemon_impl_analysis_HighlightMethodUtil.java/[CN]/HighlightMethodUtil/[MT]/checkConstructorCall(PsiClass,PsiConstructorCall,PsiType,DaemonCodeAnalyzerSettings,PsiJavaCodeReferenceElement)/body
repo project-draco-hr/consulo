@@ -1,0 +1,75 @@
+{
+  final PsiExpressionList list=constructorCall.getArgumentList();
+  if (list == null)   return null;
+  PsiMethod[] constructors=aClass.getConstructors();
+  if (constructors.length == 0) {
+    if (list.getExpressions().length != 0) {
+      String constructorName=aClass.getName() + "()";
+      String containerName=HighlightMessageUtil.getSymbolName(aClass,PsiSubstitutor.EMPTY);
+      String argTypes=HighlightUtil.buildArgTypesList(list);
+      String description=MessageFormat.format(WRONG_CONSTRUCTOR_ARGUMENTS,new Object[]{constructorName,containerName,argTypes});
+      final HighlightInfo info=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,list,description);
+      QuickFixAction.registerQuickFixAction(info,constructorCall.getTextRange(),new CreateConstructorFromCallAction(constructorCall));
+      info.navigationShift=+1;
+      return info;
+    }
+  }
+ else {
+    ResolveResult[] results=constructorCall.getManager().getResolveHelper().multiResolveConstructor((PsiClassType)type,list,list);
+    MethodCandidateInfo result=null;
+    if (results.length == 1)     result=(MethodCandidateInfo)results[0];
+    final PsiMethod constructor=result == null ? null : (PsiMethod)result.getElement();
+    if (constructor == null) {
+      String name=aClass.getName();
+      name+=HighlightUtil.buildArgTypesList(list);
+      String description=MessageFormat.format(CANNOT_RESOLVE_CONSTRUCTOR,new Object[]{name});
+      final HighlightInfo info=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,list,description);
+      QuickFixAction.registerQuickFixAction(info,constructorCall.getTextRange(),new CreateConstructorFromCallAction(constructorCall));
+      if (classReference != null) {
+        CastConstructorParametersFix.registerCastActions(classReference,list,info);
+      }
+      WrapExpressionFix.registerWrapAction(results,list.getExpressions(),info);
+      info.navigationShift=+1;
+      return info;
+    }
+ else {
+      if (!result.isAccessible() || callingProtectedConstructorFromDerivedClass(constructor,constructorCall)) {
+        String description=HighlightUtil.buildProblemWithAccessDescription(constructor,classReference,result);
+        final HighlightInfo info=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,list,description);
+        info.navigationShift=+1;
+        if (classReference != null && result.isStaticsScopeCorrect()) {
+          HighlightUtil.registerAccessQuickFixAction(constructor,classReference,info);
+        }
+        return info;
+      }
+ else       if (!result.isApplicable()) {
+        String constructorName=HighlightMessageUtil.getSymbolName(constructor,result.getSubstitutor());
+        String containerName=HighlightMessageUtil.getSymbolName(constructor.getParent(),result.getSubstitutor());
+        String argTypes=HighlightUtil.buildArgTypesList(list);
+        String description=MessageFormat.format(WRONG_METHOD_ARGUMENTS,new Object[]{constructorName,containerName,argTypes});
+        String toolTip=createMismatchedArgumentsHtmlTooltip(result,list);
+        PsiElement infoElement=list.getTextLength() > 0 ? (PsiElement)list : constructorCall;
+        final HighlightInfo info=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,infoElement,description,toolTip);
+        QuickFixAction.registerQuickFixAction(info,constructorCall.getTextRange(),new CreateConstructorFromCallAction(constructorCall));
+        if (classReference != null) {
+          CastConstructorParametersFix.registerCastActions(classReference,list,info);
+          ChangeMethodSignatureFromUsageFix.registerIntentions(results,list,info,null);
+        }
+        info.navigationShift=+1;
+        return info;
+      }
+ else {
+        HighlightInfo highlightInfo=GenericsHighlightUtil.checkUncheckedCall(result,constructorCall);
+        if (highlightInfo != null)         return highlightInfo;
+        if (constructorCall instanceof PsiNewExpression) {
+          highlightInfo=GenericsHighlightUtil.checkGenericCallWithRawArguments(result,(PsiCallExpression)constructorCall);
+        }
+        if (highlightInfo != null)         return highlightInfo;
+        if (classReference != null) {
+          return HighlightUtil.checkDeprecated(constructor,classReference,settings);
+        }
+      }
+    }
+  }
+  return null;
+}

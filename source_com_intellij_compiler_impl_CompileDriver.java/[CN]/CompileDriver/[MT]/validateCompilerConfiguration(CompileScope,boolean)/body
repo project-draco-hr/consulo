@@ -1,0 +1,135 @@
+{
+  final Module[] scopeModules=scope.getAffectedModules();
+  final List<String> modulesWithoutOutputPathSpecified=new ArrayList<String>();
+  final List<String> modulesWithoutJdkAssigned=new ArrayList<String>();
+  final Set<File> nonExistingOutputPaths=new HashSet<File>();
+  for (int idx=0; idx < scopeModules.length; idx++) {
+    final Module module=scopeModules[idx];
+    if (ModuleType.J2EE_APPLICATION.equals(module.getModuleType())) {
+      continue;
+    }
+    final boolean hasSources=hasSources(module,false);
+    final boolean hasTestSources=hasSources(module,true);
+    if (!hasSources && !hasTestSources) {
+      continue;
+    }
+    final ProjectJdk jdk=ModuleRootManager.getInstance(module).getJdk();
+    if (jdk == null) {
+      modulesWithoutJdkAssigned.add(module.getName());
+    }
+    final String outputPath=getModuleOutputPath(module,false);
+    final String testsOutputPath=getModuleOutputPath(module,true);
+    if (outputPath == null && testsOutputPath == null) {
+      modulesWithoutOutputPathSpecified.add(module.getName());
+    }
+ else {
+      if (outputPath != null) {
+        final File file=new File(outputPath.replace('/',File.separatorChar));
+        if (!file.exists()) {
+          nonExistingOutputPaths.add(file);
+        }
+      }
+ else {
+        if (hasSources) {
+          modulesWithoutOutputPathSpecified.add(module.getName());
+        }
+      }
+      if (testsOutputPath != null) {
+        final File f=new File(testsOutputPath.replace('/',File.separatorChar));
+        if (!f.exists()) {
+          nonExistingOutputPaths.add(f);
+        }
+      }
+ else {
+        if (hasTestSources) {
+          modulesWithoutOutputPathSpecified.add(module.getName());
+        }
+      }
+    }
+  }
+  if (modulesWithoutJdkAssigned.size() > 0) {
+    showNotSpecifiedError(modulesWithoutJdkAssigned,"the JDK",LibrariesEditor.NAME);
+    return false;
+  }
+  if (modulesWithoutOutputPathSpecified.size() > 0) {
+    showNotSpecifiedError(modulesWithoutOutputPathSpecified,"the output path",ContentEntriesEditor.NAME);
+    return false;
+  }
+  if (nonExistingOutputPaths.size() > 0) {
+    StringBuffer paths=new StringBuffer();
+    for (Iterator<File> it=nonExistingOutputPaths.iterator(); it.hasNext(); ) {
+      File file=it.next();
+      if (paths.length() > 0) {
+        paths.append(",\n");
+      }
+      paths.append(file.getPath());
+    }
+    final String notExistsMessage=(nonExistingOutputPaths.size() > 1 ? "The following output paths do not exist:\n" : "The following output path does not exist:\n") + paths.toString() + "\n\nWould you like to create"+ (nonExistingOutputPaths.size() > 1 ? " them " : " it ")+ "and continue?";
+    final int answer=Messages.showYesNoDialog(myProject,notExistsMessage,"Output Path Does Not Exist",Messages.getQuestionIcon());
+    if (answer == 0) {
+      for (Iterator<File> it=nonExistingOutputPaths.iterator(); it.hasNext(); ) {
+        File file=it.next();
+        final boolean succeeded=file.mkdirs();
+        if (!succeeded) {
+          Messages.showMessageDialog(myProject,"Failed to create directory " + file.getPath(),"Unable To Create Directory",Messages.getErrorIcon());
+          return false;
+        }
+      }
+      final Boolean refreshSuccess=ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>(){
+        public Boolean compute(){
+          for (Iterator<File> it=nonExistingOutputPaths.iterator(); it.hasNext(); ) {
+            File file=it.next();
+            final VirtualFile vFile=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
+            if (vFile == null) {
+              return Boolean.FALSE;
+            }
+          }
+          return Boolean.TRUE;
+        }
+      }
+);
+      if (!refreshSuccess.booleanValue()) {
+        return false;
+      }
+    }
+ else {
+      return false;
+    }
+  }
+  if (checkOutputAndSourceIntersection) {
+    if (myShouldClearOutputDirectory) {
+      if (!validateOutputAndSourcePathsIntersection()) {
+        return false;
+      }
+    }
+  }
+  final List<Chunk<Module>> chunks=ModuleCompilerUtil.getSortedModuleChunks(myProject,scopeModules);
+  for (Iterator<Chunk<Module>> it=chunks.iterator(); it.hasNext(); ) {
+    final Set<Module> chunkModules=it.next().getNodes();
+    if (chunkModules.size() <= 1) {
+      continue;
+    }
+    ProjectJdk jdk=null;
+    for (Iterator<Module> iterator=chunkModules.iterator(); iterator.hasNext(); ) {
+      final Module module=iterator.next();
+      final ProjectJdk moduleJdk=ModuleRootManager.getInstance(module).getJdk();
+      if (jdk == null) {
+        jdk=moduleJdk;
+      }
+ else {
+        if (!jdk.equals(moduleJdk)) {
+          showCyclicModulesHaveDifferentJdksError(chunkModules.iterator());
+          return false;
+        }
+      }
+    }
+  }
+  final Compiler[] allCompilers=CompilerManager.getInstance(myProject).getCompilers(Compiler.class);
+  for (int idx=0; idx < allCompilers.length; idx++) {
+    Compiler compiler=allCompilers[idx];
+    if (!compiler.validateConfiguration(scope)) {
+      return false;
+    }
+  }
+  return true;
+}

@@ -1,0 +1,78 @@
+{
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("visitMethodCallExpression " + expression);
+  }
+  PsiExpression[] argExpressions=expression.getArgumentList().getExpressions();
+  List argumentEvaluators=new ArrayList(argExpressions.length);
+  for (int idx=0; idx < argExpressions.length; idx++) {
+    PsiExpression psiExpression=argExpressions[idx];
+    psiExpression.accept(this);
+    if (myResult == null) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(psiExpression.getText()));
+    }
+    argumentEvaluators.add(myResult);
+  }
+  PsiReferenceExpression methodExpr=expression.getMethodExpression();
+  if (methodExpr == null) {
+    throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(expression.getText()));
+  }
+  PsiMethod psiMethod=(PsiMethod)methodExpr.resolve();
+  PsiExpression qualifier=methodExpr.getQualifierExpression();
+  Evaluator objectEvaluator;
+  JVMName contextClass;
+  if (psiMethod != null) {
+    PsiClass methodPsiClass=psiMethod.getContainingClass();
+    contextClass=JVMNameUtil.getJVMQualifiedName(methodPsiClass);
+    if (psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
+      objectEvaluator=new TypeEvaluator(contextClass);
+    }
+ else     if (qualifier != null) {
+      qualifier.accept(this);
+      objectEvaluator=myResult;
+    }
+ else     if (methodPsiClass.equals(getContextPsiClass()) || (getContextPsiClass() != null && getContextPsiClass().isInheritor(methodPsiClass,true))) {
+      objectEvaluator=new ThisEvaluator();
+    }
+ else {
+      int iterationCount=0;
+      PsiClass aClass=getContextPsiClass();
+      while (aClass != null && !aClass.equals(methodPsiClass)) {
+        iterationCount++;
+        aClass=getOuterClass(aClass);
+      }
+      objectEvaluator=new ThisEvaluator(iterationCount);
+    }
+  }
+ else {
+    if (qualifier != null) {
+      PsiType type=qualifier.getType();
+      if (type == null)       throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Type is unknown for '" + qualifier.getText() + "'"));
+      contextClass=JVMNameUtil.getJVMQualifiedName(type);
+      if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).resolve() instanceof PsiClass) {
+        objectEvaluator=new TypeEvaluator(contextClass);
+      }
+ else {
+        qualifier.accept(this);
+        objectEvaluator=myResult;
+      }
+    }
+ else {
+      objectEvaluator=new ThisEvaluator();
+      if (myContextPsiClass != null) {
+        contextClass=JVMNameUtil.getJVMQualifiedName(myContextPsiClass);
+      }
+ else {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Method " + methodExpr.getReferenceName() + " not found"));
+      }
+    }
+  }
+  if (objectEvaluator == null) {
+    throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(expression.getText()));
+  }
+  try {
+    myResult=new MethodEvaluator(objectEvaluator,contextClass,methodExpr.getReferenceName(),psiMethod != null ? JVMNameUtil.getJVMSignature(psiMethod) : null,argumentEvaluators);
+  }
+ catch (  EvaluateException e) {
+    throw new EvaluateRuntimeException(e);
+  }
+}

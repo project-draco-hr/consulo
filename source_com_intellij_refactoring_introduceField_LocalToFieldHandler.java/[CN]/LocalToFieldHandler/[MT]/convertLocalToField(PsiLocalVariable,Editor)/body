@@ -1,0 +1,134 @@
+{
+  PsiClass aClass;
+  boolean tempIsStatic=myIsConstant;
+  PsiElement parent=local.getParent();
+  while (true) {
+    if (parent instanceof PsiClass && !(parent instanceof PsiAnonymousClass)) {
+      aClass=(PsiClass)parent;
+      break;
+    }
+    if (parent instanceof JspFile) {
+      String message=REFACTORING_NAME + " refactoring is not supported for JSP";
+      RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.LOCAL_TO_FIELD,myProject);
+      return false;
+    }
+    if (parent instanceof PsiModifierListOwner && ((PsiModifierListOwner)parent).hasModifierProperty(PsiModifier.STATIC)) {
+      tempIsStatic=true;
+    }
+    parent=parent.getParent();
+  }
+  final boolean isStatic=tempIsStatic;
+  PsiExpression[] occurences=CodeInsightUtil.findReferenceExpressions(RefactoringUtil.getVariableScope(local),local);
+  if (editor != null) {
+    RefactoringUtil.highlightOccurences(myProject,occurences,editor);
+  }
+  final String variableName;
+  final String fieldName;
+  final int initializerPlace;
+  final boolean declareFinal;
+  final String fieldVisibility;
+  final TypeSelectorManagerImpl typeSelectorManager=new TypeSelectorManagerImpl(myProject,local.getType(),occurences);
+  boolean rebindNeeded=false;
+  if (!myIsConstant) {
+    PsiMethod method=PsiTreeUtil.getParentOfType(local,PsiMethod.class);
+    IntroduceFieldDialog dialog=new IntroduceFieldDialog(myProject,aClass,local.getInitializer(),local,method != null ? method.isConstructor() : false,true,isStatic,occurences.length,method != null,method != null,typeSelectorManager);
+    dialog.show();
+    if (!dialog.isOK())     return false;
+    variableName=local.getName();
+    fieldName=dialog.getEnteredName();
+    initializerPlace=dialog.getInitializerPlace();
+    declareFinal=dialog.isDeclareFinal();
+    fieldVisibility=dialog.getFieldVisibility();
+  }
+ else {
+    IntroduceConstantDialog dialog=new IntroduceConstantDialog(myProject,aClass,local.getInitializer(),local,true,occurences.length,aClass,typeSelectorManager);
+    dialog.show();
+    if (!dialog.isOK())     return false;
+    variableName=local.getName();
+    fieldName=dialog.getEnteredName();
+    declareFinal=true;
+    initializerPlace=IntroduceFieldHandler.IN_FIELD_DECLARATION;
+    fieldVisibility=dialog.getFieldVisibility();
+    final PsiClass destinationClass=dialog.getDestinationClass();
+    if (destinationClass != null) {
+      aClass=destinationClass;
+      rebindNeeded=true;
+    }
+  }
+  final PsiClass aaClass=aClass;
+  final boolean rebindNeeded1=rebindNeeded;
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      try {
+        final boolean rebindNeeded2=!variableName.equals(fieldName) || rebindNeeded1;
+        final PsiReference[] refs;
+        if (rebindNeeded2) {
+          PsiManager manager=local.getManager();
+          PsiSearchHelper helper=manager.getSearchHelper();
+          refs=helper.findReferences(local,GlobalSearchScope.projectScope(myProject),false);
+        }
+ else {
+          refs=null;
+        }
+        final PsiMethod enclosingConstructor=BaseExpressionToFieldHandler.getEnclosingConstructor(aaClass,local);
+        PsiField field=createField(local,fieldName,initializerPlace == IntroduceFieldHandler.IN_FIELD_DECLARATION);
+        if (isStatic) {
+          field.getModifierList().setModifierProperty(PsiModifier.STATIC,true);
+        }
+        if (declareFinal) {
+          field.getModifierList().setModifierProperty(PsiModifier.FINAL,true);
+        }
+        field.getModifierList().setModifierProperty(fieldVisibility,true);
+        field=(PsiField)aaClass.add(field);
+        local.normalizeDeclaration();
+        PsiDeclarationStatement declarationStatement=(PsiDeclarationStatement)local.getParent();
+        final int finalInitializerPlace;
+        if (local.getInitializer() == null) {
+          finalInitializerPlace=IntroduceFieldHandler.IN_FIELD_DECLARATION;
+        }
+ else {
+          finalInitializerPlace=initializerPlace;
+        }
+        final PsiElementFactory factory=myManager.getElementFactory();
+switch (finalInitializerPlace) {
+case IntroduceFieldHandler.IN_FIELD_DECLARATION:
+          declarationStatement.delete();
+        break;
+case IntroduceFieldHandler.IN_CURRENT_METHOD:
+      PsiStatement statement=createAssignment(local,fieldName,factory);
+    declarationStatement.replace(statement);
+  break;
+case IntroduceFieldHandler.IN_CONSTRUCTOR:
+addInitializationToConstructors(local,field,enclosingConstructor,factory);
+if (enclosingConstructor == null) {
+declarationStatement.delete();
+}
+break;
+}
+if (enclosingConstructor != null && initializerPlace == IntroduceFieldHandler.IN_CONSTRUCTOR) {
+PsiStatement statement=createAssignment(local,fieldName,factory);
+declarationStatement.replace(statement);
+}
+if (rebindNeeded2) {
+for (int i=0; i < refs.length; i++) {
+final PsiReference reference=refs[i];
+if (reference != null) {
+RefactoringUtil.replaceOccurenceWithFieldRef((PsiExpression)reference,field,aaClass);
+}
+}
+}
+}
+ catch (IncorrectOperationException e) {
+LOG.error(e);
+}
+}
+}
+;
+CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+public void run(){
+ApplicationManager.getApplication().runWriteAction(runnable);
+}
+}
+,REFACTORING_NAME,null);
+return true;
+}

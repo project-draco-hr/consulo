@@ -1,0 +1,69 @@
+{
+  ExitStatus status=ExitStatus.ERRORS;
+  boolean wereExceptions=false;
+  try {
+    compileContext.getProgressIndicator().pushState();
+    if (checkCachesVersion) {
+      final CompileStatus compileStatus=readStatus();
+      if (compileStatus == null) {
+        compileContext.requestRebuildNextTime("Compiler caches are corrupted. Starting rebuild...");
+      }
+ else       if (compileStatus.CACHE_FORMAT_VERSION != -1 && compileStatus.CACHE_FORMAT_VERSION != CompilerConfiguration.DEPENDENCY_FORMAT_VERSION) {
+        compileContext.requestRebuildNextTime("Compiler caches on disk have old format. Starting rebuild...");
+      }
+ else       if (compileStatus.COMPILATION_IN_PROGRESS) {
+        compileContext.requestRebuildNextTime("Previous compilation did not terminate properly. Caches may have been corrupted. Starting rebuild...");
+      }
+      if (compileContext.isRebuildRequested()) {
+        return;
+      }
+    }
+    writeStatus(new CompileStatus(CompilerConfiguration.DEPENDENCY_FORMAT_VERSION,true),compileContext);
+    if (compileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      return;
+    }
+    if (!isRebuild) {
+      compileContext.getProgressIndicator().setText("Scanning output directories...");
+      myOutputFilesOnDisk=CompilerPathsEx.getOutputFiles(myProject);
+    }
+    status=doCompile(compileContext,isRebuild,forceCompile);
+  }
+ catch (  Throwable ex) {
+    wereExceptions=true;
+    throw new RuntimeException(ex);
+  }
+ finally {
+    compileContext.getProgressIndicator().popState();
+    final ExitStatus _status=status;
+    if (compileContext.isRebuildRequested()) {
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          doRebuild(callback,new CompilerMessageImpl(myProject,CompilerMessageCategory.INFORMATION,compileContext.getRebuildReason(),null,-1,-1),false,compileContext.getCompileScope());
+        }
+      }
+);
+    }
+ else {
+      writeStatus(new CompileStatus(CompilerConfiguration.DEPENDENCY_FORMAT_VERSION,wereExceptions),compileContext);
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          final int errorCount=compileContext.getMessageCount(CompilerMessageCategory.ERROR);
+          final int warningCount=compileContext.getMessageCount(CompilerMessageCategory.WARNING);
+          final String statusMessage=createStatusMessage(_status,warningCount,errorCount);
+          final StatusBar statusBar=WindowManager.getInstance().getStatusBar(myProject);
+          if (statusBar != null) {
+            statusBar.setInfo(statusMessage);
+          }
+          if (_status != ExitStatus.UP_TO_DATE && compileContext.getMessageCount(null) > 0) {
+            compileContext.addMessage(CompilerMessageCategory.INFORMATION,statusMessage,null,-1,-1);
+          }
+          if (callback != null) {
+            callback.finished(_status == ExitStatus.CANCELLED,errorCount,warningCount);
+          }
+          ProfilingUtil.operationFinished("make");
+        }
+      }
+,ModalityState.NON_MMODAL);
+    }
+  }
+}

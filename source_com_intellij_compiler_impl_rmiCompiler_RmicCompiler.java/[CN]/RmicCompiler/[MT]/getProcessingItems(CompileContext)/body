@@ -1,0 +1,54 @@
+{
+  if (!RmicSettings.getInstance(myProject).IS_EANABLED) {
+    return ProcessingItem.EMPTY_ARRAY;
+  }
+  final List<ProcessingItem> items=new ArrayList<ProcessingItem>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      DependencyCache dependencyCache=((CompileContextEx)context).getDependencyCache();
+      try {
+        final Cache cache=dependencyCache.getCache();
+        final int[] allClassNames=cache.getAllClassNames();
+        final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+        final LocalFileSystem lfs=LocalFileSystem.getInstance();
+        for (int idx=0; idx < allClassNames.length; idx++) {
+          final int className=allClassNames[idx];
+          final int classId=cache.getClassId(className);
+          final boolean isRemoteObject=cache.isRemote(classId) && !CacheUtils.isInterface(cache,className);
+          if (!isRemoteObject && !dependencyCache.wasRemote(className)) {
+            continue;
+          }
+          final String outputPath=cache.getPath(classId);
+          if (outputPath == null) {
+            continue;
+          }
+          final VirtualFile outputClassFile=lfs.findFileByPath(outputPath.replace(File.separatorChar,'/'));
+          if (outputClassFile == null) {
+            continue;
+          }
+          final VirtualFile sourceFile=((CompileContextEx)context).getSourceFileByOutputFile(outputClassFile);
+          if (sourceFile == null) {
+            continue;
+          }
+          final Module module=context.getModuleByFile(sourceFile);
+          if (module == null) {
+            continue;
+          }
+          final VirtualFile outputDir=fileIndex.isInTestSourceContent(sourceFile) ? context.getModuleOutputDirectoryForTests(module) : context.getModuleOutputDirectory(module);
+          if (outputDir == null) {
+            continue;
+          }
+          LOG.assertTrue(VfsUtil.isAncestor(outputDir,outputClassFile,true));
+          final RmicProcessingItem item=new RmicProcessingItem(module,outputClassFile,new File(outputDir.getPath()),dependencyCache.resolve(className));
+          item.setIsRemoteObject(isRemoteObject);
+          items.add(item);
+        }
+      }
+ catch (      CacheCorruptedException e) {
+        context.addMessage(CompilerMessageCategory.ERROR,e.getMessage(),null,-1,-1);
+      }
+    }
+  }
+);
+  return items.toArray(new ProcessingItem[items.size()]);
+}

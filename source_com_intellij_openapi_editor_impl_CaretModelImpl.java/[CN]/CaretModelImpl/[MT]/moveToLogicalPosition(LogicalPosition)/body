@@ -1,0 +1,57 @@
+{
+  validateCallContext();
+  int column=pos.column;
+  int line=pos.line;
+  Document doc=myEditor.getDocument();
+  if (column < 0)   column=0;
+  if (line < 0)   line=0;
+  int lineCount=doc.getLineCount();
+  if (lineCount == 0) {
+    line=0;
+  }
+ else   if (line > lineCount - 1) {
+    line=lineCount - 1;
+  }
+  EditorSettings editorSettings=myEditor.getSettings();
+  if (!editorSettings.isVirtualSpace() && line < lineCount) {
+    int lineEndOffset=doc.getLineEndOffset(line);
+    int lineEndColumnNumber=myEditor.offsetToLogicalPosition(lineEndOffset).column;
+    if (column > lineEndColumnNumber) {
+      column=lineEndColumnNumber;
+    }
+  }
+  ((FoldingModelImpl)myEditor.getFoldingModel()).flushCaretPosition();
+  int oldY=myEditor.visibleLineNumberToYPosition(myVisibleCaret.line);
+  LogicalPosition oldCaretPosition=myLogicalCaret;
+  myLogicalCaret=new LogicalPosition(line,column);
+  final int offset=myEditor.logicalPositionToOffset(myLogicalCaret);
+  FoldRegion collapsedAt=((FoldingModelImpl)myEditor.getFoldingModel()).getCollapsedRegionAtOffset(offset);
+  if (collapsedAt != null && offset > collapsedAt.getStartOffset()) {
+    Runnable runnable=new Runnable(){
+      public void run(){
+        FoldRegion[] allCollapsedAt=((FoldingModelImpl)myEditor.getFoldingModel()).fetchCollapsedAt(offset);
+        for (int i=0; i < allCollapsedAt.length; i++) {
+          FoldRegion foldRange=allCollapsedAt[i];
+          foldRange.setExpanded(true);
+        }
+      }
+    }
+;
+    myEditor.getFoldingModel().runBatchFoldingOperation(runnable);
+  }
+  myEditor.setLastColumnNumber(myLogicalCaret.column);
+  myVisibleCaret=myEditor.logicalToVisualPosition(myLogicalCaret);
+  myOffset=myEditor.logicalPositionToOffset(myLogicalCaret);
+  LOG.assertTrue(myOffset >= 0 && myOffset <= myEditor.getDocument().getTextLength());
+  myVisualLineStart=myEditor.logicalPositionToOffset(myEditor.visualToLogicalPosition(new VisualPosition(myVisibleCaret.line,0)));
+  myVisualLineEnd=myEditor.logicalPositionToOffset(myEditor.visualToLogicalPosition(new VisualPosition(myVisibleCaret.line + 1,0)));
+  myEditor.updateCaretCursor();
+  requestRepaint(oldY);
+  if (oldCaretPosition.column != myLogicalCaret.column || oldCaretPosition.line != myLogicalCaret.line) {
+    CaretEvent event=new CaretEvent(myEditor,oldCaretPosition,myLogicalCaret);
+    CaretListener[] listeners=myCaretListeners.toArray(new CaretListener[myCaretListeners.size()]);
+    for (int i=0; i < listeners.length; i++) {
+      listeners[i].caretPositionChanged(event);
+    }
+  }
+}

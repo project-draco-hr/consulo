@@ -1,0 +1,53 @@
+{
+  if (!CodeInsightUtil.prepareFileForWrite(file))   return;
+  final PsiMethod method=SuperMethodWarningUtil.checkSuperMethod(myTargetMethod,"refactor");
+  if (method == null)   return;
+  if (!CodeInsightUtil.prepareFileForWrite(method.getContainingFile()))   return;
+  final FindUsagesOptions options=new FindUsagesOptions(project,SearchScopeCache.getInstance(project));
+  options.isImplementingMethods=true;
+  options.isMethodsUsages=true;
+  options.isOverridingMethods=true;
+  options.isUsages=true;
+  options.isSearchInNonJavaFiles=false;
+  final UsageInfo[][] usages=new UsageInfo[1][1];
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      usages[0]=FindUsagesUtil.findUsages(method,options);
+    }
+  }
+;
+  String progressTitle="Searching For Usages...";
+  if (!ApplicationManager.getApplication().runProcessWithProgressSynchronously(runnable,progressTitle,true,project))   return;
+  if (usages[0].length <= 1) {
+    final ChangeSignatureProcessor processor=new ChangeSignatureProcessor(project,method,false,null,method.getName(),method.getReturnType(),myNewParametersInfo,false,BaseRefactoringProcessor.EMPTY_CALLBACK);
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      processor.testRun();
+    }
+ else {
+      processor.run(null);
+    }
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        QuickFixAction.spoilDocument(project,file);
+      }
+    }
+);
+  }
+ else {
+    final List<ParameterInfo> parameterInfos=Arrays.asList(myNewParametersInfo);
+    final ChangeSignatureDialog.Callback callback=new ChangeSignatureDialog.Callback(){
+      public void run(      final ChangeSignatureDialog dialog){
+        new ChangeSignatureProcessor(project,method,false,dialog.getVisibility(),dialog.getMethodName(),dialog.getReturnType(),dialog.getParameters(),null,dialog.isPreviewUsages(),new Runnable(){
+          public void run(){
+            dialog.close(DialogWrapper.OK_EXIT_CODE);
+          }
+        }
+).run(null);
+      }
+    }
+;
+    ChangeSignatureDialog dialog=new ChangeSignatureDialog(project,method,false,callback);
+    dialog.setParameterInfos(parameterInfos);
+    dialog.show();
+  }
+}

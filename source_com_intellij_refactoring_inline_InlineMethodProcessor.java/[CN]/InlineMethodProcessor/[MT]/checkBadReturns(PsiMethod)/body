@@ -1,0 +1,48 @@
+{
+  PsiReturnStatement[] returns=RefactoringUtil.findReturnStatements(method);
+  if (returns.length == 0)   return false;
+  PsiCodeBlock body=method.getBody();
+  ControlFlow controlFlow;
+  try {
+    controlFlow=new ControlFlowAnalyzer(body,new LocalsControlFlowPolicy(body),false).buildControlFlow();
+  }
+ catch (  ControlFlowAnalyzer.AnalysisCanceledException e) {
+    return false;
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("Control flow:");
+    LOG.debug(controlFlow.toString());
+  }
+  Instruction[] instructions=controlFlow.getInstructions();
+  for (int i=0; i < returns.length; i++) {
+    PsiReturnStatement aReturn=returns[i];
+    int offset=controlFlow.getStartOffset(aReturn);
+    int endOffset=controlFlow.getEndOffset(aReturn);
+    while (offset <= endOffset && !(instructions[offset] instanceof GoToInstruction)) {
+      offset++;
+    }
+    LOG.assertTrue(instructions[offset] instanceof GoToInstruction);
+    instructions[offset]=new EmptyInstruction();
+  }
+  for (int i=0; i < returns.length; i++) {
+    PsiReturnStatement aReturn=returns[i];
+    int offset=controlFlow.getEndOffset(aReturn);
+    while (true) {
+      if (offset == instructions.length)       break;
+      Instruction instruction=instructions[offset];
+      if ((instruction instanceof GoToInstruction)) {
+        offset=((GoToInstruction)instruction).offset;
+      }
+ else       if (instruction instanceof ThrowToInstruction) {
+        offset=((ThrowToInstruction)instruction).offset;
+      }
+ else       if (instruction instanceof ConditionalThrowToInstruction) {
+        offset++;
+      }
+ else {
+        return true;
+      }
+    }
+  }
+  return false;
+}

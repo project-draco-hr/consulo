@@ -1,0 +1,69 @@
+{
+class MyVisitor extends InstructionClientVisitor<Boolean> {
+    boolean[] canCompleteNormally=new boolean[flow.getSize() + 1];
+    public MyVisitor(){
+    }
+    public void visitConditionalGoToInstruction(    ConditionalGoToInstruction instruction,    int offset,    int nextOffset){
+      checkInstruction(offset,nextOffset,instruction.isReturn);
+    }
+    public void visitGoToInstruction(    GoToInstruction instruction,    int offset,    int nextOffset){
+      checkInstruction(offset,nextOffset,instruction.isReturn);
+    }
+    private void checkInstruction(    int offset,    int nextOffset,    boolean isReturn){
+      if (offset > endOffset)       return;
+      if (nextOffset > flow.getSize())       nextOffset=flow.getSize();
+      boolean isNormal=nextOffset <= endOffset && !isReturn && (nextOffset == endOffset || canCompleteNormally[nextOffset]);
+      if (isNormal && nextOffset == endOffset) {
+        PsiElement element=flow.getElement(offset);
+        if (element instanceof PsiBreakStatement || element instanceof PsiContinueStatement) {
+          isNormal=false;
+        }
+      }
+      canCompleteNormally[offset]|=isNormal;
+    }
+    public void visitConditionalThrowToInstruction(    ConditionalThrowToInstruction instruction,    int offset,    int nextOffset){
+      if (nextOffset > flow.getSize())       nextOffset=flow.getSize();
+      if (offset > endOffset)       return;
+      int throwToOffset=instruction.offset;
+      boolean isNormal;
+      if (throwToOffset == nextOffset) {
+        if (throwToOffset <= endOffset) {
+          isNormal=!isLeaf(nextOffset) && canCompleteNormally[nextOffset];
+        }
+ else {
+          isNormal=false;
+        }
+      }
+ else {
+        isNormal=canCompleteNormally[nextOffset];
+      }
+      canCompleteNormally[offset]|=isNormal;
+    }
+    public void visitThrowToInstruction(    ThrowToInstruction instruction,    int offset,    int nextOffset){
+      if (nextOffset > flow.getSize())       nextOffset=flow.getSize();
+      if (offset > endOffset)       return;
+      if (nextOffset <= endOffset) {
+        boolean isNormal=!isLeaf(nextOffset) && canCompleteNormally[nextOffset];
+        canCompleteNormally[offset]|=isNormal;
+      }
+    }
+    public void visitCallInstruction(    CallInstruction instruction,    int offset,    int nextOffset){
+      if (nextOffset > flow.getSize())       nextOffset=flow.getSize();
+      if (offset > endOffset)       return;
+      if (nextOffset > endOffset && nextOffset != offset + 1) {
+        return;
+      }
+      boolean isNormal=canCompleteNormally[nextOffset];
+      canCompleteNormally[offset]|=isNormal;
+    }
+    public void visitInstruction(    Instruction instruction,    int offset,    int nextOffset){
+      checkInstruction(offset,nextOffset,false);
+    }
+    public Boolean getResult(){
+      return Boolean.valueOf(canCompleteNormally[startOffset]);
+    }
+  }
+  final MyVisitor visitor=new MyVisitor();
+  depthFirstSearch(flow,visitor,startOffset,endOffset);
+  return visitor.getResult().booleanValue();
+}

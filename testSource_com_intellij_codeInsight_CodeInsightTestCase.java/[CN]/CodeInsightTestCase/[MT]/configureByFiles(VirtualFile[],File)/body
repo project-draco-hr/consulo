@@ -1,0 +1,76 @@
+{
+  myFile=null;
+  myEditor=null;
+  final ModuleRootManager rootManager=ModuleRootManager.getInstance(myModule);
+  final ModifiableRootModel rootModel=rootManager.getModifiableModel();
+  if (clearModelBeforeConfiguring()) {
+    rootModel.clear();
+  }
+  File dir=createTempDirectory();
+  myFilesToDelete.add(dir);
+  VirtualFile vDir=LocalFileSystem.getInstance().refreshAndFindFileByPath(dir.getCanonicalPath().replace(File.separatorChar,'/'));
+  final VirtualFile[] newVFiles=new VirtualFile[vFiles.length];
+  final RangeMarker[] caretMarkers=new RangeMarker[vFiles.length];
+  final RangeMarker[] selStartMarkers=new RangeMarker[vFiles.length];
+  final RangeMarker[] selEndMarkers=new RangeMarker[vFiles.length];
+  final String[] newFileTexts=new String[vFiles.length];
+  for (int i=0; i < vFiles.length; i++) {
+    VirtualFile vFile=vFiles[i];
+    assertNotNull(vFile);
+    String fileText=new String(vFile.contentsToCharArray());
+    fileText=StringUtil.convertLineSeparators(fileText,"\n");
+    Document document=EditorFactory.getInstance().createDocument(fileText);
+    int caretIndex=fileText.indexOf(CARET_MARKER);
+    int selStartIndex=fileText.indexOf(SELECTION_START_MARKER);
+    int selEndIndex=fileText.indexOf(SELECTION_END_MARKER);
+    final RangeMarker caretMarker=caretIndex >= 0 ? document.createRangeMarker(caretIndex,caretIndex) : null;
+    final RangeMarker selStartMarker=selStartIndex >= 0 ? document.createRangeMarker(selStartIndex,selStartIndex) : null;
+    final RangeMarker selEndMarker=selEndIndex >= 0 ? document.createRangeMarker(selEndIndex,selEndIndex) : null;
+    if (caretMarker != null) {
+      document.deleteString(caretMarker.getStartOffset(),caretMarker.getStartOffset() + CARET_MARKER.length());
+    }
+    if (selStartMarker != null) {
+      document.deleteString(selStartMarker.getStartOffset(),selStartMarker.getStartOffset() + SELECTION_START_MARKER.length());
+    }
+    if (selEndMarker != null) {
+      document.deleteString(selEndMarker.getStartOffset(),selEndMarker.getStartOffset() + SELECTION_END_MARKER.length());
+    }
+    String newFileText=document.getText();
+    final VirtualFile newVFile;
+    if (projectRoot == null) {
+      newVFile=vDir.createChildData(this,vFile.getName());
+      Writer writer=newVFile.getWriter(this);
+      writer.write(newFileText);
+      writer.close();
+    }
+ else {
+      FileUtil.copyDir(projectRoot,dir);
+      newVFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(vDir.getPath() + vFile.getPath().substring(projectRoot.getPath().length()));
+    }
+    newVFiles[i]=newVFile;
+    newFileTexts[i]=newFileText;
+    selEndMarkers[i]=selEndMarker;
+    selStartMarkers[i]=selStartMarker;
+    caretMarkers[i]=caretMarker;
+  }
+  final ContentEntry contentEntry=rootModel.addContentEntry(vDir);
+  if (isAddDirToSource())   contentEntry.addSourceFolder(vDir,false);
+  rootModel.commit();
+  for (int i=0; i < newVFiles.length; i++) {
+    VirtualFile newVFile=newVFiles[i];
+    PsiFile file=myPsiManager.findFile(newVFile);
+    if (myFile == null)     myFile=file;
+    Editor editor=createEditor(newVFile);
+    if (myEditor == null)     myEditor=editor;
+    if (caretMarkers[i] != null) {
+      int caretLine=StringUtil.offsetToLineNumber(newFileTexts[i],caretMarkers[i].getStartOffset());
+      int caretCol=caretMarkers[i].getStartOffset() - StringUtil.lineColToOffset(newFileTexts[i],caretLine,0);
+      LogicalPosition pos=new LogicalPosition(caretLine,caretCol);
+      editor.getCaretModel().moveToLogicalPosition(pos);
+    }
+    if (selStartMarkers[i] != null) {
+      editor.getSelectionModel().setSelection(selStartMarkers[i].getStartOffset(),selEndMarkers[i].getStartOffset());
+    }
+  }
+  return vDir;
+}

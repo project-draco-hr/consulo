@@ -1,0 +1,54 @@
+{
+  getRefManager().findAllDeclarations();
+  final Runnable action=new Runnable(){
+    public void run(){
+      if (getRefManager().getScope().getScopeType() != AnalysisScope.PROJECT) {
+        ProgressManager.getInstance().runProcess(new Runnable(){
+          public void run(){
+            final UnusedParametersFilter filter=new UnusedParametersFilter();
+            final PsiSearchHelper helper=PsiManager.getInstance(getManager().getProject()).getSearchHelper();
+            getRefManager().iterate(new RefManager.RefIterator(){
+              public void accept(              RefElement refElement){
+                if (filter.accepts(refElement)) {
+                  RefMethod refMethod=(RefMethod)refElement;
+                  PsiMethod psiMethod=(PsiMethod)refMethod.getElement();
+                  if (!refMethod.isStatic() && !refMethod.isConstructor() && refMethod.getAccessModifier() != PsiModifier.PRIVATE) {
+                    PsiMethod[] derived=helper.findOverridingMethods(psiMethod,GlobalSearchScope.projectScope(getManager().getProject()),true);
+                    ArrayList unusedParameters=filter.getUnusedParameters(refMethod);
+                    for (Iterator paramIterator=unusedParameters.iterator(); paramIterator.hasNext(); ) {
+                      final RefParameter refParameter=(RefParameter)paramIterator.next();
+                      int idx=refParameter.getIndex();
+                      if (refMethod.isAbstract() && derived.length == 0) {
+                        refParameter.parameterReferenced(false);
+                      }
+ else {
+                        final boolean[] found=new boolean[]{false};
+                        for (int i=0; i < derived.length && !found[0]; i++) {
+                          if (!getRefManager().getScope().contains(derived[i])) {
+                            PsiParameter psiParameter=derived[i].getParameterList().getParameters()[idx];
+                            helper.processReferences(new PsiReferenceProcessor(){
+                              public boolean execute(                              PsiReference element){
+                                refParameter.parameterReferenced(false);
+                                found[0]=true;
+                                return false;
+                              }
+                            }
+,psiParameter,helper.getAccessScope(psiParameter),false);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+);
+          }
+        }
+,null);
+      }
+    }
+  }
+;
+  ApplicationManager.getApplication().runReadAction(action);
+}

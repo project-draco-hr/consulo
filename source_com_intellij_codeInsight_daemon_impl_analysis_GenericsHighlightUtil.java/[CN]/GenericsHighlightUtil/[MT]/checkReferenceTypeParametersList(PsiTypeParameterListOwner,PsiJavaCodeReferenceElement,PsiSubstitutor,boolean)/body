@@ -1,0 +1,46 @@
+{
+  final PsiTypeParameterList typeParameterList=typeParameterListOwner.getTypeParameterList();
+  final int targetParametersNum=typeParameterList == null ? 0 : typeParameterList.getTypeParameters().length;
+  final PsiReferenceParameterList referenceParameterList=referenceElement.getParameterList();
+  final int refParametersNum=referenceParameterList == null ? 0 : referenceParameterList.getTypeParameterElements().length;
+  if (targetParametersNum != refParametersNum && refParametersNum != 0) {
+    final String message=targetParametersNum == 0 ? "{0} ''{1}'' does not have type parameters" : "Wrong number of type arguments: {2}; required: {3}";
+    String description=MessageFormat.format(message,new Object[]{typeParameterListOwnerCategoryDescription(typeParameterListOwner),typeParameterListOwnerDescription(typeParameterListOwner),new Integer(refParametersNum),new Integer(targetParametersNum)});
+    final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,referenceParameterList,description);
+    if (registerIntentions) {
+      PsiElement parent=referenceElement.getParent();
+      if (parent instanceof PsiTypeElement) {
+        PsiElement variable=parent.getParent();
+        if (variable instanceof PsiVariable) {
+          VariableParameterizedTypeFix.registerIntentions(highlightInfo,(PsiVariable)variable,referenceElement);
+        }
+      }
+    }
+    return highlightInfo;
+  }
+  if (targetParametersNum > 0 && refParametersNum != 0) {
+    final PsiTypeParameter[] typeParameters=typeParameterList.getTypeParameters();
+    final PsiTypeElement[] referenceElements=referenceParameterList.getTypeParameterElements();
+    for (int i=0; i < typeParameters.length; i++) {
+      PsiTypeParameter classParameter=typeParameters[i];
+      final PsiTypeElement typeElement=referenceElements[i];
+      final PsiType type=typeElement.getType();
+      if (!(type instanceof PsiClassType))       continue;
+      final PsiClass referenceClass=((PsiClassType)type).resolve();
+      final PsiClassType[] bounds=classParameter.getSuperTypes();
+      for (int j=0; j < bounds.length; j++) {
+        PsiType bound=substitutor.substitute(bounds[j]);
+        if (!bound.equalsToText("java.lang.Object") && !TypeConversionUtil.isAssignable(bound,type)) {
+          PsiClass boundClass=bound instanceof PsiClassType ? ((PsiClassType)bound).resolve() : null;
+          String description=MessageFormat.format("Type parameter ''{0}'' is not within its bound; should {1} ''{2}''",new Object[]{HighlightUtil.formatClass(referenceClass),(boundClass == null || referenceClass.isInterface() == boundClass.isInterface() ? "extend" : "implement"),HighlightUtil.formatType(bound)});
+          final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,typeElement,description);
+          if (bound instanceof PsiClassType) {
+            QuickFixAction.registerQuickFixAction(highlightInfo,new ExtendsListFix(referenceClass,(PsiClassType)bound,true));
+          }
+          return highlightInfo;
+        }
+      }
+    }
+  }
+  return null;
+}

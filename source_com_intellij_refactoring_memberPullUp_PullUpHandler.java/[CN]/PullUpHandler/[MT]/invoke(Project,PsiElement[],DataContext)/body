@@ -1,0 +1,66 @@
+{
+  if (elements.length != 1)   return;
+  myProject=project;
+  PsiElement element=elements[0];
+  PsiClass aClass;
+  PsiElement aMember=null;
+  if (element instanceof PsiClass) {
+    aClass=(PsiClass)element;
+  }
+ else   if (element instanceof PsiMethod) {
+    aClass=((PsiMethod)element).getContainingClass();
+    aMember=element;
+  }
+ else   if (element instanceof PsiField) {
+    aClass=((PsiField)element).getContainingClass();
+    aMember=element;
+  }
+ else   return;
+  if (aClass == null) {
+    String message="Cannot perform the refactoring.\n" + "Refactoring is not supported in current context.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,null,project);
+    return;
+  }
+  ArrayList bases=RefactoringHierarchyUtil.createBasesList(aClass,false,true);
+  if (bases.isEmpty()) {
+    String message="Cannot perform the refactoring.\n" + aClass.getQualifiedName() + " does not have base classes/interfaces in current project.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,null,project);
+    return;
+  }
+  mySubclass=aClass;
+  MemberInfoStorage memberInfoStorage=new MemberInfoStorage(mySubclass,new MemberInfo.Filter(){
+    public boolean includeMember(    PsiMember element){
+      if (element instanceof PsiMethod) {
+        return !((PsiMethod)element).isConstructor();
+      }
+ else {
+        return true;
+      }
+    }
+  }
+);
+  List<MemberInfo> members=memberInfoStorage.getClassMemberInfos(mySubclass);
+  PsiManager manager=mySubclass.getManager();
+  for (int i=0; i < members.size(); i++) {
+    MemberInfo member=members.get(i);
+    if (manager.areElementsEquivalent(member.getMember(),aMember)) {
+      member.setChecked(true);
+      break;
+    }
+  }
+  final PullUpDialog dialog=new PullUpDialog(project,aClass,bases,memberInfoStorage,this);
+  dialog.show();
+  if (!dialog.isOK())   return;
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      final Runnable action=new Runnable(){
+        public void run(){
+          doRefactoring(dialog);
+        }
+      }
+;
+      ApplicationManager.getApplication().runWriteAction(action);
+    }
+  }
+,REFACTORING_NAME,null);
+}

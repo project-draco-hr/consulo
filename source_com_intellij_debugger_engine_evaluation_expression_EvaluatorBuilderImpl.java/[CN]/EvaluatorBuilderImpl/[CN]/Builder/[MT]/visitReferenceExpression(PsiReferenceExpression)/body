@@ -1,0 +1,102 @@
+{
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("visitReferenceExpression " + expression);
+  }
+  PsiExpression qualifier=expression.getQualifierExpression();
+  PsiElement element=expression.resolve();
+  if (element instanceof PsiLocalVariable || element instanceof PsiParameter) {
+    if (element.getContainingFile() instanceof PsiCodeFragment && myCurrentFragmentEvaluator != null) {
+      myResult=new SyntheticVariableEvaluator(myCurrentFragmentEvaluator,((PsiVariable)element).getName());
+      return;
+    }
+    PsiVariable psiVar=(PsiVariable)element;
+    String localName=psiVar.getName();
+    PsiClass variableClass=getContainingClass(psiVar);
+    if (getContextPsiClass() == null || getContextPsiClass().equals(variableClass)) {
+      myResult=new LocalVariableEvaluator(localName,ContextUtil.isJspImplicit(element));
+      return;
+    }
+ else {
+      int iterationCount=0;
+      PsiClass aClass=getOuterClass(getContextPsiClass());
+      while (aClass != null && !aClass.equals(variableClass)) {
+        iterationCount++;
+        aClass=getOuterClass(aClass);
+      }
+      if (aClass != null) {
+        if (psiVar.getInitializer() != null) {
+          Object value=psiVar.getManager().getConstantEvaluationHelper().computeConstantExpression(psiVar.getInitializer());
+          if (value != null) {
+            myResult=new LiteralEvaluator(value,psiVar.getType().getCanonicalText());
+            return;
+          }
+        }
+        Evaluator objectEvaluator=new ThisEvaluator(iterationCount);
+        myResult=new FieldEvaluator(objectEvaluator,getContextPsiClass().getQualifiedName(),"val$" + localName);
+        return;
+      }
+ else {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Local variable '" + localName + "' not found in class closure"));
+      }
+    }
+  }
+ else   if (element instanceof PsiField) {
+    PsiField psiField=(PsiField)element;
+    PsiClass fieldClass=psiField.getContainingClass();
+    if (fieldClass == null) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Cannot resolve class for the field : " + psiField.getName()));
+    }
+    Evaluator objectEvaluator;
+    if (psiField.hasModifierProperty(PsiModifier.STATIC)) {
+      objectEvaluator=new TypeEvaluator(JVMNameUtil.getJVMQualifiedName(fieldClass));
+    }
+ else     if (qualifier != null) {
+      qualifier.accept(this);
+      objectEvaluator=myResult;
+    }
+ else     if (fieldClass.equals(getContextPsiClass()) || getContextPsiClass().isInheritor(fieldClass,true)) {
+      objectEvaluator=new ThisEvaluator();
+    }
+ else {
+      int iterationCount=0;
+      PsiClass aClass=getContextPsiClass();
+      while (aClass != null && !(aClass.equals(fieldClass) || aClass.isInheritor(fieldClass,true))) {
+        iterationCount++;
+        aClass=getOuterClass(aClass);
+      }
+      if (aClass == null) {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Cannot find field's class sources for '" + psiField.getName() + "'"));
+      }
+      objectEvaluator=new ThisEvaluator(iterationCount);
+    }
+    myResult=new FieldEvaluator(objectEvaluator,fieldClass.getQualifiedName(),psiField.getName());
+  }
+ else {
+    PsiElement nameElement=expression.getReferenceNameElement();
+    String name;
+    if (nameElement instanceof PsiIdentifier) {
+      name=nameElement.getText();
+    }
+ else {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Identifier expected instead of '" + (nameElement != null ? nameElement.getText() : "(null)") + "'"));
+    }
+    if (qualifier != null) {
+      if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).resolve() instanceof PsiClass) {
+        PsiClass psiClass=(PsiClass)((PsiReferenceExpression)qualifier).resolve();
+        myResult=new FieldEvaluator(new TypeEvaluator(JVMNameUtil.getJVMQualifiedName(psiClass)),psiClass.getQualifiedName(),name);
+      }
+ else {
+        PsiType type=qualifier.getType();
+        if (type == null)         throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Type is unknown for '" + qualifier.getText() + "'"));
+        qualifier.accept(this);
+        if (myResult == null) {
+          throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Cannot evaluate qualifier " + qualifier.getText()));
+        }
+        myResult=new FieldEvaluator(myResult,type.getCanonicalText(),name);
+      }
+    }
+ else {
+      myResult=new LocalVariableEvaluator(name,false);
+    }
+  }
+}

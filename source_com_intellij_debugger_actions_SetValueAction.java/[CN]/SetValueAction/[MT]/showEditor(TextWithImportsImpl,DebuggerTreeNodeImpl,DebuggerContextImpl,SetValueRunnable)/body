@@ -1,0 +1,109 @@
+{
+  final JPanel editorPanel=new JPanel();
+  editorPanel.setLayout(new BoxLayout(editorPanel,BoxLayout.X_AXIS));
+  SimpleColoredComponent label=new SimpleColoredComponent();
+  label.setIcon(node.getIcon());
+  DebuggerTreeRenderer.getDescriptorTitle(node.getDescriptor()).appendToComponent(label);
+  editorPanel.add(label);
+  final DebuggerExpressionComboBox comboBox=new DebuggerExpressionComboBox(debuggerContext.getProject(),PositionUtil.getContextElement(debuggerContext),"setValue");
+  comboBox.setText(initialString);
+  editorPanel.add(comboBox);
+  final DebuggerTree.InplaceEditor editor=new DebuggerTree.InplaceEditor(node){
+    public JComponent createEditorComponent(){
+      return editorPanel;
+    }
+    public JComponent getContentComponent(){
+      return comboBox;
+    }
+    public Editor getEditor(){
+      return comboBox.getEditor();
+    }
+    private void setValue(){
+      Editor editor=comboBox.getEditor();
+      if (editor == null)       return;
+      final TextWithImportsImpl text=comboBox.getText();
+      PsiFile psiFile=PsiDocumentManager.getInstance(debuggerContext.getProject()).getPsiFile(editor.getDocument());
+      EditorEvaluationCommand evaluationCommand=new EditorEvaluationCommand(getEditor(),psiFile,debuggerContext){
+        public void threadAction(){
+          try {
+            evaluate();
+          }
+ catch (          EvaluateException e) {
+            getProgressWindow().cancel();
+          }
+catch (          ProcessCanceledException e) {
+            getProgressWindow().cancel();
+          }
+ finally {
+            if (!getProgressWindow().isCanceled()) {
+              DebuggerInvocationUtil.invokeLater(debuggerContext.getProject(),new Runnable(){
+                public void run(){
+                  comboBox.addRecent(text);
+                  superDoCancelAction();
+                }
+              }
+);
+            }
+          }
+        }
+        protected Object evaluate(        final EvaluationContextImpl evaluationContext) throws EvaluateException {
+          ExpressionEvaluator evaluator=DebuggerInvocationUtil.commitAndRunReadAction(evaluationContext.getProject(),new com.intellij.debugger.EvaluatingComputable<ExpressionEvaluator>(){
+            public ExpressionEvaluator compute() throws EvaluateException {
+              return EvaluatorBuilderImpl.getInstance().build(text,ContextUtil.getContextElement(evaluationContext));
+            }
+          }
+);
+          SetValueAction.setValue(text.getText(),evaluator,evaluationContext,new SetValueRunnable(){
+            public void setValue(            EvaluationContextImpl evaluationContext,            Value newValue) throws ClassNotLoadedException, InvalidTypeException, EvaluateException, IncompatibleThreadStateException {
+              if (!getProgressWindow().isCanceled()) {
+                setValueRunnable.setValue(evaluationContext,newValue);
+              }
+            }
+            public ReferenceType loadClass(            EvaluationContextImpl evaluationContext,            String className) throws InvocationException, ClassNotLoadedException, EvaluateException, IncompatibleThreadStateException, InvalidTypeException {
+              return setValueRunnable.loadClass(evaluationContext,className);
+            }
+          }
+);
+          return null;
+        }
+      }
+;
+      final ProgressWindowWithNotification progressWindow=evaluationCommand.getProgressWindow();
+      progressWindow.addListener(new ProgressIndicatorListenerAdapter(){
+        public void stopped(){
+          if (!progressWindow.isCanceled()) {
+            IJSwingUtilities.invoke(new Runnable(){
+              public void run(){
+                superDoCancelAction();
+              }
+            }
+);
+          }
+        }
+      }
+);
+      progressWindow.setTitle("Setting value...");
+      debuggerContext.getDebugProcess().getManagerThread().startProgress(evaluationCommand,progressWindow);
+    }
+    private void superDoCancelAction(){
+      super.doCancelAction();
+    }
+    public void doOKAction(){
+      setValue();
+    }
+    public void doFocusLostAction(){
+      setValue();
+    }
+  }
+;
+  final DebuggerStateManager stateManager=DebuggerManagerEx.getInstanceEx(debuggerContext.getProject()).getContextManager();
+  DebuggerContextListener listener=new DebuggerContextListener(){
+    public void changeEvent(    DebuggerContextImpl newContext,    int event){
+      stateManager.removeListener(this);
+      editor.doFocusLostAction();
+    }
+  }
+;
+  stateManager.addListener(listener);
+  editor.show();
+}

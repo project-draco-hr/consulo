@@ -1,0 +1,63 @@
+{
+  if (!GuiDesignerConfiguration.getInstance(myProject).INSTRUMENT_CLASSES) {
+    return ProcessingItem.EMPTY_ARRAY;
+  }
+  final ArrayList<FileProcessingCompiler.ProcessingItem> items=new ArrayList<FileProcessingCompiler.ProcessingItem>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      final CompileScope scope=context.getCompileScope();
+      final VirtualFile[] formFiles=scope.getFiles(StdFileTypes.GUI_DESIGNER_FORM,true);
+      final CompilerConfiguration compilerConfiguration=CompilerConfiguration.getInstance(myProject);
+      final BindingsCache bindingsCache=new BindingsCache(myProject);
+      final VirtualFile[] outputDirectories=CompilerPathsEx.getOutputDirectories(ModuleManager.getInstance(myProject).getSortedModules());
+      final HashMap<Module,ArrayList<VirtualFile>> module2formFiles=sortByModules(formFiles);
+      try {
+        for (Iterator<Module> modules=module2formFiles.keySet().iterator(); modules.hasNext(); ) {
+          final Module module=modules.next();
+          final HashMap<String,VirtualFile> class2form=new HashMap<String,VirtualFile>();
+          final ArrayList list=module2formFiles.get(module);
+          for (int i=0; i < list.size(); i++) {
+            final VirtualFile formFile=(VirtualFile)list.get(i);
+            if (compilerConfiguration.isExcludedFromCompilation(formFile)) {
+              continue;
+            }
+            final String classToBind;
+            try {
+              classToBind=bindingsCache.getBoundClassName(formFile);
+            }
+ catch (            AlienFormFileException e) {
+              continue;
+            }
+catch (            Exception e) {
+              addError(context,"Cannot process form file. Reason: " + e,formFile);
+              continue;
+            }
+            if (classToBind == null) {
+              continue;
+            }
+            final VirtualFile classFile=findFile(outputDirectories,classToBind,module);
+            if (classFile == null) {
+              if (context.getCompileScope().belongs(formFile.getUrl())) {
+                addError(context,"Class to bind does not exist: " + classToBind,formFile);
+              }
+              continue;
+            }
+            final VirtualFile alreadyProcessedForm=class2form.get(classToBind);
+            if (alreadyProcessedForm != null) {
+              addError(context,"The form is bound to the class " + classToBind + ".\n"+ "Another form "+ alreadyProcessedForm.getPresentableUrl()+ " is also bound to this class.",formFile);
+              continue;
+            }
+            class2form.put(classToBind,formFile);
+            final FileProcessingCompiler.ProcessingItem item=new MyInstrumentationItem(classFile,formFile);
+            items.add(item);
+          }
+        }
+      }
+  finally {
+        bindingsCache.save();
+      }
+    }
+  }
+);
+  return items.toArray(new FileProcessingCompiler.ProcessingItem[items.size()]);
+}

@@ -1,0 +1,37 @@
+{
+  LOG.assertTrue(ApplicationManager.getApplication().isDispatchThread());
+  if (myUpdateProgress.isRunning())   return;
+  if (passesToPerform.isEmpty()) {
+    if (postRunnable != null)     postRunnable.run();
+    return;
+  }
+  final HighlightingPass daemonPass=passesToPerform.iterator().next();
+  Runnable postRunnable1=new Runnable(){
+    public void run(){
+      final boolean wasCanceled=myUpdateProgress.isCanceled();
+      final boolean wasRunning=myUpdateProgress.isRunning();
+      myUpdateThreadSemaphore.up();
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          if (myDisposed)           return;
+          if (!wasCanceled || wasRunning) {
+            if (daemonPass != null && editor.getComponent().isDisplayable()) {
+              daemonPass.applyInformationToEditor();
+            }
+            passesToPerform.remove(daemonPass);
+            updateHighlighters(editor,passesToPerform,postRunnable);
+          }
+        }
+      }
+,ModalityState.stateForComponent(editor.getComponent()));
+    }
+  }
+;
+  final UpdateThread updateThread;
+synchronized (myUpdateProgress) {
+    if (myUpdateProgress.isRunning())     return;
+    updateThread=new UpdateThread(daemonPass,myProject,postRunnable1);
+  }
+  myUpdateThreadSemaphore.down();
+  updateThread.start();
+}

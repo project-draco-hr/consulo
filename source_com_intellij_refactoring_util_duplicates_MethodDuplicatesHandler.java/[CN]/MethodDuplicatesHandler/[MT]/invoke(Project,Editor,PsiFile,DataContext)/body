@@ -1,0 +1,68 @@
+{
+  final int offset=editor.getCaretModel().getOffset();
+  final PsiElement element=file.findElementAt(offset);
+  final PsiMethod method=PsiTreeUtil.getParentOfType(element,PsiMethod.class);
+  if (method == null) {
+    String message="Cannot perform the refactoring.\n" + "Locate caret inside a method.";
+    showErrorMessage(message,project);
+    return;
+  }
+  if (!file.isWritable()) {
+    RefactoringMessageUtil.showReadOnlyElementRefactoringMessage(project,method);
+    return;
+  }
+  if (method.isConstructor()) {
+    String message="Cannot perform refactoring.\n" + "Replace With Method Call does not work for constructors";
+    showErrorMessage(message,project);
+  }
+  final PsiCodeBlock body=method.getBody();
+  if (body == null) {
+    String message="Cannot perform refactring.\n" + "Method " + method.getName() + " does not have a body";
+    showErrorMessage(message,project);
+    return;
+  }
+  final PsiStatement[] statements=body.getStatements();
+  if (statements.length == 0) {
+    String message="Cannot perform refactoring.\n" + "Method " + method.getName() + " has an empty body";
+    showErrorMessage(message,project);
+    return;
+  }
+  final DuplicatesFinder duplicatesFinder;
+  final PsiElement[] pattern;
+  if (statements.length != 1 || !(statements[0] instanceof PsiReturnStatement)) {
+    pattern=statements;
+  }
+ else {
+    final PsiExpression returnValue=((PsiReturnStatement)statements[0]).getReturnValue();
+    if (returnValue != null) {
+      pattern=new PsiElement[]{returnValue};
+    }
+ else {
+      pattern=statements;
+    }
+  }
+  duplicatesFinder=new DuplicatesFinder(pattern,Arrays.asList(method.getParameterList().getParameters()),new ArrayList<PsiVariable>(),!method.hasModifierProperty(PsiModifier.STATIC));
+  PsiElement scope=file;
+  final List<Match> duplicates=duplicatesFinder.findDuplicates(scope);
+  if (duplicates.isEmpty()) {
+    final String message="IDEA has not found any code that can be replaced with method call";
+    Messages.showInfoMessage(project,message,REFACTORING_NAME);
+    return;
+  }
+  final int duplicatesNo=duplicates.size();
+  final ArrayList highlighters=new ArrayList();
+  for (Iterator<Match> iterator=duplicates.iterator(); iterator.hasNext(); ) {
+    final Match match=iterator.next();
+    DuplicatesImpl.highlightMatch(project,editor,match,highlighters);
+  }
+  final MethodDuplicatesDialog dialog=new MethodDuplicatesDialog(project,method,duplicatesNo);
+  dialog.show();
+  for (Iterator iterator=highlighters.iterator(); iterator.hasNext(); ) {
+    final RangeHighlighter rangeHighlighter=(RangeHighlighter)iterator.next();
+    HighlightManager.getInstance(project).removeSegmentHighlighter(editor,rangeHighlighter);
+  }
+  if (!dialog.isOK())   return;
+  WindowManager.getInstance().getStatusBar(project).setInfo(getStatusMessage(duplicatesNo));
+  DuplicatesImpl.invoke(project,editor,REFACTORING_NAME,new MethodDuplicatesMatchProvider(method,duplicates));
+  WindowManager.getInstance().getStatusBar(project).setInfo("");
+}

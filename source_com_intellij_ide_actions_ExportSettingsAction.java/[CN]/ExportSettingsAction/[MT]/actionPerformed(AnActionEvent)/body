@@ -1,0 +1,42 @@
+{
+  List<ExportableApplicationComponent> exportableComponents=new ArrayList<ExportableApplicationComponent>();
+  Map<File,Set<ExportableApplicationComponent>> fileToComponents=getRegisteredComponentsAndFiles(exportableComponents);
+  final ChooseComponentsToExportDialog dialog=new ChooseComponentsToExportDialog(exportableComponents,fileToComponents,true,"Select Components to Export","Please check all components to export:");
+  dialog.show();
+  if (!dialog.isOK())   return;
+  Set<ExportableApplicationComponent> markedComponents=dialog.getExportableComponents();
+  if (markedComponents.size() == 0)   return;
+  Set<File> exportFiles=new HashSet<File>();
+  for (Iterator iterator=markedComponents.iterator(); iterator.hasNext(); ) {
+    ExportableApplicationComponent component=(ExportableApplicationComponent)iterator.next();
+    final File[] files=component.getExportFiles();
+    exportFiles.addAll(Arrays.asList(files));
+  }
+  ApplicationManager.getApplication().saveSettings();
+  try {
+    final File saveFile=dialog.getExportFile();
+    if (saveFile.exists()) {
+      final int ret=Messages.showOkCancelDialog("Overwrite '" + FileUtil.toSystemDependentName(saveFile.getPath()) + "'?","File Already Exists",Messages.getWarningIcon());
+      if (ret != 0)       return;
+    }
+    final JarOutputStream output=new JarOutputStream(new FileOutputStream(saveFile));
+    final File configPath=new File(PathManager.getConfigPath());
+    final HashSet<String> writtenItemRelativePaths=new HashSet<String>();
+    for (Iterator<File> iterator=exportFiles.iterator(); iterator.hasNext(); ) {
+      File file=iterator.next();
+      final String relativePath=FileUtil.toSystemIndependentName(FileUtil.getRelativePath(configPath,file));
+      if (file.exists()) {
+        ZipUtil.addFileOrDirRecursively(output,saveFile,file,relativePath,null,writtenItemRelativePaths);
+      }
+    }
+    final File magicFile=new File(FileUtil.getTempDirectory(),SETTINGS_JAR_MARKER);
+    magicFile.createNewFile();
+    magicFile.deleteOnExit();
+    ZipUtil.addFileToZip(output,magicFile,SETTINGS_JAR_MARKER,writtenItemRelativePaths,null);
+    output.close();
+    Messages.showMessageDialog("Settings exported successfully.\n" + "You can import the settings using 'File|Import Settings' feature.","Export Successful",Messages.getInformationIcon());
+  }
+ catch (  IOException e1) {
+    Messages.showErrorDialog("Error writing settings.\n\n" + e1.toString(),"Error Writing File");
+  }
+}

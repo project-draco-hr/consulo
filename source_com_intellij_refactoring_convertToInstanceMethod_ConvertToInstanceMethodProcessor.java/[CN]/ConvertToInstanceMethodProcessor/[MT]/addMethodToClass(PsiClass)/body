@@ -1,0 +1,50 @@
+{
+  final PsiMethod newMethod=(PsiMethod)targetClass.add(myMethod);
+  final PsiModifierList modifierList=newMethod.getModifierList();
+  modifierList.setModifierProperty(PsiModifier.STATIC,false);
+  if (myNewVisibility != null && myNewVisibility != myOldVisibility) {
+    modifierList.setModifierProperty(myNewVisibility,true);
+  }
+  ChangeContextUtil.decodeContextInfo(newMethod,null,null);
+  if (myTypeParameterReplacements == null)   return newMethod;
+  final Map<PsiTypeParameter,PsiTypeParameter> additionalReplacements;
+  if (targetClass != myTargetClass) {
+    final PsiSubstitutor superClassSubstitutor=TypeConversionUtil.getSuperClassSubstitutor(myTargetClass,targetClass,PsiSubstitutor.EMPTY);
+    final Map<PsiTypeParameter,PsiTypeParameter> map=calculateReplacementMap(superClassSubstitutor,myTargetClass,targetClass);
+    if (map == null)     return newMethod;
+    additionalReplacements=new com.intellij.util.containers.HashMap<PsiTypeParameter,PsiTypeParameter>();
+    final Set entries=map.entrySet();
+    for (Iterator<Map.Entry> iterator=entries.iterator(); iterator.hasNext(); ) {
+      final Map.Entry entry=iterator.next();
+      additionalReplacements.put((PsiTypeParameter)entry.getValue(),(PsiTypeParameter)entry.getKey());
+    }
+  }
+ else {
+    additionalReplacements=null;
+  }
+  newMethod.accept(new PsiRecursiveElementVisitor(){
+    public void visitReferenceExpression(    PsiReferenceExpression expression){
+      visitReferenceElement(expression);
+    }
+    public void visitReferenceElement(    PsiJavaCodeReferenceElement reference){
+      PsiTypeParameter typeParameterToBind=reference.getCopyableUserData(BIND_TO_TYPE_PARAMETER);
+      if (typeParameterToBind != null) {
+        reference.putCopyableUserData(BIND_TO_TYPE_PARAMETER,null);
+        try {
+          if (additionalReplacements != null) {
+            typeParameterToBind=additionalReplacements.get(typeParameterToBind);
+          }
+          reference.bindToElement(typeParameterToBind);
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
+        }
+      }
+ else {
+        visitElement(reference);
+      }
+    }
+  }
+);
+  return newMethod;
+}

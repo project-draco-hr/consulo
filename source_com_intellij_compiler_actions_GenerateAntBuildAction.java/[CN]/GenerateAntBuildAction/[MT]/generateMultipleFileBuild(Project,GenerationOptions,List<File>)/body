@@ -1,0 +1,53 @@
+{
+  final File projectBuildFileDestDir=VfsUtil.virtualToIoFile(project.getProjectFile().getParent());
+  projectBuildFileDestDir.mkdirs();
+  final List<File> generated=new ArrayList<File>();
+  final File projectBuildFile=new File(projectBuildFileDestDir,BuildProperties.getProjectBuildFileName(project) + ".xml");
+  final File propertiesFile=new File(projectBuildFileDestDir,BuildProperties.getPropertyFileName(project));
+  if (!backup(projectBuildFile,project,genOptions,filesToRefresh)) {
+    return null;
+  }
+  if (!backup(propertiesFile,project,genOptions,filesToRefresh)) {
+    return null;
+  }
+  projectBuildFile.createNewFile();
+  final DataOutputStream mainDataOutput=new DataOutputStream(new BufferedOutputStream(new FileOutputStream(projectBuildFile)));
+  try {
+    final MultipleFileProjectBuild build=new MultipleFileProjectBuild(project,genOptions);
+    build.generate(mainDataOutput);
+    generated.add(projectBuildFile);
+    ModuleChunk[] chunks=genOptions.getModuleChunks();
+    for (int idx=0; idx < chunks.length; idx++) {
+      final ModuleChunk chunk=chunks[idx];
+      final File chunkBaseDir=BuildProperties.getModuleChunkBaseDir(chunk);
+      chunkBaseDir.mkdirs();
+      final File chunkBuildFile=new File(chunkBaseDir,BuildProperties.getModuleChunkBuildFileName(chunk) + ".xml");
+      final boolean moduleBackupOk=backup(chunkBuildFile,project,genOptions,filesToRefresh);
+      if (!moduleBackupOk) {
+        return null;
+      }
+      chunkBuildFile.createNewFile();
+      final DataOutputStream out=new DataOutputStream(new BufferedOutputStream(new FileOutputStream(chunkBuildFile)));
+      try {
+        new ModuleChunkAntProject(project,chunk,genOptions).generate(out);
+        generated.add(chunkBuildFile);
+      }
+  finally {
+        out.close();
+      }
+    }
+  }
+  finally {
+    mainDataOutput.close();
+  }
+  final DataOutputStream propertiesOut=new DataOutputStream(new BufferedOutputStream(new FileOutputStream(propertiesFile)));
+  try {
+    new PropertyFileGenerator(project).generate(propertiesOut);
+    generated.add(propertiesFile);
+  }
+  finally {
+    propertiesOut.close();
+  }
+  filesToRefresh.addAll(generated);
+  return generated.toArray(new File[generated.size()]);
+}

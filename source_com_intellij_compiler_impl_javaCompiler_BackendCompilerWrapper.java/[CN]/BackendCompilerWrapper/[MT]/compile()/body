@@ -1,0 +1,62 @@
+{
+  VirtualFile[] dependentFiles=null;
+  Application application=ApplicationManager.getApplication();
+  COMPILE:   try {
+    if (myFilesToCompile.length > 0) {
+      if (application.isUnitTestMode()) {
+        saveTestData();
+      }
+      final Map<Module,Set<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,myFilesToCompile);
+      compileModules(moduleToFilesMap);
+    }
+    dependentFiles=findDependentFiles();
+    if (myCompileContext.getProgressIndicator().isCanceled() || myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      break COMPILE;
+    }
+    if (dependentFiles.length > 0) {
+      VirtualFile[] filesInScope=getFilesInScope(dependentFiles);
+      if (filesInScope.length > 0) {
+        final Map<Module,Set<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,filesInScope);
+        compileModules(moduleToFilesMap);
+      }
+    }
+  }
+ catch (  IOException e) {
+    throw new CompilerException("Process not started:\n" + e.getMessage(),e);
+  }
+catch (  SecurityException e) {
+    throw new CompilerException("Compiler not started :" + e.getMessage(),e);
+  }
+catch (  IllegalArgumentException e) {
+    throw new CompilerException(e.getMessage(),e);
+  }
+ finally {
+    myCompileContext.getProgressIndicator().pushState();
+    myCompileContext.getProgressIndicator().setText("Deleting temp files...");
+    for (Iterator<Module> it=myModuleToTempDirMap.keySet().iterator(); it.hasNext(); ) {
+      final Module module=it.next();
+      final VirtualFile file=myModuleToTempDirMap.get(module);
+      if (file != null) {
+        final File ioFile=application.runReadAction(new Computable<File>(){
+          public File compute(){
+            return new File(file.getPath());
+          }
+        }
+);
+        FileUtil.asyncDelete(ioFile);
+      }
+    }
+    myModuleToTempDirMap.clear();
+    myCompileContext.getProgressIndicator().setText("Updating caches...");
+    if (mySuccesfullyCompiledJavaFiles.size() > 0 || (dependentFiles != null && dependentFiles.length > 0)) {
+      myCompileContext.getDependencyCache().update();
+    }
+    myCompileContext.getProgressIndicator().popState();
+  }
+  myFilesToRecompile=new HashSet<VirtualFile>(Arrays.asList(myFilesToCompile));
+  if (dependentFiles != null) {
+    myFilesToRecompile.addAll(Arrays.asList(dependentFiles));
+  }
+  myFilesToRecompile.removeAll(mySuccesfullyCompiledJavaFiles);
+  return myOutputItems.toArray(new TranslatingCompiler.OutputItem[myOutputItems.size()]);
+}

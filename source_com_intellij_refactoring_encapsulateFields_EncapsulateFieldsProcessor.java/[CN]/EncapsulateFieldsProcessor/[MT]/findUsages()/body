@@ -1,0 +1,50 @@
+{
+  boolean findGet=myDialog.isToEncapsulateGet();
+  boolean findSet=myDialog.isToEncapsulateSet();
+  PsiModifierList newModifierList=null;
+  if (!myDialog.isToUseAccessorsWhenAccessible()) {
+    PsiElementFactory factory=PsiManager.getInstance(myProject).getElementFactory();
+    try {
+      PsiField field=factory.createField("a",PsiType.INT);
+      setNewFieldVisibility(field);
+      newModifierList=field.getModifierList();
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+  }
+  PsiMethod[] getterPrototypes=myDialog.getGetterPrototypes();
+  PsiMethod[] setterPrototypes=myDialog.getSetterPrototypes();
+  ArrayList<UsageInfo> array=new ArrayList<UsageInfo>();
+  PsiField[] fields=myFields;
+  for (int i=0; i < fields.length; i++) {
+    PsiField field=fields[i];
+    PsiSearchHelper helper=field.getManager().getSearchHelper();
+    PsiReference[] refs=helper.findReferences(field,GlobalSearchScope.projectScope(myProject),false);
+    for (int j=0; j < refs.length; j++) {
+      final PsiReference reference=refs[j];
+      if (!(reference instanceof PsiReferenceExpression))       continue;
+      PsiReferenceExpression ref=(PsiReferenceExpression)reference;
+      if (findGet && isUsedInExistingAccessor(getterPrototypes[i],ref))       continue;
+      if (findSet && isUsedInExistingAccessor(setterPrototypes[i],ref))       continue;
+      if (!findGet) {
+        if (!PsiUtil.isAccessedForWriting(ref))         continue;
+      }
+      if (!findSet || field.hasModifierProperty(PsiModifier.FINAL)) {
+        if (!PsiUtil.isAccessedForReading(ref))         continue;
+      }
+      if (!myDialog.isToUseAccessorsWhenAccessible()) {
+        PsiClass accessObjectClass=null;
+        PsiExpression qualifier=ref.getQualifierExpression();
+        if (qualifier != null) {
+          accessObjectClass=(PsiClass)PsiUtil.getAccessObjectClass(qualifier).getElement();
+        }
+        if (PsiManager.getInstance(myProject).getResolveHelper().isAccessible(field,newModifierList,ref,accessObjectClass))         continue;
+      }
+      UsageInfo usageInfo=new MyUsageInfo(ref,i);
+      array.add(usageInfo);
+    }
+  }
+  MyUsageInfo[] usageInfos=array.toArray(new MyUsageInfo[array.size()]);
+  return UsageViewUtil.removeDuplicatedUsages(usageInfos);
+}

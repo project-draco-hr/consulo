@@ -1,0 +1,88 @@
+{
+  if (asynchronous) {
+    ApplicationManager.getApplication().assertReadAccessAllowed();
+  }
+ else {
+    ApplicationManager.getApplication().assertWriteAccessAllowed();
+  }
+  final ModalityState modalityState=EventQueue.isDispatchThread() ? ModalityState.current() : ModalityState.NON_MMODAL;
+  final WorkerThread worker;
+  if (asynchronous) {
+    worker=new WorkerThread("Synchronize worker");
+  }
+ else {
+    worker=null;
+  }
+  final Runnable endTask=new Runnable(){
+    public void run(){
+      ProgressIndicator indicator=getManager().getRefreshIndicator();
+      if (indicator != null) {
+        indicator.stop();
+      }
+      getManager().afterRefreshFinish(asynchronous,modalityState);
+    }
+  }
+;
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      getManager().beforeRefreshStart(asynchronous,modalityState,null);
+      final ProgressIndicator indicator=getManager().getRefreshIndicator();
+      if (indicator != null) {
+        indicator.start();
+        indicator.setText("Synchronizing files...");
+      }
+      storeRefreshStatusToFiles();
+      myCachedRoots=File.listRoots();
+      VirtualFileImpl[] roots;
+synchronized (LOCK) {
+        roots=myRoots.toArray(new VirtualFileImpl[myRoots.size()]);
+      }
+      for (int i=0; i < roots.length; i++) {
+        final VirtualFileImpl rootFile=roots[i];
+        PhysicalFile file=rootFile.getPhysicalFile();
+        if (!file.exists()) {
+          final Runnable action=new Runnable(){
+            public void run(){
+              if (!rootFile.isValid())               return;
+              boolean isDirectory=rootFile.isDirectory();
+              fireBeforeFileDeletion(null,rootFile);
+synchronized (LOCK) {
+                myRoots.remove(rootFile);
+                updateFileWatcher();
+              }
+              fireFileDeleted(null,rootFile,rootFile.getName(),isDirectory,null);
+            }
+          }
+;
+          getManager().addEventToFireByRefresh(action,asynchronous,modalityState);
+        }
+ else {
+          refresh(rootFile,true,false,worker,modalityState);
+        }
+      }
+    }
+  }
+;
+  if (asynchronous) {
+    Runnable runnable1=new Runnable(){
+      public void run(){
+        LOG.info("Executing request:" + this);
+        worker.start();
+        ApplicationManager.getApplication().runReadAction(runnable);
+        worker.dispose(false);
+        try {
+          worker.join();
+        }
+ catch (        InterruptedException e) {
+        }
+        endTask.run();
+      }
+    }
+;
+    getSynchronizeQueueAlarm().addRequest(runnable1,0);
+  }
+ else {
+    runnable.run();
+    endTask.run();
+  }
+}

@@ -1,0 +1,55 @@
+{
+  int col=-1;
+  int line=-1;
+  if (myEditor != null) {
+    col=myEditor.getCaretModel().getLogicalPosition().column;
+    line=myEditor.getCaretModel().getLogicalPosition().line;
+    LogicalPosition pos=new LogicalPosition(0,0);
+    myEditor.getCaretModel().moveToLogicalPosition(pos);
+  }
+  PsiExpression initializer=myField.getInitializer();
+  LOG.assertTrue(initializer != null);
+  PsiConstantEvaluationHelper evalHelper=myField.getManager().getConstantEvaluationHelper();
+  initializer=normalize((PsiExpression)initializer.copy());
+  for (int i=0; i < usages.length; i++) {
+    PsiExpression initializer1=initializer;
+    PsiExpression expr=(PsiExpression)usages[i].getElement();
+    while (expr.getParent() instanceof PsiArrayAccessExpression) {
+      PsiArrayAccessExpression arrayAccess=((PsiArrayAccessExpression)expr.getParent());
+      Object value=evalHelper.computeConstantExpression(arrayAccess.getIndexExpression());
+      if (value instanceof Integer) {
+        int intValue=((Integer)value).intValue();
+        if (initializer1 instanceof PsiNewExpression) {
+          PsiExpression[] arrayInitializers=((PsiNewExpression)initializer1).getArrayInitializer().getInitializers();
+          if (0 <= intValue && intValue < arrayInitializers.length) {
+            expr=(PsiExpression)expr.getParent();
+            initializer1=normalize(arrayInitializers[intValue]);
+            continue;
+          }
+        }
+      }
+      break;
+    }
+    try {
+      myField.normalizeDeclaration();
+      ChangeContextUtil.encodeContextInfo(initializer1,true);
+      PsiElement element=expr.replace(initializer1);
+      ChangeContextUtil.decodeContextInfo(element,null,null);
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+  }
+  if (!myDialog.isInlineThisOnly()) {
+    try {
+      myField.delete();
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+  }
+  if (myEditor != null) {
+    LogicalPosition pos=new LogicalPosition(line,col);
+    myEditor.getCaretModel().moveToLogicalPosition(pos);
+  }
+}

@@ -1,0 +1,79 @@
+{
+  final GeneratingCompiler.GenerationItem[] allItems=compiler.getGenerationItems(context);
+  final List<GeneratingCompiler.GenerationItem> toGenerate=new ArrayList<GeneratingCompiler.GenerationItem>();
+  final StateCache<ValidityState> cache=getGeneratingCompilerCache(compiler);
+  final Set<String> pathsToRemove=new HashSet<String>(Arrays.asList(cache.getUrls()));
+  final Map<GeneratingCompiler.GenerationItem,String> itemToOutputPathMap=new com.intellij.util.containers.HashMap<GeneratingCompiler.GenerationItem,String>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      for (int idx=0; idx < allItems.length; idx++) {
+        final GeneratingCompiler.GenerationItem item=allItems[idx];
+        final Module itemModule=item.getModule();
+        final String outputDirPath=getGenerationOutputPath(compiler,itemModule);
+        final String outputPath=outputDirPath + "/" + item.getPath();
+        itemToOutputPathMap.put(item,outputPath);
+        final ValidityState savedState=cache.getState(outputPath);
+        if (forceGenerate || savedState == null || !savedState.equalsTo(item.getValidityState())) {
+          toGenerate.add(item);
+        }
+ else {
+          pathsToRemove.remove(outputPath);
+        }
+      }
+    }
+  }
+);
+  final List<File> filesToRefresh=new ArrayList<File>();
+  try {
+    if (pathsToRemove.size() > 0) {
+      context.getProgressIndicator().pushState();
+      context.getProgressIndicator().setText("Synchronizing output directory...");
+      for (Iterator<String> it=pathsToRemove.iterator(); it.hasNext(); ) {
+        String path=it.next();
+        final File file=new File(path);
+        final boolean deleted=file.delete();
+        if (deleted) {
+          cache.remove(path);
+          filesToRefresh.add(file);
+        }
+      }
+      context.getProgressIndicator().popState();
+    }
+    Map<Module,Set<GeneratingCompiler.GenerationItem>> moduleToItemMap=buildModuleToGenerationItemMap(toGenerate.toArray(new GeneratingCompiler.GenerationItem[toGenerate.size()]));
+    List<Module> modules=new ArrayList<Module>(moduleToItemMap.size());
+    for (Iterator<Module> it=moduleToItemMap.keySet().iterator(); it.hasNext(); ) {
+      modules.add(it.next());
+    }
+    ModuleCompilerUtil.sortModules(myProject,modules);
+    for (Iterator<Module> it=modules.iterator(); it.hasNext(); ) {
+      context.getProgressIndicator().pushState();
+      try {
+        final Module module=it.next();
+        final Set<GeneratingCompiler.GenerationItem> items=moduleToItemMap.get(module);
+        if (items != null && items.size() > 0) {
+          final VirtualFile outputDir=getGenerationOutputDir(compiler,module);
+          final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,items.toArray(new GeneratingCompiler.GenerationItem[items.size()]),outputDir);
+          context.getProgressIndicator().setText("Updating caches...");
+          for (int idx=0; idx < successfullyGenerated.length; idx++) {
+            GeneratingCompiler.GenerationItem item=successfullyGenerated[idx];
+            cache.update(itemToOutputPathMap.get(item),item.getValidityState());
+            filesToRefresh.add(new File(item.getPath()));
+          }
+        }
+      }
+  finally {
+        context.getProgressIndicator().popState();
+      }
+    }
+  }
+  finally {
+    context.getProgressIndicator().pushState();
+    CompilerUtil.refreshIOFiles(filesToRefresh.toArray(new File[filesToRefresh.size()]));
+    if (cache.isDirty()) {
+      context.getProgressIndicator().setText("Saving caches...");
+      cache.save();
+    }
+    context.getProgressIndicator().popState();
+  }
+  return toGenerate.size() > 0 || filesToRefresh.size() > 0;
+}

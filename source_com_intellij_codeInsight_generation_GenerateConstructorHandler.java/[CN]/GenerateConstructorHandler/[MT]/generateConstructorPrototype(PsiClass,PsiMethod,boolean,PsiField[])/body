@@ -1,0 +1,69 @@
+{
+  PsiManager manager=aClass.getManager();
+  PsiElementFactory factory=manager.getElementFactory();
+  CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(manager.getProject());
+  PsiMethod constructor=factory.createConstructor();
+  String modifier=aClass.hasModifierProperty(PsiModifier.ABSTRACT) ? PsiModifier.PROTECTED : PsiModifier.PUBLIC;
+  constructor.getModifierList().setModifierProperty(modifier,true);
+  if (baseConstructor != null) {
+    PsiJavaCodeReferenceElement[] throwRefs=baseConstructor.getThrowsList().getReferenceElements();
+    for (int i=0; i < throwRefs.length; i++) {
+      PsiJavaCodeReferenceElement ref=throwRefs[i];
+      constructor.getThrowsList().add(ref);
+    }
+    if (copyJavaDoc) {
+      final PsiDocComment docComment=((PsiMethod)baseConstructor.getNavigationElement()).getDocComment();
+      if (docComment != null) {
+        constructor.addAfter(docComment,null);
+      }
+    }
+  }
+  StringBuffer buffer=new StringBuffer();
+  buffer.append("{\n");
+  if (baseConstructor != null) {
+    PsiClass superClass=aClass.getSuperClass();
+    LOG.assertTrue(superClass != null);
+    if (!"java.lang.Enum".equals(superClass.getQualifiedName())) {
+      if (baseConstructor instanceof PsiCompiledElement) {
+        PsiClass dummyClass=factory.createClass("Dummy");
+        baseConstructor=(PsiMethod)dummyClass.add(baseConstructor);
+      }
+      PsiParameter[] parms=baseConstructor.getParameterList().getParameters();
+      for (int j=0; j < parms.length; j++) {
+        PsiParameter parm=parms[j];
+        constructor.getParameterList().add(parm);
+      }
+      if (parms.length > 0) {
+        buffer.append("super(");
+        for (int j=0; j < parms.length; j++) {
+          PsiParameter parm=parms[j];
+          if (j > 0) {
+            buffer.append(",");
+          }
+          buffer.append(parm.getName());
+        }
+        buffer.append(");\n");
+      }
+    }
+  }
+  for (int i=0; i < fields.length; i++) {
+    PsiField field=fields[i];
+    String fieldName=field.getName();
+    String name=codeStyleManager.variableNameToPropertyName(fieldName,VariableKind.FIELD);
+    String parmName=codeStyleManager.propertyNameToVariableName(name,VariableKind.PARAMETER);
+    PsiParameter parm=factory.createParameter(parmName,field.getType());
+    constructor.getParameterList().add(parm);
+    if (fieldName.equals(parmName)) {
+      buffer.append("this.");
+    }
+    buffer.append(fieldName);
+    buffer.append("=");
+    buffer.append(parmName);
+    buffer.append(";\n");
+  }
+  buffer.append("}");
+  PsiCodeBlock body=factory.createCodeBlockFromText(buffer.toString(),null);
+  constructor.getBody().replace(body);
+  constructor=(PsiMethod)codeStyleManager.reformat(constructor);
+  return constructor;
+}

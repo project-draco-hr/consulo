@@ -1,0 +1,60 @@
+{
+  FindManager findManager=FindManager.getInstance(project);
+  Document document=editor.getDocument();
+  final FindResult result=findManager.findString(document.getCharsSequence(),offset,model);
+  if (result == null) {
+    return null;
+  }
+  String stringToFind=model.getStringToFind();
+  if (stringToFind == null) {
+    return null;
+  }
+  boolean isFound=result.isStringFound();
+  if (!model.isGlobal()) {
+    if (result.getEndOffset() > editor.getSelectionModel().getSelectionEnd() || result.getStartOffset() < editor.getSelectionModel().getSelectionStart()) {
+      isFound=false;
+    }
+  }
+  if (!isFound) {
+    if (toWarn) {
+      processNotFound(editor,model.getStringToFind(),model,project);
+    }
+    return null;
+  }
+  if (adjustEditor) {
+    final CaretModel caretModel=editor.getCaretModel();
+    final ScrollingModel scrollingModel=editor.getScrollingModel();
+    int oldCaretOffset=caretModel.getOffset();
+    boolean forward=oldCaretOffset < result.getStartOffset();
+    final ScrollType scrollType=forward ? ScrollType.CENTER_DOWN : ScrollType.CENTER_UP;
+    if (model.isGlobal()) {
+      caretModel.moveToOffset(result.getEndOffset());
+      editor.getSelectionModel().removeSelection();
+      scrollingModel.scrollToCaret(scrollType);
+      scrollingModel.runActionOnScrollingFinished(new Runnable(){
+        public void run(){
+          scrollingModel.scrollTo(editor.offsetToLogicalPosition(result.getStartOffset()),scrollType);
+          scrollingModel.scrollTo(editor.offsetToLogicalPosition(result.getEndOffset()),scrollType);
+        }
+      }
+);
+    }
+ else {
+      moveCaretAndDontChangeSelection(editor,result.getStartOffset(),scrollType);
+      moveCaretAndDontChangeSelection(editor,result.getEndOffset(),scrollType);
+    }
+    IdeDocumentHistory.getInstance(project).includeCurrentCommandAsNavigation();
+    EditorColorsManager manager=EditorColorsManager.getInstance();
+    TextAttributes selectionAttributes=manager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+    if (!model.isGlobal()) {
+      final RangeHighlighterEx segmentHighlighter=(RangeHighlighterEx)editor.getMarkupModel().addRangeHighlighter(result.getStartOffset(),result.getEndOffset(),HighlighterLayer.SELECTION + 1,selectionAttributes,HighlighterTargetArea.EXACT_RANGE);
+      MyListener listener=new MyListener(editor,segmentHighlighter);
+      editor.getContentComponent().addFocusListener(listener);
+      caretModel.addCaretListener(listener);
+    }
+ else {
+      editor.getSelectionModel().setSelection(result.getStartOffset(),result.getEndOffset());
+    }
+  }
+  return result;
+}

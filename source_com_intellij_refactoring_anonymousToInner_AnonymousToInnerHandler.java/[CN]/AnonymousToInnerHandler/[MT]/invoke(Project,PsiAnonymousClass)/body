@@ -1,0 +1,53 @@
+{
+  myProject=project;
+  myManager=PsiManager.getInstance(myProject);
+  myAnonClass=anonymousClass;
+  PsiClassType baseRef=myAnonClass.getBaseClassType();
+  if (baseRef.resolve() == null) {
+    String message="Cannot resolve " + baseRef.getCanonicalText();
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.ANONYMOUS_TO_INNER,project);
+    return;
+  }
+  PsiElement targetContainer=findTargetContainer(myAnonClass);
+  if (targetContainer instanceof JspFile) {
+    String message=REFACTORING_NAME + " refactoring is not supported for JSP";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.ANONYMOUS_TO_INNER,project);
+    return;
+  }
+  boolean condition=targetContainer instanceof PsiClass;
+  LOG.assertTrue(condition);
+  myTargetClass=(PsiClass)targetContainer;
+  if (!myTargetClass.isWritable()) {
+    RefactoringMessageUtil.showReadOnlyElementRefactoringMessage(myProject,myTargetClass);
+    return;
+  }
+  HashMap<PsiVariable,VariableInfo> variableInfoMap=new HashMap<PsiVariable,VariableInfo>();
+  ArrayList<VariableInfo> variableInfoVector=new ArrayList<VariableInfo>();
+  collectUsedVariables(variableInfoMap,variableInfoVector,myAnonClass);
+  myVariableInfos=variableInfoVector.toArray(new VariableInfo[variableInfoVector.size()]);
+  final boolean needsThis=needsThis() || PsiUtil.isInnerClass(myTargetClass);
+  myDialog=new AnonymousToInnerDialog(myProject,myAnonClass,myVariableInfos,needsThis);
+  myDialog.show();
+  if (!myDialog.isOK()) {
+    return;
+  }
+  myVariableInfos=myDialog.getVariableInfos();
+  myMakeStatic=myDialog.isMakeStatic();
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      final Runnable action=new Runnable(){
+        public void run(){
+          try {
+            doRefactoring();
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
+      }
+;
+      ApplicationManager.getApplication().runWriteAction(action);
+    }
+  }
+,REFACTORING_NAME,null);
+}

@@ -1,0 +1,46 @@
+{
+  if (elementAtStartLineEnd == null || elementAtNextLineStart == null)   return -1;
+  if (!(elementAtStartLineEnd instanceof PsiJavaToken))   return -1;
+  PsiJavaToken lastFirstLineToken=(PsiJavaToken)elementAtStartLineEnd;
+  if (lastFirstLineToken.getTokenType() != JavaTokenType.SEMICOLON)   return -1;
+  if (!(lastFirstLineToken.getParent() instanceof PsiLocalVariable))   return -1;
+  PsiLocalVariable var=(PsiLocalVariable)lastFirstLineToken.getParent();
+  if (!(var.getParent() instanceof PsiDeclarationStatement))   return -1;
+  PsiDeclarationStatement decl=(PsiDeclarationStatement)var.getParent();
+  if (decl.getDeclaredElements().length > 1)   return -1;
+  if (!(elementAtNextLineStart instanceof PsiJavaToken))   return -1;
+  PsiJavaToken firstNextLineToken=(PsiJavaToken)elementAtNextLineStart;
+  if (firstNextLineToken.getTokenType() != JavaTokenType.IDENTIFIER)   return -1;
+  if (!(firstNextLineToken.getParent() instanceof PsiReferenceExpression))   return -1;
+  PsiReferenceExpression ref=(PsiReferenceExpression)firstNextLineToken.getParent();
+  PsiElement refResolved=ref.resolve();
+  PsiManager psiManager=ref.getManager();
+  if (!psiManager.areElementsEquivalent(refResolved,var))   return -1;
+  if (!(ref.getParent() instanceof PsiAssignmentExpression))   return -1;
+  PsiAssignmentExpression assignment=(PsiAssignmentExpression)ref.getParent();
+  if (assignment.getOperationSign().getTokenType() != JavaTokenType.EQ)   return -1;
+  if (!(assignment.getParent() instanceof PsiExpressionStatement))   return -1;
+  if (psiManager.getSearchHelper().findReferences(var,new LocalSearchScope(assignment.getRExpression()),false).length > 0) {
+    return -1;
+  }
+  PsiExpressionStatement statement=(PsiExpressionStatement)assignment.getParent();
+  PsiDeclarationStatement newDecl=null;
+  int startOffset=decl.getTextRange().getStartOffset();
+  try {
+    newDecl=psiManager.getElementFactory().createVariableDeclarationStatement(var.getName(),var.getType(),assignment.getRExpression());
+    PsiVariable newVar=((PsiVariable)newDecl.getDeclaredElements()[0]);
+    if (var.getModifierList().getText().length() > 0) {
+      newVar.getModifierList().setModifierProperty(PsiModifier.FINAL,true);
+    }
+    newVar.getModifierList().replace(var.getModifierList());
+    decl.replace(newDecl);
+    statement.delete();
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  if (newDecl != null) {
+    return startOffset + newDecl.getTextRange().getEndOffset() - newDecl.getTextRange().getStartOffset();
+  }
+  return -1;
+}

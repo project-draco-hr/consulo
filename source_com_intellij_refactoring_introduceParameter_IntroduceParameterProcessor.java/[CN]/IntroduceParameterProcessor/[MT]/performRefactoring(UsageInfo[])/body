@@ -1,0 +1,63 @@
+{
+  try {
+    PsiElementFactory factory=myMethodToReplaceIn.getManager().getElementFactory();
+    PsiType initializerType=getInitializerType(myForcedType,myParameterInitializer,myLocalVariable);
+    if (myParameterInitializer != null) {
+      myParameterInitializer=RefactoringUtil.convertInitializerToNormalExpression(myParameterInitializer,initializerType);
+    }
+ else {
+      LOG.assertTrue(myLocalVariable != null);
+      myParameterInitializer=factory.createExpressionFromText(myLocalVariable.getName(),myLocalVariable);
+    }
+    ChangeContextUtil.encodeContextInfo(myParameterInitializer,true);
+    for (int i=0; i < usages.length; i++) {
+      UsageInfo usage=usages[i];
+      if (!(usage instanceof InternalUsageInfo)) {
+        if (usage instanceof DefaultConstructorImplicitUsageInfo) {
+          addSuperCall(((DefaultConstructorImplicitUsageInfo)usage).getConstructor());
+        }
+ else         if (usage instanceof NoConstructorClassUsageInfo) {
+          addDefaultConstructor(((NoConstructorClassUsageInfo)usage).getPsiClass());
+        }
+ else         if (usage.getElement() instanceof PsiMethod) {
+          if (!myManager.areElementsEquivalent(usage.getElement(),myMethodToReplaceIn)) {
+            changeMethodSignatureAndResolveFieldConflicts((PsiMethod)usage.getElement(),initializerType);
+          }
+        }
+ else {
+          changeExternalUsage(usage);
+        }
+      }
+    }
+    LOG.assertTrue(initializerType.isValid());
+    final FieldConflictsResolver fieldConflictsResolver=new FieldConflictsResolver(myParameterName,myMethodToReplaceIn.getBody());
+    changeMethodSignature(myMethodToReplaceIn,initializerType);
+    if (myMethodToSearchFor != myMethodToReplaceIn) {
+      changeMethodSignatureAndResolveFieldConflicts(myMethodToSearchFor,initializerType);
+    }
+    ChangeContextUtil.clearContextInfo(myParameterInitializer);
+    for (int j=0; j < usages.length; j++) {
+      UsageInfo usage=usages[j];
+      if (usage instanceof ChangedMethodCallInfo) {
+        PsiElement element=usage.getElement();
+        processChangedMethodCall(element);
+      }
+ else       if (usage instanceof InternalUsageInfo) {
+        PsiElement element=usage.getElement();
+        if (element instanceof PsiExpression) {
+          element=RefactoringUtil.outermostParenthesizedExpression((PsiExpression)element);
+        }
+        PsiElement newExpr=factory.createExpressionFromText(myParameterName,element);
+        element.replace(newExpr);
+      }
+    }
+    if (myLocalVariable != null && myRemoveLocalVariable) {
+      myLocalVariable.normalizeDeclaration();
+      myLocalVariable.getParent().delete();
+    }
+    fieldConflictsResolver.fix();
+  }
+ catch (  IncorrectOperationException ex) {
+    LOG.assertTrue(false);
+  }
+}

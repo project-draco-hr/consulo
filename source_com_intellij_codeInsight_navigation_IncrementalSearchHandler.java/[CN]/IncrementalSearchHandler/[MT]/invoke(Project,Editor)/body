@@ -1,0 +1,92 @@
+{
+  if (!ourActionsRegistered) {
+    ourActionsRegistered=true;
+    EditorActionManager actionManager=EditorActionManager.getInstance();
+    TypedAction typedAction=actionManager.getTypedAction();
+    typedAction.setupHandler(new IncrementalSearchHandler.MyTypedHandler(typedAction.getHandler()));
+    actionManager.setActionHandler(IdeActions.ACTION_EDITOR_BACKSPACE,new IncrementalSearchHandler.BackSpaceHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_BACKSPACE)));
+    actionManager.setActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_UP,new IncrementalSearchHandler.UpHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_UP)));
+    actionManager.setActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_DOWN,new IncrementalSearchHandler.DownHandler(actionManager.getActionHandler(IdeActions.ACTION_EDITOR_MOVE_CARET_DOWN)));
+  }
+  FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.incremental.search");
+  String selection=editor.getSelectionModel().getSelectedText();
+  JLabel label2=new MyLabel(selection == null ? "" : selection);
+  PerEditorSearchData data=(PerEditorSearchData)editor.getUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY);
+  if (data == null) {
+    data=new PerEditorSearchData();
+  }
+ else {
+    if (data.hint != null) {
+      if (data.lastSearch != null) {
+        PerHintSearchData hintData=(PerHintSearchData)data.hint.getUserData(SEARCH_DATA_IN_HINT_KEY);
+        if ("".equals(hintData.label.getText())) {
+          label2=new MyLabel(data.lastSearch);
+        }
+      }
+      data.hint.hide();
+    }
+  }
+  JLabel label1=new MyLabel(" Search for: ");
+  label1.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD));
+  JPanel panel=new MyPanel(label1);
+  panel.add(label1,BorderLayout.WEST);
+  panel.add(label2,BorderLayout.CENTER);
+  panel.setBorder(BorderFactory.createLineBorder(Color.black));
+  final DocumentListener[] documentListener=new DocumentListener[1];
+  final CaretListener[] caretListener=new CaretListener[1];
+  final LightweightHint hint=new LightweightHint(panel){
+    public void hide(){
+      PerHintSearchData data=(PerHintSearchData)getUserData(SEARCH_DATA_IN_HINT_KEY);
+      LOG.assertTrue(data != null);
+      String prefix=data.label.getText();
+      super.hide();
+      if (data.segmentHighlighter != null) {
+        editor.getMarkupModel().removeHighlighter(data.segmentHighlighter);
+      }
+      PerEditorSearchData editorData=(PerEditorSearchData)editor.getUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY);
+      editorData.hint=null;
+      editorData.lastSearch=prefix;
+      if (documentListener[0] != null) {
+        editor.getDocument().removeDocumentListener(documentListener[0]);
+      }
+      if (caretListener[0] != null) {
+        CaretListener listener=caretListener[0];
+        editor.getCaretModel().removeCaretListener(listener);
+      }
+    }
+  }
+;
+  documentListener[0]=new DocumentAdapter(){
+    public void documentChanged(    DocumentEvent e){
+      if (!hint.isVisible())       return;
+      hint.hide();
+    }
+  }
+;
+  editor.getDocument().addDocumentListener(documentListener[0]);
+  caretListener[0]=new CaretListener(){
+    public void caretPositionChanged(    CaretEvent e){
+      PerHintSearchData data=(PerHintSearchData)hint.getUserData(SEARCH_DATA_IN_HINT_KEY);
+      if (data != null && data.ignoreCaretMove)       return;
+      if (!hint.isVisible())       return;
+      hint.hide();
+    }
+  }
+;
+  CaretListener listener=caretListener[0];
+  editor.getCaretModel().addCaretListener(listener);
+  final JComponent component=editor.getComponent();
+  int x=SwingUtilities.convertPoint(component,0,0,component).x;
+  int y=-hint.getComponent().getPreferredSize().height;
+  Point p=SwingUtilities.convertPoint(component,x,y,component.getRootPane().getLayeredPane());
+  HintManager hintManager=HintManager.getInstance();
+  hintManager.showEditorHint(hint,editor,p,HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_TEXT_CHANGE,0,false);
+  PerHintSearchData hintData=new PerHintSearchData(project,label2);
+  hintData.searchStart=editor.getCaretModel().getOffset();
+  hint.putUserData(SEARCH_DATA_IN_HINT_KEY,hintData);
+  data.hint=hint;
+  editor.putUserData(SEARCH_DATA_IN_EDITOR_VIEW_KEY,data);
+  if (hintData.label.getText().length() > 0) {
+    updatePosition(editor,hintData,true,false);
+  }
+}

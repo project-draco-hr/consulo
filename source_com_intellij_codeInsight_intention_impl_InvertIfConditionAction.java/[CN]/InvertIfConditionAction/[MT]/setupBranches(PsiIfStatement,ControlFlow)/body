@@ -1,0 +1,98 @@
+{
+  PsiElementFactory factory=ifStatement.getManager().getElementFactory();
+  Project project=ifStatement.getProject();
+  PsiStatement thenBranch=ifStatement.getThenBranch();
+  PsiStatement elseBranch=ifStatement.getElseBranch();
+  if (elseBranch != null) {
+    elseBranch=(PsiStatement)elseBranch.copy();
+    setElseBranch(ifStatement,thenBranch,flow);
+    ifStatement.getThenBranch().replace(elseBranch);
+    return;
+  }
+  if (flow.getInstructions().length == 0) {
+    ifStatement.setElseBranch(thenBranch);
+    PsiStatement statement=factory.createStatementFromText("{}",null);
+    statement=(PsiStatement)CodeStyleManager.getInstance(project).reformat(statement);
+    statement=(PsiStatement)ifStatement.getThenBranch().replace(statement);
+    CodeStyleManager.getInstance(project).reformat(statement);
+    return;
+  }
+  int endOffset=calcEndOffset(flow,ifStatement);
+  LOG.assertTrue(endOffset >= 0);
+  if (endOffset >= flow.getSize()) {
+    PsiStatement statement=factory.createStatementFromText("return;",null);
+    statement=(PsiStatement)CodeStyleManager.getInstance(project).reformat(statement);
+    if (thenBranch instanceof PsiBlockStatement) {
+      PsiStatement[] statements=((PsiBlockStatement)thenBranch).getCodeBlock().getStatements();
+      int len=statements.length;
+      if (len > 0) {
+        if (statements[len - 1] instanceof PsiReturnStatement)         len--;
+        if (len > 0) {
+          ifStatement.getParent().addRangeAfter(statements[0],statements[len - 1],ifStatement);
+        }
+      }
+    }
+ else {
+      if (!(thenBranch instanceof PsiReturnStatement)) {
+        addAfter(ifStatement,thenBranch);
+      }
+    }
+    ifStatement.getThenBranch().replace(statement);
+    return;
+  }
+  PsiElement element=flow.getElement(endOffset);
+  while (element != null && !(element instanceof PsiStatement))   element=element.getParent();
+  if (element != null && element.getParent() instanceof PsiForStatement) {
+    PsiForStatement forStatement=(PsiForStatement)element.getParent();
+    if (forStatement.getUpdate() == element) {
+      PsiStatement statement=factory.createStatementFromText("continue;",null);
+      statement=(PsiStatement)CodeStyleManager.getInstance(project).reformat(statement);
+      addAfter(ifStatement,thenBranch);
+      ifStatement.getThenBranch().replace(statement);
+      return;
+    }
+  }
+  if (element instanceof PsiWhileStatement && flow.getStartOffset(element) == endOffset) {
+    PsiStatement statement=factory.createStatementFromText("continue;",null);
+    statement=(PsiStatement)CodeStyleManager.getInstance(project).reformat(statement);
+    addAfter(ifStatement,thenBranch);
+    ifStatement.getThenBranch().replace(statement);
+    return;
+  }
+  if (element instanceof PsiReturnStatement) {
+    PsiReturnStatement returnStatement=(PsiReturnStatement)element;
+    addAfter(ifStatement,thenBranch);
+    ifStatement.getThenBranch().replace(returnStatement.copy());
+    ControlFlow flow2=buildControlFlow(findCodeBlock(ifStatement));
+    if (!ControlFlowUtil.isInstructionReachable(flow2,flow2.getStartOffset(returnStatement),0))     returnStatement.delete();
+    return;
+  }
+  boolean nextUnreachable=flow.getEndOffset(ifStatement) + 1 == flow.getSize();
+  if (!nextUnreachable) {
+    PsiElement nearestCodeBlock=findNearestCodeBlock(ifStatement);
+    if (nearestCodeBlock != null) {
+      ControlFlow flow2=buildControlFlow(nearestCodeBlock);
+      nextUnreachable=!ControlFlowUtil.isInstructionReachable(flow2,flow2.getEndOffset(ifStatement) + 1,getThenOffset(flow2,ifStatement));
+    }
+  }
+  if (nextUnreachable) {
+    setElseBranch(ifStatement,thenBranch,flow);
+    PsiElement first=ifStatement.getNextSibling();
+    if (first != null) {
+      PsiElement last=first;
+      while (last.getNextSibling() != null)       last=last.getNextSibling();
+      while (last instanceof PsiWhiteSpace || (last instanceof PsiJavaToken && ((PsiJavaToken)last).getTokenType() == JavaTokenType.RBRACE))       last=last.getPrevSibling();
+      PsiBlockStatement codeBlock=(PsiBlockStatement)factory.createStatementFromText("{}",null);
+      codeBlock=(PsiBlockStatement)ifStatement.getThenBranch().replace(codeBlock);
+      codeBlock.getCodeBlock().addRange(first,last);
+      first.getParent().deleteChildRange(first,last);
+    }
+    CodeStyleManager.getInstance(project).reformat(ifStatement);
+    return;
+  }
+  setElseBranch(ifStatement,thenBranch,flow);
+  PsiStatement statement=factory.createStatementFromText("{}",null);
+  statement=(PsiStatement)CodeStyleManager.getInstance(project).reformat(statement);
+  statement=(PsiStatement)ifStatement.getThenBranch().replace(statement);
+  CodeStyleManager.getInstance(project).reformat(statement);
+}

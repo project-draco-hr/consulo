@@ -1,0 +1,138 @@
+{
+  CheckUtil.checkWritable(file);
+  if (!SourceTreeToPsiMap.hasTreeElement(file))   return offset;
+  final CharTable charTable=((FileElement)SourceTreeToPsiMap.psiElementToTree(file)).getCharTable();
+  TreeElement element=SourceTreeToPsiMap.psiElementToTree(file.findElementAt(offset));
+  if (element == null)   return offset;
+  if (element.getElementType() == ElementType.WHITE_SPACE) {
+    int spaceStart=element.getTextRange().getStartOffset();
+    offset=spaceStart + CharArrayUtil.shiftForward(element.textToCharArray(),offset - spaceStart," \t");
+    element=SourceTreeToPsiMap.psiElementToTree(file.findElementAt(offset));
+  }
+  FileType fileType=file.getFileType();
+  Helper helper=new Helper(fileType,myProject);
+  CheckUncompleteCode:   if (element != null && canTryXXX) {
+    TreeElement space;
+    if (element.getElementType() == ElementType.WHITE_SPACE) {
+      space=element;
+    }
+ else {
+      space=SourceTreeToPsiMap.psiElementToTree(file.findElementAt(offset - 1));
+    }
+    int spaceStart;
+    if (space != null && space.getElementType() == ElementType.WHITE_SPACE) {
+      spaceStart=space.getStartOffset();
+    }
+ else {
+      spaceStart=element.getTextRange().getStartOffset();
+    }
+    if (spaceStart > 0) {
+      TreeElement leafBeforeSpace=SourceTreeToPsiMap.psiElementToTree(file.findElementAt(spaceStart - 1));
+      if (leafBeforeSpace.getTreeNext() != null && leafBeforeSpace.getTreeNext().getElementType() == ElementType.ERROR_ELEMENT) {
+        PsiErrorElement errorElement=(PsiErrorElement)SourceTreeToPsiMap.treeElementToPsi(leafBeforeSpace.getTreeNext());
+        Project project=file.getProject();
+        BlockSupport blockSupport=project.getComponent(BlockSupport.class);
+        String dummyString="xxx";
+        if ("';' expected".equals(errorElement.getErrorDescription())) {
+          break CheckUncompleteCode;
+        }
+        blockSupport.reparseRange(file,offset,offset,dummyString);
+        int newOffset=adjustLineIndent(file,offset,false);
+        blockSupport.reparseRange(file,newOffset,newOffset + dummyString.length(),"");
+        return newOffset;
+      }
+    }
+  }
+  int start=-1;
+  int end=-1;
+  if (element != null && element.getElementType() == ElementType.WHITE_SPACE) {
+    TextRange range=element.getTextRange();
+    int localOffset=offset - range.getStartOffset();
+    char[] chars=element.textToCharArray();
+    start=CharArrayUtil.shiftBackward(chars,localOffset - 1," \t");
+    if (start > 0 && chars[start] != '\n' && chars[start] != '\r')     return offset;
+    start++;
+    end=CharArrayUtil.shiftForward(chars,localOffset," \t");
+    if (end < chars.length) {
+      start+=range.getStartOffset();
+      end+=range.getStartOffset();
+    }
+ else {
+      end=-1;
+    }
+  }
+  if (end < 0) {
+    char[] chars=file.textToCharArray();
+    start=CharArrayUtil.shiftBackward(chars,offset - 1," \t");
+    if (start > 0 && chars[start] != '\n' && chars[start] != '\r')     return offset;
+    start++;
+    end=CharArrayUtil.shiftForward(chars,offset," \t");
+    if (end >= chars.length)     return start;
+    element=SourceTreeToPsiMap.psiElementToTree(file.findElementAt(end));
+    if (element == null)     return start;
+  }
+  if (element.getElementType() == ElementType.WHITE_SPACE) {
+    final boolean physical=file.isPhysical();
+    CompositeElement parent;
+    TreeElement newSpace;
+    try {
+      ((PsiFileImpl)file).setIsPhysicalExplicitly(false);
+      int spaceStart=element.getTextRange().getStartOffset();
+      parent=element.getTreeParent();
+      TreeElement prev=element.getTreePrev();
+      TreeElement next=element.getTreeNext();
+      TreeElement space1=Helper.splitSpaceElement(element,end - spaceStart,charTable);
+      TreeElement tempElement=Factory.createSingleLeafElement(ElementType.NEW_LINE_INDENT,"###".toCharArray(),0,"###".length(),charTable,null);
+      ChangeUtil.addChild(parent,tempElement,space1.getTreeNext());
+      tempElement=new IndentAdjusterFacade(getSettings(),helper).adjustIndent(tempElement);
+      offset=tempElement.getTextRange().getStartOffset();
+      ChangeUtil.removeChild(parent,tempElement);
+      CodeEditUtil.normalizeSpace(helper,parent,prev,next,charTable);
+      newSpace=prev != null ? prev.getTreeNext() : parent.firstChild;
+      LOG.assertTrue(newSpace.getElementType() == ElementType.WHITE_SPACE);
+      ChangeUtil.replaceChild(parent,newSpace,element);
+    }
+  finally {
+      ((PsiFileImpl)file).setIsPhysicalExplicitly(physical);
+    }
+    ChangeUtil.replaceChild(parent,element,newSpace);
+    return offset;
+  }
+ else {
+    int elementStart=element.getTextRange().getStartOffset();
+    if (elementStart == end) {
+      while (true) {
+        TreeElement prev=element.getTreePrev();
+        while (prev != null && prev.getTextLength() == 0) {
+          prev=prev.getTreePrev();
+        }
+        if (prev != null)         break;
+        if (element.getTreeParent() == null)         break;
+        element=element.getTreeParent();
+      }
+      element=new IndentAdjusterFacade(getSettings(),helper).adjustFirstLineIndent(element);
+      return element.getTextRange().getStartOffset();
+    }
+ else {
+      char[] chars=file.textToCharArray();
+      int offset1=CharArrayUtil.shiftBackward(chars,start," \t\n\r");
+      int indent;
+      if (offset1 < 0) {
+        indent=0;
+      }
+ else {
+        offset1=CharArrayUtil.shiftBackwardUntil(chars,offset1,"\n\r");
+        offset1++;
+        int offset2=CharArrayUtil.shiftForward(chars,offset1," \t");
+        String space=new String(chars,offset1,offset2 - offset1);
+        indent=helper.getIndent(space,true);
+      }
+      String indentSpace=helper.fillIndent(indent);
+      String elementText=element.getText();
+      String newElementText=elementText.substring(0,start - elementStart) + indentSpace + elementText.substring(end - elementStart);
+      LeafElement newElement=Factory.createSingleLeafElement(element.getElementType(),newElementText.toCharArray(),0,newElementText.length(),null,element.getManager());
+      ChangeUtil.replaceChild(element.getTreeParent(),element,newElement);
+      return start + indentSpace.length();
+    }
+  }
+}

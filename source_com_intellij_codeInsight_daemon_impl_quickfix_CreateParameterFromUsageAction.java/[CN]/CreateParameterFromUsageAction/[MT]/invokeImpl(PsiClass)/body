@@ -1,0 +1,36 @@
+{
+  if (CreateFromUsageUtils.isValidReference(myReferenceExpression)) {
+    return;
+  }
+  final PsiManager psiManager=myReferenceExpression.getManager();
+  final Project project=psiManager.getProject();
+  final PsiElementFactory factory=psiManager.getElementFactory();
+  final PsiType[] expectedTypes=CreateFromUsageUtils.guessType(myReferenceExpression,false);
+  PsiType type=expectedTypes[0];
+  String varName=myReferenceExpression.getReferenceName();
+  PsiMethod method=PsiTreeUtil.getParentOfType(myReferenceExpression,PsiMethod.class);
+  PsiParameter param;
+  try {
+    param=factory.createParameter(varName,type);
+    param.getModifierList().setModifierProperty(PsiModifier.FINAL,CodeStyleSettingsManager.getSettings(project).GENERATE_FINAL_LOCALS && !PsiUtil.isAccessedForWriting(myReferenceExpression));
+    PsiParameter[] parameters=method.getParameterList().getParameters();
+    if (parameters.length > 0 && parameters[parameters.length - 1].isVarArgs()) {
+      param=(PsiParameter)method.getParameterList().addBefore(param,parameters[parameters.length - 1]);
+    }
+ else {
+      param=(PsiParameter)method.getParameterList().add(param);
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+    return;
+  }
+  TemplateBuilder builder=new TemplateBuilder(method);
+  builder.replaceElement(param.getTypeElement(),new TypeExpression(project,expectedTypes));
+  builder.setEndVariableAfter(method.getParameterList());
+  Template template=builder.buildTemplate();
+  Editor editor=positionCursor(project,method.getContainingFile(),method);
+  TextRange range=method.getTextRange();
+  editor.getDocument().deleteString(range.getStartOffset(),range.getEndOffset());
+  TemplateManager.getInstance(project).startTemplate(editor,template);
+}

@@ -1,0 +1,48 @@
+{
+  PsiElement element=file.findElementAt(editor.getCaretModel().getOffset());
+  final PsiClass psiClass=PsiTreeUtil.getParentOfType(element,PsiClass.class);
+  PsiFile sourceFile=psiClass.getContainingFile();
+  PsiDirectory sourceDir=sourceFile.getContainingDirectory();
+  final PsiPackage aPackage=sourceDir.getPackage();
+  final CreateClassDialog dialog=new CreateClassDialog(project,myText,psiClass.getName() + "Impl",aPackage != null ? aPackage.getQualifiedName() : "",false,true);
+  dialog.show();
+  if (!dialog.isOK())   return;
+  final PsiDirectory targetDirectory=dialog.getTargetDirectory();
+  if (targetDirectory == null)   return;
+  PsiClass targetClass=ApplicationManager.getApplication().runWriteAction(new Computable<PsiClass>(){
+    public PsiClass compute(){
+      IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+      PsiClass targetClass;
+      try {
+        targetClass=targetDirectory.createClass(dialog.getClassName());
+      }
+ catch (      IncorrectOperationException e) {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          public void run(){
+            Messages.showErrorDialog(project,"Cannot Create Class '" + dialog.getClassName() + "'","Failed to Create Class");
+          }
+        }
+);
+        return null;
+      }
+      PsiJavaCodeReferenceElement ref=file.getManager().getElementFactory().createClassReferenceElement(psiClass);
+      try {
+        if (psiClass.isInterface()) {
+          targetClass.getImplementsList().add(ref);
+        }
+ else {
+          targetClass.getExtendsList().add(ref);
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+      return targetClass;
+    }
+  }
+);
+  if (targetClass == null)   return;
+  final Editor editor1=CodeInsightUtil.positionCursor(project,targetClass.getContainingFile(),targetClass.getLBrace());
+  if (editor1 == null)   return;
+  OverrideImplementUtil.chooseAndImplementMethods(project,editor1,targetClass);
+}

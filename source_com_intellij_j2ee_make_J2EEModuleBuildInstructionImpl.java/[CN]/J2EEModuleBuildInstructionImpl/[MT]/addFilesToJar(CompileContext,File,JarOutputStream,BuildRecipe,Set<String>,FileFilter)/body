@@ -1,0 +1,52 @@
+{
+  final File tempFile;
+  final BuildRecipe childDependencies=new BuildRecipeImpl();
+  if (myBuildProperties.isJarEnabled()) {
+    tempFile=new File(myBuildProperties.getJarPath());
+    final BuildRecipe childModuleRecipe=getChildInstructions(context);
+    childModuleRecipe.visitInstructions(new BuildInstructionVisitor(){
+      public boolean visitInstruction(      BuildInstruction instruction) throws RuntimeException {
+        if (instruction.isExternalDependencyInstruction()) {
+          childDependencies.addInstruction(instruction);
+        }
+        return true;
+      }
+    }
+,false);
+  }
+ else {
+    String moduleName=ModuleUtil.getModuleNameInReadAction(getModule());
+    tempFile=File.createTempFile(moduleName + "___",".tmp");
+    tempFile.deleteOnExit();
+    makeJar(context,tempFile,childDependencies,fileFilter);
+  }
+  ZipUtil.addFileToZip(outputStream,tempFile,getOutputRelativePath(),writtenRelativePaths,fileFilter);
+  try {
+    childDependencies.visitInstructionsWithExceptions(new BuildInstructionVisitor(){
+      public boolean visitFileCopyInstruction(      FileCopyInstruction instruction) throws Exception {
+        File file=instruction.getFile();
+        String dependencyRelativePath=PathUtil.getCanonicalPath(MakeUtil.appendToPath(getOutputRelativePath(),instruction.getOutputRelativePath()));
+        ZipUtil.addFileToZip(outputStream,file,dependencyRelativePath,writtenRelativePaths,fileFilter);
+        return true;
+      }
+      public boolean visitJarAndCopyBuildInstruction(      JarAndCopyBuildInstruction instruction) throws Exception {
+        if (instruction.getJarFile() == null) {
+          File tempJar=File.createTempFile("___",".tmp");
+          tempJar.deleteOnExit();
+          instruction.makeJar(context,tempJar,fileFilter);
+        }
+        File jarFile=instruction.getJarFile();
+        String dependencyRelativePath=PathUtil.getCanonicalPath(MakeUtil.appendToPath(getOutputRelativePath(),instruction.getOutputRelativePath()));
+        ZipUtil.addFileToZip(outputStream,jarFile,dependencyRelativePath,writtenRelativePaths,fileFilter);
+        return true;
+      }
+    }
+,false);
+  }
+ catch (  Exception e) {
+    if (e instanceof IOException)     throw (IOException)e;
+    if (e instanceof RuntimeException)     throw (RuntimeException)e;
+    Degenerator.unableToDegenerateMarker();
+    return;
+  }
+}

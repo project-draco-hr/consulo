@@ -1,0 +1,41 @@
+{
+  PsiManager manager=psiMethod.getManager();
+  final PsiSearchHelper searchHelper=manager.getSearchHelper();
+  GlobalSearchScope projectScope=GlobalSearchScope.projectScope(manager.getProject());
+  final PsiReference[] references=searchHelper.findReferences(psiMethod,projectScope,false);
+  if (psiMethod.isConstructor()) {
+    findConstructorUsages(psiMethod,references,usages);
+    return;
+  }
+  final PsiMethod[] overridingMethods=removeDeletedMethods(searchHelper.findOverridingMethods(psiMethod,projectScope,true));
+  boolean anyRefs=false;
+  for (int i=0; i < references.length; i++) {
+    PsiReference reference=references[i];
+    final PsiElement element=reference.getElement();
+    if (!isInside(element,myElements) && !isInside(element,overridingMethods)) {
+      usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(element,psiMethod,false));
+      anyRefs=true;
+    }
+  }
+  final UsageInsideDeleted usageInsideDeleted;
+  if (!anyRefs) {
+    HashMap<PsiMethod,PsiReference[]> methodToReferences=new HashMap<PsiMethod,PsiReference[]>();
+    for (int i=0; i < overridingMethods.length; i++) {
+      PsiMethod overridingMethod=overridingMethods[i];
+      final PsiReference[] overridingReferences=searchHelper.findReferences(overridingMethod,projectScope,false);
+      methodToReferences.put(overridingMethod,overridingReferences);
+    }
+    final HashSet<PsiMethod> validOverriding=validateOverridingMethods(psiMethod,references,Arrays.asList(overridingMethods),methodToReferences,usages);
+    usageInsideDeleted=new UsageInsideDeleted(){
+      public boolean isInsideDeleted(      PsiElement usage){
+        if (usage instanceof PsiFile)         return false;
+        return isInside(usage,myElements) || isInside(usage,validOverriding);
+      }
+    }
+;
+  }
+ else {
+    usageInsideDeleted=myInsideDeletedElements;
+  }
+  addNonCodeUsages(psiMethod,usages,usageInsideDeleted);
+}

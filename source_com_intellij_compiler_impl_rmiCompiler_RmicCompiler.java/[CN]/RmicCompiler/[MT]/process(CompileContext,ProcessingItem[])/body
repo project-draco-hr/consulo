@@ -1,0 +1,55 @@
+{
+  if (!RmicSettings.getInstance(myProject).IS_EANABLED) {
+    return ProcessingItem.EMPTY_ARRAY;
+  }
+  final ProgressIndicator progressIndicator=context.getProgressIndicator();
+  progressIndicator.pushState();
+  try {
+    progressIndicator.setText("Generating RMI stubs...");
+    final List<ProcessingItem> processed=new ArrayList<ProcessingItem>();
+    final Map<Pair<Module,File>,List<RmicProcessingItem>> sortedByModuleAndOutputPath=new HashMap<Pair<Module,File>,List<RmicProcessingItem>>();
+    for (int idx=0; idx < items.length; idx++) {
+      final RmicProcessingItem item=(RmicProcessingItem)items[idx];
+      final Pair<Module,File> moduleOutputPair=new Pair<Module,File>(item.getModule(),item.getOutputDir());
+      List<RmicProcessingItem> dirItems=sortedByModuleAndOutputPath.get(moduleOutputPair);
+      if (dirItems == null) {
+        dirItems=new ArrayList<RmicProcessingItem>();
+        sortedByModuleAndOutputPath.put(moduleOutputPair,dirItems);
+      }
+      dirItems.add(item);
+    }
+    for (Iterator<Pair<Module,File>> it=sortedByModuleAndOutputPath.keySet().iterator(); it.hasNext(); ) {
+      if (progressIndicator.isCanceled()) {
+        break;
+      }
+      final Pair<Module,File> pair=it.next();
+      final List<RmicProcessingItem> dirItems=sortedByModuleAndOutputPath.get(pair);
+      try {
+        for (Iterator itemIterator=dirItems.iterator(); itemIterator.hasNext(); ) {
+          final RmicProcessingItem item=(RmicProcessingItem)itemIterator.next();
+          item.deleteGeneratedFiles();
+          if (!item.isRemoteObject()) {
+            itemIterator.remove();
+          }
+        }
+        if (dirItems.size() > 0) {
+          final RmicProcessingItem[] successfullyProcessed=invokeRmic(context,pair.getFirst(),dirItems,pair.getSecond());
+          processed.addAll(Arrays.asList(successfullyProcessed));
+        }
+        progressIndicator.setFraction(((double)processed.size()) / ((double)items.length));
+      }
+ catch (      IOException e) {
+        context.addMessage(CompilerMessageCategory.ERROR,e.getMessage(),null,-1,-1);
+      }
+    }
+    final ProcessingItem[] processedItems=processed.toArray(new ProcessingItem[processed.size()]);
+    for (int idx=0; idx < processedItems.length; idx++) {
+      RmicProcessingItem item=(RmicProcessingItem)processedItems[idx];
+      item.updateState();
+    }
+    return processedItems;
+  }
+  finally {
+    progressIndicator.popState();
+  }
+}

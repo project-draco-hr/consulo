@@ -1,0 +1,93 @@
+{
+  LOG.assertTrue(file != null);
+  window.myInsideTabChange++;
+  FileEditor[] editors;
+  FileEditorProvider[] providers;
+  try {
+    final EditorWithProviderComposite newSelectedComposite;
+    boolean newEditorCreated=false;
+    final boolean open=window.isFileOpen(file);
+    if (open) {
+      LOG.assertTrue(window.findFileComposite(file) != null);
+      newSelectedComposite=window.findFileComposite(file);
+      LOG.assertTrue(newSelectedComposite != null);
+      editors=newSelectedComposite.getEditors();
+      providers=newSelectedComposite.getProviders();
+      window.setEditor(newSelectedComposite);
+    }
+ else {
+      final FileEditorProviderManager editorProviderManager=FileEditorProviderManager.getInstance();
+      providers=editorProviderManager.getProviders(window.getManager().myProject,file);
+      if (providers.length == 0) {
+        return Pair.create(EMPTY_EDITOR_ARRAY,EMPTY_PROVIDER_ARRAY);
+      }
+      newEditorCreated=true;
+      editors=new FileEditor[providers.length];
+      for (int i=0; i < providers.length; i++) {
+        final FileEditorProvider provider=providers[i];
+        LOG.assertTrue(provider != null);
+        LOG.assertTrue(provider.accept(window.getManager().myProject,file));
+        final FileEditor editor=provider.createEditor(window.getManager().myProject,file);
+        editors[i]=editor;
+        LOG.assertTrue(editor != null);
+        LOG.assertTrue(editor.isValid());
+        editor.addPropertyChangeListener(window.getManager().myEditorPropertyChangeListener);
+      }
+      newSelectedComposite=new EditorWithProviderComposite(file,editors,providers,window.getManager());
+      newSelectedComposite.addEditorManagerListener(window.getManager().myEditorManagerListener);
+      window.setEditor(newSelectedComposite);
+    }
+    final EditorHistoryManager editorHistoryManager=EditorHistoryManager.getInstance(window.getManager().myProject);
+    for (int i=0; i < editors.length; i++) {
+      final FileEditor editor=editors[i];
+      if (editor instanceof TextEditor) {
+        ((EditorEx)((TextEditor)editor).getEditor()).stopOptimizedScrolling();
+      }
+      final FileEditorProvider provider=providers[i];
+      FileEditorState state=null;
+      if (entry != null) {
+        state=entry.getState(provider);
+      }
+      if (state == null && !open) {
+        state=editorHistoryManager.getState(file,provider);
+      }
+      if (state != null) {
+        editor.setState(state);
+      }
+    }
+    final FileEditorProvider selectedProvider=editorHistoryManager.getSelectedProvider(file);
+    if (selectedProvider != null) {
+      final FileEditor[] _editors=newSelectedComposite.getEditors();
+      final FileEditorProvider[] _providers=newSelectedComposite.getProviders();
+      for (int i=_editors.length - 1; i >= 0; i--) {
+        final FileEditorProvider provider=_providers[i];
+        if (provider.equals(selectedProvider)) {
+          newSelectedComposite.setSelectedEditor(i);
+          break;
+        }
+      }
+    }
+    final EditorComposite oldSelectedComposite=window.getManager().getLastSelected();
+    if (oldSelectedComposite != null) {
+      oldSelectedComposite.getSelectedEditor().deselectNotify();
+    }
+    window.getManager().mySplitters.setCurrentWindow(window,false);
+    newSelectedComposite.getSelectedEditor().selectNotify();
+    if (newEditorCreated) {
+      window.getManager().fireFileOpened(file);
+    }
+    window.getManager().fireSelectionChanged(oldSelectedComposite,newSelectedComposite);
+    if (!ApplicationManagerEx.getApplicationEx().isUnitTestMode()) {
+      if (focusEditor || ToolWindowManager.getInstance(window.getManager().myProject).isEditorComponentActive()) {
+        window.setAsCurrentWindow(false);
+        ToolWindowManager.getInstance(window.getManager().myProject).activateEditorComponent();
+      }
+    }
+    window.getManager().updateFileName(file);
+    IdeDocumentHistory.getInstance(window.getManager().myProject).includeCurrentCommandAsNavigation();
+  }
+  finally {
+    window.myInsideTabChange--;
+  }
+  return Pair.create(editors,providers);
+}

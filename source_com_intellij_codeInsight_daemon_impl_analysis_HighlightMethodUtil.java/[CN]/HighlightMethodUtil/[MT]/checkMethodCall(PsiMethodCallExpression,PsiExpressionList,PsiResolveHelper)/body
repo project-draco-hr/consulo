@@ -1,0 +1,162 @@
+{
+  PsiReferenceExpression referenceToMethod=methodCall.getMethodExpression();
+  final ResolveResult resolveResult=referenceToMethod.advancedResolve(true);
+  final PsiElement element=resolveResult.getElement();
+  boolean isDummy=false;
+  final boolean isThisOrSuper=referenceToMethod.getReferenceNameElement() instanceof PsiKeyword;
+  if (isThisOrSuper) {
+    final PsiMember constructor=PsiUtil.findEnclosingConstructorOrInitializer(methodCall);
+    if (!(constructor instanceof PsiMethod)) {
+      final String description=MessageFormat.format("Call to ''{0}()'' allowed in constructor only",new Object[]{referenceToMethod.getReferenceName()});
+      HighlightInfo errorResult=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,methodCall,description);
+      return errorResult;
+    }
+    if (list.getExpressions().length == 0) {
+      final CandidateInfo[] candidates=resolveHelper.getReferencedMethodCandidates(methodCall,true);
+      if (candidates.length == 1 && !candidates[0].getElement().isPhysical()) {
+        isDummy=true;
+      }
+    }
+  }
+  HighlightInfo highlightInfo;
+  if (isDummy)   return null;
+  if (element instanceof PsiMethod && resolveResult.isValidResult()) {
+    PsiMethod resolvedMethod=(PsiMethod)element;
+    if (resolvedMethod.isConstructor() && !isThisOrSuper) {
+      highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,methodCall,"Direct constructor call is not allowed");
+    }
+ else {
+      TextRange fixRange=getFixRange(methodCall);
+      highlightInfo=HighlightUtil.checkUnhandledExceptions(methodCall,fixRange);
+    }
+    if (highlightInfo == null) {
+      highlightInfo=GenericsHighlightUtil.checkUncheckedCall(resolveResult,methodCall);
+    }
+    if (highlightInfo == null) {
+      highlightInfo=GenericsHighlightUtil.checkGenericCallWithRawArguments(resolveResult,methodCall);
+    }
+  }
+ else {
+    PsiMethod resolvedMethod=null;
+    MethodCandidateInfo info=null;
+    if (resolveResult instanceof MethodCandidateInfo) {
+      info=(MethodCandidateInfo)resolveResult;
+      resolvedMethod=info.getElement();
+    }
+    if (!resolveResult.isAccessible() || !resolveResult.isStaticsScopeCorrect()) {
+      String methodName=referenceToMethod.getReferenceName();
+      methodName+=HighlightUtil.buildArgTypesList(list);
+      final ResolveResult[] resolveResults=referenceToMethod.multiResolve(true);
+      MethodCandidateInfo methodCandidate1=null;
+      MethodCandidateInfo methodCandidate2=null;
+      List<MethodCandidateInfo> candidateList=new ArrayList<MethodCandidateInfo>();
+      for (int i=0; i < resolveResults.length; i++) {
+        ResolveResult result=resolveResults[i];
+        if (!(result instanceof MethodCandidateInfo))         continue;
+        MethodCandidateInfo candidate=(MethodCandidateInfo)result;
+        if (candidate.isApplicable()) {
+          if (methodCandidate1 == null) {
+            methodCandidate1=candidate;
+          }
+ else {
+            methodCandidate2=candidate;
+            break;
+          }
+        }
+      }
+      for (int i=0; i < resolveResults.length; i++) {
+        ResolveResult result=resolveResults[i];
+        if (!(result instanceof MethodCandidateInfo))         continue;
+        MethodCandidateInfo candidate=(MethodCandidateInfo)result;
+        if (candidate.isAccessible())         candidateList.add(candidate);
+      }
+      String description;
+      String toolTip;
+      PsiElement elementToHighlight;
+      HighlightInfoType highlightInfoType=HighlightInfoType.ERROR;
+      if (methodCandidate2 != null) {
+        final String m1=PsiFormatUtil.formatMethod(methodCandidate1.getElement(),methodCandidate1.getSubstitutor(),PsiFormatUtil.SHOW_CONTAINING_CLASS | PsiFormatUtil.SHOW_NAME | PsiFormatUtil.SHOW_PARAMETERS,PsiFormatUtil.SHOW_TYPE);
+        final String m2=PsiFormatUtil.formatMethod(methodCandidate2.getElement(),methodCandidate2.getSubstitutor(),PsiFormatUtil.SHOW_CONTAINING_CLASS | PsiFormatUtil.SHOW_NAME | PsiFormatUtil.SHOW_PARAMETERS,PsiFormatUtil.SHOW_TYPE);
+        description=MessageFormat.format("Ambiguous method call: both ''{0}'' and ''{1}'' match",new Object[]{m1,m2});
+        toolTip=createAmbiguousMethodHtmlTooltip(new MethodCandidateInfo[]{methodCandidate1,methodCandidate2});
+        elementToHighlight=list;
+      }
+ else {
+        if (element != null && !resolveResult.isAccessible()) {
+          description=HighlightUtil.buildProblemWithAccessDescription(element,referenceToMethod,resolveResult);
+          elementToHighlight=referenceToMethod.getReferenceNameElement();
+        }
+ else         if (element != null && !resolveResult.isStaticsScopeCorrect()) {
+          description=HighlightUtil.buildProblemWithStaticDescription(element);
+          elementToHighlight=referenceToMethod.getReferenceNameElement();
+        }
+ else {
+          description=MessageFormat.format(CANNOT_RESOLVE_METHOD,new Object[]{methodName});
+          if (candidateList.size() == 0) {
+            elementToHighlight=referenceToMethod.getReferenceNameElement();
+            highlightInfoType=HighlightInfoType.WRONG_REF;
+          }
+ else {
+            elementToHighlight=list;
+          }
+        }
+        toolTip=description;
+      }
+      highlightInfo=HighlightInfo.createHighlightInfo(highlightInfoType,elementToHighlight,description,toolTip);
+      if (methodCandidate2 == null) {
+        registerMethodCallIntentions(highlightInfo,methodCall,list,resolveHelper);
+      }
+      if (!resolveResult.isAccessible() && resolveResult.isStaticsScopeCorrect()) {
+        HighlightUtil.registerAccessQuickFixAction((PsiMember)element,referenceToMethod,highlightInfo);
+      }
+      if (!resolveResult.isStaticsScopeCorrect()) {
+        HighlightUtil.registerStaticProblemQuickFixAction(element,highlightInfo,referenceToMethod);
+      }
+      MethodCandidateInfo[] candidates=candidateList.toArray(new MethodCandidateInfo[candidateList.size()]);
+      CastMethodParametersFix.registerCastActions(candidates,list,methodCall.getMethodExpression(),highlightInfo);
+      WrapExpressionFix.registerWrapAction(candidates,list.getExpressions(),highlightInfo);
+      ChangeParameterClassFix.registerQuickFixActions(methodCall,list,highlightInfo);
+      highlightInfo.navigationShift=+1;
+    }
+ else     if (info != null && !info.isApplicable()) {
+      if (info.isTypeArgumentsApplicable()) {
+        String methodName=HighlightMessageUtil.getSymbolName(element,resolveResult.getSubstitutor());
+        String containerName=HighlightMessageUtil.getSymbolName(element.getParent(),resolveResult.getSubstitutor());
+        String argTypes=HighlightUtil.buildArgTypesList(list);
+        String description=MessageFormat.format(WRONG_METHOD_ARGUMENTS,new Object[]{methodName,containerName,argTypes});
+        String toolTip=element.getParent() instanceof PsiClass ? createMismatchedArgumentsHtmlTooltip(info,list) : description;
+        highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,list,description,toolTip);
+        registerMethodCallIntentions(highlightInfo,methodCall,list,resolveHelper);
+        highlightInfo.navigationShift=+1;
+      }
+ else {
+        final PsiReferenceExpression methodExpression=methodCall.getMethodExpression();
+        PsiReferenceParameterList typeArgumentList=methodCall.getTypeArgumentList();
+        if ((typeArgumentList == null || typeArgumentList.getTypeArguments().length == 0) && resolvedMethod.getTypeParameterList().getTypeParameters().length > 0) {
+          highlightInfo=GenericsHighlightUtil.checkInferredTypeArguments(resolvedMethod,methodCall,resolveResult.getSubstitutor());
+        }
+ else {
+          highlightInfo=GenericsHighlightUtil.checkParameterizedReferenceTypeArguments(element,methodExpression,resolveResult.getSubstitutor());
+        }
+      }
+    }
+ else {
+      highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,methodCall,"Method call expected");
+      if (element instanceof PsiClass) {
+        QuickFixAction.registerQuickFixAction(highlightInfo,new InsertNewFix(methodCall,(PsiClass)element));
+      }
+ else {
+        TextRange range=getFixRange(methodCall);
+        QuickFixAction.registerQuickFixAction(highlightInfo,range,new CreateMethodFromUsageAction(methodCall));
+        QuickFixAction.registerQuickFixAction(highlightInfo,range,new CreatePropertyFromUsageAction(methodCall));
+      }
+    }
+  }
+  if (highlightInfo == null) {
+    highlightInfo=HighlightUtil.checkDeprecated(element,referenceToMethod.getReferenceNameElement(),DaemonCodeAnalyzerSettings.getInstance());
+  }
+  if (highlightInfo == null) {
+    highlightInfo=GenericsHighlightUtil.checkParameterizedReferenceTypeArguments(element,referenceToMethod,resolveResult.getSubstitutor());
+  }
+  return highlightInfo;
+}

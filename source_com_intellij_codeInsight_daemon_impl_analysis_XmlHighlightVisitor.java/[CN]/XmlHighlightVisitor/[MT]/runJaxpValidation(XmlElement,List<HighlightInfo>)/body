@@ -1,0 +1,91 @@
+{
+  VirtualFile virtualFile=element.getContainingFile().getVirtualFile();
+  if (myFile == virtualFile && virtualFile != null && myTimeStamp == virtualFile.getTimeStamp() && myInfos != null && myInfos.get() != null) {
+    result.addAll(myInfos.get());
+    return;
+  }
+  PsiFile containingFile=element.getContainingFile();
+  if (myHandler == null)   myHandler=new ValidateXmlActionHandler(false);
+  final Project project=element.getProject();
+  final Document document=PsiDocumentManager.getInstance(project).getDocument(containingFile);
+  if (document == null)   return;
+  final List<HighlightInfo> results=new LinkedList<HighlightInfo>();
+  myHandler.setErrorReporter(myHandler.new ErrorReporter(){
+    public boolean filterValidationException(    Exception ex){
+      super.filterValidationException(ex);
+      if (ex instanceof FileNotFoundException || ex instanceof MalformedURLException) {
+        return true;
+      }
+      return false;
+    }
+    public void processError(    final SAXParseException e,    final boolean warning){
+      try {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            if (document.getLineCount() <= e.getLineNumber() || e.getLineNumber() <= 0) {
+              return;
+            }
+            int offset=Math.max(0,document.getLineStartOffset(e.getLineNumber() - 1) + e.getColumnNumber() - 2);
+            PsiElement currentElement=PsiDocumentManager.getInstance(project).getPsiFile(document).findElementAt(offset);
+            PsiElement originalElement=currentElement;
+            final String elementText=currentElement.getText();
+            if (elementText.equals("</")) {
+              currentElement=currentElement.getNextSibling();
+            }
+ else             if (elementText.equals(">") || elementText.equals("=")) {
+              currentElement=currentElement.getPrevSibling();
+            }
+            String localizedMessage=e.getLocalizedMessage();
+            localizedMessage=localizedMessage.substring(localizedMessage.indexOf(':') + 1).trim();
+            if (localizedMessage.startsWith("Cannot find the declaration of element") || localizedMessage.startsWith("Element") || localizedMessage.startsWith("Document root element")|| localizedMessage.startsWith("The content of element type")) {
+              currentElement=addProblemToTagName(currentElement,originalElement,localizedMessage,result,warning);
+            }
+ else             if (localizedMessage.startsWith("Value ")) {
+              currentElement=addProblemToTagName(currentElement,originalElement,localizedMessage,result,warning);
+              return;
+            }
+ else             if (localizedMessage.startsWith("Attribute ")) {
+              currentElement=PsiTreeUtil.getParentOfType(currentElement,XmlAttribute.class,false);
+              final int messagePrefixLength="Attribute ".length();
+              if (currentElement == null && localizedMessage.charAt(messagePrefixLength) == '"') {
+                final int nextQuoteIndex=localizedMessage.indexOf('"',messagePrefixLength + 1);
+                String attrName=(nextQuoteIndex != -1) ? localizedMessage.substring(messagePrefixLength + 1,nextQuoteIndex) : null;
+                XmlTag parent=PsiTreeUtil.getParentOfType(originalElement,XmlTag.class);
+                currentElement=parent.getAttribute(attrName,null);
+                if (currentElement != null) {
+                  currentElement=SourceTreeToPsiMap.treeElementToPsi(XmlChildRole.ATTRIBUTE_NAME_FINDER.findChild((CompositeElement)SourceTreeToPsiMap.psiElementToTree(currentElement)));
+                }
+              }
+              if (currentElement != null) {
+                assertValidElement(currentElement,originalElement,localizedMessage);
+                result.add(HighlightInfo.createHighlightInfo(warning ? HighlightInfoType.WARNING : HighlightInfoType.ERROR,currentElement,localizedMessage));
+              }
+ else {
+                currentElement=addProblemToTagName(originalElement,originalElement,localizedMessage,result,warning);
+              }
+              return;
+            }
+ else {
+              currentElement=PsiTreeUtil.getParentOfType(currentElement,XmlTag.class,false);
+              assertValidElement(currentElement,originalElement,localizedMessage);
+              if (currentElement != null) {
+                result.add(HighlightInfo.createHighlightInfo(warning ? HighlightInfoType.WARNING : HighlightInfoType.ERROR,currentElement,localizedMessage));
+              }
+            }
+          }
+        }
+);
+      }
+ catch (      Exception ex) {
+        if (ex instanceof ProcessCanceledException)         throw (ProcessCanceledException)ex;
+        LOG.error(ex);
+      }
+    }
+  }
+);
+  myHandler.doValidate(project,element.getContainingFile());
+  myFile=containingFile.getVirtualFile();
+  myTimeStamp=myFile == null ? 0 : myFile.getTimeStamp();
+  myInfos=new WeakReference<List<HighlightInfo>>(results);
+  result.addAll(results);
+}

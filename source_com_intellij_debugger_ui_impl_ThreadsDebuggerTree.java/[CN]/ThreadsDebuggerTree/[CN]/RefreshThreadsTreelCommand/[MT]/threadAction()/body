@@ -1,0 +1,80 @@
+{
+  super.threadAction();
+  final DebuggerTreeNodeImpl root=getNodeFactory().getDefaultNode();
+  try {
+    DebugProcessImpl debugProcess=getDebuggerContext().getDebugProcess();
+    if (debugProcess == null || !debugProcess.isAttached())     return;
+    ThreadReferenceProxyImpl currentThread=ThreadsViewSettings.getInstance().SHOW_CURRENT_THREAD ? getSuspendContext().getThread() : null;
+    VirtualMachineProxyImpl vm=debugProcess.getVirtualMachineProxy();
+    EvaluationContextImpl evaluationContext=getDebuggerContext().createEvaluationContext();
+    if (currentThread != null && ThreadsViewSettings.getInstance().SHOW_THREAD_GROUPS) {
+      ThreadGroupReferenceProxyImpl topCurrentGroup=null;
+      if (currentThread != null) {
+        topCurrentGroup=currentThread.threadGroupProxy();
+        for (; ; ) {
+          ThreadGroupReferenceProxyImpl parentGroup=topCurrentGroup.parent();
+          if (parentGroup != null) {
+            topCurrentGroup=parentGroup;
+          }
+ else {
+            break;
+          }
+        }
+        if (topCurrentGroup != null) {
+          NodeManagerImpl nodeManager=getNodeFactory();
+          root.add(nodeManager.createNode(nodeManager.getThreadGroupDescriptor(null,topCurrentGroup),evaluationContext));
+        }
+ else {
+          NodeManagerImpl nodeManager=getNodeFactory();
+          root.add(nodeManager.createNode(nodeManager.getThreadDescriptor(null,currentThread),evaluationContext));
+        }
+      }
+      for (Iterator it=vm.topLevelThreadGroups().iterator(); it.hasNext(); ) {
+        ThreadGroupReferenceProxyImpl group=(ThreadGroupReferenceProxyImpl)it.next();
+        NodeManagerImpl nodeManager=getNodeFactory();
+        if (group != topCurrentGroup) {
+          DebuggerTreeNodeImpl threadGroup=nodeManager.createNode(nodeManager.getThreadGroupDescriptor(null,group),evaluationContext);
+          root.add(threadGroup);
+        }
+      }
+    }
+ else {
+      if (currentThread != null) {
+        NodeManagerImpl nodeManager=getNodeFactory();
+        root.insert(nodeManager.createNode(nodeManager.getThreadDescriptor(null,currentThread),evaluationContext),0);
+      }
+      List<ThreadReferenceProxyImpl> allThreads=new ArrayList<ThreadReferenceProxyImpl>(vm.allThreads());
+      Collections.sort(allThreads,ThreadReferenceProxyImpl.ourComparator);
+      for (Iterator it=allThreads.iterator(); it.hasNext(); ) {
+        ThreadReferenceProxyImpl threadProxy=(ThreadReferenceProxyImpl)it.next();
+        if (threadProxy.equals(currentThread)) {
+          continue;
+        }
+        NodeManagerImpl nodeManager=getNodeFactory();
+        root.add(nodeManager.createNode(nodeManager.getThreadDescriptor(null,threadProxy),evaluationContext));
+      }
+    }
+  }
+ catch (  Exception ex) {
+    root.add(MessageDescriptor.DEBUG_INFO_UNAVAILABLE);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(ex);
+    }
+  }
+  final ThreadReferenceProxyImpl thread=getSuspendContext().getThread();
+  final List<ThreadGroupReferenceProxyImpl> groups=new ArrayList<ThreadGroupReferenceProxyImpl>();
+  if (ThreadsViewSettings.getInstance().SHOW_THREAD_GROUPS) {
+    for (ThreadGroupReferenceProxyImpl group=thread.threadGroupProxy(); group != null; group=group.parent()) {
+      groups.add(group);
+    }
+  }
+  Collections.reverse(groups);
+  DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+    public void run(){
+      getMutableModel().setRoot(root);
+      treeChanged();
+      selectThread(groups,thread);
+    }
+  }
+);
+}

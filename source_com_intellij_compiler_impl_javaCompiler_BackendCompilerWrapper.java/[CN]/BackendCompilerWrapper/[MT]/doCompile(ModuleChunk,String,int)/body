@@ -1,0 +1,64 @@
+{
+  chunk.setSourcesFilter(sourcesFilter);
+  if (ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+    public Boolean compute(){
+      return chunk.getFilesToCompile().length == 0 ? Boolean.TRUE : Boolean.FALSE;
+    }
+  }
+).equals(Boolean.TRUE)) {
+    return;
+  }
+  final Pair<OutputParser,Process> pair;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    pair=JavacSettings.getInstance(myProject).isTestsUseExternalCompiler() ? runExternalCompiler(chunk,outputDir) : runEmbeddedJavac(chunk,outputDir);
+  }
+ else {
+    if (System.getProperty("idea.use.embedded.javac") != null && System.getProperty("idea.use.embedded.javac").equals("true")) {
+      pair=runEmbeddedJavac(chunk,outputDir);
+    }
+ else {
+      pair=runExternalCompiler(chunk,outputDir);
+    }
+  }
+  int exitValue=0;
+  try {
+    Process process=pair.getSecond();
+    final JavaCompilerParsingThread parsingThread=new JavaCompilerParsingThread(process,myCompileContext,pair.getFirst(),this);
+    myClassParsingThread=new ClassParsingThread();
+    myClassParsingThread.start();
+    parsingThread.start();
+    try {
+      exitValue=process.waitFor();
+    }
+ catch (    InterruptedException e) {
+      process.destroy();
+      exitValue=process.exitValue();
+    }
+    try {
+      parsingThread.join();
+    }
+ catch (    InterruptedException e) {
+    }
+    myClassParsingThread.stopParsing();
+    try {
+      myClassParsingThread.join();
+    }
+ catch (    InterruptedException e) {
+    }
+    final Throwable error=parsingThread.getError();
+    if (error != null) {
+      String message=error.getMessage();
+      if (error instanceof CacheCorruptedException) {
+        myCompileContext.requestRebuildNextTime(message);
+      }
+ else {
+        myCompileContext.addMessage(CompilerMessageCategory.ERROR,message,null,-1,-1);
+      }
+    }
+  }
+  finally {
+    myClassParsingThread=null;
+    compileFinished(exitValue,chunk,outputDir);
+    myModuleName=null;
+  }
+}

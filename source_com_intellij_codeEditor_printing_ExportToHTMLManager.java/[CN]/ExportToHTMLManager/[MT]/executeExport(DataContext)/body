@@ -1,0 +1,64 @@
+{
+  PsiDirectory psiDirectory=null;
+  PsiElement psiElement=(PsiElement)dataContext.getData(DataConstants.PSI_ELEMENT);
+  if (psiElement instanceof PsiDirectory) {
+    psiDirectory=(PsiDirectory)psiElement;
+  }
+  final PsiFile psiFile=(PsiFile)dataContext.getData(DataConstants.PSI_FILE);
+  Project project=(Project)dataContext.getData(DataConstants.PROJECT);
+  String shortFileName=null;
+  String directoryName=null;
+  if (psiFile != null || psiDirectory != null) {
+    if (psiFile != null) {
+      shortFileName=psiFile.getVirtualFile().getName();
+      if (psiDirectory == null) {
+        psiDirectory=psiFile.getContainingDirectory();
+      }
+    }
+    if (psiDirectory != null) {
+      directoryName=psiDirectory.getVirtualFile().getPresentableUrl();
+    }
+  }
+  Editor editor=(Editor)dataContext.getData(DataConstants.EDITOR);
+  boolean isSelectedTextEnabled=false;
+  if (editor != null && editor.getSelectionModel().hasSelection()) {
+    isSelectedTextEnabled=true;
+  }
+  ExportToHTMLDialog exportToHTMLDialog=new ExportToHTMLDialog(shortFileName,directoryName,isSelectedTextEnabled,project);
+  ExportToHTMLSettings exportToHTMLSettings=ExportToHTMLSettings.getInstance(project);
+  if (exportToHTMLSettings.OUTPUT_DIRECTORY == null) {
+    final VirtualFile projectFile=project.getProjectFile();
+    if (projectFile != null) {
+      exportToHTMLSettings.OUTPUT_DIRECTORY=projectFile.getParent().getPresentableUrl() + File.separator + "exportToHTML";
+    }
+ else {
+      exportToHTMLSettings.OUTPUT_DIRECTORY="";
+    }
+  }
+  exportToHTMLDialog.reset();
+  exportToHTMLDialog.show();
+  if (!exportToHTMLDialog.isOK()) {
+    return;
+  }
+  exportToHTMLDialog.apply();
+  final String outputDirectoryName=exportToHTMLSettings.OUTPUT_DIRECTORY;
+  if (exportToHTMLSettings.getPrintScope() != PrintSettings.PRINT_DIRECTORY) {
+    if (psiFile == null || psiFile.getText() == null) {
+      return;
+    }
+    final String dirName=constructOutputDirectory(psiFile,outputDirectoryName);
+    HTMLTextPainter textPainter=new HTMLTextPainter(psiFile,project,dirName,exportToHTMLSettings.PRINT_LINE_NUMBERS);
+    if (exportToHTMLSettings.getPrintScope() == PrintSettings.PRINT_SELECTED_TEXT && editor != null && editor.getSelectionModel().hasSelection()) {
+      int firstLine=editor.getDocument().getLineNumber(editor.getSelectionModel().getSelectionStart());
+      textPainter.setSegment(editor.getSelectionModel().getSelectionStart(),editor.getSelectionModel().getSelectionEnd(),firstLine);
+    }
+    textPainter.paint(null,psiFile.getFileType());
+    if (exportToHTMLSettings.OPEN_IN_BROWSER) {
+      BrowserUtil.launchBrowser(textPainter.getHTMLFileName());
+    }
+  }
+ else {
+    ExportRunnable exportRunnable=new ExportRunnable(exportToHTMLSettings,psiDirectory,outputDirectoryName,project);
+    ApplicationManager.getApplication().runProcessWithProgressSynchronously(exportRunnable,"Export to HTML",true,project);
+  }
+}

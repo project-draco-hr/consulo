@@ -1,0 +1,58 @@
+{
+  int offset=editor.getCaretModel().getOffset();
+  editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
+  PsiElement element=file.findElementAt(offset);
+  while (true) {
+    if (element == null) {
+      if (!(file instanceof PsiJavaFile)) {
+        PsiElement[] elements=new PsiElement[]{file};
+        if (MoveFilesOrDirectoriesUtil.canMoveFiles(elements)) {
+          doMove(project,elements,null,null);
+        }
+        return;
+      }
+      String message="Cannot perform the refactoring.\n" + "The caret should be positioned at the class, method or field to be refactored.";
+      RefactoringMessageUtil.showErrorMessage("Move",message,null,project);
+      return;
+    }
+    if (element instanceof PsiField) {
+      MoveMembersImpl.doMove(project,new PsiElement[]{element},null,null);
+      return;
+    }
+    if (element instanceof PsiMethod) {
+      MoveMembersImpl.doMove(project,new PsiElement[]{element},null,null);
+      return;
+    }
+    if (element instanceof PsiClass) {
+      PsiClass aClass=(PsiClass)element;
+      if (aClass.getContainingClass() != null) {
+        FeatureUsageTracker.getInstance().triggerFeatureUsed("refactoring.move.moveInner");
+        if (!aClass.hasModifierProperty(PsiModifier.STATIC)) {
+          MoveInnerImpl.doMove(project,new PsiElement[]{aClass},null);
+        }
+ else {
+          SelectInnerOrMembersRefactoringDialog dialog=new SelectInnerOrMembersRefactoringDialog(aClass,project);
+          dialog.show();
+          if (dialog.isOK()) {
+            int type=dialog.getRefactoringType();
+            if (type == INNER_TO_UPPER) {
+              MoveInnerImpl.doMove(project,new PsiElement[]{aClass},null);
+            }
+ else             if (type == MEMBERS) {
+              MoveMembersImpl.doMove(project,new PsiElement[]{aClass},null,null);
+            }
+          }
+        }
+        return;
+      }
+      if (!(element instanceof PsiAnonymousClass)) {
+        MoveClassesOrPackagesImpl.doMove(project,new PsiElement[]{aClass},myTargetContainerFinder.getTargetContainer(dataContext),null);
+      }
+ else {
+        new AnonymousToInnerHandler().invoke(project,(PsiAnonymousClass)element);
+      }
+      return;
+    }
+    element=element.getParent();
+  }
+}

@@ -1,0 +1,61 @@
+{
+  final FindManager findManager=FindManager.getInstance(myProject);
+  final FindModel findModel=(FindModel)findManager.getFindInProjectModel().clone();
+  findModel.setReplaceState(true);
+  FindInProjectUtil.setDirectoryName(findModel,dataContext);
+  Editor editor=(Editor)dataContext.getData(DataConstants.EDITOR);
+  if (editor != null) {
+    String s=editor.getSelectionModel().getSelectedText();
+    if (s != null && (s.indexOf("\r") == -1) && (s.indexOf("\n") == -1)) {
+      findModel.setStringToFind(s);
+    }
+  }
+  if (!findManager.showFindDialog(findModel)) {
+    return;
+  }
+  final PsiDirectory psiDirectory=FindInProjectUtil.getPsiDirectory(findModel,myProject);
+  if (!findModel.isProjectScope() && psiDirectory == null && findModel.getModuleName() == null) {
+    return;
+  }
+class AsyncFindUsagesCommandImpl implements AsyncFindUsagesCommand {
+    ReplaceInProjectViewDescriptor viewDescriptor;
+    UsageView usagesPanel;
+    ProgressIndicator progress;
+    public void findUsages(    final AsyncFindUsagesProcessListener consumer){
+      progress=new FindProgressIndicator(myProject,FindInProjectUtil.getTitleForScope(findModel));
+      final Runnable findUsagesRunnable=new Runnable(){
+        public void run(){
+          FindInProjectUtil.findUsages(findManager.getFindInProjectModel(),psiDirectory,myProject,consumer);
+        }
+      }
+;
+      final Runnable showUsagesPanelRunnable=new Runnable(){
+        public void run(){
+          myIsFindInProgress=false;
+          if (consumer.getCount() != 0 && findManager.getFindInProjectModel().isPromptOnReplace()) {
+            replaceWithPrompt(usagesPanel,viewDescriptor);
+          }
+        }
+      }
+;
+      Runnable showUsagesPanelRunnable1=new Runnable(){
+        public void run(){
+          SwingUtilities.invokeLater(showUsagesPanelRunnable);
+        }
+      }
+;
+      myIsFindInProgress=true;
+      findManager.getFindInProjectModel().copyFrom(findModel);
+      FindInProjectUtil.runProcessWithProgress(progress,findUsagesRunnable,showUsagesPanelRunnable1,myProject);
+    }
+    public void stopAsyncSearch(){
+      progress.cancel();
+    }
+  }
+  ;
+  AsyncFindUsagesCommandImpl findUsagesCommand=new AsyncFindUsagesCommandImpl();
+  ReplaceInProjectViewDescriptor viewDescriptor=new ReplaceInProjectViewDescriptor(findModel,findUsagesCommand);
+  UsageView usagesPanel=showUsagesPanel(viewDescriptor);
+  findUsagesCommand.viewDescriptor=viewDescriptor;
+  findUsagesCommand.usagesPanel=usagesPanel;
+}

@@ -1,0 +1,69 @@
+{
+  LOG.assertTrue(searchScope != null);
+  PsiClass parentClass=method.getContainingClass();
+  if (method.isConstructor()) {
+    return processConstructorReferences(processor,method,searchScope,!isStrictSignatureSearch,isStrictSignatureSearch);
+  }
+  if (isStrictSignatureSearch && (parentClass == null || parentClass instanceof PsiAnonymousClass || parentClass.hasModifierProperty(PsiModifier.FINAL) || method instanceof PsiAnnotationMethod || method.hasModifierProperty(PsiModifier.STATIC) || method.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.PRIVATE))) {
+    return processReferences(processor,method,searchScope,false);
+  }
+  final String text=method.getName();
+  final PsiMethod[] methods=isStrictSignatureSearch ? new PsiMethod[]{method} : getOverloadsMayBeOverriden(method);
+  SearchScope accessScope=getAccessScope(methods[0]);
+  for (int i=0; i < methods.length; i++) {
+    SearchScope someScope=PsiSearchScopeUtil.scopesUnion(accessScope,getAccessScope(methods[i]));
+    accessScope=someScope == null ? accessScope : someScope;
+  }
+  final PsiClass aClass=method.getContainingClass();
+  final PsiElementProcessorEx processor1=new PsiElementProcessorEx(){
+    public boolean execute(    PsiElement element,    int offsetInElement){
+      PsiReference reference=element.findReferenceAt(offsetInElement);
+      if (reference != null) {
+        for (int i=0; i < methods.length; i++) {
+          PsiMethod method=methods[i];
+          if (reference.isReferenceTo(method)) {
+            return processor.execute(reference);
+          }
+          PsiElement refElement=reference.resolve();
+          if (refElement instanceof PsiMethod) {
+            PsiMethod refMethod=(PsiMethod)refElement;
+            PsiClass refMethodClass=refMethod.getContainingClass();
+            if (refMethodClass == null)             return true;
+            if (!refMethod.hasModifierProperty(PsiModifier.STATIC)) {
+              PsiSubstitutor substitutor=TypeConversionUtil.getClassSubstitutor(aClass,refMethodClass,PsiSubstitutor.EMPTY);
+              if (substitutor != null) {
+                if (method.getSignature(PsiSubstitutor.EMPTY).equals(refMethod.getSignature(substitutor))) {
+                  if (!processor.execute(reference))                   return false;
+                }
+              }
+            }
+            if (!isStrictSignatureSearch) {
+              PsiManager manager=method.getManager();
+              if (manager.areElementsEquivalent(refMethodClass,aClass)) {
+                return processor.execute(reference);
+              }
+            }
+          }
+ else {
+            return true;
+          }
+        }
+      }
+      return true;
+    }
+  }
+;
+  searchScope=searchScope.intersectWith(accessScope);
+  if (searchScope == null)   return true;
+  short occurrenceMask=WordInfo.IN_CODE | WordInfo.IN_COMMENTS;
+  boolean toContinue=processElementsWithWord(processor1,searchScope,text,IDENTIFIER_OR_DOC_VALUE_BIT_SET,occurrenceMask,false);
+  if (!toContinue)   return false;
+  if (PropertyUtil.isSimplePropertyAccessor(method)) {
+    String propertyName=PropertyUtil.getPropertyName(method);
+    if (myManager.getNameHelper().isIdentifier(propertyName)) {
+      toContinue=processElementsWithWord(processor1,searchScope,propertyName,IDENTIFIER_OR_ATTRIBUTE_VALUE_BIT_SET,WordInfo.JSP_ATTRIBUTE_VALUE,false);
+      if (!toContinue)       return false;
+    }
+  }
+  return true;
+}

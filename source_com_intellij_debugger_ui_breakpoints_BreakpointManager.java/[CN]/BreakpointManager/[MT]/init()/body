@@ -1,0 +1,115 @@
+{
+  EditorEventMulticaster eventMulticaster=EditorFactory.getInstance().getEventMulticaster();
+  myEditorMouseListener=new EditorMouseAdapter(){
+    private EditorMouseEvent myMousePressedEvent;
+    private Breakpoint toggleBreakpoint(    final boolean mostSuitingBreakpoint,    int line){
+      Editor editor=FileEditorManager.getInstance(myProject).getSelectedTextEditor();
+      Document document=editor.getDocument();
+      PsiDocumentManager.getInstance(myProject).commitDocument(document);
+      int offset=editor.getCaretModel().getOffset();
+      int editorLine=editor.getDocument().getLineNumber(offset);
+      if (editorLine != line) {
+        offset=editor.getDocument().getLineStartOffset(line);
+      }
+      Breakpoint breakpoint=findBreakpoint(document,offset);
+      if (breakpoint == null) {
+        if (mostSuitingBreakpoint) {
+          breakpoint=addFieldBreakpoint(document,offset);
+          if (breakpoint == null) {
+            breakpoint=addMethodBreakpoint(document,line);
+          }
+          if (breakpoint == null) {
+            breakpoint=addLineBreakpoint(document,line);
+          }
+        }
+ else {
+          breakpoint=addLineBreakpoint(document,line);
+          if (breakpoint == null) {
+            breakpoint=addMethodBreakpoint(document,line);
+          }
+        }
+        if (breakpoint != null) {
+          RequestManagerImpl.createRequests(breakpoint);
+        }
+        return breakpoint;
+      }
+ else {
+        removeBreakpoint(breakpoint);
+        return null;
+      }
+    }
+    private boolean isFromMyProject(    Editor editor){
+      FileEditor[] allEditors=FileEditorManager.getInstance(myProject).getAllEditors();
+      for (int idx=0; idx < allEditors.length; idx++) {
+        FileEditor ed=allEditors[idx];
+        if (!(ed instanceof TextEditor)) {
+          continue;
+        }
+        if (((TextEditor)ed).getEditor().equals(editor)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    public void mousePressed(    EditorMouseEvent e){
+      if (MarkupEditorFilterFactory.createIsDiffFilter().avaliableIn(e.getEditor()))       return;
+      if (e.isConsumed())       return;
+      if (e.getArea() == EditorMouseEventArea.LINE_MARKERS_AREA && e.getMouseEvent().isShiftDown()) {
+        myMousePressedEvent=e;
+        e.consume();
+      }
+    }
+    public void mouseReleased(    EditorMouseEvent e){
+      if (myMousePressedEvent != null) {
+        mouseClicked(e);
+      }
+      myMousePressedEvent=null;
+    }
+    public void mouseClicked(    final EditorMouseEvent e){
+      if (MarkupEditorFilterFactory.createIsDiffFilter().avaliableIn(e.getEditor()))       return;
+      if (e.isConsumed())       return;
+      if (e.getArea() == EditorMouseEventArea.LINE_MARKERS_AREA) {
+        PsiDocumentManager.getInstance(myProject).commitAndRunReadAction(new Runnable(){
+          public void run(){
+            final Editor editor=e.getEditor();
+            if (!isFromMyProject(editor)) {
+              return;
+            }
+            final int line=editor.xyToLogicalPosition(e.getMouseEvent().getPoint()).line;
+            if (line < 0) {
+              return;
+            }
+            MouseEvent event=e.getMouseEvent();
+            if (event.isPopupTrigger()) {
+              return;
+            }
+            if (event.getButton() != 1) {
+              return;
+            }
+            e.consume();
+            DebuggerInvocationUtil.invokeLater(myProject,new Runnable(){
+              public void run(){
+                Breakpoint breakpoint=toggleBreakpoint(e.getMouseEvent().isAltDown(),line);
+                if (e.getMouseEvent().isShiftDown() && breakpoint != null) {
+                  breakpoint.LOG_EXPRESSION_ENABLED=true;
+                  breakpoint.setLogMessage(DebuggerUtilsEx.getEditorText(editor));
+                  breakpoint.SUSPEND_POLICY=DebuggerSettings.SUSPEND_NONE;
+                  DialogWrapper dialog=DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager().createConfigurationDialog(breakpoint,BreakpointPropertiesPanel.CONTROL_LOG_MESSAGE);
+                  dialog.show();
+                  if (!dialog.isOK()) {
+                    removeBreakpoint(breakpoint);
+                  }
+                }
+              }
+            }
+);
+          }
+        }
+);
+      }
+    }
+  }
+;
+  eventMulticaster.addEditorMouseListener(myEditorMouseListener);
+  eventMulticaster.addDocumentListener(myDocumentListener);
+}

@@ -1,0 +1,71 @@
+{
+  try {
+    final CharSequence chars=myDocument.getCharsSequence();
+    int offset=CharArrayUtil.shiftBackwardUntil(chars,myOffset - 1,"\n") - 1;
+    offset=CharArrayUtil.shiftBackwardUntil(chars,offset,"\n") + 1;
+    int lineStart=CharArrayUtil.shiftForward(chars,offset," \t");
+    boolean docStart=CharArrayUtil.regionMatches(chars,lineStart,"/**");
+    boolean docAsterisk=CharArrayUtil.regionMatches(chars,lineStart,"*");
+    boolean slashSlash=CharArrayUtil.regionMatches(chars,lineStart,"//") && chars.charAt(CharArrayUtil.shiftForward(chars,myOffset," \t")) != '\n';
+    if (docStart) {
+      PsiElement element=myFile.findElementAt(lineStart);
+      if (element.getText().equals("/**") && element.getParent() instanceof PsiDocComment) {
+        PsiDocComment comment=(PsiDocComment)element.getParent();
+        int commentEnd=comment.getTextRange().getEndOffset();
+        if (myOffset >= commentEnd) {
+          docStart=false;
+        }
+ else {
+          if (isDocCommentComplete(comment)) {
+            if (myOffset >= commentEnd) {
+              docAsterisk=false;
+              docStart=false;
+            }
+ else {
+              docAsterisk=true;
+              docStart=false;
+            }
+          }
+ else {
+            generateJavadoc();
+          }
+        }
+      }
+ else {
+        docStart=false;
+      }
+    }
+    if (docAsterisk) {
+      docAsterisk=insertDocAsterisk(lineStart,docAsterisk);
+    }
+    if (CodeInsightSettings.getInstance().SMART_INDENT_ON_ENTER || myForceIndent || docStart|| docAsterisk|| slashSlash) {
+      myOffset=CodeStyleManager.getInstance(myFile.getProject()).adjustLineIndent(myFile,myOffset);
+    }
+    if (docAsterisk || docStart || slashSlash) {
+      if (myInsertSpace) {
+        if (myOffset == myDocument.getTextLength()) {
+          myDocument.insertString(myOffset," ");
+        }
+        myDocument.insertString(myOffset + 1," ");
+      }
+      final char c=myDocument.getCharsSequence().charAt(myOffset);
+      if (c != '\n') {
+        myOffset+=1;
+      }
+    }
+    if ((docAsterisk || slashSlash) && !docStart) {
+      myCaretAdvance=slashSlash ? 2 : 1;
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  myEditor.getCaretModel().moveToOffset(myOffset);
+  myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  myEditor.getSelectionModel().removeSelection();
+  if (myCaretAdvance != 0) {
+    LogicalPosition caretPosition=myEditor.getCaretModel().getLogicalPosition();
+    LogicalPosition pos=new LogicalPosition(caretPosition.line,caretPosition.column + myCaretAdvance);
+    myEditor.getCaretModel().moveToLogicalPosition(pos);
+  }
+}

@@ -1,0 +1,64 @@
+{
+  final Module module=ModuleUtil.getModuleForFile(project,formFile);
+  LOG.assertTrue(module != null);
+  final PsiPropertiesProvider propertiesProvider=new PsiPropertiesProvider(module);
+  final Document doc=FileDocumentManager.getInstance().getDocument(formFile);
+  final LwRootContainer _rootContainer;
+  try {
+    _rootContainer=Utils.getRootContainer(doc.getText(),propertiesProvider);
+  }
+ catch (  AlienFormFileException e) {
+    throw new MyException(e.getMessage());
+  }
+catch (  Exception e) {
+    throw new MyException("Cannot process form file. Reason: " + e);
+  }
+  rootContainer[0]=_rootContainer;
+  final String classToBind=_rootContainer.getClassToBind();
+  if (classToBind == null) {
+    throw new MyException("Form is not bound to a class");
+  }
+  final PsiClass boundClass=FormEditingUtil.findClassToBind(module,classToBind);
+  if (boundClass == null) {
+    throw new MyException("Bound class " + classToBind + " does not exist");
+  }
+  final ArrayList<FormProperty> result=new ArrayList<FormProperty>();
+  final MyException[] exception=new MyException[1];
+  FormEditingUtil.iterate(_rootContainer,new FormEditingUtil.ComponentVisitor<LwComponent>(){
+    public boolean visit(    final LwComponent component){
+      final String binding=component.getBinding();
+      if (binding == null) {
+        return true;
+      }
+      final PsiField[] fields=boundClass.getFields();
+      PsiField field=null;
+      for (int i=fields.length - 1; i >= 0; i--) {
+        if (binding.equals(fields[i].getName())) {
+          field=fields[i];
+          break;
+        }
+      }
+      if (field == null) {
+        exception[0]=new MyException("Field " + binding + " not found in class "+ classToBind);
+        return false;
+      }
+      final PsiClass fieldClass=getClassByType(field.getType());
+      if (fieldClass == null) {
+        exception[0]=new MyException("Invalid binding field type: field " + binding + ", class "+ classToBind);
+        return false;
+      }
+      if (instanceOf(fieldClass,JTextComponent.class.getName())) {
+        result.add(new FormProperty(component,"getText","setText",String.class.getName()));
+      }
+ else       if (instanceOf(fieldClass,JCheckBox.class.getName())) {
+        result.add(new FormProperty(component,"isSelected","setSelected",boolean.class.getName()));
+      }
+      return true;
+    }
+  }
+);
+  if (exception[0] != null) {
+    throw exception[0];
+  }
+  return result.toArray(new FormProperty[result.size()]);
+}

@@ -1,0 +1,70 @@
+{
+  Runnable action=new Runnable(){
+    public void run(){
+      myRefreshCount--;
+      Runnable postRunnable=myPostRefreshRunnables.pop();
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          for (int i=0; i < myRefreshEventsToFire.size(); i++) {
+            Runnable runnable=myRefreshEventsToFire.get(i);
+            try {
+              runnable.run();
+            }
+ catch (            Exception e) {
+              LOG.error(e);
+            }
+          }
+          if (myRefreshCount > 0) {
+            myRefreshEventsToFire.clear();
+          }
+ else {
+            myRefreshEventsToFire=null;
+            final FileSystemSynchronizer synchronizer;
+            if (asynchronous) {
+              synchronizer=new FileSystemSynchronizer();
+              for (int i=0; i < myRefreshParticipants.size(); i++) {
+                CacheUpdater participant=myRefreshParticipants.get(i);
+                synchronizer.registerCacheUpdater(participant);
+              }
+            }
+ else {
+              synchronizer=null;
+            }
+            LOG.info("afterRefreshFinish()");
+            myVirtualFileManagerListenerMulticaster.getMulticaster().afterRefreshFinish(asynchronous);
+            if (asynchronous) {
+              int filesCount=synchronizer.collectFilesToUpdate();
+              if (filesCount > 0) {
+                boolean runWithProgress=!ApplicationManager.getApplication().isUnitTestMode() && filesCount > 5;
+                if (runWithProgress) {
+                  Runnable process=new Runnable(){
+                    public void run(){
+                      synchronizer.execute();
+                    }
+                  }
+;
+                  ApplicationManager.getApplication().runProcessWithProgressSynchronously(process,"Updating Modified Files...",false,null);
+                }
+ else {
+                  synchronizer.execute();
+                }
+              }
+            }
+          }
+        }
+      }
+);
+      if (postRunnable != null) {
+        postRunnable.run();
+      }
+    }
+  }
+;
+  if (asynchronous) {
+    ApplicationManager.getApplication().invokeLater(action,modalityState);
+  }
+ else {
+    LOG.assertTrue(ApplicationManager.getApplication().isDispatchThread());
+    action.run();
+  }
+}

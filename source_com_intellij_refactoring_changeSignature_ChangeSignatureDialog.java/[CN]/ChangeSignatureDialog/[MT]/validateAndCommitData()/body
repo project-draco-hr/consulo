@@ -1,0 +1,88 @@
+{
+  PsiManager manager=PsiManager.getInstance(myProject);
+  PsiElementFactory factory=manager.getElementFactory();
+  String name=getMethodName();
+  if (!manager.getNameHelper().isIdentifier(name)) {
+    return RefactoringMessageUtil.getIncorrectIdentifierMessage(name);
+  }
+  if (!myMethod.isConstructor()) {
+    try {
+      myReturnTypeCodeFragment.getType();
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      myReturnTypeField.requestFocus();
+      return "Wrong return type: '" + myReturnTypeCodeFragment.getText() + "'";
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      myReturnTypeField.requestFocus();
+      return "Specify return type";
+    }
+  }
+  final List<PsiTypeCodeFragment> codeFraments=myParametersTableModel.getCodeFraments();
+  final List<PsiCodeFragment> defaultValueFraments=myParametersTableModel.getDefaultValueFraments();
+  ParameterInfo[] parameterInfos=myParametersTableModel.getParameters();
+  final int newParametersNumber=parameterInfos.length;
+  LOG.assertTrue(codeFraments.size() == newParametersNumber);
+  for (int i=0; i < newParametersNumber; i++) {
+    ParameterInfo info=parameterInfos[i];
+    PsiTypeCodeFragment psiCodeFragment=codeFraments.get(i);
+    PsiCodeFragment defaultValueFragment=defaultValueFraments.get(i);
+    if (!manager.getNameHelper().isIdentifier(info.getName())) {
+      return RefactoringMessageUtil.getIncorrectIdentifierMessage(info.getName());
+    }
+    final PsiType type;
+    try {
+      type=psiCodeFragment.getType();
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      return "Wrong type: '" + psiCodeFragment.getText() + "' for parameter "+ info.getName();
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      return "Specify a type for parameter" + info.getName();
+    }
+    info.setType(type);
+    if (type instanceof PsiEllipsisType && i != newParametersNumber - 1) {
+      return "Vararg parameter should be the last in method signature";
+    }
+    if (info.oldParameterIndex < 0) {
+      info.defaultValue=defaultValueFragment.getText();
+      String def=info.defaultValue;
+      def=def.trim();
+      if (!(type instanceof PsiEllipsisType)) {
+        if (def.length() == 0) {
+          return "New parameter " + info.getName() + " has been added.\n"+ "Specify a default value to be used in all existing calls of this method.";
+        }
+        try {
+          factory.createExpressionFromText(info.defaultValue,null);
+        }
+ catch (        IncorrectOperationException e) {
+          return e.getMessage();
+        }
+      }
+    }
+  }
+  ThrownExceptionInfo[] exceptionInfos=myExceptionsTableModel.getThrownExceptions();
+  PsiTypeCodeFragment[] typeCodeFragments=myExceptionsTableModel.getTypeCodeFragments();
+  for (int i=0; i < exceptionInfos.length; i++) {
+    ThrownExceptionInfo exceptionInfo=exceptionInfos[i];
+    PsiTypeCodeFragment typeCodeFragment=typeCodeFragments[i];
+    try {
+      PsiType type=typeCodeFragment.getType();
+      if (!(type instanceof PsiClassType)) {
+        return "Wrong type: '" + typeCodeFragment.getText() + "' for exception";
+      }
+      PsiClassType throwable=myMethod.getManager().getElementFactory().createTypeByFQClassName("java.lang.Throwable",type.getResolveScope());
+      if (!throwable.isAssignableFrom(type)) {
+        return "Wrong type: '" + typeCodeFragment.getText() + "' for exception, should extend java.lang.Throwable";
+      }
+      exceptionInfo.setType((PsiClassType)type);
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      return "Wrong type: '" + typeCodeFragment.getText() + "' for exception";
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      return "Specify a type for exception";
+    }
+  }
+  return null;
+}

@@ -1,0 +1,41 @@
+{
+  if (COUNT_FILTER_ENABLED) {
+    context.getDebugProcess().getVirtualMachineProxy().suspend();
+    context.getDebugProcess().getRequestsManager().deleteRequest(this);
+    context.getDebugProcess().getRequestsManager().createRequest((Breakpoint)this);
+    context.getDebugProcess().getVirtualMachineProxy().resume();
+  }
+  if (INSTANCE_FILTERS_ENABLED) {
+    Value value=context.getThisObject();
+    if (value != null) {
+      ObjectReference reference=(ObjectReference)value;
+      if (!hasObjectID(reference.uniqueID()))       return false;
+    }
+  }
+  if (CONDITION_ENABLED && getCondition() != null && !"".equals(getCondition())) {
+    try {
+      ExpressionEvaluator evaluator=DebuggerInvocationUtil.commitAndRunReadAction(context.getProject(),new com.intellij.debugger.EvaluatingComputable<ExpressionEvaluator>(){
+        public ExpressionEvaluator compute() throws EvaluateException {
+          return EvaluatorBuilderImpl.getInstance().build(getCondition(),getEvaluationElement());
+        }
+      }
+);
+      Value value=evaluator.evaluate(context);
+      if (!(value instanceof BooleanValue)) {
+        throw EvaluateExceptionUtil.createEvaluateException("Type mismatch. Required boolean value");
+      }
+      if (!((BooleanValue)value).booleanValue())       return false;
+    }
+ catch (    EvaluateException ex) {
+      if (ex.getCause() instanceof VMDisconnectedException)       return false;
+      StringBuffer text=new StringBuffer();
+      text.append("Failed to evaluate breakpoint condition\n'");
+      text.append(getCondition());
+      text.append("'\nReason: ");
+      text.append(ex.getMessage());
+      throw EvaluateExceptionUtil.createEvaluateException(text.toString());
+    }
+    return true;
+  }
+  return true;
+}

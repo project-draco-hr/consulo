@@ -1,0 +1,48 @@
+{
+  if (call.getManager().getEffectiveLanguageLevel().compareTo(LanguageLevel.JDK_1_5) < 0)   return null;
+  final PsiMethod method=(PsiMethod)resolveResult.getElement();
+  final PsiSubstitutor substitutor=resolveResult.getSubstitutor();
+  final PsiParameter[] parameters=method.getParameterList().getParameters();
+  for (int i=0; i < parameters.length; i++) {
+    PsiParameter parameter=parameters[i];
+    final PsiType parameterType=parameter.getType();
+    if (parameterType == null)     continue;
+    if (parameterType.accept(new PsiTypeVisitor<Boolean>(){
+      public Boolean visitPrimitiveType(      PsiPrimitiveType primitiveType){
+        return Boolean.FALSE;
+      }
+      public Boolean visitArrayType(      PsiArrayType arrayType){
+        return arrayType.getComponentType().accept(this);
+      }
+      public Boolean visitClassType(      PsiClassType classType){
+        PsiClass psiClass=classType.resolve();
+        if (psiClass instanceof PsiTypeParameter) {
+          return substitutor.substitute((PsiTypeParameter)psiClass) == null ? Boolean.TRUE : Boolean.FALSE;
+        }
+        PsiType[] parameters=classType.getParameters();
+        for (int i=0; i < parameters.length; i++) {
+          if (parameters[i].accept(this).booleanValue())           return Boolean.TRUE;
+        }
+        return Boolean.FALSE;
+      }
+      public Boolean visitWildcardType(      PsiWildcardType wildcardType){
+        PsiType bound=wildcardType.getBound();
+        if (bound != null)         return bound.accept(this);
+        return Boolean.FALSE;
+      }
+      public Boolean visitEllipsisType(      PsiEllipsisType ellipsisType){
+        return ellipsisType.getComponentType().accept(this);
+      }
+    }
+).booleanValue()) {
+      final PsiElementFactory elementFactory=method.getManager().getElementFactory();
+      PsiType type=elementFactory.createType(method.getContainingClass(),substitutor);
+      String description=MessageFormat.format("Unchecked call to ''{0}'' as a member of raw type ''{1}''",new Object[]{HighlightUtil.formatMethod(method),HighlightUtil.formatType(type)});
+      PsiElement element=call instanceof PsiMethodCallExpression ? (PsiElement)((PsiMethodCallExpression)call).getMethodExpression() : call;
+      HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.WARNING,element,description);
+      QuickFixAction.registerQuickFixAction(highlightInfo,new GenerifyFileFix(element.getContainingFile()));
+      return highlightInfo;
+    }
+  }
+  return null;
+}

@@ -1,0 +1,107 @@
+{
+  if (findIn != null) {
+    findIn.accept(new PsiRecursiveElementVisitor(){
+      public void visitReferenceElement(      PsiJavaCodeReferenceElement reference){
+      }
+      public void visitReferenceExpression(      PsiReferenceExpression expression){
+        visitElement(expression);
+        PsiElement psiResolved=expression.resolve();
+        if (psiResolved instanceof PsiModifierListOwner) {
+          updateCanBeStatic(refFrom,psiFrom,(PsiModifierListOwner)psiResolved);
+          if (isDeprecated(psiResolved))           refFrom.setUsesDeprecatedApi(true);
+        }
+        RefElement refResolved=refFrom.getRefManager().getReference(psiResolved);
+        refFrom.addReference(refResolved,psiResolved,psiFrom,PsiUtil.isAccessedForWriting(expression),PsiUtil.isAccessedForReading(expression),expression);
+        if (refResolved instanceof RefMethod) {
+          updateRefMethod(psiResolved,refResolved,expression,psiFrom,refFrom);
+        }
+      }
+      public void visitThisExpression(      PsiThisExpression expression){
+        super.visitThisExpression(expression);
+        PsiJavaCodeReferenceElement qualifier=expression.getQualifier();
+        if (qualifier != null) {
+          PsiClass psiClass=(PsiClass)qualifier.resolve();
+          if (psiClass != null) {
+            updateCanBeStatic(refFrom,psiFrom,MethodSignatureUtil.findMethodBySignature(psiClass,MethodSignatureUtil.createMethodSignature("hashCode",(PsiType[])null,null,PsiSubstitutor.EMPTY),true));
+          }
+        }
+        refFrom.setCanBeStatic(false);
+      }
+      public void visitNewExpression(      PsiNewExpression newExpr){
+        super.visitNewExpression(newExpr);
+        PsiMethod psiConstructor=newExpr.resolveConstructor();
+        if (psiConstructor != null) {
+          updateCanBeStatic(refFrom,psiFrom,psiConstructor.getContainingClass());
+          if (isDeprecated(psiConstructor))           refFrom.setUsesDeprecatedApi(true);
+        }
+        RefMethod refConstructor=(RefMethod)refFrom.getRefManager().getReference(psiConstructor);
+        refFrom.addReference(refConstructor,psiConstructor,psiFrom,false,true,null);
+        if (newExpr.getArgumentList() != null) {
+          PsiExpression[] psiParams=newExpr.getArgumentList().getExpressions();
+          for (int i=0; i < psiParams.length; i++) {
+            PsiExpression param=psiParams[i];
+            param.accept(this);
+          }
+          if (refConstructor != null) {
+            refConstructor.updateParameterValues(psiParams);
+          }
+        }
+        if (refConstructor == null) {
+          PsiType newType=newExpr.getType();
+          if (newType instanceof PsiClassType) {
+            PsiClass psiClass=PsiUtil.resolveClassInType(newType);
+            RefClass refClass=(RefClass)refFrom.getRefManager().getReference(psiClass);
+            if (psiClass != null) {
+              updateCanBeStatic(refFrom,psiFrom,psiClass);
+            }
+            if (refClass != null) {
+              RefMethod refDefaultConstructor=refClass.getDefaultConstructor();
+              if (refDefaultConstructor != null) {
+                refDefaultConstructor.addInReference(refFrom);
+                refFrom.addOutReference(refDefaultConstructor);
+              }
+ else {
+                refFrom.addReference(refClass,psiClass,psiFrom,false,true,null);
+              }
+            }
+          }
+        }
+      }
+      public void visitAnonymousClass(      PsiAnonymousClass psiClass){
+        RefClass refClass=(RefClass)refFrom.getRefManager().getReference(psiClass);
+        refFrom.addReference(refClass,psiClass,psiFrom,false,true,null);
+      }
+      public void visitReturnStatement(      PsiReturnStatement statement){
+        super.visitReturnStatement(statement);
+        if (refFrom instanceof RefMethod) {
+          RefMethod refMethod=(RefMethod)refFrom;
+          refMethod.updateReturnValueTemplate(statement.getReturnValue());
+        }
+      }
+      public void visitClassObjectAccessExpression(      PsiClassObjectAccessExpression expression){
+        super.visitClassObjectAccessExpression(expression);
+        final PsiTypeElement operand=expression.getOperand();
+        if (operand == null)         return;
+        final PsiType type=operand.getType();
+        if (type instanceof PsiClassType) {
+          PsiClassType classType=(PsiClassType)type;
+          PsiClass psiClass=classType.resolve();
+          if (psiClass != null) {
+            RefClass refClass=(RefClass)refFrom.getRefManager().getReference(psiClass);
+            if (refClass != null) {
+              RefMethod refDefaultConstructor=refClass.getDefaultConstructor();
+              if (refDefaultConstructor != null) {
+                refDefaultConstructor.addInReference(refFrom);
+                refFrom.addOutReference(refDefaultConstructor);
+              }
+ else {
+                refFrom.addReference(refClass,psiClass,psiFrom,false,true,null);
+              }
+            }
+          }
+        }
+      }
+    }
+);
+  }
+}

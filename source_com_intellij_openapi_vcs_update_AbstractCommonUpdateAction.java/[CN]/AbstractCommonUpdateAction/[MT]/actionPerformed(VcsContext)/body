@@ -1,0 +1,77 @@
+{
+  final Project project=context.getProject();
+  boolean showUpdateOptions=myActionInfo.showOptions(project);
+  final UpdatedFiles updatedFiles=UpdatedFiles.create();
+  if (project != null) {
+    try {
+      if (ApplicationManager.getApplication().isDispatchThread()) {
+        ApplicationManager.getApplication().saveAll();
+      }
+      final FilePath[] roots=filterDescindingFiles(myScopeInfo.getRoots(context),project);
+      final Map<UpdateEnvironment,Collection<FilePath>> updateEnvToVirtualFiles=createEnvToFilesMap(roots,project);
+      if (showUpdateOptions || OptionsDialog.shiftIsPressed(context.getModifiers())) {
+        showOptionsDialog(updateEnvToVirtualFiles,project);
+      }
+      final ArrayList<VcsException> vcsExceptions=new ArrayList<VcsException>();
+      final List<UpdateSession> updateSessions=new ArrayList<UpdateSession>();
+      ApplicationManager.getApplication().runProcessWithProgressSynchronously(new Runnable(){
+        public void run(){
+          ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+          for (Iterator<UpdateEnvironment> iterator=updateEnvToVirtualFiles.keySet().iterator(); iterator.hasNext(); ) {
+            UpdateEnvironment updateEnvironment=iterator.next();
+            updateEnvironment.fillGroups(updatedFiles);
+            Collection<FilePath> files=updateEnvToVirtualFiles.get(updateEnvironment);
+            UpdateSession updateSession=updateEnvironment.updateDirectories(files.toArray(new FilePath[files.size()]),updatedFiles,progressIndicator);
+            vcsExceptions.addAll(updateSession.getExceptions());
+            updateSessions.add(updateSession);
+          }
+          if (progressIndicator != null) {
+            progressIndicator.setText("Synchronizing files...");
+            progressIndicator.setText2("");
+          }
+          final Semaphore semaphore=new Semaphore();
+          semaphore.down();
+          ApplicationManager.getApplication().invokeLater(new Runnable(){
+            public void run(){
+              VirtualFileManager.getInstance().refresh(true,new Runnable(){
+                public void run(){
+                  semaphore.up();
+                }
+              }
+);
+            }
+          }
+);
+          semaphore.waitFor();
+          if (!someSessionWasCanceled(updateSessions)) {
+            for (Iterator<UpdateSession> iterator=updateSessions.iterator(); iterator.hasNext(); ) {
+              iterator.next().onRefreshFilesCompleted();
+            }
+          }
+        }
+      }
+,getCompleteActionName(context),true,project);
+      if (!someSessionWasCanceled(updateSessions)) {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          public void run(){
+            if (!vcsExceptions.isEmpty()) {
+              AbstractVcsHelper.getInstance(project).showErrors(vcsExceptions,getCompleteActionName(context) + " Errors");
+            }
+            if (updatedFiles.isEmpty() && vcsExceptions.isEmpty()) {
+              Messages.showMessageDialog(getAllFilesAreUpToDateMessage(roots),getCompleteActionName(context),Messages.getInformationIcon());
+              return;
+            }
+ else             if (!updatedFiles.isEmpty()) {
+              RestoreUpdateTree restoreUpdateTree=RestoreUpdateTree.getInstance(project);
+              restoreUpdateTree.registerUpdateInformation(updatedFiles,myActionInfo);
+              showUpdateProjectInfo(project,updatedFiles,getCompleteActionName(context),myActionInfo);
+            }
+          }
+        }
+);
+      }
+    }
+ catch (    ProcessCanceledException e1) {
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  if (!element.isValid())   return true;
+  final PsiElementFactory factory=variable.getManager().getElementFactory();
+  while (element != null) {
+    if (element instanceof PsiAssignmentExpression) {
+      final PsiAssignmentExpression expression=(PsiAssignmentExpression)element;
+      final PsiExpression lExpression=expression.getLExpression();
+      LOG.assertTrue(lExpression instanceof PsiReferenceExpression && variable == ((PsiReferenceExpression)lExpression).resolve());
+      PsiExpression rExpression=expression.getRExpression();
+      rExpression=PsiUtil.deparenthesizeExpression(rExpression);
+      if (rExpression == null)       return true;
+      final boolean sideEffectFound=checkSideEffects(rExpression,variable,sideEffects);
+      if (!(element.getParent() instanceof PsiExpressionStatement) || PsiUtil.isStatement(rExpression)) {
+        if (deleteMode == SideEffectWarningDialog.MAKE_STATEMENT || (deleteMode == SideEffectWarningDialog.DELETE_ALL && !(element.getParent() instanceof PsiExpressionStatement))) {
+          element=replaceElementWithExpression(rExpression,factory,element);
+          while (element.getParent() instanceof PsiParenthesizedExpression) {
+            element=element.getParent().replace(element);
+          }
+          List<PsiElement> references=new ArrayList<PsiElement>();
+          collectReferences(element,variable,references);
+          deleteReferences(variable,references,deleteMode);
+        }
+ else         if (deleteMode == SideEffectWarningDialog.DELETE_ALL) {
+          deleteWholeStatement(element,factory);
+        }
+        return true;
+      }
+ else {
+        if (deleteMode != SideEffectWarningDialog.CANCEL) {
+          deleteWholeStatement(element,factory);
+        }
+        return !sideEffectFound;
+      }
+    }
+ else     if (element instanceof PsiExpressionStatement && deleteMode != SideEffectWarningDialog.CANCEL) {
+      element.delete();
+      break;
+    }
+ else     if (element instanceof PsiVariable && element == variable) {
+      PsiExpression expression=variable.getInitializer();
+      if (expression != null) {
+        expression=PsiUtil.deparenthesizeExpression(expression);
+      }
+      final boolean sideEffectsFound=checkSideEffects(expression,variable,sideEffects);
+      if (expression != null && PsiUtil.isStatement(expression) && variable instanceof PsiLocalVariable && !(variable.getParent() instanceof PsiDeclarationStatement && ((PsiDeclarationStatement)variable.getParent()).getDeclaredElements().length > 1)) {
+        if (deleteMode == SideEffectWarningDialog.MAKE_STATEMENT) {
+          element=element.replace(createStatementIfNeeded(expression,factory,element));
+          List<PsiElement> references=new ArrayList<PsiElement>();
+          collectReferences(element,variable,references);
+          deleteReferences(variable,references,deleteMode);
+        }
+ else         if (deleteMode == SideEffectWarningDialog.DELETE_ALL) {
+          element.delete();
+        }
+        return true;
+      }
+ else {
+        if (deleteMode != SideEffectWarningDialog.CANCEL) {
+          element.delete();
+        }
+        return !sideEffectsFound;
+      }
+    }
+    element=element.getParent();
+  }
+  return true;
+}

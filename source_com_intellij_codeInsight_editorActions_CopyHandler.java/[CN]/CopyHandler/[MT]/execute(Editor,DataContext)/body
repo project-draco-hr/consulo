@@ -1,0 +1,32 @@
+{
+  final Project project=(Project)DataManager.getInstance().getDataContext(editor.getComponent()).getData(DataConstants.PROJECT);
+  if (project == null) {
+    if (myOriginalAction != null) {
+      myOriginalAction.execute(editor,dataContext);
+    }
+    return;
+  }
+  final PsiFile file=PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
+  final CodeInsightSettings settings=CodeInsightSettings.getInstance();
+  if (file == null || settings.ADD_IMPORTS_ON_PASTE == CodeInsightSettings.NO) {
+    if (myOriginalAction != null) {
+      myOriginalAction.execute(editor,dataContext);
+    }
+    return;
+  }
+  final SelectionModel selectionModel=editor.getSelectionModel();
+  if (!selectionModel.hasSelection() && !selectionModel.hasBlockSelection()) {
+    selectionModel.selectLineAtCaret();
+    if (!selectionModel.hasSelection())     return;
+  }
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  final int[] startOffsets=selectionModel.getBlockSelectionStarts();
+  final int[] endOffsets=selectionModel.getBlockSelectionEnds();
+  final TextBlockTransferable.ReferenceData[] referenceData=collectReferencesInBlock(file,startOffsets,endOffsets);
+  final TextBlockTransferable.FoldingData[] foldingData=collectFoldingsInBlock(editor,startOffsets,endOffsets);
+  String text=selectionModel.getSelectedText();
+  text=TextBlockTransferable.convertLineSeparators(text,"\n",referenceData,foldingData);
+  text=unescapeIfInsideLiteral(file,startOffsets,endOffsets,text);
+  final Transferable transferable=referenceData.length > 0 || foldingData.length > 0 ? (Transferable)new TextBlockTransferable(text,referenceData,foldingData) : new StringSelection(text);
+  CopyPasteManager.getInstance().setContents(transferable);
+}

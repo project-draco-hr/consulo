@@ -1,0 +1,158 @@
+{
+  if (file instanceof PsiImportHolder) {
+    return ((PsiImportHolder)file).importClass(refClass);
+  }
+  if (!(file instanceof PsiJavaFile) && !(file instanceof JspFile))   return false;
+  PsiManager manager=file.getManager();
+  PsiElementFactory factory=manager.getElementFactory();
+  PsiResolveHelper helper=manager.getResolveHelper();
+  Project project=manager.getProject();
+  String className=refClass.getQualifiedName();
+  if (className == null)   return true;
+  String packageName=getPackageOrClassName(className);
+  String shortName=PsiNameHelper.getShortClassName(className);
+  PsiClass conflictSingleRef=findSingleImportByShortName(file,shortName);
+  if (conflictSingleRef != null) {
+    return conflictSingleRef.getQualifiedName().equals(className);
+  }
+  PsiClass curRefClass=helper.resolveReferencedClass(shortName,file);
+  if (refClass.equals(curRefClass)) {
+    return true;
+  }
+  boolean useOnDemand=true;
+  if (packageName.length() == 0) {
+    useOnDemand=false;
+  }
+  PsiElement conflictPackageRef=findImportOnDemand(file,packageName);
+  if (conflictPackageRef != null) {
+    useOnDemand=false;
+  }
+  ArrayList<PsiElement> classesToReimport=new ArrayList<PsiElement>();
+  PsiJavaCodeReferenceElement[] importRefs=getImportsFromPackage(file,packageName);
+  if (useOnDemand) {
+    if (mySettings.USE_SINGLE_CLASS_IMPORTS) {
+      if (importRefs.length + 1 < mySettings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND && !mySettings.PACKAGES_TO_USE_IMPORT_ON_DEMAND.contains(packageName)) {
+        useOnDemand=false;
+      }
+    }
+    if (curRefClass != null) {
+      useOnDemand=true;
+    }
+    if (useOnDemand) {
+      PsiElement[] onDemandRefs=file.getOnDemandImports(false,true);
+      if (onDemandRefs.length > 0) {
+        PsiPackage aPackage=manager.findPackage(packageName);
+        if (aPackage != null) {
+          PsiDirectory[] dirs=aPackage.getDirectories();
+          for (int i=0; i < dirs.length; i++) {
+            PsiDirectory dir=dirs[i];
+            PsiFile[] files=dir.getFiles();
+            for (int j=0; j < files.length; j++) {
+              PsiFile aFile=files[j];
+              if (aFile instanceof PsiJavaFile) {
+                String name=aFile.getVirtualFile().getNameWithoutExtension();
+                for (int k=0; k < onDemandRefs.length; k++) {
+                  PsiElement ref=onDemandRefs[k];
+                  String refName=ref instanceof PsiClass ? ((PsiClass)ref).getQualifiedName() : ((PsiPackage)ref).getQualifiedName();
+                  String conflictClassName=refName + "." + name;
+                  GlobalSearchScope resolveScope=file.getResolveScope();
+                  PsiClass conflictClass=manager.findClass(conflictClassName,resolveScope);
+                  if (conflictClass != null && helper.isAccessible(conflictClass,file,null)) {
+                    String conflictClassName2=aPackage.getQualifiedName() + "." + name;
+                    PsiClass conflictClass2=manager.findClass(conflictClassName2,resolveScope);
+                    if (conflictClass2 != null && helper.isAccessible(conflictClass2,file,null)) {
+                      PsiSearchHelper searchHelper=manager.getSearchHelper();
+                      PsiReference[] usages=searchHelper.findReferences(conflictClass,new LocalSearchScope(file),false);
+                      if (usages.length > 0) {
+                        classesToReimport.add(conflictClass);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  try {
+    if (file instanceof PsiJavaFile) {
+      PsiImportList importList=((PsiJavaFile)file).getImportList();
+      PsiImportStatement statement;
+      if (useOnDemand) {
+        statement=factory.createImportStatementOnDemand(packageName);
+      }
+ else {
+        statement=factory.createImportStatement(refClass);
+      }
+      importList.add(statement);
+      if (useOnDemand) {
+        for (int i=0; i < importRefs.length; i++) {
+          PsiJavaCodeReferenceElement ref=importRefs[i];
+          LOG.assertTrue(ref.getParent() instanceof PsiImportStatement);
+          if (!ref.isValid())           continue;
+          classesToReimport.add(ref.resolve());
+          PsiImportStatement importStatement=(PsiImportStatement)ref.getParent();
+          importStatement.delete();
+        }
+      }
+    }
+ else     if (file instanceof JspFileImpl) {
+      JspFileImpl jspFile=(JspFileImpl)file;
+      boolean added=false;
+      JspDirective[] directives=jspFile.getPageDirectives();
+      for (int i=0; i < directives.length; i++) {
+        JspDirective directive=directives[i];
+        JspAttribute importAttr=JspUtil.findAttributeByName(directive.getAttributes(),"import");
+        if (importAttr != null) {
+          JspImportValue importValue=(JspImportValue)importAttr.getValueElement();
+          if (importValue != null) {
+            if (useOnDemand) {
+              PsiPackage aPackage=refClass.getContainingFile().getContainingDirectory().getPackage();
+              importValue.addOnDemandImport(aPackage.getQualifiedName());
+            }
+ else {
+              importValue.addSingleClassImport(refClass.getQualifiedName());
+            }
+            added=true;
+            break;
+          }
+        }
+      }
+      if (!added) {
+        JspDirective directive=manager.getJspElementFactory().createDirectiveFromText("<%@ page import=\"\"%>");
+        directive=(JspDirective)CodeStyleManager.getInstance(project).reformat(directive);
+        directive=(JspDirective)jspFile.add(directive);
+        JspAttribute importAttr=JspUtil.findAttributeByName(directive.getAttributes(),"import");
+        JspImportValue importValue=(JspImportValue)importAttr.getValueElement();
+        if (useOnDemand) {
+          PsiPackage aPackage=refClass.getContainingFile().getContainingDirectory().getPackage();
+          importValue.addOnDemandImport(aPackage.getQualifiedName());
+        }
+ else {
+          importValue.addSingleClassImport(refClass.getQualifiedName());
+        }
+      }
+      if (useOnDemand) {
+        for (int i=0; i < importRefs.length; i++) {
+          PsiJavaCodeReferenceElement ref=importRefs[i];
+          if (ref.getContainingFile() == jspFile) {
+            classesToReimport.add(ref.resolve());
+            ref.delete();
+          }
+        }
+      }
+    }
+    for (int i=0; i < classesToReimport.size(); i++) {
+      PsiClass aClass=(PsiClass)classesToReimport.get(i);
+      if (aClass != null) {
+        addImport(file,aClass);
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  return true;
+}

@@ -1,0 +1,56 @@
+{
+  int offset=parent.getStartOffset();
+  int oldLength=parent.getTextLength();
+  int newLength=newChildrenParent.getTextLength();
+  PsiTreeChangeEventImpl event=null;
+  PsiElement parentPsiElement=SourceTreeToPsiMap.treeElementToPsi(parent);
+  boolean physical=parentPsiElement.isPhysical();
+  PsiFile file=parentPsiElement.getContainingFile();
+  ChameleonTransforming.transformChildren(newChildrenParent);
+  final TreeElement firstChild=newChildrenParent.firstChild;
+  if (physical) {
+    PsiManagerImpl manager=(PsiManagerImpl)parent.getManager();
+    manager.invalidateFile(file);
+    event=new PsiTreeChangeEventImpl(manager);
+    event.setParent(parentPsiElement);
+    event.setFile(file);
+    event.setOffset(offset);
+    event.setOldLength(oldLength);
+    manager.beforeChildrenChange(event);
+    VirtualFile vFile=file.getVirtualFile();
+    if (vFile != null) {
+      RepositoryManager repositoryManager=manager.getRepositoryManager();
+      if (repositoryManager != null) {
+        ChameleonTransforming.transformChildren(parent);
+        for (TreeElement child=parent.firstChild; child != null; child=child.getTreeNext()) {
+          repositoryManager.beforeChildAddedOrRemoved(file,parent,child);
+        }
+        for (TreeElement child=firstChild; child != null; child=child.getTreeNext()) {
+          repositoryManager.beforeChildAddedOrRemoved(file,parent,child);
+        }
+      }
+    }
+  }
+  final CharTable newCharTab=SharedImplUtil.findCharTableByTree(parent);
+  TreeElement oldChild=parent.firstChild;
+  while (oldChild != null) {
+    oldChild.putUserData(CharTable.CHAR_TABLE_KEY,newCharTab);
+    oldChild=oldChild.getTreeNext();
+  }
+  TreeUtil.removeRange(parent.firstChild,null);
+  if (firstChild != null) {
+    final CharTable oldCharTab=SharedImplUtil.findCharTableByTree(newChildrenParent);
+    registerLeafsInCharTab(newCharTab,firstChild,oldCharTab);
+    TreeUtil.addChildren(parent,firstChild);
+  }
+  parent.setCachedLength(newLength);
+  parent.subtreeChanged();
+  PsiManagerImpl manager=(PsiManagerImpl)parent.getManager();
+  if (physical) {
+    manager.childrenChanged(event);
+  }
+ else   if (manager != null) {
+    manager.nonPhysicalChange();
+  }
+  checkConsistency(file);
+}

@@ -1,0 +1,55 @@
+{
+  try {
+    ControlFlow flow=new ControlFlowAnalyzer().buildControlFlow(psiBlock);
+    if (flow == null)     return false;
+    myInstructions=flow.getInstructions();
+    myFields=flow.getFields();
+    if (LOG.isDebugEnabled()) {
+      for (int i=0; i < myInstructions.length; i++) {
+        Instruction instruction=myInstructions[i];
+        LOG.debug("" + i + ": "+ instruction.toString());
+      }
+    }
+    int branchCount=0;
+    for (int i=0; i < myInstructions.length; i++) {
+      Instruction instruction=myInstructions[i];
+      if (instruction instanceof BranchingInstruction)       branchCount++;
+    }
+    if (branchCount > 80)     return false;
+    final ArrayList queue=new ArrayList();
+    queue.add(new DfaInstructionState(myInstructions[0],DfaMemoryStateImpl.createEmpty()));
+    final boolean unitTestMode=ApplicationManager.getApplication().isUnitTestMode();
+    final long before=System.currentTimeMillis();
+    while (queue.size() > 0) {
+      if (!unitTestMode && System.currentTimeMillis() - before > ourTimeLimit)       return false;
+      ProgressManager.getInstance().checkCanceled();
+      DfaInstructionState instructionState=(DfaInstructionState)queue.remove(0);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(instructionState.toString());
+      }
+      Instruction instruction=instructionState.getInstruction();
+      long distance=instructionState.getDistanceFromStart();
+      if (instruction instanceof BranchingInstruction) {
+        instruction.setMemoryStateProcessed(instructionState.getMemoryState().createCopy());
+      }
+      DfaInstructionState[] after=instruction.apply(DataFlowRunner.this,instructionState.getMemoryState());
+      if (after != null) {
+        for (int i=0; i < after.length; i++) {
+          DfaInstructionState state=after[i];
+          Instruction nextInstruction=state.getInstruction();
+          if (!(nextInstruction instanceof BranchingInstruction) || !nextInstruction.isMemoryStateProcessed(state.getMemoryState())) {
+            state.setDistanceFromStart(distance + 1);
+            queue.add(state);
+          }
+        }
+      }
+    }
+    return true;
+  }
+ catch (  EmptyStackException e) {
+    return false;
+  }
+ finally {
+    DfaValueFactory.freeInstance();
+  }
+}

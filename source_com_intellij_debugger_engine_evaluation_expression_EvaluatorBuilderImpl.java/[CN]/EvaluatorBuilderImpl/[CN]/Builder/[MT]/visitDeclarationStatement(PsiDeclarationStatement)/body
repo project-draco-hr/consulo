@@ -1,0 +1,59 @@
+{
+  List<Evaluator> evaluators=new ArrayList<Evaluator>();
+  PsiElement[] declaredElements=statement.getDeclaredElements();
+  for (int i=0; i < declaredElements.length; i++) {
+    PsiElement declaredElement=declaredElements[i];
+    if (declaredElement instanceof PsiLocalVariable) {
+      if (myCurrentFragmentEvaluator != null) {
+        PsiLocalVariable localVariable=((PsiLocalVariable)declaredElement);
+        PsiType type=localVariable.getType();
+        if (type == null) {
+          throw new EvaluateRuntimeException(EvaluateExceptionUtil.UNKNOWN_TYPE(localVariable.getName()));
+        }
+        PsiElementFactory elementFactory=localVariable.getManager().getElementFactory();
+        try {
+          PsiExpression initialValue=elementFactory.createExpressionFromText(CodeInsightUtil.getDefaultValueOfType(type),null);
+          Object value=ConstantExpressionEvaluator.computeConstantExpression(initialValue,null,true);
+          myCurrentFragmentEvaluator.setInitialValue(localVariable.getName(),value);
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
+        }
+catch (        EvaluateException e) {
+          throw new EvaluateRuntimeException(e);
+        }
+        PsiExpression initializer=localVariable.getInitializer();
+        if (initializer != null) {
+          try {
+            if (!TypeConversionUtil.areTypesAssignmentCompatible(localVariable.getType(),initializer)) {
+              throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Initializer for '" + localVariable.getName() + "' have incompatible type "));
+            }
+            initializer.accept(this);
+            Evaluator rEvaluator=myResult;
+            PsiExpression localVarReference=elementFactory.createExpressionFromText(localVariable.getName(),initializer);
+            localVarReference.accept(this);
+            Evaluator lEvaluator=myResult;
+            evaluators.add(new AssignmentEvaluator(lEvaluator,rEvaluator));
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
+      }
+ else {
+        throw new EvaluateRuntimeException(new EvaluateException("Local variable declarations are supported here.",null));
+      }
+    }
+ else {
+      throw new EvaluateRuntimeException(new EvaluateException("Invalid declaration : " + declaredElement.getText() + "Only local variable declarations supported.",null));
+    }
+  }
+  if (evaluators.size() > 0) {
+    CodeFragmentEvaluator codeFragmentEvaluator=new CodeFragmentEvaluator(myCurrentFragmentEvaluator);
+    codeFragmentEvaluator.setStatements(evaluators.toArray(new Evaluator[0]));
+    myResult=codeFragmentEvaluator;
+  }
+ else {
+    myResult=null;
+  }
+}

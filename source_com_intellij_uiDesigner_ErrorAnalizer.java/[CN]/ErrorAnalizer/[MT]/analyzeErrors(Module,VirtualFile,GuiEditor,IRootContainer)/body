@@ -1,0 +1,94 @@
+{
+  LOG.assertTrue(module != null);
+  LOG.assertTrue(formFile != null);
+  LOG.assertTrue(rootContainer != null);
+  final String classToBind=rootContainer.getClassToBind();
+  final PsiClass psiClass;
+  if (classToBind != null) {
+    psiClass=FormEditingUtil.findClassToBind(module,classToBind);
+    if (psiClass == null) {
+      final QuickFix[] fixes=editor != null ? new QuickFix[]{new CreateClassToBindFix(editor,classToBind)} : QuickFix.EMPTY_ARRAY;
+      final ErrorInfo errorInfo=new ErrorInfo("Class \"" + classToBind + "\" does not exist",fixes);
+      rootContainer.putClientProperty(CLIENT_PROP_CLASS_TO_BIND_ERROR,errorInfo);
+    }
+ else {
+      rootContainer.putClientProperty(CLIENT_PROP_CLASS_TO_BIND_ERROR,null);
+    }
+  }
+ else {
+    psiClass=null;
+  }
+  final ArrayList<String> usedBindings=new ArrayList<String>();
+  final HashMap<String,PsiType> className2Type=new HashMap<String,PsiType>();
+  FormEditingUtil.iterate(rootContainer,new FormEditingUtil.ComponentVisitor<IComponent>(){
+    public boolean visit(    final IComponent component){
+      component.putClientProperty(CLIENT_PROP_BINDING_ERROR,null);
+      final String binding=component.getBinding();
+      if (binding == null) {
+        return true;
+      }
+      if (psiClass != null) {
+        final PsiField[] fields=psiClass.getFields();
+        PsiField field=null;
+        for (int i=fields.length - 1; i >= 0; i--) {
+          if (binding.equals(fields[i].getName())) {
+            field=fields[i];
+            break;
+          }
+        }
+        if (field == null) {
+          final QuickFix[] fixes=editor != null ? new QuickFix[]{new CreateFieldFix(editor,psiClass,component.getComponentClassName(),binding)} : QuickFix.EMPTY_ARRAY;
+          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo("Field \"" + binding + "\" does not exist in class \""+ classToBind+ "\"",fixes));
+          return true;
+        }
+ else         if (field.hasModifierProperty(PsiModifier.STATIC)) {
+          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo("Cannot bind to static field \"" + binding + "\"",QuickFix.EMPTY_ARRAY));
+          return true;
+        }
+        try {
+          final PsiType componentType;
+          final String className=component.getComponentClassName().replace('$','.');
+          if (className2Type.containsKey(className)) {
+            componentType=className2Type.get(className);
+          }
+ else {
+            componentType=PsiManager.getInstance(module.getProject()).getElementFactory().createTypeFromText(className,null);
+          }
+          final PsiType fieldType=field.getType();
+          if (fieldType != null && componentType != null && !fieldType.isAssignableFrom(componentType)) {
+            component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo("Incompatible types. Found \"" + fieldType.getPresentableText() + "\", required \""+ className+ "\"",QuickFix.EMPTY_ARRAY));
+          }
+        }
+ catch (        IncorrectOperationException e) {
+        }
+      }
+      if (usedBindings.contains(binding)) {
+        component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo("Binding to field \"" + binding + "\" already exists",QuickFix.EMPTY_ARRAY));
+        return true;
+      }
+      usedBindings.add(binding);
+      return true;
+    }
+  }
+);
+  FormEditingUtil.iterate(rootContainer,new FormEditingUtil.ComponentVisitor<IComponent>(){
+    public boolean visit(    final IComponent component){
+      if (!(component instanceof IContainer)) {
+        return true;
+      }
+      component.putClientProperty(CLIENT_PROP_GENERAL_ERROR,null);
+      final IContainer container=(IContainer)component;
+      if (container instanceof IRootContainer) {
+        final IRootContainer rootContainer=(IRootContainer)container;
+        if (rootContainer.getComponentCount() > 1) {
+          component.putClientProperty(CLIENT_PROP_GENERAL_ERROR,new ErrorInfo("Form cannot be compiled because it contains more than one component at the top level",QuickFix.EMPTY_ARRAY));
+        }
+      }
+ else       if (container.isXY() && container.getComponentCount() > 0) {
+        component.putClientProperty(CLIENT_PROP_GENERAL_ERROR,new ErrorInfo("Form cannot be compiled until this panel is layed out in a grid",QuickFix.EMPTY_ARRAY));
+      }
+      return true;
+    }
+  }
+);
+}

@@ -1,0 +1,71 @@
+{
+  if (file instanceof PsiBinaryFile || file instanceof PsiCompiledElement || file.getVirtualFile() == null) {
+    return EMPTY_TODO_ITEMS;
+  }
+  int count=myManager.getCacheManager().getTodoCount(file.getVirtualFile());
+  if (count == 0) {
+    return EMPTY_TODO_ITEMS;
+  }
+  TIntArrayList commentStarts=new TIntArrayList();
+  TIntArrayList commentEnds=new TIntArrayList();
+  char[] chars=file.textToCharArray();
+  if (file instanceof PsiPlainTextFile) {
+    commentStarts.add(0);
+    commentEnds.add(file.getTextLength());
+  }
+ else {
+synchronized (PsiLock.LOCK) {
+      final Lexer lexer=((PsiFileImpl)file).createLexer();
+      TokenSet COMMENT_TOKEN_BIT_SET;
+      if (file instanceof PsiJavaFile || file instanceof JspFile) {
+        COMMENT_TOKEN_BIT_SET=ElementType.COMMENT_BIT_SET;
+      }
+ else       if (file instanceof XmlFile) {
+        COMMENT_TOKEN_BIT_SET=XML_COMMENT_BIT_SET;
+      }
+ else {
+        return EMPTY_TODO_ITEMS;
+      }
+      for (lexer.start(chars); ; lexer.advance()) {
+        IElementType tokenType=lexer.getTokenType();
+        if (tokenType == null)         break;
+        if (range != null) {
+          if (lexer.getTokenEnd() <= range.getStartOffset())           continue;
+          if (lexer.getTokenStart() >= range.getEndOffset())           break;
+        }
+        if (COMMENT_TOKEN_BIT_SET.isInSet(tokenType)) {
+          commentStarts.add(lexer.getTokenStart());
+          commentEnds.add(lexer.getTokenEnd());
+        }
+      }
+    }
+  }
+  ArrayList<TodoItem> list=new ArrayList<TodoItem>();
+  for (int i=0; i < commentStarts.size(); i++) {
+    int commentStart=commentStarts.get(i);
+    int commentEnd=commentEnds.get(i);
+    TodoPattern[] patterns=TodoConfiguration.getInstance().getTodoPatterns();
+    for (int j=0; j < patterns.length; j++) {
+      TodoPattern toDoPattern=patterns[j];
+      Pattern pattern=toDoPattern.getPattern();
+      if (pattern != null) {
+        ProgressManager.getInstance().checkCanceled();
+        CharSequence input=new CharArrayCharSequence(chars,commentStart,commentEnd);
+        Matcher matcher=pattern.matcher(input);
+        while (true) {
+          boolean found=matcher.find();
+          if (!found)           break;
+          int start=matcher.start() + commentStart;
+          int end=matcher.end() + commentStart;
+          if (start != end) {
+            if (range == null || range.getStartOffset() <= start && end <= range.getEndOffset()) {
+              list.add(new TodoItemImpl(file,start,end,toDoPattern));
+            }
+          }
+          ProgressManager.getInstance().checkCanceled();
+        }
+      }
+    }
+  }
+  return list.toArray(new TodoItem[list.size()]);
+}

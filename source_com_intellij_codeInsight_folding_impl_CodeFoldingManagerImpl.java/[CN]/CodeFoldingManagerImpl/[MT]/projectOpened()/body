@@ -1,0 +1,100 @@
+{
+  myEditorFactoryListener=new EditorFactoryListener(){
+    public void editorCreated(    EditorFactoryEvent event){
+      final Editor editor=event.getEditor();
+      final Project project=editor.getProject();
+      if (project != null && !project.equals(myProject))       return;
+      final Document document=editor.getDocument();
+      PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(document);
+      if (file == null || file instanceof XmlFile)       return;
+      PsiDocumentManager.getInstance(myProject).commitDocument(document);
+      Runnable operation=new Runnable(){
+        public void run(){
+          Runnable runnable=updateFoldRegions(editor,true);
+          if (runnable != null) {
+            runnable.run();
+          }
+          DocumentFoldingInfo documentFoldingInfo=getDocumentFoldingInfo(document);
+          Editor[] editors=EditorFactory.getInstance().getEditors(document,myProject);
+          for (int i=0; i < editors.length; i++) {
+            Editor editor1=editors[i];
+            if (editor1 == editor)             continue;
+            documentFoldingInfo.loadFromEditor(editor1);
+            break;
+          }
+          documentFoldingInfo.setToEditor(editor);
+          documentFoldingInfo.clear();
+        }
+      }
+;
+      editor.getFoldingModel().runBatchFoldingOperation(operation);
+    }
+    public void editorReleased(    EditorFactoryEvent event){
+      Editor editor=event.getEditor();
+      final Project project=editor.getProject();
+      if (project != null && !project.equals(myProject))       return;
+      Document document=editor.getDocument();
+      PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(document);
+      if (file == null || !file.isValid())       return;
+      PsiDocumentManager.getInstance(myProject).commitDocument(document);
+      Editor[] otherEditors=EditorFactory.getInstance().getEditors(document,myProject);
+      if (otherEditors.length == 0) {
+        getDocumentFoldingInfo(document).loadFromEditor(editor);
+      }
+      EditorFoldingInfo.get(editor).dispose();
+    }
+  }
+;
+  myMouseMotionListener=new EditorMouseMotionAdapter(){
+    LightweightHint myCurrentHint=null;
+    FoldRegion myCurrentFold=null;
+    public void mouseMoved(    EditorMouseEvent e){
+      if (e.getArea() != EditorMouseEventArea.FOLDING_OUTLINE_AREA)       return;
+      LightweightHint hint=null;
+      FoldRegion fold=null;
+      try {
+        Editor editor=e.getEditor();
+        if (PsiDocumentManager.getInstance(myProject).isUncommited(editor.getDocument()))         return;
+        MouseEvent mouseEvent=e.getMouseEvent();
+        fold=((EditorEx)editor).getGutterComponentEx().findFoldingAnchorAt(mouseEvent.getX(),mouseEvent.getY());
+        if (fold == null)         return;
+        if (fold == myCurrentFold && myCurrentHint != null) {
+          hint=myCurrentHint;
+          return;
+        }
+        PsiElement psiElement=EditorFoldingInfo.get(editor).getPsiElement(fold);
+        if (psiElement == null)         return;
+        int textOffset=psiElement.getTextOffset();
+        Point foldStartXY=editor.visualPositionToXY(editor.offsetToVisualPosition(textOffset));
+        Rectangle visibleArea=editor.getScrollingModel().getVisibleArea();
+        if (visibleArea.y > foldStartXY.y) {
+          if (myCurrentHint != null) {
+            myCurrentHint.hide();
+            myCurrentHint=null;
+          }
+          TextRange textRange=new TextRange(textOffset,fold.getStartOffset());
+          hint=EditorFragmentComponent.showEditorFragmentHint(editor,textRange,true);
+          myCurrentFold=fold;
+          myCurrentHint=hint;
+        }
+      }
+  finally {
+        if (hint == null) {
+          if (myCurrentHint != null) {
+            myCurrentHint.hide();
+            myCurrentHint=null;
+          }
+          myCurrentFold=null;
+        }
+      }
+    }
+  }
+;
+  StartupManager.getInstance(myProject).registerPostStartupActivity(new Runnable(){
+    public void run(){
+      EditorFactory.getInstance().addEditorFactoryListener(myEditorFactoryListener);
+      EditorFactory.getInstance().getEventMulticaster().addEditorMouseMotionListener(myMouseMotionListener);
+    }
+  }
+);
+}

@@ -1,0 +1,80 @@
+{
+  if (asynchronous) {
+    ApplicationManager.getApplication().assertReadAccessAllowed();
+  }
+ else {
+    ApplicationManager.getApplication().assertWriteAccessAllowed();
+  }
+  final ModalityState modalityState=EventQueue.isDispatchThread() ? ModalityState.current() : ModalityState.NON_MMODAL;
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("VirtualFile.refresh():" + getPresentableUrl() + ", recursive = "+ recursive+ ", modalityState = "+ modalityState);
+  }
+  final WorkerThread worker;
+  if (asynchronous) {
+    worker=new WorkerThread("Synchronize worker");
+  }
+ else {
+    worker=null;
+  }
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      myFileSystem.getManager().beforeRefreshStart(asynchronous,modalityState,postRunnable);
+      PhysicalFile physicalFile=getPhysicalFile();
+      if (!physicalFile.exists()) {
+        Runnable runnable=new Runnable(){
+          public void run(){
+            if (!isValid())             return;
+            VirtualFileImpl parent=(VirtualFileImpl)getParent();
+            if (parent != null) {
+              myFileSystem.fireBeforeFileDeletion(null,VirtualFileImpl.this);
+              parent.removeChild(VirtualFileImpl.this);
+              myFileSystem.fireFileDeleted(null,VirtualFileImpl.this,myName,myDirectoryFlag,parent);
+            }
+          }
+        }
+;
+        myFileSystem.getManager().addEventToFireByRefresh(runnable,asynchronous,modalityState);
+      }
+ else {
+        myFileSystem.refresh(VirtualFileImpl.this,recursive,true,worker,modalityState);
+      }
+    }
+  }
+;
+  final Runnable endTask=new Runnable(){
+    public void run(){
+      myFileSystem.getManager().afterRefreshFinish(asynchronous,modalityState);
+    }
+  }
+;
+  if (asynchronous) {
+    Runnable runnable1=new Runnable(){
+      public void run(){
+        LOG.info("Executing request:" + this);
+        final ProgressIndicator indicator=myFileSystem.getManager().getRefreshIndicator();
+        if (indicator != null) {
+          indicator.start();
+          indicator.setText("Synchronizing files...");
+        }
+        worker.start();
+        ApplicationManager.getApplication().runReadAction(runnable);
+        worker.dispose(false);
+        try {
+          worker.join();
+        }
+ catch (        InterruptedException e) {
+        }
+        if (indicator != null) {
+          indicator.stop();
+        }
+        endTask.run();
+      }
+    }
+;
+    myFileSystem.getSynchronizeQueueAlarm().addRequest(runnable1,0);
+  }
+ else {
+    runnable.run();
+    endTask.run();
+  }
+}

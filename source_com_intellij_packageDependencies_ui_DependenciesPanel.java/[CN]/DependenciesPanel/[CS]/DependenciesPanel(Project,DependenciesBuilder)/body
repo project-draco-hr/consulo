@@ -1,0 +1,80 @@
+{
+  super(new BorderLayout());
+  myDependencies=builder.getDependencies();
+  myBuilder=builder;
+  myIllegalDependencies=myBuilder.getIllegalDependencies();
+  myProject=project;
+  myUsagesPanel=new UsagesPanel(myProject);
+  hideHintsWhenNothingToShow();
+  Splitter treeSplitter=new Splitter();
+  treeSplitter.setFirstComponent(myLeftTreePanel);
+  treeSplitter.setSecondComponent(ScrollPaneFactory.createScrollPane(myRightTree));
+  Splitter splitter=new Splitter(true);
+  splitter.setFirstComponent(treeSplitter);
+  splitter.setSecondComponent(myUsagesPanel);
+  add(splitter,BorderLayout.CENTER);
+  add(createToolbar(),BorderLayout.NORTH);
+  myRightTreeExpantionMonitor=TreeExpantionMonitor.install(myRightTree);
+  myLeftTreeExpantionMonitor=TreeExpantionMonitor.install(myLeftTree);
+  myRightTreeMarker=new TreeModelBuilder.Marker(){
+    public boolean isMarked(    PsiFile file){
+      return myIllegalsInRightTree.contains(file);
+    }
+  }
+;
+  myLeftTreeMarker=new TreeModelBuilder.Marker(){
+    public boolean isMarked(    PsiFile file){
+      return myIllegalDependencies.containsKey(file);
+    }
+  }
+;
+  updateLeftTreeModel();
+  updateRightTreeModel();
+  myLeftTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      updateRightTreeModel();
+      final StringBuffer denyRules=new StringBuffer();
+      final StringBuffer allowRules=new StringBuffer();
+      PackageDependenciesNode selectedNode=(PackageDependenciesNode)myLeftTree.getSelectionPath().getLastPathComponent();
+      traverseToLeaves(selectedNode,denyRules,allowRules);
+      try {
+        if (denyRules.length() + allowRules.length() > 0) {
+          myBrowser.read(new StringReader("<html><body>The following rule" + ((denyRules.length() == 0 || allowRules.length() == 0) ? " is " : "s are ") + "violated: "+ (denyRules.length() > 0 ? denyRules.toString() : " ")+ "<br>"+ (allowRules.length() > 0 ? allowRules.toString() : " ")+ "</body></html>"),null);
+        }
+ else {
+          myBrowser.read(new StringReader("<html><body>No rules are violated.</body></html>"),null);
+        }
+      }
+ catch (      IOException e1) {
+      }
+    }
+  }
+);
+  myRightTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          Set<PsiFile> searchIn=getSelectedScope(myLeftTree);
+          Set<PsiFile> searchFor=getSelectedScope(myRightTree);
+          if (searchIn.isEmpty() || searchFor.isEmpty()) {
+            myUsagesPanel.setToInitialPosition();
+          }
+ else {
+            myUsagesPanel.findUsages(builder,searchIn,searchFor);
+          }
+        }
+      }
+);
+    }
+  }
+);
+  initTree(myLeftTree,false);
+  initTree(myRightTree,true);
+  AnalysisScope scope=builder.getScope();
+  if (scope.getScopeType() == AnalysisScope.FILE) {
+    Set<PsiFile> oneFileSet=myDependencies.keySet();
+    if (oneFileSet.size() == 1) {
+      selectElementInLeftTree(oneFileSet.iterator().next());
+    }
+  }
+}

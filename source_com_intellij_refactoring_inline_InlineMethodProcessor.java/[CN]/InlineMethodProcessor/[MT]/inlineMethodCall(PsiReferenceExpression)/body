@@ -1,0 +1,89 @@
+{
+  PsiMethodCallExpression methodCall=(PsiMethodCallExpression)ref.getParent();
+  BlockData blockData=prepareBlock(ref);
+  solveVariableNameConflicts(blockData.block,ref);
+  substituteMethodTypeParams(blockData.block,methodCall);
+  addParmAndThisVarInitializers(blockData,methodCall);
+  PsiElement anchor=RefactoringUtil.getParentStatement(methodCall,true);
+  if (anchor == null)   return;
+  PsiElement anchorParent=anchor.getParent();
+  PsiLocalVariable thisVar=null;
+  PsiLocalVariable[] parmVars=new PsiLocalVariable[blockData.parmVars.length];
+  PsiLocalVariable resultVar=null;
+  PsiElement[] methodStatements=blockData.block.getChildren();
+  if (methodStatements.length > 2) {
+    PsiElement first=methodStatements[1];
+    PsiElement last=methodStatements[methodStatements.length - 2];
+    PsiStatement[] statements=blockData.block.getStatements();
+    if (statements.length > 0 && statements[statements.length - 1] instanceof PsiReturnStatement) {
+      last=statements[statements.length - 1].getPrevSibling();
+    }
+    PsiElement firstAdded=anchorParent.addRangeBefore(first,last,anchor);
+    PsiElement current=firstAdded;
+    if (blockData.thisVar != null) {
+      while (current != null && !(current instanceof PsiStatement)) {
+        current=current.getNextSibling();
+      }
+      if (current == null) {
+        current=firstAdded;
+      }
+      thisVar=(PsiLocalVariable)((PsiDeclarationStatement)current).getDeclaredElements()[0];
+      current=current.getNextSibling();
+    }
+    for (int i=0; i < parmVars.length; i++) {
+      final PsiElement oldCurrent=current;
+      while (current != null && !(current instanceof PsiStatement)) {
+        current=current.getNextSibling();
+      }
+      if (current == null) {
+        current=oldCurrent;
+      }
+      parmVars[i]=(PsiLocalVariable)((PsiDeclarationStatement)current).getDeclaredElements()[0];
+      current=current.getNextSibling();
+    }
+    if (blockData.resultVar != null) {
+      final PsiElement oldCurrent=current;
+      while (current != null && !(current instanceof PsiStatement)) {
+        current=current.getNextSibling();
+      }
+      if (current == null) {
+        current=oldCurrent;
+      }
+      resultVar=(PsiLocalVariable)((PsiDeclarationStatement)current).getDeclaredElements()[0];
+      current=current.getNextSibling();
+    }
+  }
+  if (methodCall.getParent() instanceof PsiExpressionStatement) {
+    methodCall.getParent().delete();
+  }
+ else {
+    if (blockData.resultVar != null) {
+      PsiExpression expr=myFactory.createExpressionFromText(blockData.resultVar.getName(),null);
+      methodCall.replace(expr);
+    }
+ else {
+    }
+  }
+  PsiClass thisClass=myMethod.getContainingClass();
+  PsiExpression thisAccessExpr=thisVar != null ? myFactory.createExpressionFromText(thisVar.getName(),null) : null;
+  ChangeContextUtil.decodeContextInfo(anchorParent,thisClass,thisAccessExpr);
+  if (thisVar != null) {
+    inlineParmOrThisVariable(thisVar,false);
+  }
+  final PsiParameter[] parameters=myMethod.getParameterList().getParameters();
+  for (int i=0; i < parmVars.length; i++) {
+    final boolean strictlyFinal;
+    final PsiParameter parameter=parameters[i];
+    if (parameter.hasModifierProperty(PsiModifier.FINAL)) {
+      strictlyFinal=isStrictlyFinal(parameter);
+    }
+ else {
+      strictlyFinal=false;
+    }
+    inlineParmOrThisVariable(parmVars[i],strictlyFinal);
+  }
+  if (resultVar != null) {
+    inlineResultVariable(resultVar);
+  }
+  ChangeContextUtil.clearContextInfo(anchorParent);
+}

@@ -1,0 +1,50 @@
+{
+  if (type1 instanceof PsiCapturedWildcardType) {
+    return getLeastUpperBound(((PsiCapturedWildcardType)type1).getUpperBound(),type2,compared,manager);
+  }
+ else   if (type2 instanceof PsiCapturedWildcardType) {
+    return getLeastUpperBound(type1,((PsiCapturedWildcardType)type2).getUpperBound(),compared,manager);
+  }
+  if (type1 instanceof PsiArrayType && type2 instanceof PsiArrayType) {
+    final PsiType componentType=getLeastUpperBound(((PsiArrayType)type1).getComponentType(),((PsiArrayType)type2).getComponentType(),manager);
+    if (componentType != null) {
+      return componentType.createArrayType();
+    }
+  }
+ else   if (type1 instanceof PsiClassType && type2 instanceof PsiClassType) {
+    PsiClassType.ClassResolveResult classResolveResult1=((PsiClassType)type1).resolveGenerics();
+    PsiClassType.ClassResolveResult classResolveResult2=((PsiClassType)type2).resolveGenerics();
+    PsiClass aClass=classResolveResult1.getElement();
+    PsiClass bClass=classResolveResult2.getElement();
+    if (aClass == null || bClass == null) {
+      return manager.getElementFactory().createTypeByFQClassName("java.lang.Object",GlobalSearchScope.allScope(manager.getProject()));
+    }
+    PsiClass[] supers=getLeastUpperClasses(aClass,bClass);
+    if (supers.length == 0) {
+      return manager.getElementFactory().createTypeByFQClassName("java.lang.Object",aClass.getResolveScope());
+    }
+    PsiClassType[] conjuncts=new PsiClassType[supers.length];
+    for (int i=0; i < supers.length; i++) {
+      PsiClass aSuper=supers[i];
+      PsiSubstitutor subst1=TypeConversionUtil.getSuperClassSubstitutor(aSuper,aClass,classResolveResult1.getSubstitutor());
+      PsiSubstitutor subst2=TypeConversionUtil.getSuperClassSubstitutor(aSuper,bClass,classResolveResult2.getSubstitutor());
+      LOG.assertTrue(subst1 != null && subst2 != null);
+      Iterator<PsiTypeParameter> iterator=PsiUtil.typeParametersIterator(aSuper);
+      PsiSubstitutor substitutor=PsiSubstitutor.EMPTY;
+      while (iterator.hasNext()) {
+        PsiTypeParameter parameter=iterator.next();
+        PsiType mapping1=subst1.substitute(parameter);
+        PsiType mapping2=subst2.substitute(parameter);
+        if (mapping1 != null && mapping2 != null) {
+          substitutor=substitutor.put(parameter,getLeastContainingTypeArgument(mapping1,mapping2,compared,manager));
+        }
+ else {
+          substitutor=substitutor.put(parameter,null);
+        }
+      }
+      conjuncts[i]=manager.getElementFactory().createType(aSuper,substitutor);
+    }
+    return PsiIntersectionType.createIntersection(conjuncts);
+  }
+  return manager.getElementFactory().createTypeByFQClassName("java.lang.Object",GlobalSearchScope.allScope(manager.getProject()));
+}

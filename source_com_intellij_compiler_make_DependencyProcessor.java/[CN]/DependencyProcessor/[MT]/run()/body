@@ -1,0 +1,176 @@
+{
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("Checking dependencies for " + myDependencyCache.resolve(myQName));
+  }
+  final boolean superListChanged=mySuperClassChanged || mySuperClassAdded || mySuperInterfaceAdded|| mySuperInterfaceRemoved|| mySuperlistGenericSignatureChanged;
+  if (superListChanged) {
+    myDependencyCache.registerSuperListChange(myQName);
+  }
+  final Cache oldCache=myDependencyCache.getCache();
+  final Cache newCache=myDependencyCache.getNewClassesCache();
+  if (!myMembersChanged && (oldCache.getFlags(oldCache.getClassId(myQName)) == newCache.getFlags(newCache.getClassId(myQName))) && !superListChanged&& !myWereAnnotationTargetsRemoved) {
+    return;
+  }
+  if (myIsAnnotation) {
+    if (hasMembersWithoutDefaults(myAddedMembers)) {
+      markAll(myBackDependencies,"; reason: added annotation type member without default " + myDependencyCache.resolve(myQName));
+      return;
+    }
+    if (myRemovedMembers.size() > 0) {
+      markAll(myBackDependencies,"; reason: removed annotation type member " + myDependencyCache.resolve(myQName));
+      return;
+    }
+    if (myChangedMembers.size() > 0) {
+      markAll(myBackDependencies,"; reason: changed annotation member's type " + myDependencyCache.resolve(myQName));
+      return;
+    }
+    if (wereAnnotationDefaultsRemoved()) {
+      markAll(myBackDependencies,"; reason: removed annotation member's default value " + myDependencyCache.resolve(myQName));
+      return;
+    }
+    if (myWereAnnotationTargetsRemoved) {
+      markAll(myBackDependencies,"; reason: removed annotation's targets " + myDependencyCache.resolve(myQName));
+      return;
+    }
+  }
+  final DependencyCacheNavigator cacheNavigator=myDependencyCache.getCacheNavigator();
+  if (mySuperClassChanged || mySuperInterfaceRemoved || mySuperlistGenericSignatureChanged) {
+    markAll(myBackDependencies,"; reason: deleted items from the superlist or changed superlist generic signature of " + myDependencyCache.resolve(myQName));
+    cacheNavigator.walkSubClasses(myQName,new ClassInfoProcessor(){
+      public boolean process(      int classQName) throws CacheCorruptedException {
+        markAll(oldCache.getBackDependencies(classQName),"; reason: deleted items from the superlist or changed superlist generic signature of " + myDependencyCache.resolve(myQName));
+        return true;
+      }
+    }
+);
+    return;
+  }
+  final boolean isKindChanged=(CacheUtils.isInterface(oldCache,myQName) && !CacheUtils.isInterface(newCache,myQName)) || (!CacheUtils.isInterface(oldCache,myQName) && CacheUtils.isInterface(newCache,myQName));
+  if (isKindChanged) {
+    markAll(myBackDependencies,"; reason: class kind changed (class/interface) " + myDependencyCache.resolve(myQName));
+    cacheNavigator.walkSubClasses(myQName,new ClassInfoProcessor(){
+      public boolean process(      int classQName) throws CacheCorruptedException {
+        markAll(oldCache.getBackDependencies(classQName),"; reason: class kind changed (class/interface) " + myDependencyCache.resolve(myQName));
+        return true;
+      }
+    }
+);
+    return;
+  }
+  boolean becameFinal=!CacheUtils.isFinal(oldCache,myQName) && CacheUtils.isFinal(newCache,myQName);
+  if (becameFinal) {
+    markAll(myBackDependencies,"; reason: class became final: " + myDependencyCache.resolve(myQName));
+  }
+ else {
+    boolean becameAbstract=!CacheUtils.isAbstract(oldCache,myQName) && CacheUtils.isAbstract(newCache,myQName);
+    boolean accessRestricted=MakeUtil.isMoreAccessible(oldCache.getFlags(oldCache.getClassId(myQName)),newCache.getFlags(newCache.getClassId(myQName)));
+    for (int idx=0; idx < myBackDependencies.length; idx++) {
+      Dependency backDependency=myBackDependencies[idx];
+      if (myDependencyCache.isTargetClassInfoMarked(backDependency))       continue;
+      if (accessRestricted) {
+        if (myDependencyCache.markTargetClassInfo(backDependency)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Mark dependent class " + myDependencyCache.resolve(backDependency.getClassQualifiedName()) + "; reason: "+ myDependencyCache.resolve(myQName)+ " made less accessible");
+          }
+        }
+        continue;
+      }
+      if (becameAbstract) {
+        if (processClassBecameAbstract(backDependency)) {
+          continue;
+        }
+      }
+      if (isDependentOnRemovedMembers(backDependency)) {
+        if (myDependencyCache.markTargetClassInfo(backDependency)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Mark dependent class " + myDependencyCache.resolve(backDependency.getClassQualifiedName()) + "; reason: the class uses removed members of "+ myDependencyCache.resolve(myQName));
+          }
+        }
+        continue;
+      }
+      if (isDependentOnChangedMembers(backDependency)) {
+        if (myDependencyCache.markTargetClassInfo(backDependency)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Mark dependent class " + myDependencyCache.resolve(backDependency.getClassQualifiedName()) + "; reason: the class uses changed members of "+ myDependencyCache.resolve(myQName));
+          }
+        }
+        continue;
+      }
+      MethodInfo[] usedMethods=backDependency.getUsedMethods();
+      if (isDependentOnEquivalentMethods(usedMethods,myRemovedMembers)) {
+        if (myDependencyCache.markTargetClassInfo(backDependency)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Mark dependent class " + myDependencyCache.resolve(backDependency.getClassQualifiedName()) + "; reason: some overloaded methods of "+ myDependencyCache.resolve(myQName)+ " were removed");
+          }
+        }
+        continue;
+      }
+      if (isDependentOnEquivalentMethods(usedMethods,myAddedMembers)) {
+        if (myDependencyCache.markTargetClassInfo(backDependency)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Mark dependent class " + myDependencyCache.resolve(backDependency.getClassQualifiedName()) + "; reason: some overloaded methods of "+ myDependencyCache.resolve(myQName)+ " were added");
+          }
+        }
+        continue;
+      }
+    }
+  }
+  final Set methodsToCheck=new HashSet();
+  extractMethods(myRemovedMembers,methodsToCheck,false);
+  extractMethods(myAddedMembers,methodsToCheck,false);
+  processInheritanceDependencies(methodsToCheck.size() > 0);
+  if (!MakeUtil.isAnonymous(myDependencyCache.resolve(myQName))) {
+    final TIntHashSet fieldNames=new TIntHashSet();
+    extractFieldNames(myAddedMembers,fieldNames);
+    int addedFieldsCount=fieldNames.size();
+    extractFieldNames(myRemovedMembers,fieldNames);
+    if (fieldNames.size() > 0) {
+      cacheNavigator.walkSuperClasses(myQName,new ClassInfoProcessor(){
+        public boolean process(        final int classQName) throws CacheCorruptedException {
+          markUseDependenciesOnFields(classQName,fieldNames);
+          return true;
+        }
+      }
+);
+    }
+    if (addedFieldsCount > 0 && CacheUtils.isInterface(oldCache,myQName)) {
+      final TIntHashSet visitedClasses=new TIntHashSet();
+      visitedClasses.add(myQName);
+      cacheNavigator.walkSubClasses(myQName,new ClassInfoProcessor(){
+        public boolean process(        int subclassQName) throws CacheCorruptedException {
+          markUseDependenciesOnFields(subclassQName,fieldNames);
+          visitedClasses.add(subclassQName);
+          cacheNavigator.walkSuperClasses(subclassQName,new ClassInfoProcessor(){
+            public boolean process(            int superclassQName) throws CacheCorruptedException {
+              if (visitedClasses.contains(superclassQName)) {
+                return false;
+              }
+              markUseDependenciesOnFields(superclassQName,fieldNames);
+              visitedClasses.add(superclassQName);
+              return true;
+            }
+          }
+);
+          return true;
+        }
+      }
+);
+    }
+    if (methodsToCheck.size() > 0) {
+      cacheNavigator.walkSuperClasses(myQName,new ClassInfoProcessor(){
+        public boolean process(        int classQName) throws CacheCorruptedException {
+          markUseDependenciesOnEquivalentMethods(classQName,methodsToCheck,myQName);
+          return true;
+        }
+      }
+);
+      cacheNavigator.walkSubClasses(myQName,new ClassInfoProcessor(){
+        public boolean process(        int classQName) throws CacheCorruptedException {
+          markUseDependenciesOnEquivalentMethods(classQName,methodsToCheck,myQName);
+          return true;
+        }
+      }
+);
+    }
+  }
+}

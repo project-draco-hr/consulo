@@ -1,0 +1,82 @@
+{
+  LOG.assertTrue(lexer.getTokenType() == NEW_KEYWORD);
+  CompositeElement element=Factory.createCompositeElement(NEW_EXPRESSION);
+  if (qualifier != null) {
+    TreeUtil.addChildren(element,qualifier);
+    TreeUtil.addChildren(element,dot);
+  }
+  TreeUtil.addChildren(element,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+  lexer.advance();
+  TreeUtil.addChildren(element,parseReferenceParameterList(lexer,false));
+  boolean isPrimitive;
+  TreeElement refOrType;
+  if (lexer.getTokenType() == IDENTIFIER) {
+    isPrimitive=false;
+    refOrType=parseJavaCodeReference(lexer,true);
+  }
+ else   if (lexer.getTokenType() != null && PRIMITIVE_TYPE_BIT_SET.isInSet(lexer.getTokenType())) {
+    isPrimitive=true;
+    refOrType=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
+    lexer.advance();
+  }
+ else {
+    TreeUtil.addChildren(element,Factory.createErrorElement("Identifier expected"));
+    return element;
+  }
+  if (!isPrimitive && lexer.getTokenType() == LPARENTH) {
+    TreeElement argumentList=parseArgumentList(lexer);
+    if (lexer.getTokenType() == LBRACE && refOrType.getElementType() == JAVA_CODE_REFERENCE) {
+      CompositeElement classElement=Factory.createCompositeElement(ANONYMOUS_CLASS);
+      TreeUtil.addChildren(element,classElement);
+      TreeUtil.addChildren(classElement,refOrType);
+      TreeUtil.addChildren(classElement,argumentList);
+      myContext.getDeclarationParsing().parseClassBodyWithBraces(classElement,lexer,false,false);
+    }
+ else {
+      TreeUtil.addChildren(element,refOrType);
+      TreeUtil.addChildren(element,argumentList);
+    }
+  }
+ else {
+    TreeUtil.addChildren(element,refOrType);
+    if (lexer.getTokenType() != LBRACKET) {
+      String description=isPrimitive ? "'[' expected" : "'(' or '[' expected";
+      TreeUtil.addChildren(element,Factory.createErrorElement(description));
+      return element;
+    }
+    int bracketCount=0;
+    int dimCount=0;
+    while (true) {
+      if (lexer.getTokenType() != LBRACKET)       break;
+      TreeUtil.addChildren(element,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+      TreeElement dimExpr=null;
+      if (bracketCount == dimCount) {
+        dimExpr=parseExpression(lexer);
+        if (dimExpr != null) {
+          TreeUtil.addChildren(element,dimExpr);
+          dimCount++;
+        }
+      }
+      bracketCount++;
+      if (lexer.getTokenType() != RBRACKET) {
+        TreeUtil.addChildren(element,Factory.createErrorElement("']' expected"));
+        return element;
+      }
+      TreeUtil.addChildren(element,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+    }
+    if (dimCount == 0) {
+      if (lexer.getTokenType() == LBRACE) {
+        TreeElement initializer=parseArrayInitializerExpression(lexer);
+        if (initializer != null) {
+          TreeUtil.addChildren(element,initializer);
+        }
+      }
+ else {
+        TreeUtil.addChildren(element,Factory.createErrorElement("Array initializer expected"));
+      }
+    }
+  }
+  return element;
+}

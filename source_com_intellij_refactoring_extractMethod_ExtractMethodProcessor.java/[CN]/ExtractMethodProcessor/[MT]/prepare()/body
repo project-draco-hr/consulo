@@ -1,0 +1,117 @@
+{
+  myExpression=null;
+  if (myElements.length == 1 && myElements[0] instanceof PsiExpression) {
+    final PsiExpression expression=(PsiExpression)myElements[0];
+    if (expression.getParent() instanceof PsiExpressionStatement) {
+      myElements[0]=expression.getParent();
+    }
+ else {
+      myExpression=expression;
+    }
+  }
+  if (myFile instanceof JspFileImpl) {
+    if (myShowErrorDialogs) {
+      RefactoringMessageUtil.showErrorMessage(myRefactoringName,myRefactoringName + " refactoring is not supported for JSP",myHelpId,myProject);
+    }
+    return false;
+  }
+  myCodeFragment=ControlFlowUtil.findCodeFragment(myElements[0]);
+  myCodeFragementMember=myCodeFragment.getParent();
+  ControlFlowAnalyzer analyzer=new ControlFlowAnalyzer(myCodeFragment,new LocalsControlFlowPolicy(myCodeFragment),false);
+  try {
+    myControlFlow=analyzer.buildControlFlow();
+  }
+ catch (  ControlFlowAnalyzer.AnalysisCanceledException e) {
+    throw new PrepareFailedException("Code contains syntax errors." + "Cannot perform neccessary analysis.",e.getErrorElement());
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debug(myControlFlow.toString());
+  }
+  calculateFlowStartAndEnd();
+  IntArrayList exitPoints=new IntArrayList();
+  myExitStatements=new ArrayList<PsiStatement>();
+  ControlFlowUtil.findExitPointsAndStatements(myControlFlow,myFlowStart,myFlowEnd,exitPoints,myExitStatements,ControlFlowUtil.DEFAULT_EXIT_STATEMENTS_CLASSES);
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("exit points:");
+    for (int i=0; i < exitPoints.size(); i++) {
+      LOG.debug("  " + exitPoints.get(i));
+    }
+    LOG.debug("exit statements:");
+    for (int i=0; i < myExitStatements.size(); i++) {
+      LOG.debug("  " + myExitStatements.get(i));
+    }
+  }
+  if (exitPoints.size() == 0) {
+    exitPoints.add(myControlFlow.getEndOffset(myElements[myElements.length - 1]));
+  }
+  if (exitPoints.size() != 1) {
+    showMultipleExitPointsMessage();
+    return false;
+  }
+  myExitPoint=exitPoints.get(0);
+  myHasReturnStatement=myExpression == null && ControlFlowUtil.returnPresentBetween(myControlFlow,myFlowStart,myFlowEnd);
+  myInputVariables=ControlFlowUtil.getInputVariables(myControlFlow,myFlowStart,myFlowEnd);
+  myOutputVariables=ControlFlowUtil.getOutputVariables(myControlFlow,myFlowStart,myFlowEnd,myExitPoint);
+  chooseTargetClass();
+  PsiType expressionType=null;
+  if (myExpression != null) {
+    if (myForcedReturnType != null) {
+      expressionType=myForcedReturnType;
+    }
+ else {
+      expressionType=RefactoringUtil.getTypeByExpressionWithExpectedType(myExpression);
+    }
+  }
+  if (expressionType == null) {
+    expressionType=PsiType.VOID;
+  }
+  myHasExpressionOutput=expressionType != PsiType.VOID;
+  PsiType returnStatementType=null;
+  if (myHasReturnStatement) {
+    returnStatementType=myCodeFragementMember instanceof PsiMethod ? ((PsiMethod)myCodeFragementMember).getReturnType() : null;
+  }
+  myHasReturnStatementOutput=returnStatementType != null && returnStatementType != PsiType.VOID;
+  if (!myHasReturnStatementOutput) {
+    int outputCount=(myHasExpressionOutput ? 1 : 0) + myOutputVariables.length;
+    if (outputCount > 1) {
+      showMultipleOutputMessage(expressionType);
+      return false;
+    }
+  }
+  myOutputVariable=myOutputVariables.length > 0 ? myOutputVariables[0] : null;
+  if (myHasReturnStatementOutput) {
+    myReturnType=returnStatementType;
+  }
+ else   if (myOutputVariable != null) {
+    myReturnType=myOutputVariable.getTypeElement().getType();
+  }
+ else {
+    myReturnType=expressionType;
+  }
+  PsiElement container=PsiTreeUtil.getParentOfType(myElements[0],new Class[]{PsiClass.class,PsiMethod.class});
+  if (container instanceof PsiMethod) {
+    myTypeParameterList=((PsiMethod)container).getTypeParameterList();
+  }
+  myThrownExceptions=ExceptionUtil.getThrownCheckedExceptions(myElements);
+  myStatic=shouldBeStatic();
+  if (myTargetClass.getContainingClass() == null || myTargetClass.hasModifierProperty(PsiModifier.STATIC)) {
+    ElementNeedsThis needsThis=new ElementNeedsThis(myTargetClass);
+    for (int i=0; i < myElements.length && !needsThis.usesMembers(); i++) {
+      PsiElement element=myElements[i];
+      element.accept(needsThis);
+    }
+    myCanBeStatic=!needsThis.usesMembers();
+  }
+ else {
+    myCanBeStatic=false;
+  }
+  if (myExpression != null) {
+    myDuplicatesFinder=new DuplicatesFinder(myElements,Arrays.asList(myInputVariables),new ArrayList<PsiVariable>(),false);
+    myDuplicates=myDuplicatesFinder.findDuplicates(myTargetClass);
+  }
+ else {
+    myDuplicatesFinder=new DuplicatesFinder(myElements,Arrays.asList(myInputVariables),Arrays.asList(myOutputVariables),false);
+    myDuplicates=myDuplicatesFinder.findDuplicates(myTargetClass);
+  }
+  return true;
+}

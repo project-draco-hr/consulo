@@ -1,0 +1,111 @@
+{
+  String name=tag.getName();
+  XmlElementDescriptor elementDescriptor;
+  if (tag.getParent() instanceof XmlTag) {
+    XmlTag parentTag=(XmlTag)tag.getParent();
+    elementDescriptor=parentTag.getDescriptor();
+    if (elementDescriptor == null) {
+      return;
+    }
+    elementDescriptor=elementDescriptor.getElementDescriptor(tag);
+    if (elementDescriptor == null) {
+      addElementsForTag(tag,"Element " + name + " is not allowed here",myResult,HighlightInfoType.WRONG_REF,null);
+      return;
+    }
+    if (elementDescriptor instanceof AnyXmlElementDescriptor) {
+      elementDescriptor=tag.getDescriptor();
+    }
+  }
+ else {
+    elementDescriptor=tag.getDescriptor();
+    if (elementDescriptor == null) {
+      addElementsForTag(tag,"Element " + name + " must be declared",myResult,HighlightInfoType.WRONG_REF,null);
+      return;
+    }
+  }
+  final XmlAttributeDescriptor[] attributeDescriptors=elementDescriptor.getAttributesDescriptors();
+  Set<String> requiredAttributes=null;
+  for (int i=0; i < attributeDescriptors.length; i++) {
+    XmlAttributeDescriptor attribute=attributeDescriptors[i];
+    if (attribute != null && attribute.isRequired()) {
+      if (requiredAttributes == null) {
+        requiredAttributes=new HashSet<String>();
+      }
+      requiredAttributes.add(attribute.getDefaultName());
+    }
+  }
+  if (requiredAttributes != null) {
+    for (Iterator<String> iterator=requiredAttributes.iterator(); iterator.hasNext(); ) {
+      final String attrName=iterator.next();
+      if (tag.getAttribute(attrName,XmlUtil.ALL_NAMESPACE) == null) {
+        addElementsForTag(tag,"Element " + name + " doesn't have required attribute",myResult,HighlightInfoType.WRONG_REF,new IntentionAction(){
+          public String getText(){
+            return "Insert Required Attribute";
+          }
+          public String getFamilyName(){
+            return "Insert Required Attribute";
+          }
+          public boolean isAvailable(          Project project,          Editor editor,          PsiFile file){
+            return true;
+          }
+          public void invoke(          final Project project,          final Editor editor,          final PsiFile file){
+            CompositeElement treeElement=(CompositeElement)SourceTreeToPsiMap.psiElementToTree(tag);
+            PsiElement anchor=SourceTreeToPsiMap.treeElementToPsi(XmlChildRole.EMPTY_TAG_END_FINDER.findChild(treeElement));
+            if (anchor == null) {
+              anchor=SourceTreeToPsiMap.treeElementToPsi(XmlChildRole.START_TAG_END_FINDER.findChild(treeElement));
+            }
+            if (anchor == null)             return;
+            final Template template=TemplateManager.getInstance(project).createTemplate("","");
+            template.addTextSegment(" " + attrName + "=\"");
+            Expression expression=new Expression(){
+              TextResult result=new TextResult("");
+              public Result calculateResult(              ExpressionContext context){
+                return result;
+              }
+              public Result calculateQuickResult(              ExpressionContext context){
+                return null;
+              }
+              public LookupItem[] calculateLookupItems(              ExpressionContext context){
+                return new LookupItem[0];
+              }
+            }
+;
+            template.addVariable("name",expression,expression,true);
+            template.addTextSegment("\"");
+            final PsiElement anchor1=anchor;
+            final Runnable runnable=new Runnable(){
+              public void run(){
+                ApplicationManager.getApplication().runWriteAction(new Runnable(){
+                  public void run(){
+                    int textOffset=anchor1.getTextOffset();
+                    editor.getCaretModel().moveToOffset(textOffset);
+                    TemplateManager.getInstance(project).startTemplate(editor,template,null);
+                  }
+                }
+);
+              }
+            }
+;
+            if (!ApplicationManager.getApplication().isUnitTestMode()) {
+              Runnable commandRunnable=new Runnable(){
+                public void run(){
+                  CommandProcessor.getInstance().executeCommand(project,runnable,getText(),getFamilyName());
+                }
+              }
+;
+              ApplicationManager.getApplication().invokeLater(commandRunnable);
+            }
+ else {
+              runnable.run();
+            }
+          }
+          public boolean startInWriteAction(){
+            return true;
+          }
+        }
+);
+        return;
+      }
+    }
+  }
+}

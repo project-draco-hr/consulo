@@ -1,0 +1,55 @@
+{
+  String oldValue=getExpressionString(segmentNumber);
+  int start=mySegments.getSegmentStart(segmentNumber);
+  int end=mySegments.getSegmentEnd(segmentNumber);
+  ExpressionContext context=createExpressionContext(start);
+  Result result;
+  if (isQuick) {
+    result=expressionNode.calculateQuickResult(context);
+  }
+ else {
+    result=expressionNode.calculateResult(context);
+    if (expressionNode instanceof ConstantNode) {
+      if (result instanceof TextResult) {
+        TextResult text=(TextResult)result;
+        if (text.getText().equals("") && defaultValue != null) {
+          result=defaultValue.calculateResult(context);
+        }
+      }
+    }
+    if (result == null && defaultValue != null) {
+      result=defaultValue.calculateResult(context);
+    }
+  }
+  if (result == null)   return;
+  PsiFile psiFile=PsiDocumentManager.getInstance(myProject).getPsiFile(myDocument);
+  PsiElement element=psiFile.findElementAt(start);
+  if (result.equalsToText(oldValue,element))   return;
+  String newValue=result.toString();
+  if (newValue == null)   newValue="";
+  if (element instanceof PsiJavaToken && ((PsiJavaToken)element).getTokenType() == JavaTokenType.STRING_LITERAL) {
+    newValue=StringUtil.escapeStringCharacters(newValue);
+  }
+  toProcessChangedUpdate=false;
+  replaceString(newValue,start,end,segmentNumber);
+  if (result instanceof PsiTypeResult) {
+    PsiTypeElement t=PsiTreeUtil.getParentOfType(psiFile.findElementAt(start),PsiTypeElement.class);
+    if (t != null && t.getTextRange().getStartOffset() == start) {
+      try {
+        PsiJavaCodeReferenceElement ref=t.getInnermostComponentReferenceElement();
+        if (ref != null) {
+          myCodeStyleManager.shortenClassReferences(ref);
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    if (result instanceof PsiTypeResult)     updateTypeBindings(((PsiTypeResult)result).getType(),psiFile,context);
+ else     if (result instanceof PsiClass)     updateTypeBindings(result,psiFile,context);
+  }
+  toProcessChangedUpdate=true;
+  LOG.assertTrue(!PsiDocumentManager.getInstance(myProject).isUncommited(myDocument));
+}

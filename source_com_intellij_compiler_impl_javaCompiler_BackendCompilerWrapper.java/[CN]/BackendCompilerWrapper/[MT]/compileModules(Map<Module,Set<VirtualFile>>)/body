@@ -1,0 +1,68 @@
+{
+  final List<ModuleChunk> chunks=getModuleChunks(moduleToFilesMap);
+  for (Iterator<ModuleChunk> it=chunks.iterator(); it.hasNext(); ) {
+    final ModuleChunk chunk=it.next();
+    runTransformingCompilers(chunk);
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        final Module[] modules=chunk.getModules();
+        StringBuffer names=new StringBuffer();
+        for (int idx=0; idx < modules.length; idx++) {
+          Module module=modules[idx];
+          if (idx > 0) {
+            names.append(", ");
+          }
+          names.append(module.getName());
+        }
+        myModuleName=names.toString();
+      }
+    }
+);
+    File fileToDelete=null;
+    final List<OutputDir> pairs=new ArrayList<OutputDir>();
+    if (chunk.getModuleCount() == 1) {
+      final Module module=chunk.getModules()[0];
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          final String sourcesOutputDir=getOutputDir(module);
+          if (shouldCompileTestsSeparately(module)) {
+            if (sourcesOutputDir != null) {
+              pairs.add(new OutputDir(sourcesOutputDir,ModuleChunk.SOURCES));
+            }
+            final String testsOutputDir=getTestsOutputDir(module);
+            if (testsOutputDir == null) {
+              LOG.assertTrue(false,"Tests output dir is null for module \"" + module.getName() + "\"");
+            }
+            pairs.add(new OutputDir(testsOutputDir,ModuleChunk.TEST_SOURCES));
+          }
+ else {
+            if (sourcesOutputDir == null) {
+              LOG.assertTrue(false,"Sources output dir is null for module \"" + module.getName() + "\"");
+            }
+            pairs.add(new OutputDir(sourcesOutputDir,ModuleChunk.ALL_SOURCES));
+          }
+        }
+      }
+);
+    }
+ else {
+      final File outputDir=FileUtil.createTempDirectory("compile","output");
+      fileToDelete=outputDir;
+      pairs.add(new OutputDir(outputDir.getPath(),ModuleChunk.ALL_SOURCES));
+    }
+    try {
+      for (Iterator<OutputDir> i=pairs.iterator(); i.hasNext(); ) {
+        final OutputDir outputDir=i.next();
+        doCompile(chunk,outputDir.getPath(),outputDir.getKind());
+        if (myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+          return;
+        }
+      }
+    }
+  finally {
+      if (fileToDelete != null) {
+        FileUtil.asyncDelete(fileToDelete);
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  final List<UsageInfo> results=new ArrayList<UsageInfo>();
+  PsiManager manager=element.getManager();
+  PsiSearchHelper helper=manager.getSearchHelper();
+  GlobalSearchScope projectScope=GlobalSearchScope.projectScope(manager.getProject());
+  if (element instanceof PsiMethod) {
+    PsiMethod method=(PsiMethod)element;
+    PsiReference[] refs=helper.findReferencesIncludingOverriding(method,projectScope,true);
+    for (int i=0; i < refs.length; i++) {
+      PsiReference ref=refs[i];
+      results.add(new MoveRenameUsageInfo(ref.getElement(),ref,element));
+    }
+    PsiElement[] overridings=helper.findOverridingMethods(method,projectScope,true);
+    for (int i=0; i < overridings.length; i++) {
+      PsiElement element1=overridings[i];
+      results.add(new MoveRenameUsageInfo(element1,null,element));
+    }
+  }
+ else {
+    PsiReference[] refs=helper.findReferences(element,projectScope,false);
+    final ClassCollisionsDetector classCollisionsDetector;
+    if (element instanceof PsiClass) {
+      classCollisionsDetector=new ClassCollisionsDetector((PsiClass)element);
+    }
+ else {
+      classCollisionsDetector=null;
+    }
+    for (int i=0; i < refs.length; i++) {
+      PsiReference ref=refs[i];
+      PsiElement referenceElement=ref.getElement();
+      results.add(new MoveRenameUsageInfo(referenceElement,ref,ref.getRangeInElement().getStartOffset(),ref.getRangeInElement().getEndOffset(),element,referenceElement instanceof XmlElement));
+      if (classCollisionsDetector == null) {
+        addLocalsCollisions(element,referenceElement,newName,results);
+      }
+ else {
+        classCollisionsDetector.addClassCollisions(referenceElement,newName,results);
+      }
+    }
+  }
+  RenameUtil.findUnresolvableLocalsCollisions(element,newName,results);
+  RenameUtil.findUnresolvableMemberCollisions(element,newName,results);
+  if (searchInStringsAndComments && !(element instanceof PsiDirectory)) {
+    String stringToSearch=RefactoringUtil.getStringToSearch(element,false);
+    if (stringToSearch != null) {
+      final String stringToReplace=getStringToReplace(element,newName,false);
+      RefactoringUtil.UsageInfoFactory factory=new RefactoringUtil.UsageInfoFactory(){
+        public UsageInfo createUsageInfo(        PsiElement usage,        int startOffset,        int endOffset){
+          int start=usage.getTextRange().getStartOffset();
+          return NonCodeUsageInfo.create(usage.getContainingFile(),start + startOffset,start + endOffset,element,stringToReplace);
+        }
+      }
+;
+      RefactoringUtil.addUsagesInStringsAndComments(element,stringToSearch,results,factory);
+    }
+  }
+  if (searchInNonJavaFiles && !(element instanceof PsiDirectory)) {
+    String stringToSearch=RefactoringUtil.getStringToSearch(element,true);
+    if (stringToSearch != null) {
+      final String stringToReplace=getStringToReplace(element,newName,true);
+      RefactoringUtil.UsageInfoFactory factory=new RefactoringUtil.UsageInfoFactory(){
+        public UsageInfo createUsageInfo(        PsiElement usage,        int startOffset,        int endOffset){
+          int start=usage.getTextRange().getStartOffset();
+          return NonCodeUsageInfo.create(usage.getContainingFile(),start + startOffset,start + endOffset,element,stringToReplace);
+        }
+      }
+;
+      RefactoringUtil.addUsagesInNonJavaFiles(element,stringToSearch,projectScope,results,factory);
+      if (element instanceof PsiClass) {
+        final PsiClass aClass=(PsiClass)element;
+        if (aClass.getParent() instanceof PsiClass) {
+          final String dollaredStringToSearch=RefactoringUtil.getInnerClassNameForClassLoader(aClass);
+          final String dollaredStringToReplace=RefactoringUtil.getNewInnerClassName(aClass,dollaredStringToSearch,newName);
+          RefactoringUtil.UsageInfoFactory dollaredFactory=new RefactoringUtil.UsageInfoFactory(){
+            public UsageInfo createUsageInfo(            PsiElement usage,            int startOffset,            int endOffset){
+              int start=usage.getTextRange().getStartOffset();
+              return NonCodeUsageInfo.create(usage.getContainingFile(),start + startOffset,start + endOffset,element,dollaredStringToReplace);
+            }
+          }
+;
+          RefactoringUtil.addUsagesInNonJavaFiles(aClass,dollaredStringToSearch,projectScope,results,dollaredFactory);
+        }
+      }
+    }
+  }
+  return results.toArray(new UsageInfo[results.size()]);
+}

@@ -1,0 +1,72 @@
+{
+  try {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("====================Marking dependent files=====================");
+    }
+    ProgressManager.getInstance().getProgressIndicator().startNonCancelableSection();
+    try {
+      int[] qNamesToUpdate=myTraverseRoots.toArray();
+      final SourceFileFinder sourceFileFinder=new SourceFileFinder(project,context);
+      final CachingSearcher searcher=new CachingSearcher(project);
+      final ChangedRetentionPolicyDependencyProcessor changedRetentionPolicyDependencyProcessor=new ChangedRetentionPolicyDependencyProcessor(project,searcher,this);
+      for (int nameIndex=0; nameIndex < qNamesToUpdate.length; nameIndex++) {
+        int qName=qNamesToUpdate[nameIndex];
+        int oldInfoId=getCache().getClassId(qName);
+        if (oldInfoId == Cache.UNKNOWN) {
+          continue;
+        }
+        int newInfoId=getNewClassesCache().getClassId(qName);
+        if (newInfoId != Cache.UNKNOWN) {
+          new DependencyProcessor(project,this,qName).run();
+          ArrayList changed=new ArrayList();
+          ArrayList removed=new ArrayList();
+          findModifiedConstants(qName,changed,removed);
+          if (changed.size() > 0 || removed.size() > 0) {
+            new ChangedConstantsDependencyProcessor(project,searcher,this,qName,(FieldInfo[])changed.toArray(new FieldInfo[changed.size()]),(FieldInfo[])removed.toArray(new FieldInfo[removed.size()])).run();
+          }
+          changedRetentionPolicyDependencyProcessor.checkAnnotationRetentionPolicyChanges(qName);
+        }
+ else {
+          boolean isSourceDeleted=false;
+          if (myClassesWithSourceRemoved.contains(qName)) {
+            isSourceDeleted=true;
+          }
+ else           if (!(new File(getCache().getPath(oldInfoId)).exists())) {
+            final String qualifiedName=resolve(qName);
+            final String sourceFileName=getCache().getSourceFileName(oldInfoId);
+            final boolean markAsRemovedSource=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+              public Boolean compute(){
+                VirtualFile sourceFile=sourceFileFinder.findSourceFile(qualifiedName,sourceFileName);
+                return (sourceFile == null || successfullyCompiled.contains(sourceFile)) ? Boolean.TRUE : Boolean.FALSE;
+              }
+            }
+).booleanValue();
+            if (markAsRemovedSource) {
+              isSourceDeleted=true;
+              markSourceRemoved(qName);
+              myMarkedInfos.remove(qName);
+            }
+          }
+          if (isSourceDeleted) {
+            Dependency[] backDependencies=getCache().getBackDependencies(qName);
+            for (int idx=0; idx < backDependencies.length; idx++) {
+              if (markTargetClassInfo(backDependencies[idx])) {
+                if (LOG.isDebugEnabled()) {
+                  LOG.debug("Mark dependent class " + backDependencies[idx].getClassQualifiedName() + "; reason: no class file found for "+ qName);
+                }
+              }
+            }
+          }
+        }
+      }
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("================================================================");
+      }
+    }
+  finally {
+      ProgressManager.getInstance().getProgressIndicator().finishNonCancelableSection();
+    }
+  }
+ catch (  ProcessCanceledException ignored) {
+  }
+}

@@ -1,0 +1,89 @@
+{
+  if (toType instanceof PsiPrimitiveType || fromType instanceof PsiPrimitiveType)   return fromType.equals(toType);
+  if (toType instanceof PsiArrayType && !(fromType instanceof PsiArrayType)) {
+    return fromType.equalsToText("java.io.Serializable") || fromType.equalsToText("java.lang.Cloneable") || fromType.equalsToText("java.lang.Object");
+  }
+  if (fromType instanceof PsiArrayType) {
+    return toType instanceof PsiArrayType && isNarrowingReferenceConversionAllowed(((PsiArrayType)fromType).getComponentType(),((PsiArrayType)toType).getComponentType());
+  }
+  if (fromType instanceof PsiIntersectionType || toType instanceof PsiIntersectionType)   return false;
+  if (fromType instanceof PsiWildcardType || toType instanceof PsiWildcardType)   return false;
+  if (toType instanceof PsiCapturedWildcardType)   return false;
+  if (fromType instanceof PsiCapturedWildcardType) {
+    return isNarrowingReferenceConversionAllowed(((PsiCapturedWildcardType)fromType).getUpperBound(),toType);
+  }
+  if (isAssignable(fromType,toType))   return true;
+  LOG.assertTrue(toType instanceof PsiClassType && fromType instanceof PsiClassType);
+  PsiClassType fromClassType=(PsiClassType)fromType;
+  PsiClassType toClassType=(PsiClassType)toType;
+  PsiClassType.ClassResolveResult fromResult=fromClassType.resolveGenerics();
+  final PsiClass fromClass=fromResult.getElement();
+  if (fromClass == null)   return false;
+  if (fromClass instanceof PsiTypeParameter)   return isNarrowingReferenceConversionAllowed(fromClass.getSuperTypes()[0],toType);
+  PsiClassType.ClassResolveResult toResult=toClassType.resolveGenerics();
+  final PsiClass toClass=toResult.getElement();
+  if (toClass == null)   return false;
+  if (toClass instanceof PsiTypeParameter)   return isNarrowingReferenceConversionAllowed(fromType,toClass.getSuperTypes()[0]);
+  PsiManager manager=fromClass.getManager();
+  if (!fromClass.isInterface()) {
+    if (toClass.isInterface()) {
+      if (fromClass.hasModifierProperty(PsiModifier.FINAL))       return false;
+      return checkSuperTypesWithDifferentTypeArguments(toResult,fromClass,manager,fromResult.getSubstitutor());
+    }
+ else {
+      if (manager.areElementsEquivalent(fromClass,toClass)) {
+        return !areDistinctParameterTypes(fromClassType,toClassType);
+      }
+      if (toClass.isInheritor(fromClass,true)) {
+        return checkSuperTypesWithDifferentTypeArguments(fromResult,toClass,manager,toResult.getSubstitutor());
+      }
+ else       if (fromClass.isInheritor(toClass,true)) {
+        return checkSuperTypesWithDifferentTypeArguments(toResult,fromClass,manager,fromResult.getSubstitutor());
+      }
+      return false;
+    }
+  }
+ else {
+    if (!toClass.isInterface()) {
+      if (!toClass.hasModifierProperty(PsiModifier.FINAL)) {
+        return checkSuperTypesWithDifferentTypeArguments(fromResult,toClass,manager,toResult.getSubstitutor());
+      }
+ else {
+        if (!toClass.isInheritor(fromClass,true))         return false;
+        PsiSubstitutor toSubstitutor=getSuperClassSubstitutor(fromClass,toClass,toResult.getSubstitutor());
+        return !areDistinctArgumentTypes(fromClass,fromResult.getSubstitutor(),toSubstitutor);
+      }
+    }
+ else {
+      if (manager.getEffectiveLanguageLevel().compareTo(LanguageLevel.JDK_1_5) < 0) {
+        Collection<List<MethodSignatureBackedByPsiMethod>> fromClassAllMethods=MethodSignatureUtil.getSameSignatureMethods(fromClass).values();
+        final MethodSignatureUtil.MethodSignatureToMethods toClassAllMethods=MethodSignatureUtil.getSameSignatureMethods(toClass);
+        for (Iterator<List<MethodSignatureBackedByPsiMethod>> iterator=fromClassAllMethods.iterator(); iterator.hasNext(); ) {
+          List<MethodSignatureBackedByPsiMethod> sameSignatureMethods=iterator.next();
+          final MethodSignatureBackedByPsiMethod fromMethodSignature=sameSignatureMethods.get(0);
+          PsiMethod fromClassMethod=fromMethodSignature.getMethod();
+          List<MethodSignatureBackedByPsiMethod> toClassMethods=toClassAllMethods.get(fromClassMethod.getSignature(PsiSubstitutor.EMPTY));
+          if (toClassMethods != null) {
+            final PsiType fromClassReturnType=fromClassMethod.getReturnType();
+            for (int i=0; i < toClassMethods.size(); i++) {
+              PsiMethod toClassMethod=toClassMethods.get(i).getMethod();
+              final PsiType toClassReturnType=toClassMethod.getReturnType();
+              if (fromClassReturnType != null && toClassReturnType != null && !fromClassReturnType.equals(toClassReturnType)) {
+                return false;
+              }
+            }
+          }
+        }
+        return true;
+      }
+ else {
+        if (toClass.isInheritor(fromClass,true)) {
+          return checkSuperTypesWithDifferentTypeArguments(fromResult,toClass,manager,toResult.getSubstitutor());
+        }
+ else {
+          return checkSuperTypesWithDifferentTypeArguments(toResult,fromClass,manager,fromResult.getSubstitutor());
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  PsiClassType[] unhandledExceptions=null;
+  if (element instanceof PsiCallExpression) {
+    PsiCallExpression expression=(PsiCallExpression)element;
+    unhandledExceptions=getUnhandledExceptions(expression,topElement);
+  }
+ else   if (element instanceof PsiThrowStatement) {
+    PsiThrowStatement statement=(PsiThrowStatement)element;
+    unhandledExceptions=getUnhandledExceptions(statement,topElement);
+  }
+ else   if (element instanceof PsiCodeBlock && element.getParent() instanceof PsiMethod && ((PsiMethod)element.getParent()).isConstructor()&& !firstStatementIsConstructorCall((PsiCodeBlock)element)) {
+    final PsiMethod constructor=(PsiMethod)element.getParent();
+    final PsiClass aClass=constructor.getContainingClass();
+    final PsiClass superClass=aClass == null ? null : aClass.getSuperClass();
+    final PsiMethod[] superConstructors=superClass == null ? PsiMethod.EMPTY_ARRAY : superClass.getConstructors();
+    Collection<PsiClassType> unhandled=new HashSet<PsiClassType>();
+    for (int i=0; i < superConstructors.length; i++) {
+      PsiMethod superConstructor=superConstructors[i];
+      if (!superConstructor.hasModifierProperty(PsiModifier.PRIVATE) && superConstructor.getParameterList().getParameters().length == 0) {
+        final PsiClassType[] exceptionTypes=superConstructor.getThrowsList().getReferencedTypes();
+        for (int j=0; j < exceptionTypes.length; j++) {
+          PsiClassType exceptionType=exceptionTypes[j];
+          if (!isUncheckedException(exceptionType) && !isHandled(element,exceptionType,topElement)) {
+            unhandled.add(exceptionType);
+          }
+        }
+        break;
+      }
+    }
+    unhandledExceptions=unhandled.toArray(new PsiClassType[unhandled.size()]);
+  }
+  if (unhandledExceptions != null) {
+    if (foundExceptions == null) {
+      foundExceptions=new HashSet<PsiClassType>();
+    }
+    for (int i=0; i < unhandledExceptions.length; i++) {
+      PsiClassType unhandledException=unhandledExceptions[i];
+      foundExceptions.add(unhandledException);
+    }
+  }
+  for (PsiElement child=element.getFirstChild(); child != null; child=child.getNextSibling()) {
+    foundExceptions=collectUnhandledExceptions(child,topElement,foundExceptions);
+  }
+  return foundExceptions;
+}

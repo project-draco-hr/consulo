@@ -1,0 +1,55 @@
+{
+  int parenthIndex=memberRefText.indexOf('(');
+  if (parenthIndex < 0) {
+    String name=memberRefText;
+    PsiField field=aClass.findFieldByName(name,true);
+    if (field != null)     return field.getNavigationElement();
+    PsiClass inner=aClass.findInnerClassByName(name,true);
+    if (inner != null)     return inner.getNavigationElement();
+    PsiMethod[] methods=aClass.getAllMethods();
+    for (int i=0; i < methods.length; i++) {
+      PsiMethod method=methods[i];
+      if (method.getName().equals(name))       return method.getNavigationElement();
+    }
+    return null;
+  }
+ else {
+    String name=memberRefText.substring(0,parenthIndex).trim();
+    if (!StringUtil.endsWithChar(memberRefText,')'))     return null;
+    String parmsText=memberRefText.substring(parenthIndex + 1,memberRefText.length() - 1).trim();
+    StringTokenizer tokenizer=new StringTokenizer(parmsText.replaceAll("[*]",""),",");
+    PsiType[] types=new PsiType[tokenizer.countTokens()];
+    int i=0;
+    PsiElementFactory factory=aClass.getManager().getElementFactory();
+    while (tokenizer.hasMoreTokens()) {
+      String parmText=tokenizer.nextToken().trim();
+      try {
+        Matcher typeMatcher=ourTypePattern.matcher(parmText);
+        String typeText=parmText;
+        if (typeMatcher.find()) {
+          typeText=parmText.substring(0,typeMatcher.start());
+        }
+        PsiType type=factory.createTypeFromText(typeText,context);
+        types[i++]=type;
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.info(e);
+      }
+    }
+    PsiMethod[] methods=aClass.getAllMethods();
+    MethodsLoop:     for (int j=0; j < methods.length; j++) {
+      PsiMethod method=methods[j];
+      if (!method.getName().equals(name))       continue;
+      PsiParameter[] parms=method.getParameterList().getParameters();
+      if (parms.length != types.length)       continue;
+      for (int k=0; k < parms.length; k++) {
+        PsiParameter parm=parms[k];
+        if (types[k] != null && !TypeConversionUtil.erasure(parm.getType()).getCanonicalText().equals(types[k].getCanonicalText())) {
+          continue MethodsLoop;
+        }
+      }
+      return method.getNavigationElement();
+    }
+    return null;
+  }
+}

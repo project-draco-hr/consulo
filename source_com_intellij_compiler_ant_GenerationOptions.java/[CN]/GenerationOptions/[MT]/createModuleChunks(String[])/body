@@ -1,0 +1,62 @@
+{
+  final Set<String> mainModuleNames=new HashSet<String>(Arrays.asList(representativeModuleNames));
+  final Graph<Chunk<Module>> chunkGraph=ModuleCompilerUtil.toChunkGraph(ModuleCompilerUtil.createModuleGraph(ModuleManager.getInstance(myProject).getModules()));
+  final Map<Chunk<Module>,ModuleChunk> map=new HashMap<Chunk<Module>,ModuleChunk>();
+  final Map<ModuleChunk,Chunk<Module>> reverseMap=new HashMap<ModuleChunk,Chunk<Module>>();
+  for (Iterator<Chunk<Module>> it=chunkGraph.getNodes().iterator(); it.hasNext(); ) {
+    final Chunk<Module> chunk=it.next();
+    final Set<Module> modules=chunk.getNodes();
+    final ModuleChunk moduleChunk=new ModuleChunk(modules.toArray(new Module[modules.size()]));
+    for (Iterator modulesIterator=modules.iterator(); modulesIterator.hasNext(); ) {
+      final Module module=(Module)modulesIterator.next();
+      if (mainModuleNames.contains(module.getName())) {
+        moduleChunk.setMainModule(module);
+        break;
+      }
+    }
+    map.put(chunk,moduleChunk);
+    reverseMap.put(moduleChunk,chunk);
+  }
+  final Graph<ModuleChunk> moduleChunkGraph=GraphGenerator.create(CachingSemiGraph.create(new GraphGenerator.SemiGraph<ModuleChunk>(){
+    public Collection<ModuleChunk> getNodes(){
+      return map.values();
+    }
+    public Iterator<ModuleChunk> getIn(    ModuleChunk n){
+      final Chunk<Module> chunk=reverseMap.get(n);
+      final Iterator<Chunk<Module>> in=chunkGraph.getIn(chunk);
+      return new Iterator<ModuleChunk>(){
+        public boolean hasNext(){
+          return in.hasNext();
+        }
+        public ModuleChunk next(){
+          return map.get(in.next());
+        }
+        public void remove(){
+          new OperationNotSupportedException();
+        }
+      }
+;
+    }
+  }
+));
+  final Collection<ModuleChunk> nodes=moduleChunkGraph.getNodes();
+  final ModuleChunk[] moduleChunks=nodes.toArray(new ModuleChunk[nodes.size()]);
+  for (int idx=0; idx < moduleChunks.length; idx++) {
+    ModuleChunk moduleChunk=moduleChunks[idx];
+    final Iterator<ModuleChunk> depsIterator=moduleChunkGraph.getIn(moduleChunk);
+    List<ModuleChunk> deps=new ArrayList<ModuleChunk>();
+    while (depsIterator.hasNext()) {
+      deps.add(depsIterator.next());
+    }
+    moduleChunk.setDependentChunks(deps.toArray(new ModuleChunk[deps.size()]));
+  }
+  Arrays.sort(moduleChunks,new DFSTBuilder<ModuleChunk>(moduleChunkGraph).comparator());
+  if (generateSingleFile) {
+    final File baseDir=BuildProperties.getProjectBaseDir(myProject);
+    for (int idx=0; idx < moduleChunks.length; idx++) {
+      ModuleChunk chunk=moduleChunks[idx];
+      chunk.setBaseDir(baseDir);
+    }
+  }
+  return moduleChunks;
+}

@@ -1,0 +1,61 @@
+{
+  try {
+    startElement(expression);
+    PsiReferenceExpression methodExpression=expression.getMethodExpression();
+    PsiExpression qualifierExpression=methodExpression.getQualifierExpression();
+    if (qualifierExpression != null) {
+      final String text=qualifierExpression.getText();
+      if ("System".equals(text)) {
+        PsiElement resolved=methodExpression.getReference().resolve();
+        if (resolved != null && resolved instanceof PsiMethod) {
+          PsiMethod method=(PsiMethod)resolved;
+          if ("exit".equals(method.getName())) {
+            addInstruction(new ReturnInstruction());
+            return;
+          }
+        }
+      }
+ else       if ("LOG".equals(text)) {
+        final PsiType qualifierType=qualifierExpression.getType();
+        if (qualifierType != null && qualifierType.equalsToText("com.intellij.openapi.diagnostic.Logger")) {
+          PsiElement resolved=methodExpression.getReference().resolve();
+          if (resolved != null && resolved instanceof PsiMethod) {
+            PsiMethod method=(PsiMethod)resolved;
+            final String methodName=method.getName();
+            if ("error".equals(methodName)) {
+              processMethodParameters(expression);
+              addInstruction(new ReturnInstruction());
+              return;
+            }
+ else             if ("assertTrue".equals(methodName)) {
+              PsiExpression[] params=expression.getArgumentList().getExpressions();
+              params[0].accept(this);
+              for (int i=1; i < params.length; i++) {
+                params[i].accept(this);
+                addInstruction(new PopInstruction());
+              }
+              addInstruction(new ConditionalGotoInstruction(getEndOffset(expression) - 1,false,null));
+              addInstruction(new ReturnInstruction());
+              addInstruction(new PushInstruction(DfaUnknownValue.getInstance()));
+              return;
+            }
+          }
+        }
+      }
+    }
+    if (qualifierExpression != null) {
+      qualifierExpression.accept(this);
+      addInstruction(new PopInstruction());
+    }
+    processMethodParameters(expression);
+    addInstruction(new MethodCallInstruction(expression));
+    PsiExpression expr=methodExpression;
+    if (myCatchStack.size() > 0) {
+      addMethodThrows((PsiMethod)methodExpression.getReference().resolve());
+    }
+    pushTypeOrUnknown(expr);
+  }
+  finally {
+    finishElement(expression);
+  }
+}

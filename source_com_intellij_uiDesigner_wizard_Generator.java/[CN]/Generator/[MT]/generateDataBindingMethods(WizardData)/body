@@ -1,0 +1,169 @@
+{
+  if (data.myBindToNewBean) {
+    final PsiClass beanClass=createBeanClass(data);
+    LOG.assertTrue(beanClass != null);
+    data.myBeanClass=beanClass;
+  }
+  final HashMap<String,String> binding2beanGetter=new HashMap<String,String>();
+  final HashMap<String,String> binding2beanSetter=new HashMap<String,String>();
+  final FormProperty2BeanProperty[] bindings=data.myBindings;
+  for (int i=0; i < bindings.length; i++) {
+    final FormProperty2BeanProperty form2bean=bindings[i];
+    if (form2bean == null || form2bean.myBeanProperty == null) {
+      continue;
+    }
+{
+      final String setterName=PropertyUtil.suggestSetterName(form2bean.myBeanProperty.myName);
+      final PsiMethod[] methodsByName=data.myBeanClass.findMethodsByName(setterName,true);
+      if (methodsByName == null || methodsByName.length < 1) {
+        LOG.assertTrue(!data.myBindToNewBean);
+        if (!data.myBeanClass.isWritable()) {
+          throw new MyException("Cannot add property to non writable class " + data.myBeanClass.getQualifiedName());
+        }
+        final StringBuffer membersBuffer=new StringBuffer();
+        final StringBuffer methodsBuffer=new StringBuffer();
+        final CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(data.myBeanClass.getProject());
+        generateProperty(codeStyleManager,form2bean.myBeanProperty.myName,form2bean.myBeanProperty.myType,membersBuffer,methodsBuffer);
+        final PsiClass fakeClass;
+        try {
+          fakeClass=data.myBeanClass.getManager().getElementFactory().createClassFromText(membersBuffer.toString() + methodsBuffer.toString(),null);
+          final PsiField[] fields=fakeClass.getFields();
+{
+            final PsiElement result=data.myBeanClass.add(fields[0]);
+            codeStyleManager.shortenClassReferences(result);
+            codeStyleManager.reformat(result);
+          }
+          final PsiMethod[] methods=fakeClass.getMethods();
+{
+            final PsiElement result=data.myBeanClass.add(methods[0]);
+            codeStyleManager.shortenClassReferences(result);
+            codeStyleManager.reformat(result);
+          }
+{
+            final PsiElement result=data.myBeanClass.add(methods[1]);
+            codeStyleManager.shortenClassReferences(result);
+            codeStyleManager.reformat(result);
+          }
+        }
+ catch (        IncorrectOperationException e) {
+          throw new MyException(e.getMessage());
+        }
+      }
+    }
+    final PsiMethod propertySetter=PropertyUtil.findPropertySetter(data.myBeanClass,form2bean.myBeanProperty.myName,false,true);
+    final PsiMethod propertyGetter=PropertyUtil.findPropertyGetter(data.myBeanClass,form2bean.myBeanProperty.myName,false,true);
+    if (propertyGetter == null) {
+      continue;
+    }
+    if (propertySetter == null) {
+      continue;
+    }
+    final String binding=form2bean.myFormProperty.getLwComponent().getBinding();
+    binding2beanGetter.put(binding,propertyGetter.getName());
+    binding2beanSetter.put(binding,propertySetter.getName());
+  }
+  final String dataBeanClassName=data.myBeanClass.getQualifiedName();
+  final LwRootContainer[] rootContainer=new LwRootContainer[1];
+  final FormProperty[] formProperties=exposeForm(data.myProject,data.myFormFile,rootContainer);
+  final StringBuffer getDataBody=new StringBuffer();
+  final StringBuffer setDataBody=new StringBuffer();
+  final StringBuffer isModifiedBody=new StringBuffer();
+  for (int i=0; i < formProperties.length; i++) {
+    final FormProperty formProperty=formProperties[i];
+    final String binding=formProperty.getLwComponent().getBinding();
+    if (!binding2beanGetter.containsKey(binding)) {
+      continue;
+    }
+    getDataBody.append("data.");
+    getDataBody.append(binding2beanSetter.get(binding));
+    getDataBody.append("(");
+    getDataBody.append(binding);
+    getDataBody.append(".");
+    getDataBody.append(formProperty.getComponentPropertyGetterName());
+    getDataBody.append("());\n");
+    setDataBody.append(binding);
+    setDataBody.append(".");
+    setDataBody.append(formProperty.getComponentPropertySetterName());
+    setDataBody.append("(data.");
+    setDataBody.append(binding2beanGetter.get(binding));
+    setDataBody.append("());\n");
+    final String propertyClassName=formProperty.getComponentPropertyClassName();
+    if ("boolean".equals(propertyClassName)) {
+      isModifiedBody.append("if (");
+      isModifiedBody.append(binding);
+      isModifiedBody.append(".");
+      isModifiedBody.append(formProperty.getComponentPropertyGetterName());
+      isModifiedBody.append("()");
+      isModifiedBody.append("!= ");
+      isModifiedBody.append("data.");
+      isModifiedBody.append(binding2beanGetter.get(binding));
+      isModifiedBody.append("()");
+      isModifiedBody.append(") return true;\n");
+    }
+ else {
+      isModifiedBody.append("if (");
+      isModifiedBody.append(binding);
+      isModifiedBody.append(".");
+      isModifiedBody.append(formProperty.getComponentPropertyGetterName());
+      isModifiedBody.append("()");
+      isModifiedBody.append("!= null ? ");
+      isModifiedBody.append("!");
+      isModifiedBody.append(binding);
+      isModifiedBody.append(".");
+      isModifiedBody.append(formProperty.getComponentPropertyGetterName());
+      isModifiedBody.append("()");
+      isModifiedBody.append(".equals(");
+      isModifiedBody.append("data.");
+      isModifiedBody.append(binding2beanGetter.get(binding));
+      isModifiedBody.append("()");
+      isModifiedBody.append(") : ");
+      isModifiedBody.append("data.");
+      isModifiedBody.append(binding2beanGetter.get(binding));
+      isModifiedBody.append("()");
+      isModifiedBody.append("!= null");
+      isModifiedBody.append(") return true;\n");
+    }
+  }
+  isModifiedBody.append("return false;\n");
+  final String textOfMethods="public void setData(" + dataBeanClassName + " data){\n"+ setDataBody.toString()+ "}\n"+ "\n"+ "public void getData("+ dataBeanClassName+ " data){\n"+ getDataBody.toString()+ "}\n"+ "\n"+ "public boolean isModified("+ dataBeanClassName+ " data){\n"+ isModifiedBody.toString()+ "}\n";
+  final Module module=ModuleUtil.getModuleForFile(data.myProject,data.myFormFile);
+  LOG.assertTrue(module != null);
+  final PsiClass boundClass=FormEditingUtil.findClassToBind(module,rootContainer[0].getClassToBind());
+  LOG.assertTrue(boundClass != null);
+  final PsiClass fakeClass;
+  try {
+    fakeClass=PsiManager.getInstance(data.myProject).getElementFactory().createClassFromText(textOfMethods,null);
+    final PsiMethod methodSetData=fakeClass.getMethods()[0];
+    final PsiMethod methodGetData=fakeClass.getMethods()[1];
+    final PsiMethod methodIsModified=fakeClass.getMethods()[2];
+    final PsiMethod existing1=boundClass.findMethodBySignature(methodSetData,false);
+    final PsiMethod existing2=boundClass.findMethodBySignature(methodGetData,false);
+    final PsiMethod existing3=boundClass.findMethodBySignature(methodIsModified,false);
+    if (existing1 != null) {
+      existing1.delete();
+    }
+    if (existing2 != null) {
+      existing2.delete();
+    }
+    if (existing3 != null) {
+      existing3.delete();
+    }
+    final CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(module.getProject());
+    final PsiElement setData=boundClass.add(methodSetData);
+    codeStyleManager.shortenClassReferences(setData);
+    codeStyleManager.reformat(setData);
+    final PsiElement getData=boundClass.add(methodGetData);
+    codeStyleManager.shortenClassReferences(getData);
+    codeStyleManager.reformat(getData);
+    if (data.myGenerateIsModified) {
+      final PsiElement isModified=boundClass.add(methodIsModified);
+      codeStyleManager.shortenClassReferences(isModified);
+      codeStyleManager.reformat(isModified);
+    }
+    final OpenFileDescriptor descriptor=new OpenFileDescriptor(setData.getProject(),setData.getContainingFile().getVirtualFile(),setData.getTextOffset());
+    FileEditorManager.getInstance(data.myProject).openTextEditor(descriptor,true);
+  }
+ catch (  IncorrectOperationException e) {
+    throw new MyException(e.getMessage());
+  }
+}

@@ -1,0 +1,115 @@
+{
+  PsiField field=myFields[usage.fieldIndex];
+  boolean processGet=myDialog.isToEncapsulateGet();
+  boolean processSet=myDialog.isToEncapsulateSet() && !field.hasModifierProperty(PsiModifier.FINAL);
+  if (!processGet && !processSet)   return;
+  PsiElementFactory factory=PsiManager.getInstance(myProject).getElementFactory();
+  try {
+    final PsiReferenceExpression expr=(PsiReferenceExpression)usage.getElement();
+    final PsiElement parent=expr.getParent();
+    if (parent instanceof PsiAssignmentExpression && expr.equals(((PsiAssignmentExpression)parent).getLExpression())) {
+      PsiAssignmentExpression assignment=(PsiAssignmentExpression)parent;
+      if (assignment.getRExpression() == null)       return;
+      PsiJavaToken opSign=assignment.getOperationSign();
+      IElementType opType=opSign.getTokenType();
+      if (opType == JavaTokenType.EQ) {
+{
+          if (!processSet)           return;
+          final int fieldIndex=usage.fieldIndex;
+          final PsiExpression setterArgument=assignment.getRExpression();
+          PsiMethodCallExpression methodCall=createSetterCall(fieldIndex,setterArgument,expr);
+          if (methodCall != null) {
+            assignment.replace(methodCall);
+          }
+        }
+      }
+ else       if (opType == JavaTokenType.ASTERISKEQ || opType == JavaTokenType.DIVEQ || opType == JavaTokenType.PERCEQ || opType == JavaTokenType.PLUSEQ || opType == JavaTokenType.MINUSEQ || opType == JavaTokenType.LTLTEQ || opType == JavaTokenType.GTGTEQ || opType == JavaTokenType.GTGTGTEQ || opType == JavaTokenType.ANDEQ || opType == JavaTokenType.OREQ || opType == JavaTokenType.XOREQ) {
+{
+          String opName=opSign.getText();
+          LOG.assertTrue(StringUtil.endsWithChar(opName,'='));
+          opName=opName.substring(0,opName.length() - 1);
+          PsiExpression getExpr=expr;
+          if (processGet) {
+            final int fieldIndex=usage.fieldIndex;
+            final PsiMethodCallExpression getterCall=createGetterCall(fieldIndex,expr);
+            if (getterCall != null) {
+              getExpr=getterCall;
+            }
+          }
+          String text="a" + opName + "b";
+          PsiBinaryExpression binExpr=(PsiBinaryExpression)factory.createExpressionFromText(text,expr);
+          binExpr=(PsiBinaryExpression)CodeStyleManager.getInstance(myProject).reformat(binExpr);
+          binExpr.getLOperand().replace(getExpr);
+          binExpr.getROperand().replace(assignment.getRExpression());
+          PsiExpression setExpr;
+          if (processSet) {
+            PsiMethodCallExpression methodCall=createSetterCall(usage.fieldIndex,binExpr,expr);
+            setExpr=methodCall;
+          }
+ else {
+            text="a = b";
+            PsiAssignmentExpression assignment1=(PsiAssignmentExpression)factory.createExpressionFromText(text,null);
+            assignment1=(PsiAssignmentExpression)CodeStyleManager.getInstance(myProject).reformat(assignment1);
+            assignment1.getLExpression().replace(expr);
+            assignment1.getRExpression().replace(binExpr);
+            setExpr=assignment1;
+          }
+          assignment.replace(setExpr);
+        }
+      }
+    }
+ else     if (isPlusPlusOrMinusMinus(parent)) {
+      PsiJavaToken sign;
+      if (parent instanceof PsiPrefixExpression) {
+        sign=((PsiPrefixExpression)parent).getOperationSign();
+      }
+ else {
+        sign=((PsiPostfixExpression)parent).getOperationSign();
+      }
+      IElementType tokenType=sign.getTokenType();
+      PsiExpression getExpr=expr;
+      if (processGet) {
+        final int fieldIndex=usage.fieldIndex;
+        final PsiMethodCallExpression getterCall=createGetterCall(fieldIndex,expr);
+        if (getterCall != null) {
+          getExpr=getterCall;
+        }
+      }
+      String text;
+      if (tokenType == JavaTokenType.PLUSPLUS) {
+        text="a+1";
+      }
+ else {
+        text="a-1";
+      }
+      PsiBinaryExpression binExpr=(PsiBinaryExpression)factory.createExpressionFromText(text,null);
+      binExpr=(PsiBinaryExpression)CodeStyleManager.getInstance(myProject).reformat(binExpr);
+      binExpr.getLOperand().replace(getExpr);
+      PsiExpression setExpr;
+      if (processSet) {
+        final int fieldIndex=usage.fieldIndex;
+        final PsiMethodCallExpression setterCall=createSetterCall(fieldIndex,binExpr,expr);
+        setExpr=setterCall;
+      }
+ else {
+        text="a = b";
+        PsiAssignmentExpression assignment=(PsiAssignmentExpression)factory.createExpressionFromText(text,null);
+        assignment=(PsiAssignmentExpression)CodeStyleManager.getInstance(myProject).reformat(assignment);
+        assignment.getLExpression().replace(expr);
+        assignment.getRExpression().replace(binExpr);
+        setExpr=assignment;
+      }
+      parent.replace(setExpr);
+    }
+ else {
+      if (!processGet)       return;
+      PsiMethodCallExpression methodCall=createGetterCall(usage.fieldIndex,expr);
+      if (methodCall != null) {
+        expr.replace(methodCall);
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

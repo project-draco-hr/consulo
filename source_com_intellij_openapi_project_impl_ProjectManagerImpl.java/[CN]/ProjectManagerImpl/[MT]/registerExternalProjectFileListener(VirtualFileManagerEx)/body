@@ -1,0 +1,79 @@
+{
+  virtualFileManager.addVirtualFileManagerListener(new VirtualFileManagerListener(){
+    public void beforeRefreshStart(    boolean asynchonous){
+      myIsInRefresh=true;
+    }
+    public void afterRefreshFinish(    boolean asynchonous){
+      myIsInRefresh=false;
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          if (myChangedProjectFiles.size() > 0) {
+            Set<Project> projects=myChangedProjectFiles.keySet();
+            List<Project> projectsToReload=new ArrayList<Project>();
+            for (Iterator<Project> iterator=projects.iterator(); iterator.hasNext(); ) {
+              Project project=iterator.next();
+              List<VirtualFile> causes=myChangedProjectFiles.get(project);
+              Set<VirtualFile> liveCauses=new HashSet<VirtualFile>(causes);
+              for (int i=0; i < causes.size(); i++) {
+                VirtualFile cause=causes.get(i);
+                if (!cause.isValid())                 liveCauses.remove(cause);
+              }
+              if (!liveCauses.isEmpty()) {
+                StringBuffer message=new StringBuffer();
+                message.append("Project file");
+                if (liveCauses.size() > 1) {
+                  message.append("s:\n");
+                }
+ else {
+                  message.append(" ");
+                }
+                boolean first=true;
+                for (Iterator<VirtualFile> it=liveCauses.iterator(); it.hasNext(); ) {
+                  VirtualFile cause=it.next();
+                  if (!first)                   message.append("\n");
+                  first=false;
+                  message.append(cause.getPresentableUrl());
+                }
+                message.append(liveCauses.size() > 1 ? "\nhave" : " has");
+                message.append(" been changed externally.\n\nReload project?");
+                if (Messages.showYesNoDialog(project,message.toString(),"Project Files Changed",Messages.getQuestionIcon()) == 0) {
+                  projectsToReload.add(project);
+                }
+              }
+              for (Iterator<Project> reloadIterator=projectsToReload.iterator(); reloadIterator.hasNext(); ) {
+                reloadProject(reloadIterator.next());
+              }
+            }
+            myChangedProjectFiles.clear();
+          }
+        }
+      }
+,ModalityState.NON_MMODAL);
+    }
+  }
+);
+  virtualFileManager.addVirtualFileListener(new VirtualFileAdapter(){
+    public void contentsChanged(    VirtualFileEvent event){
+      if (event.getRequestor() == null && myIsInRefresh) {
+        final VirtualFile file=event.getFile();
+        final Project[] projects=getOpenProjects();
+        for (int i=0; i < projects.length; i++) {
+          Project project=projects[i];
+          if (file == project.getProjectFile() || file == project.getWorkspaceFile()) {
+            copyToTemp(file);
+            registerProjectToReload(project,file);
+          }
+          ModuleManager moduleManager=ModuleManager.getInstance(project);
+          final Module[] modules=moduleManager.getModules();
+          for (int j=0; j < modules.length; j++) {
+            if (modules[j].getModuleFile() == file) {
+              copyToTemp(file);
+              registerProjectToReload(project,file);
+            }
+          }
+        }
+      }
+    }
+  }
+);
+}

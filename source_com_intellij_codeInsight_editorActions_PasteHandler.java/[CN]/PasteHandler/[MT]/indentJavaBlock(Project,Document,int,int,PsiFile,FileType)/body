@@ -1,0 +1,71 @@
+{
+  CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(project);
+  CharSequence chars=document.getCharsSequence();
+  int spaceStart=CharArrayUtil.shiftBackwardUntil(chars,startOffset - 1,"\n\r") + 1;
+  int spaceEnd=CharArrayUtil.shiftForward(chars,startOffset," \t");
+  if (spaceEnd > endOffset)   return;
+  while (!codeStyleManager.isLineToBeIndented(file,spaceEnd)) {
+    spaceStart=CharArrayUtil.shiftForwardUntil(chars,spaceEnd,"\n\r");
+    spaceStart=CharArrayUtil.shiftForward(chars,spaceStart,"\n\r");
+    spaceEnd=CharArrayUtil.shiftForward(chars,spaceStart," \t");
+    if (spaceEnd >= endOffset)     return;
+  }
+  Indent indent=codeStyleManager.getIndent(chars.subSequence(spaceStart,spaceEnd).toString(),fileType);
+  int newEnd=spaceEnd;
+  try {
+    newEnd=codeStyleManager.adjustLineIndent(file,spaceEnd);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  chars=document.getCharsSequence();
+  Indent newIndent=codeStyleManager.getIndent(chars.subSequence(spaceStart,newEnd).toString(),fileType);
+  Indent indentShift=newIndent.subtract(indent);
+  ArrayList<Boolean> indentFlags=new ArrayList<Boolean>();
+  if (!indentShift.isZero()) {
+    endOffset+=newEnd - spaceEnd;
+    int offset=newEnd;
+    while (true) {
+      offset=CharArrayUtil.shiftForwardUntil(chars,offset,"\n\r");
+      if (offset >= endOffset)       break;
+      offset=CharArrayUtil.shiftForward(chars,offset,"\n\r");
+      if (offset >= endOffset)       break;
+      int offset1=CharArrayUtil.shiftForward(chars,offset," \t");
+      if (offset1 >= endOffset)       break;
+      if (chars.charAt(offset1) == '\n' || chars.charAt(offset1) == '\r') {
+        offset=offset1;
+        continue;
+      }
+      Boolean flag=codeStyleManager.isLineToBeIndented(file,offset) ? Boolean.TRUE : Boolean.FALSE;
+      indentFlags.add(flag);
+      offset=offset1;
+    }
+    int count=0;
+    offset=newEnd;
+    while (true) {
+      offset=CharArrayUtil.shiftForwardUntil(chars,offset,"\n\r");
+      if (offset >= endOffset)       break;
+      offset=CharArrayUtil.shiftForward(chars,offset,"\n\r");
+      if (offset >= endOffset)       break;
+      int offset1=CharArrayUtil.shiftForward(chars,offset," \t");
+      if (offset1 >= endOffset)       break;
+      if (chars.charAt(offset1) == '\n' || chars.charAt(offset1) == '\r') {
+        offset=offset1;
+        continue;
+      }
+      int index=count++;
+      if (indentFlags.get(index) == Boolean.FALSE) {
+        offset=offset1;
+        continue;
+      }
+      String space=chars.subSequence(offset,offset1).toString();
+      indent=codeStyleManager.getIndent(space,fileType);
+      indent=indent.add(indentShift);
+      String newSpace=codeStyleManager.fillIndent(indent,fileType);
+      document.replaceString(offset,offset1,newSpace);
+      chars=document.getCharsSequence();
+      offset+=newSpace.length();
+      endOffset+=newSpace.length() - space.length();
+    }
+  }
+}

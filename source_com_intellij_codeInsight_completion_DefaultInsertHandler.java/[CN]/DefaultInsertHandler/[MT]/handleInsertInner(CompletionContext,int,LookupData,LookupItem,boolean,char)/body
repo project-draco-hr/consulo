@@ -1,0 +1,63 @@
+{
+  LOG.assertTrue(CommandProcessor.getInstance().getCurrentCommand() != null);
+  PsiDocumentManager.getInstance(context.project).commitDocument(context.editor.getDocument());
+  myContext=context;
+  myStartOffset=startOffset;
+  myLookupData=data;
+  myLookupItem=item;
+  myProject=myContext.project;
+  myFile=myContext.file;
+  myEditor=myContext.editor;
+  myDocument=myEditor.getDocument();
+  if (myLookupItem.getObject() instanceof Template && myLookupItem.getAttribute(EXPANDED_TEMPLATE_ATTR) == null) {
+    handleTemplate(context,signatureSelected,completionChar);
+    return false;
+  }
+  int tailType=getTailType(completionChar);
+  adjustContextAfterLookupStringInsertion();
+  myState=new InsertHandlerState(myContext.selectionEndOffset,myContext.selectionEndOffset);
+  final boolean overwrite=completionChar != 0 ? completionChar == Lookup.REPLACE_SELECT_CHAR : myLookupItem.getAttribute(LookupItem.OVERWRITE_ON_AUTOCOMPLETE_ATTR) != null;
+  final boolean needLeftParenth=isToInsertParenth(tailType);
+  final boolean hasParams=needLeftParenth && hasParams(signatureSelected);
+  tailType=modifyTailTypeBasedOnMethodReturnType(signatureSelected,needLeftParenth,hasParams,tailType);
+  if (overwrite)   removeEndOfIdentifier(needLeftParenth && hasParams);
+ else   if (myContext.identifierEndOffset != myContext.selectionEndOffset)   context.resetParensInfo();
+  handleParenses(hasParams,needLeftParenth,tailType);
+  handleBrackets();
+  RangeMarker saveMaker=null;
+  final boolean generateAnonymousBody=myLookupItem.getAttribute(LookupItem.GENERATE_ANONYMOUS_BODY_ATTR) != null;
+  if (generateAnonymousBody) {
+    saveMaker=myDocument.createRangeMarker(myState.caretOffset,myState.caretOffset);
+    myDocument.insertString(myState.tailOffset,"{}");
+    myState.caretOffset=myState.tailOffset + 1;
+    myState.tailOffset+=2;
+  }
+  myState.caretOffset=processTail(tailType,myState.caretOffset,myState.tailOffset);
+  myEditor.getCaretModel().moveToOffset(myState.caretOffset);
+  myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  myEditor.getSelectionModel().removeSelection();
+  try {
+    addImportForItem(myFile,myStartOffset,myLookupItem);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  if (needLeftParenth && hasParams) {
+    final PsiMethod method=myLookupItem.getObject() instanceof PsiMethod ? (PsiMethod)myLookupItem.getObject() : null;
+    AutoPopupController.getInstance(myProject).autoPopupParameterInfo(myEditor,signatureSelected ? method : null);
+  }
+  if (tailType == TailType.DOT) {
+    AutoPopupController.getInstance(myProject).autoPopupMemberLookup(myEditor);
+  }
+  if (generateAnonymousBody) {
+    generateAnonymousBody();
+    if (hasParams) {
+      int offset=saveMaker.getStartOffset();
+      myEditor.getCaretModel().moveToOffset(offset);
+      myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+      myEditor.getSelectionModel().removeSelection();
+    }
+    return false;
+  }
+  return true;
+}

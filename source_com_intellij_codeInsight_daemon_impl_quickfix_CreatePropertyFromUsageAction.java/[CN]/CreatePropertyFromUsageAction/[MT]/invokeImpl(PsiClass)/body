@@ -1,0 +1,110 @@
+{
+  PsiManager manager=myMethodCall.getManager();
+  final Project project=manager.getProject();
+  PsiElementFactory factory=manager.getElementFactory();
+  boolean isStatic=false;
+  PsiExpression qualifierExpression=myMethodCall.getMethodExpression().getQualifierExpression();
+  if (qualifierExpression != null) {
+    if (qualifierExpression.getReference() != null) {
+      isStatic=qualifierExpression.getReference().resolve() instanceof PsiClass;
+    }
+  }
+ else {
+    PsiMethod method=PsiTreeUtil.getParentOfType(myMethodCall,PsiMethod.class);
+    if (method != null) {
+      isStatic=method.hasModifierProperty(PsiModifier.STATIC);
+    }
+  }
+  String fieldName=getVariableName(myMethodCall,isStatic);
+  LOG.assertTrue(fieldName != null);
+  String callText=myMethodCall.getMethodExpression().getReferenceName();
+  final PsiType[] expectedTypes;
+  PsiType type;
+  if (callText.startsWith("get")) {
+    expectedTypes=CreateFromUsageUtils.guessType(myMethodCall,false);
+    type=expectedTypes[0];
+  }
+ else   if (callText.startsWith("is")) {
+    type=PsiType.BOOLEAN;
+    expectedTypes=new PsiType[]{type};
+  }
+ else {
+    type=myMethodCall.getArgumentList().getExpressions()[0].getType();
+    if (type == null || type == PsiType.NULL)     type=PsiType.getJavaLangObject(manager,myMethodCall.getResolveScope());
+    expectedTypes=new PsiType[]{type};
+  }
+  positionCursor(project,targetClass.getContainingFile(),targetClass);
+  IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+  try {
+    PsiField field=targetClass.findFieldByName(fieldName,true);
+    if (field == null) {
+      field=factory.createField(fieldName,type);
+      field.getModifierList().setModifierProperty(PsiModifier.STATIC,isStatic);
+    }
+    PsiMethod accessor;
+    PsiElement fieldReference;
+    PsiElement typeReference;
+    if (callText.startsWith("get") || callText.startsWith("is")) {
+      accessor=(PsiMethod)targetClass.add(PropertyUtil.generateGetterPrototype(field));
+      fieldReference=((PsiReturnStatement)accessor.getBody().getStatements()[0]).getReturnValue();
+      typeReference=accessor.getReturnTypeElement();
+    }
+ else {
+      accessor=(PsiMethod)targetClass.add(PropertyUtil.generateSetterPrototype(field));
+      PsiAssignmentExpression expr=(PsiAssignmentExpression)((PsiExpressionStatement)accessor.getBody().getStatements()[0]).getExpression();
+      fieldReference=((PsiReferenceExpression)expr.getLExpression()).getReferenceNameElement();
+      typeReference=accessor.getParameterList().getParameters()[0].getTypeElement();
+    }
+    accessor.setName(callText);
+    accessor.getModifierList().setModifierProperty(PsiModifier.STATIC,isStatic);
+    final Editor editor=positionCursor(project,targetClass.getContainingFile(),accessor);
+    TemplateBuilder builder=new TemplateBuilder(accessor);
+    builder.replaceElement(typeReference,TYPE_VARIABLE,new TypeExpression(project,expectedTypes),true);
+    builder.replaceElement(fieldReference,FIELD_VARIABLE,new FieldExpression(field,targetClass,expectedTypes),true);
+    builder.setEndVariableAfter(accessor.getBody().getLBrace());
+    Template template=builder.buildTemplate();
+    TextRange textRange=accessor.getTextRange();
+    final PsiFile file=targetClass.getContainingFile();
+    editor.getDocument().deleteString(textRange.getStartOffset(),textRange.getEndOffset());
+    editor.getCaretModel().moveToOffset(textRange.getStartOffset());
+    final boolean isStatic1=isStatic;
+    startTemplate(editor,template,project,new TemplateStateListener(){
+      public void templateFinished(      Template template){
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            TemplateState state=TemplateManagerImpl.getTemplateState(editor);
+            if (state == null)             return;
+            String fieldName=state.getVariableValue(FIELD_VARIABLE).getText();
+            if (!PsiManager.getInstance(project).getNameHelper().isIdentifier(fieldName))             return;
+            String fieldType=state.getVariableValue(TYPE_VARIABLE).getText();
+            PsiElement element=file.findElementAt(editor.getCaretModel().getOffset());
+            PsiClass aClass=PsiTreeUtil.getParentOfType(element,PsiClass.class);
+            if (aClass == null)             return;
+            if (aClass.findFieldByName(fieldName,true) != null)             return;
+            PsiElementFactory factory=aClass.getManager().getElementFactory();
+            try {
+              PsiType type=factory.createTypeFromText(fieldType,aClass);
+              try {
+                PsiField field=factory.createField(fieldName,type);
+                field=(PsiField)aClass.add(field);
+                field.getModifierList().setModifierProperty(PsiModifier.STATIC,isStatic1);
+                positionCursor(project,field.getContainingFile(),field);
+              }
+ catch (              IncorrectOperationException e) {
+                LOG.error(e);
+              }
+            }
+ catch (            IncorrectOperationException e) {
+              return;
+            }
+          }
+        }
+);
+      }
+    }
+);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

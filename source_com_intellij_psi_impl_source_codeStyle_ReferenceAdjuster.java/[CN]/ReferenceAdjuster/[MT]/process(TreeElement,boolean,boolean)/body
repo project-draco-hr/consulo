@@ -1,0 +1,62 @@
+{
+  IElementType elementType=element.getElementType();
+  if (elementType == JAVA_CODE_REFERENCE || elementType == REFERENCE_EXPRESSION) {
+    if (elementType == JAVA_CODE_REFERENCE || element.getTreeParent().getElementType() == REFERENCE_EXPRESSION || uncompleteCode) {
+      final PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)SourceTreeToPsiMap.treeElementToPsi(element);
+      final PsiTypeElement[] typeParameters=ref.getParameterList().getTypeParameterElements();
+      for (int i=0; i < typeParameters.length; i++) {
+        process(SourceTreeToPsiMap.psiElementToTree(typeParameters[i]),addImports,uncompleteCode);
+      }
+      boolean rightKind=true;
+      if (elementType == JAVA_CODE_REFERENCE) {
+        int kind=((PsiJavaCodeReferenceElementImpl)element).getKind();
+        rightKind=kind == PsiJavaCodeReferenceElementImpl.CLASS_NAME_KIND || kind == PsiJavaCodeReferenceElementImpl.CLASS_OR_PACKAGE_NAME_KIND;
+      }
+      if (rightKind) {
+        boolean isInsideDocComment=TreeUtil.findParent(element,ElementType.DOC_COMMENT) != null;
+        boolean isShort=!((SourceJavaCodeReference)element).isQualified();
+        if (!makeFQ(isInsideDocComment)) {
+          if (isShort)           return element;
+        }
+        PsiElement refElement;
+        if (!uncompleteCode) {
+          refElement=ref.resolve();
+        }
+ else {
+          PsiResolveHelper helper=element.getManager().getResolveHelper();
+          refElement=helper.resolveReferencedClass(((SourceJavaCodeReference)element).getClassNameText(),SourceTreeToPsiMap.treeElementToPsi(element));
+        }
+        if (refElement instanceof PsiClass) {
+          if (makeFQ(isInsideDocComment)) {
+            String qName=((PsiClass)refElement).getQualifiedName();
+            if (qName == null)             return element;
+            PsiFile file=SourceTreeToPsiMap.treeElementToPsi(element).getContainingFile();
+            if (ImportHelper.isImplicitlyImported(qName,file)) {
+              if (isShort)               return element;
+              return makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports,uncompleteCode);
+            }
+            if (file instanceof PsiJavaFile) {
+              String thisPackageName=((PsiJavaFile)file).getPackageName();
+              if (ImportHelper.hasPackage(qName,thisPackageName)) {
+                if (!isShort) {
+                  return makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports,uncompleteCode);
+                }
+              }
+            }
+            return replaceReferenceWithFQ((CompositeElement)element,(PsiClass)refElement);
+          }
+ else {
+            return makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports,uncompleteCode);
+          }
+        }
+      }
+    }
+  }
+  if (element instanceof CompositeElement) {
+    ChameleonTransforming.transformChildren((CompositeElement)element);
+    for (TreeElement child=((CompositeElement)element).firstChild; child != null; child=child.getTreeNext()) {
+      child=process(child,addImports,uncompleteCode);
+    }
+  }
+  return element;
+}

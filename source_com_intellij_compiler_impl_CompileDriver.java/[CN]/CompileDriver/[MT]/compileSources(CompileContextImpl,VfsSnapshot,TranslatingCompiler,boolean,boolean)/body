@@ -1,0 +1,62 @@
+{
+  final TranslatingCompilerStateCache cache=getTranslatingCompilerCache(compiler);
+  final Set<VirtualFile> toCompile=new HashSet<VirtualFile>();
+  final Set<String> toDelete=new HashSet<String>();
+  final boolean wereFilesDeleted[]=new boolean[]{false};
+  final CompilerConfiguration compilerConfiguration=CompilerConfiguration.getInstance(myProject);
+  context.getProgressIndicator().pushState();
+  try {
+    final Set<String> urlsWithSourceRemoved=new HashSet<String>();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        findOutOfDateFiles(compiler,snapshot,forceCompile,cache,toCompile,context);
+        if (context.getCompileScope() instanceof TrackDependenciesScope && toCompile.size() > 0) {
+          final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
+          final PsiManager psiManager=PsiManager.getInstance(myProject);
+          final VirtualFile[] filesToCompile=toCompile.toArray(new VirtualFile[toCompile.size()]);
+          Set<String> sourcesWithOutputRemoved=getSourcesWithOutputRemoved(cache);
+          for (int i=0; i < filesToCompile.length; i++) {
+            final VirtualFile file=filesToCompile[i];
+            if (fileTypeManager.getFileTypeByFile(file) == StdFileTypes.JAVA) {
+              final PsiFile psiFile=psiManager.findFile(file);
+              if (psiFile != null) {
+                addDependentFiles(psiFile,toCompile,cache,snapshot,sourcesWithOutputRemoved);
+              }
+            }
+          }
+        }
+        context.getProgressIndicator().setText("Searching for files to delete...");
+        if (!isRebuild) {
+          findFilesToDelete(context.getCompileScope(),snapshot,urlsWithSourceRemoved,cache,toCompile,context,toDelete,compilerConfiguration);
+        }
+      }
+    }
+);
+    if (toDelete.size() > 0) {
+      try {
+        wereFilesDeleted[0]=syncOutputDir(urlsWithSourceRemoved,context,toDelete,cache);
+      }
+ catch (      CacheCorruptedException e) {
+        LOG.info(e);
+        context.requestRebuildNextTime(e.getMessage());
+      }
+    }
+    if (wereFilesDeleted[0] && toDelete.size() > 0) {
+      CompilerUtil.refreshPaths(toDelete.toArray(new String[toDelete.size()]));
+    }
+    if ((wereFilesDeleted[0] || toCompile.size() > 0) && context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+      final TranslatingCompiler.ExitStatus exitStatus=compiler.compile(context,toCompile.toArray(new VirtualFile[toCompile.size()]));
+      updateInternalCaches(cache,context,exitStatus.getSuccessfullyCompiled(),exitStatus.getFilesToRecompile());
+    }
+  }
+  finally {
+    if (cache.isDirty()) {
+      context.getProgressIndicator().setText("Saving caches...");
+      if (cache.isDirty()) {
+        cache.save();
+      }
+    }
+    context.getProgressIndicator().popState();
+  }
+  return toCompile.size() > 0 || wereFilesDeleted[0];
+}

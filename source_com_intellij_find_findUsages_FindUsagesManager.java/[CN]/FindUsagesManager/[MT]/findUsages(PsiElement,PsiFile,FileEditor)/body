@@ -1,0 +1,104 @@
+{
+  PsiElement[] elementsToSearch=null;
+  if (!canFindUsages(psiElement)) {
+    return;
+  }
+  if (psiElement instanceof PsiDirectory) {
+    PsiPackage psiPackage=((PsiDirectory)psiElement).getPackage();
+    if (psiPackage == null) {
+      return;
+    }
+    psiElement=psiPackage;
+  }
+  boolean isOpenInNewTabEnabled;
+  boolean toOpenInNewTab;
+  Content selectedContent=UsageViewManager.getInstance(myProject).getSelectedContent(true);
+  if (selectedContent != null && selectedContent.isPinned()) {
+    toOpenInNewTab=true;
+    isOpenInNewTabEnabled=false;
+  }
+ else {
+    toOpenInNewTab=myToOpenInNewTab;
+    isOpenInNewTabEnabled=(UsageViewManager.getInstance(myProject).getReusableContentsCount() > 0);
+  }
+  if (psiElement instanceof PsiMethod || psiElement instanceof PsiPointcutDef) {
+    psiElement=psiElement instanceof PsiMethod ? (PsiElement)SuperMethodWarningUtil.checkSuperMethod((PsiMethod)psiElement,"find usages of") : (PsiElement)SuperMethodWarningUtil.checkSuperPointcut((PsiPointcutDef)psiElement,"find usages of");
+  }
+  if (psiElement == null)   return;
+  final FindUsagesDialog dialog=getFindUsagesDialog(psiElement,scopeFile != null,toOpenInNewTab,isOpenInNewTabEnabled);
+  if (dialog == null) {
+    return;
+  }
+  dialog.show();
+  if (!dialog.isOK()) {
+    return;
+  }
+  if (isOpenInNewTabEnabled) {
+    myToOpenInNewTab=toOpenInNewTab=dialog.isShowInSeparateWindow();
+  }
+  FindUsagesOptions findUsagesOptions=dialog.calcFindUsagesOptions();
+  if (scopeFile != null) {
+    findUsagesOptions=(FindUsagesOptions)findUsagesOptions.clone();
+    findUsagesOptions.isDerivedClasses=false;
+    findUsagesOptions.isDerivedInterfaces=false;
+    findUsagesOptions.isImplementingClasses=false;
+  }
+  clearFindingNextUsageInFile();
+  LOG.assertTrue(psiElement.isValid());
+  if (psiElement instanceof PsiParameter) {
+    final PsiParameter parameter=(PsiParameter)psiElement;
+    final PsiElement scope=parameter.getDeclarationScope();
+    if (scope instanceof PsiMethod) {
+      final PsiMethod method=(PsiMethod)scope;
+      if (PsiUtil.canBeOverriden(method)) {
+        final PsiClass aClass=method.getContainingClass();
+        LOG.assertTrue(aClass != null);
+        final boolean findInInheritors;
+        if (aClass.isInterface() || method.hasModifierProperty(PsiModifier.ABSTRACT)) {
+          findInInheritors=true;
+        }
+ else {
+          findInInheritors=Messages.showDialog(psiElement.getProject(),"Do you want to search usages of parameter '" + parameter.getName() + "' in overriding methods?","Search in Overriding Methods",new String[]{"Yes","No"},0,Messages.getQuestionIcon()) == 0;
+        }
+        if (findInInheritors) {
+          elementsToSearch=getParameterElementsToSearch(parameter);
+        }
+      }
+    }
+  }
+ else   if (psiElement instanceof PsiField) {
+    final PsiField field=(PsiField)psiElement;
+    if (field.getContainingClass() != null && field.getType() != null) {
+      final String propertyName=field.getManager().getCodeStyleManager().variableNameToPropertyName(field.getName(),VariableKind.FIELD);
+      PsiMethod getter=PropertyUtil.findPropertyGetterWithType(propertyName,field.hasModifierProperty(PsiModifier.STATIC),field.getType(),ContainerUtil.iterate(field.getContainingClass().getMethods()));
+      PsiMethod setter=PropertyUtil.findPropertySetterWithType(propertyName,field.hasModifierProperty(PsiModifier.STATIC),field.getType(),ContainerUtil.iterate(field.getContainingClass().getMethods()));
+      if (getter != null || setter != null) {
+        if (Messages.showDialog("Do you want to search for accessors of '" + field.getName() + "'?","Search Accessors",new String[]{"Yes","No"},0,Messages.getQuestionIcon()) == DialogWrapper.OK_EXIT_CODE) {
+          final List<PsiElement> elements=new ArrayList<PsiElement>();
+          elements.add(field);
+          if (getter != null) {
+            getter=SuperMethodWarningUtil.checkSuperMethod(getter,"find usages of");
+            if (getter == null)             return;
+            elements.add(getter);
+          }
+          if (setter != null) {
+            setter=SuperMethodWarningUtil.checkSuperMethod(setter,"find usages of");
+            if (setter == null)             return;
+            elements.add(setter);
+          }
+          elementsToSearch=elements.toArray(new PsiElement[elements.size()]);
+        }
+      }
+    }
+  }
+  if (elementsToSearch == null) {
+    elementsToSearch=new PsiElement[]{psiElement};
+  }
+  if (scopeFile == null) {
+    findUsages(elementsToSearch,dialog.isSkipResultsWhenOneUsage(),toOpenInNewTab,findUsagesOptions);
+  }
+ else {
+    editor.putUserData(KEY_START_USAGE_AGAIN,null);
+    findUsagesInEditor(elementsToSearch,scopeFile,FROM_START,findUsagesOptions,editor);
+  }
+}

@@ -1,0 +1,79 @@
+{
+  StringBuffer buffer=new StringBuffer(512);
+  List threads=vmProxy.getVirtualMachine().allThreads();
+  for (Iterator it=threads.iterator(); it.hasNext(); ) {
+    ThreadReference threadReference=(ThreadReference)it.next();
+    buffer.append(threadName(threadReference));
+    ReferenceType referenceType=threadReference.referenceType();
+    if (referenceType != null) {
+      Field daemon=referenceType.fieldByName("daemon");
+      if (daemon != null) {
+        Value value=threadReference.getValue(daemon);
+        if (value instanceof BooleanValue && ((BooleanValue)value).booleanValue()) {
+          buffer.append(" daemon");
+        }
+      }
+      Field priority=referenceType.fieldByName("priority");
+      if (priority != null) {
+        Value value=threadReference.getValue(priority);
+        if (value instanceof IntegerValue) {
+          buffer.append(" prio=" + ((IntegerValue)value).intValue());
+        }
+      }
+    }
+    ThreadGroupReference groupReference=threadReference.threadGroup();
+    if (groupReference != null) {
+      buffer.append(", in group \"");
+      buffer.append(groupReference.name());
+      buffer.append("\"");
+    }
+    buffer.append(", status: ");
+    buffer.append(DebuggerUtilsEx.getThreadStatusText(threadReference.status()));
+    try {
+      if (vmProxy.canGetOwnedMonitorInfo() && vmProxy.canGetMonitorInfo()) {
+        List list=threadReference.ownedMonitors();
+        for (Iterator iterator=list.iterator(); iterator.hasNext(); ) {
+          ObjectReference reference=(ObjectReference)iterator.next();
+          List waiting=reference.waitingThreads();
+          for (Iterator iterator1=waiting.iterator(); iterator1.hasNext(); ) {
+            ThreadReference thread=(ThreadReference)iterator1.next();
+            buffer.append("\n\t blocks " + threadName(thread));
+          }
+        }
+      }
+      ObjectReference waitedMonitor=vmProxy.canGetCurrentContendedMonitor() ? threadReference.currentContendedMonitor() : null;
+      if (waitedMonitor != null) {
+        if (vmProxy.canGetMonitorInfo()) {
+          ThreadReference waitedThread=waitedMonitor.owningThread();
+          if (waitedThread != null) {
+            buffer.append("\n\t waiting for " + threadName(waitedThread));
+          }
+        }
+      }
+      List frames=threadReference.frames();
+      for (Iterator frit=frames.iterator(); frit.hasNext(); ) {
+        StackFrame stackFrame=(StackFrame)frit.next();
+        Location location=stackFrame.location();
+        Method method=location.method();
+        buffer.append("\n\t  ");
+        buffer.append(method.name());
+        buffer.append("():");
+        buffer.append(Integer.toString(location.lineNumber()));
+        try {
+          String sourceName=location.sourceName();
+          buffer.append(", ");
+          buffer.append(sourceName);
+        }
+ catch (        AbsentInformationException e) {
+        }
+catch (        InternalError e) {
+        }
+      }
+    }
+ catch (    IncompatibleThreadStateException e) {
+      buffer.append("\n\t Incompatible thread state");
+    }
+    buffer.append("\n\n");
+  }
+  return buffer.toString();
+}

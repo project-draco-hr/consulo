@@ -1,0 +1,70 @@
+{
+  if (body == null)   return null;
+  final List<ProblemDescriptor> descriptions=new ArrayList<ProblemDescriptor>();
+  final Set<PsiVariable> usedVariables=new THashSet<PsiVariable>();
+  List<DefUseUtil.Info> unusedDefs=DefUseUtil.getUnusedDefs(body,usedVariables);
+  if (unusedDefs != null && !unusedDefs.isEmpty()) {
+    Collections.sort(unusedDefs,new Comparator<DefUseUtil.Info>(){
+      public int compare(      DefUseUtil.Info o1,      DefUseUtil.Info o2){
+        int offset1=o1.getContext().getTextOffset();
+        int offset2=o2.getContext().getTextOffset();
+        if (offset1 == offset2)         return 0;
+        if (offset1 < offset2)         return -1;
+        return 1;
+      }
+    }
+);
+    for (int i=0; i < unusedDefs.size(); i++) {
+      DefUseUtil.Info info=unusedDefs.get(i);
+      PsiElement context=info.getContext();
+      PsiVariable psiVariable=info.getVariable();
+      if (context instanceof PsiDeclarationStatement) {
+        if (!info.isRead()) {
+          if (!isOnTheFly) {
+            descriptions.add(manager.createProblemDescriptor(psiVariable.getNameIdentifier(),"Variable <code>#ref</code> #loc is never used.",null,ProblemHighlightType.LIKE_UNUSED_SYMBOL));
+          }
+        }
+ else {
+          descriptions.add(manager.createProblemDescriptor(psiVariable.getInitializer(),"Variable <code>" + psiVariable.getName() + "</code> initializer <code>#ref</code> #loc is redundant.",new RemoveInitializerFix(),ProblemHighlightType.LIKE_UNUSED_SYMBOL));
+        }
+      }
+ else       if (context instanceof PsiAssignmentExpression && ((PsiAssignmentExpression)context).getOperationSign().getTokenType() == JavaTokenType.EQ) {
+        final PsiAssignmentExpression assignment=(PsiAssignmentExpression)context;
+        descriptions.add(manager.createProblemDescriptor(assignment.getRExpression(),"The value <code>#ref</code> assigned to " + assignment.getLExpression().getText() + " #loc is never used.",null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+      }
+ else {
+        if (context instanceof PsiPrefixExpression && REPORT_PREFIX_EXPRESSIONS || context instanceof PsiPostfixExpression && REPORT_POSTFIX_EXPRESSIONS) {
+          descriptions.add(manager.createProblemDescriptor(context,"The value changed at <code>#ref</code> #loc is never used.",null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+        }
+      }
+    }
+  }
+  body.accept(new PsiRecursiveElementVisitor(){
+    public void visitReferenceExpression(    PsiReferenceExpression expression){
+      visitElement(expression);
+    }
+    public void visitClass(    PsiClass aClass){
+    }
+    public void visitLocalVariable(    PsiLocalVariable variable){
+      if (!usedVariables.contains(variable) && variable.getInitializer() == null && !isOnTheFly) {
+        descriptions.add(manager.createProblemDescriptor(variable.getNameIdentifier(),"Variable <code>#ref</code> #loc is never used.",null,ProblemHighlightType.LIKE_UNUSED_SYMBOL));
+      }
+    }
+    public void visitAssignmentExpression(    PsiAssignmentExpression expression){
+      PsiExpression lExpression=expression.getLExpression();
+      PsiExpression rExpression=expression.getRExpression();
+      if (lExpression instanceof PsiReferenceExpression && rExpression instanceof PsiReferenceExpression) {
+        PsiReferenceExpression lRef=(PsiReferenceExpression)lExpression;
+        PsiReferenceExpression rRef=(PsiReferenceExpression)rExpression;
+        if (lRef.resolve() != rRef.resolve())         return;
+        PsiExpression lQualifier=lRef.getQualifierExpression();
+        PsiExpression rQualifier=rRef.getQualifierExpression();
+        if ((lQualifier == null && rQualifier == null || lQualifier instanceof PsiThisExpression && rQualifier instanceof PsiThisExpression || lQualifier instanceof PsiThisExpression && rQualifier == null || lQualifier == null && rQualifier instanceof PsiThisExpression) && !isOnTheFly) {
+          descriptions.add(manager.createProblemDescriptor(expression,"The variable is assigned to itself in <code>#ref</code>.",null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+        }
+      }
+    }
+  }
+);
+  return descriptions.isEmpty() ? null : (ProblemDescriptor[])descriptions.toArray(new ProblemDescriptorImpl[descriptions.size()]);
+}

@@ -1,0 +1,48 @@
+{
+  final HashSet<PsiClass> movedClasses=new HashSet<PsiClass>();
+  final HashMap<PsiClass,HashSet> reportedClassToContainers=new com.intellij.util.containers.HashMap<PsiClass,HashSet>();
+  final PackageWrapper aPackage=myTargetPackage;
+  for (int i=0; i < usages.length; i++) {
+    UsageInfo usage=usages[i];
+    if (usage instanceof MoveRenameUsageInfo && ((MoveRenameUsageInfo)usage).referencedElement instanceof PsiClass) {
+      PsiClass aClass=(PsiClass)((MoveRenameUsageInfo)usage).referencedElement;
+      if (!movedClasses.contains(aClass)) {
+        movedClasses.add(aClass);
+      }
+      String visibility=VisibilityUtil.getVisibilityModifier(aClass.getModifierList());
+      if (PsiModifier.PACKAGE_LOCAL.equals(visibility)) {
+        PsiElement container=ConflictsUtil.getContainer(usage.getElement());
+        if (PsiTreeUtil.getParentOfType(usage.getElement(),PsiImportStatement.class) != null)         continue;
+        HashSet reported=reportedClassToContainers.get(aClass);
+        if (reported == null) {
+          reported=new HashSet();
+          reportedClassToContainers.put(aClass,reported);
+        }
+        if (!reported.contains(container)) {
+          PsiFile containingFile=usage.getElement().getContainingFile();
+          if (containingFile != null && !isInsideMoved(usage.getElement())) {
+            PsiDirectory directory=containingFile.getContainingDirectory();
+            if (directory != null) {
+              PsiPackage usagePackage=directory.getPackage();
+              if (aPackage != null && usagePackage != null && !aPackage.equalToPackage(usagePackage)) {
+                final String message="A package-local class " + ConflictsUtil.htmlEmphasize(aClass.getName()) + " will no longer be accessible from "+ ConflictsUtil.getDescription(container,true);
+                conflicts.add(message);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  final MyClassInstanceReferenceVisitor instanceReferenceVisitor=new MyClassInstanceReferenceVisitor(conflicts);
+  for (Iterator<PsiClass> it=movedClasses.iterator(); it.hasNext(); ) {
+    final PsiClass aClass=it.next();
+    String visibility=VisibilityUtil.getVisibilityModifier(aClass.getModifierList());
+    if (PsiModifier.PACKAGE_LOCAL.equals(visibility)) {
+      findInstancesOfPackageLocal(aClass,usages,instanceReferenceVisitor);
+    }
+ else {
+      findPublicClassConflicts(aClass,instanceReferenceVisitor);
+    }
+  }
+}

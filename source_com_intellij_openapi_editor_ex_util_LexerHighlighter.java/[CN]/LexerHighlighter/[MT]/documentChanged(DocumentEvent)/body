@@ -1,0 +1,56 @@
+{
+  Document document=e.getDocument();
+  if (mySegments.getSegmentCount() == 0 || myLexer.getSmartUpdateShift() < 0) {
+    setText(document.getCharsSequence());
+    return;
+  }
+  CharSequence text=document.getCharsSequence();
+  int oldStartOffset=e.getOffset();
+  int startIndex=Math.max(0,mySegments.findSegmentIndex(oldStartOffset) - 2);
+  int startOffset=mySegments.getSegmentStart(startIndex);
+  long data=mySegments.getSegmentData(startIndex);
+  final int lexerState=unpackState(data);
+  int newEndOffset=e.getOffset() + e.getNewLength();
+  myLexer.start(CharArrayUtil.fromSequence(text),startOffset,text.length(),lexerState);
+  SegmentArrayWithData insertSegments=new SegmentArrayWithData();
+  int oldEndIndex=-1;
+  int insertSegmentCount=0;
+  int repaintEnd=-1;
+  int lastTokenStart=-1;
+  while (myLexer.getTokenType() != null) {
+    int tokenStart=myLexer.getTokenStart();
+    if (tokenStart == lastTokenStart) {
+      throw new IllegalStateException("Error while updating lexer: " + e + " document text: "+ e.getDocument().getText());
+    }
+    lastTokenStart=tokenStart;
+    int tokenEnd=myLexer.getTokenEnd();
+    data=packData(myLexer.getTokenType(),myLexer.getState());
+    if (tokenStart >= newEndOffset) {
+      int shiftedTokenStart=tokenStart - e.getNewLength() + e.getOldLength();
+      int index=mySegments.findSegmentIndex(shiftedTokenStart);
+      if (mySegments.getSegmentStart(index) == shiftedTokenStart && mySegments.getSegmentData(index) == data) {
+        repaintEnd=tokenStart;
+        oldEndIndex=index;
+        break;
+      }
+    }
+    insertSegments.setElementAt(insertSegmentCount,tokenStart,tokenEnd,data);
+    insertSegmentCount++;
+    myLexer.advance();
+  }
+  if (repaintEnd == -1) {
+    repaintEnd=text.length();
+  }
+  if (oldEndIndex < 0) {
+    oldEndIndex=mySegments.getSegmentCount();
+  }
+  mySegments.shiftSegments(oldEndIndex,e.getNewLength() - e.getOldLength());
+  mySegments.remove(startIndex,oldEndIndex);
+  mySegments.insert(insertSegments,startIndex);
+  int lastDocOffset=e.getDocument().getTextLength();
+  checkUpdateCorrect(lastDocOffset);
+  if (insertSegmentCount == 0 || oldEndIndex == startIndex + 1 && insertSegmentCount == 1 && data == mySegments.getSegmentData(startIndex)) {
+    return;
+  }
+  ((EditorEx)myEditor).repaint(startOffset,repaintEnd);
+}

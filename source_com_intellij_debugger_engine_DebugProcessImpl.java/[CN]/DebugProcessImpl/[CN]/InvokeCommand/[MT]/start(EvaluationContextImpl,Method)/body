@@ -1,0 +1,67 @@
+{
+  DebuggerManagerThreadImpl.assertIsManagerThread();
+  SuspendContextImpl suspendContext=evaluationContext.getSuspendContext();
+  SuspendManagerUtil.assertSuspendContext(suspendContext);
+  myEvaluationDispatcher.getMulticaster().evaluationStarted(suspendContext);
+  beforeMethodInvocation(suspendContext,method);
+  ThreadReferenceProxyImpl invokeThread=suspendContext.getThread();
+  if (SuspendManagerUtil.isEvaluating(getSuspendManager(),invokeThread)) {
+    throw EvaluateExceptionUtil.NESTED_EVALUATION_ERROR;
+  }
+  Set<SuspendContextImpl> suspendingContexts=SuspendManagerUtil.getSuspendingContexts(getSuspendManager(),invokeThread);
+  for (Iterator<SuspendContextImpl> iterator=suspendingContexts.iterator(); iterator.hasNext(); ) {
+    SuspendContextImpl suspendingContext=iterator.next();
+    if (suspendingContext.getThread() != invokeThread) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Resuming " + invokeThread + "that is paused by "+ suspendingContext.getThread());
+      }
+      LOG.assertTrue(!suspendingContext.getThread().getThreadReference().equals(invokeThread.getThreadReference()));
+      getSuspendManager().resumeThread(suspendingContext,invokeThread);
+    }
+  }
+  Object resumeData=SuspendManagerUtil.prepareForResume(suspendContext);
+  suspendContext.setIsEvaluating(evaluationContext);
+  getVirtualMachineProxy().clearCaches();
+  try {
+    for (; ; ) {
+      try {
+        return invokeMethodAndFork(suspendContext);
+      }
+ catch (      ClassNotLoadedException e) {
+        ReferenceType loadedClass=loadClass(evaluationContext,e.className(),evaluationContext.getClassLoader());
+        if (loadedClass == null)         throw EvaluateExceptionUtil.createEvaluateException(e);
+      }
+    }
+  }
+ catch (  ClassNotLoadedException e) {
+    throw EvaluateExceptionUtil.createEvaluateException(e);
+  }
+catch (  InvocationException e) {
+    throw EvaluateExceptionUtil.createEvaluateException(e);
+  }
+catch (  IncompatibleThreadStateException e) {
+    throw EvaluateExceptionUtil.createEvaluateException(e);
+  }
+catch (  InvalidTypeException e) {
+    throw EvaluateExceptionUtil.createEvaluateException(e);
+  }
+catch (  ObjectCollectedException e) {
+    throw EvaluateExceptionUtil.createEvaluateException(e);
+  }
+ finally {
+    suspendContext.setIsEvaluating(null);
+    SuspendManagerUtil.restoreAfterResume(suspendContext,resumeData);
+    for (Iterator<SuspendContextImpl> iterator=getSuspendManager().getEventContexts().iterator(); iterator.hasNext(); ) {
+      SuspendContextImpl suspendingContext=iterator.next();
+      if (suspendingContexts.contains(suspendingContext) && !suspendingContext.isEvaluating() && !suspendingContext.suspends(invokeThread)) {
+        getSuspendManager().suspendThread(suspendingContext,invokeThread);
+      }
+    }
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("getVirtualMachine().clearCaches()");
+    }
+    getVirtualMachineProxy().clearCaches();
+    afterMethodInvocation(suspendContext);
+    myEvaluationDispatcher.getMulticaster().evaluationFinished(suspendContext);
+  }
+}

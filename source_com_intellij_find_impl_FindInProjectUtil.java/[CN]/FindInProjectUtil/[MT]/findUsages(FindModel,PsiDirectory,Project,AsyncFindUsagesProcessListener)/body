@@ -1,0 +1,81 @@
+{
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  final VirtualFile[] virtualFiles=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
+    public VirtualFile[] compute(){
+      final FileIndex fileIndex=(findModel.getModuleName() == null) ? (FileIndex)ProjectRootManager.getInstance(project).getFileIndex() : ModuleRootManager.getInstance(ModuleManager.getInstance(project).findModuleByName(findModel.getModuleName())).getFileIndex();
+      if (psiDirectory == null || (findModel.isWithSubdirectories() && fileIndex.isInContent(psiDirectory.getVirtualFile()))) {
+class EnumContentIterator implements ContentIterator {
+          List<VirtualFile> myVirtualFiles=new ArrayList<VirtualFile>();
+          Pattern fileMaskRegExp=createFileMaskRegExp(findModel);
+          public boolean processFile(          VirtualFile fileOrDir){
+            if (!fileOrDir.isDirectory() && (fileMaskRegExp == null || fileMaskRegExp.matcher(fileOrDir.getName()).matches())) {
+              myVirtualFiles.add(fileOrDir);
+            }
+            return true;
+          }
+          public VirtualFile[] getVirtualFiles(){
+            return myVirtualFiles.toArray(new VirtualFile[myVirtualFiles.size()]);
+          }
+        }
+        final EnumContentIterator iterator=new EnumContentIterator();
+        if (psiDirectory == null) {
+          fileIndex.iterateContent(iterator);
+        }
+ else {
+          fileIndex.iterateContentUnderDirectory(psiDirectory.getVirtualFile(),iterator);
+        }
+        return iterator.getVirtualFiles();
+      }
+ else {
+        List<VirtualFile> vFileList=new ArrayList<VirtualFile>();
+        VirtualFile virtualFile=psiDirectory.getVirtualFile();
+        addVirtualFilesUnderDirectory(virtualFile,vFileList,findModel.isWithSubdirectories(),createFileMaskRegExp(findModel));
+        return vFileList.toArray(new VirtualFile[vFileList.size()]);
+      }
+    }
+  }
+);
+  final FileDocumentManager manager=FileDocumentManager.getInstance();
+  try {
+    for (int i=0; i < virtualFiles.length; i++) {
+      ProgressManager.getInstance().checkCanceled();
+      final VirtualFile virtualFile=virtualFiles[i];
+      final int index=i;
+      final int occurencesBeforeFileSearch=consumer.getCount();
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          if (virtualFile.isValid()) {
+            if (FileTypeManager.getInstance().getFileTypeByFile(virtualFile).isBinary())             return;
+            final Document document=manager.getDocument(virtualFile);
+            if (document != null) {
+              addToUsages(project,document,consumer,findModel);
+              if (progress != null) {
+                progress.setFraction((double)index / virtualFiles.length);
+                String text="Searching for '" + findModel.getStringToFind() + "' in "+ virtualFile.getPresentableUrl()+ "...";
+                progress.setText(text);
+                int size=consumer.getCount();
+                progress.setText2((size == 0 ? "No" : Integer.toString(size)) + " occurrence" + (size != 1 ? "s" : "")+ " found so far");
+              }
+            }
+          }
+        }
+      }
+);
+      if (occurencesBeforeFileSearch == consumer.getCount()) {
+synchronized (project) {
+          try {
+            project.wait(1);
+          }
+ catch (          InterruptedException ex) {
+          }
+        }
+      }
+    }
+  }
+ catch (  ProcessCanceledException e) {
+  }
+  if (progress != null) {
+    progress.setText("Search completed");
+  }
+  consumer.findUsagesCompleted();
+}

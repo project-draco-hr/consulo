@@ -1,0 +1,65 @@
+{
+  try {
+    PsiManager manager=element.getManager();
+    final PsiElementFactory factory=manager.getElementFactory();
+    final PsiSearchHelper helper=manager.getSearchHelper();
+    GlobalSearchScope projectScope=GlobalSearchScope.projectScope(manager.getProject());
+    if (element instanceof PsiMethod) {
+      PsiMethod method=(PsiMethod)element;
+      final PsiClass containingClass=method.getContainingClass();
+      if (containingClass == null)       return;
+      if (method.hasModifierProperty(PsiModifier.PRIVATE))       return;
+      PsiClass[] inheritors=helper.findInheritors(containingClass,projectScope,true);
+      PsiMethod prototype=(PsiMethod)element.copy();
+      prototype.getNameIdentifier().replace(factory.createIdentifier(newName));
+      final PsiMethod existingMethod=containingClass.findMethodBySignature(prototype,true);
+      if (existingMethod != null && manager.getResolveHelper().isAccessible(existingMethod,containingClass,null)) {
+        result.add(new MemberExistsUsageInfo(existingMethod,method));
+      }
+      for (int i=0; i < inheritors.length; i++) {
+        PsiClass inheritor=inheritors[i];
+        PsiMethod conflictingMethod=inheritor.findMethodBySignature(prototype,false);
+        if (conflictingMethod != null) {
+          result.add(new SubmemberHidesMemberUsageInfo(conflictingMethod,method));
+        }
+      }
+    }
+ else     if (element instanceof PsiField) {
+      final PsiField field=(PsiField)element;
+      if (field.getContainingClass() == null)       return;
+      if (field.hasModifierProperty(PsiModifier.PRIVATE))       return;
+      final PsiClass containingClass=field.getContainingClass();
+      final PsiField existingField=containingClass.findFieldByName(newName,true);
+      if (existingField != null && manager.getResolveHelper().isAccessible(existingField,containingClass,null)) {
+        result.add(new MemberExistsUsageInfo(existingField,field));
+      }
+      PsiClass[] inheritors=helper.findInheritors(containingClass,projectScope,true);
+      for (int i=0; i < inheritors.length; i++) {
+        PsiClass inheritor=inheritors[i];
+        PsiField conflictingField=inheritor.findFieldByName(newName,false);
+        if (conflictingField != null) {
+          result.add(new SubmemberHidesMemberUsageInfo(conflictingField,field));
+        }
+      }
+    }
+ else     if (element instanceof PsiClass) {
+      final PsiClass aClass=(PsiClass)element;
+      if (aClass.getParent() instanceof PsiClass) {
+        PsiClass[] inheritors=helper.findInheritors((PsiClass)aClass.getParent(),projectScope,true);
+        for (int i=0; i < inheritors.length; i++) {
+          PsiClass inheritor=inheritors[i];
+          PsiClass[] inners=inheritor.getInnerClasses();
+          for (int j=0; j < inners.length; j++) {
+            PsiClass inner=inners[j];
+            if (inner.getName().equals(newName)) {
+              result.add(new SubmemberHidesMemberUsageInfo(inner,aClass));
+            }
+          }
+        }
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

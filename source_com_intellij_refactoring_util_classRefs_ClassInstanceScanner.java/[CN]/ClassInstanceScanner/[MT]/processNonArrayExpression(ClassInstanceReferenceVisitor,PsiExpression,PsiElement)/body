@@ -1,0 +1,74 @@
+{
+  expression=RefactoringUtil.outermostParenthesizedExpression(expression);
+  PsiElement parent=expression.getParent();
+  if (parent instanceof PsiReferenceExpression && expression == ((PsiReferenceExpression)parent).getQualifierExpression()) {
+    visitor.visitQualifier((PsiReferenceExpression)parent,expression,referencedElement);
+  }
+ else   if (parent instanceof PsiTypeCastExpression) {
+    visitor.visitTypeCast((PsiTypeCastExpression)parent,expression,referencedElement);
+  }
+ else   if (parent instanceof PsiReturnStatement) {
+    final PsiReturnStatement returnStatement=(PsiReturnStatement)parent;
+    PsiMethod enclosingMethod=PsiTreeUtil.getParentOfType(returnStatement,PsiMethod.class);
+    final PsiType returnType;
+    if (enclosingMethod != null) {
+      returnType=enclosingMethod.getReturnType();
+    }
+ else {
+      returnType=null;
+    }
+    visitor.visitReadUsage(expression,returnType,referencedElement);
+  }
+ else   if (parent instanceof PsiStatement) {
+    visitor.visitReadUsage(expression,null,referencedElement);
+  }
+ else   if (parent instanceof PsiExpressionList) {
+    PsiExpressionList expressionList=(PsiExpressionList)parent;
+    PsiElement pparent=expressionList.getParent();
+    if (pparent instanceof PsiStatement) {
+      visitor.visitReadUsage(expression,null,referencedElement);
+    }
+ else     if (pparent instanceof PsiCallExpression) {
+      PsiCallExpression callExpression=(PsiCallExpression)pparent;
+      PsiExpression[] arguments=callExpression.getArgumentList().getExpressions();
+      PsiMethod method=callExpression.resolveMethod();
+      if (method != null) {
+        int index=-1;
+        for (int i=0; i < arguments.length; i++) {
+          PsiExpression argument=arguments[i];
+          if (argument.equals(expression)) {
+            index=i;
+            break;
+          }
+        }
+        if (index >= 0) {
+          PsiParameter[] parameters=method.getParameterList().getParameters();
+          if (parameters.length > index) {
+            visitor.visitReadUsage(expression,parameters[index].getType(),referencedElement);
+          }
+        }
+      }
+    }
+  }
+ else   if (parent instanceof PsiAssignmentExpression) {
+    PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)parent;
+    if (expression.equals(assignmentExpression.getRExpression())) {
+      visitor.visitReadUsage(expression,assignmentExpression.getLExpression().getType(),referencedElement);
+    }
+ else {
+      visitor.visitWriteUsage(expression,assignmentExpression.getRExpression().getType(),referencedElement);
+    }
+  }
+ else   if (RefactoringUtil.isAssignmentLHS(expression)) {
+    visitor.visitWriteUsage(expression,null,referencedElement);
+  }
+ else   if (parent instanceof PsiVariable) {
+    visitor.visitReadUsage(expression,((PsiVariable)parent).getType(),referencedElement);
+  }
+ else   if (parent instanceof PsiExpression) {
+    visitor.visitReadUsage(expression,null,referencedElement);
+  }
+ else {
+    LOG.assertTrue(false,"Unknown variation of class instance usage");
+  }
+}

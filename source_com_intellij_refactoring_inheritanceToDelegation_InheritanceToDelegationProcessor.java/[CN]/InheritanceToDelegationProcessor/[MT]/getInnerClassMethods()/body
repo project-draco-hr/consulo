@@ -1,0 +1,75 @@
+{
+  ArrayList result=new ArrayList();
+  if (!myBaseClass.isInterface()) {
+    PsiMethod[] constructors=myClass.getConstructors();
+    for (int i=0; i < constructors.length; i++) {
+      PsiMethod constructor=constructors[i];
+      final PsiStatement[] statements=constructor.getBody().getStatements();
+      if (statements.length > 0 && RefactoringUtil.isSuperOrThisCall(statements[0],true,false)) {
+        final PsiMethodCallExpression superConstructorCall=(PsiMethodCallExpression)((PsiExpressionStatement)statements[0]).getExpression();
+        PsiElement superConstructor=superConstructorCall.getMethodExpression().resolve();
+        if (superConstructor instanceof PsiMethod && ((PsiMethod)superConstructor).isConstructor()) {
+          result.add(new InnerClassConstructor((PsiMethod)superConstructor));
+        }
+      }
+    }
+  }
+{
+class InnerClassOverridingMethod extends InnerClassMethod {
+      public InnerClassOverridingMethod(      PsiMethod method){
+        super(method);
+      }
+      public void createMethod(      PsiClass innerClass,      PsiClass outerClass) throws IncorrectOperationException {
+        OverridenMethodClassMemberReferencesVisitor visitor=new OverridenMethodClassMemberReferencesVisitor();
+        myMethod.accept(visitor);
+        final List actions=visitor.getPsiActions();
+        for (Iterator iterator=actions.iterator(); iterator.hasNext(); ) {
+          PsiAction action=(PsiAction)iterator.next();
+          action.run();
+        }
+        innerClass.add(myMethod);
+        myMethod.delete();
+      }
+    }
+    for (Iterator iterator=myOverridenMethods.iterator(); iterator.hasNext(); ) {
+      PsiMethod method=(PsiMethod)iterator.next();
+      result.add(new InnerClassOverridingMethod(method));
+    }
+  }
+{
+class InnerClassAbstractMethod extends InnerClassMethod {
+      public InnerClassAbstractMethod(      PsiMethod method){
+        super(method);
+        LOG.assertTrue(method.hasModifierProperty(PsiModifier.ABSTRACT));
+      }
+      public void createMethod(      PsiClass innerClass,      PsiClass outerClass) throws IncorrectOperationException {
+        PsiMethod method=delegateMethod(outerClass.getName() + ".this",myMethod);
+        final PsiClass containingClass=myMethod.getContainingClass();
+        if (myBaseClass.isInterface() || containingClass.isInterface()) {
+          method.getModifierList().setModifierProperty(PsiModifier.PUBLIC,true);
+        }
+        innerClass.add(method);
+        PsiMethod outerMethod=outerClass.findMethodBySignature(myMethod,false);
+        if (outerMethod == null) {
+          final String visibility=checkOuterClassAbstractMethod(myMethod);
+          PsiMethod newOuterMethod=(PsiMethod)outerClass.add(myMethod);
+          newOuterMethod.getModifierList().setModifierProperty(visibility,true);
+          if (newOuterMethod.getDocComment() != null) {
+            newOuterMethod.getDocComment().delete();
+          }
+        }
+      }
+    }
+    PsiMethod[] methods=myBaseClass.getAllMethods();
+    for (int i=0; i < methods.length; i++) {
+      PsiMethod method=methods[i];
+      if (method.hasModifierProperty(PsiModifier.ABSTRACT)) {
+        PsiMethod classMethod=myClass.findMethodBySignature(method,true);
+        if (classMethod == null || classMethod.hasModifierProperty(PsiModifier.ABSTRACT)) {
+          result.add(new InnerClassAbstractMethod(method));
+        }
+      }
+    }
+  }
+  return result;
+}

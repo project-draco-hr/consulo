@@ -1,0 +1,77 @@
+{
+  final Project project=module.getProject();
+  PsiDirectory psiDirectory=null;
+  if (!"".equals(packageName)) {
+    PsiPackage rootPackage=findLongestExistingPackage(module,packageName);
+    if (rootPackage != null) {
+      int beginIndex=rootPackage.getQualifiedName().length() + 1;
+      packageName=beginIndex < packageName.length() ? packageName.substring(beginIndex) : "";
+      String postfixToShow=packageName.replace('.',File.separatorChar);
+      if (packageName.length() > 0) {
+        postfixToShow=File.separatorChar + postfixToShow;
+      }
+      PsiDirectory[] moduleDirectories=getPackageDirectoriesInModule(rootPackage,module);
+      psiDirectory=selectDirectory(project,moduleDirectories,baseDir,postfixToShow);
+      if (psiDirectory == null)       return null;
+    }
+  }
+  if (psiDirectory == null) {
+    if (!ModuleUtil.checkSourceRootsConfigured(module))     return null;
+    final VirtualFile[] sourceRoots=ModuleRootManager.getInstance(module).getSourceRoots();
+    List<PsiDirectory> directoryList=new ArrayList<PsiDirectory>();
+    for (int i=0; i < sourceRoots.length; i++) {
+      VirtualFile sourceRoot=sourceRoots[i];
+      final PsiDirectory directory=PsiManager.getInstance(project).findDirectory(sourceRoot);
+      if (directory != null) {
+        directoryList.add(directory);
+      }
+    }
+    PsiDirectory[] sourceDirectories=directoryList.toArray(new PsiDirectory[directoryList.size()]);
+    psiDirectory=selectDirectory(project,sourceDirectories,baseDir,File.separatorChar + packageName.replace('.',File.separatorChar));
+    if (psiDirectory == null)     return null;
+  }
+  String restOfName=packageName;
+  boolean askedToCreate=false;
+  while (restOfName.length() > 0) {
+    final String name=getLeftPart(restOfName);
+    PsiDirectory foundExistingDirectory=psiDirectory.findSubdirectory(name);
+    if (foundExistingDirectory == null) {
+      if (!askedToCreate && askUserToCreate) {
+        if (ApplicationManager.getApplication().isUnitTestMode()) {
+          askedToCreate=true;
+        }
+ else {
+          int toCreate=Messages.showYesNoDialog(project,"Package " + packageName + " does not exist.\nDo you want to create it?","Package not found",Messages.getQuestionIcon());
+          if (toCreate != 0) {
+            return null;
+          }
+        }
+        askedToCreate=true;
+      }
+      final PsiDirectory psiDirectory1=psiDirectory;
+      try {
+        psiDirectory=ActionRunner.runInsideWriteAction(new ActionRunner.InterruptibleRunnableWithResult<PsiDirectory>(){
+          public PsiDirectory run() throws Exception {
+            return psiDirectory1.createSubdirectory(name);
+          }
+        }
+);
+      }
+ catch (      Exception e) {
+        if (e instanceof IncorrectOperationException) {
+          throw (IncorrectOperationException)e;
+        }
+        if (e instanceof RuntimeException) {
+          throw (RuntimeException)e;
+        }
+        LOG.error(e);
+        Degenerator.unableToDegenerateMarker();
+      }
+    }
+ else {
+      psiDirectory=foundExistingDirectory;
+    }
+    restOfName=cutLeftPart(restOfName);
+  }
+  return psiDirectory;
+}

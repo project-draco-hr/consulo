@@ -1,0 +1,65 @@
+{
+  try {
+    ArrayList<MyUsageInfo> otherUsages=new ArrayList<MyUsageInfo>();
+    for (int idx=0; idx < usages.length; idx++) {
+      MyUsageInfo usage=(MyUsageInfo)usages[idx];
+      if (!usage.reference.isValid())       continue;
+      if (usage.reference instanceof PsiReferenceExpression) {
+        PsiReferenceExpression refExpr=(PsiReferenceExpression)usage.reference;
+        PsiExpression qualifier=refExpr.getQualifierExpression();
+        if (qualifier != null) {
+          if (usage.qualifierClass != null) {
+            changeQualifier(refExpr,usage.qualifierClass);
+          }
+ else {
+            removeQualifier(refExpr);
+          }
+        }
+ else {
+          if (usage.qualifierClass != null) {
+            addQualifier(refExpr,usage.qualifierClass);
+          }
+        }
+      }
+ else {
+        otherUsages.add(usage);
+      }
+    }
+    for (Iterator it=myMembersToMove.iterator(); it.hasNext(); ) {
+      PsiElement member=(PsiElement)it.next();
+      if (member instanceof PsiVariable) {
+        ((PsiVariable)member).normalizeDeclaration();
+      }
+      final RefactoringElementListener elementListener=getTransaction().getElementListener(member);
+      ChangeContextUtil.encodeContextInfo(member,true);
+      final PsiElement memberCopy=member.copy();
+      ArrayList<PsiReference> refsToBeRebind=new ArrayList<PsiReference>();
+      for (Iterator<MyUsageInfo> iterator=otherUsages.iterator(); iterator.hasNext(); ) {
+        MyUsageInfo info=iterator.next();
+        if (member.equals(info.member)) {
+          PsiReference ref=info.reference.getReference();
+          if (ref != null) {
+            refsToBeRebind.add(ref);
+          }
+          iterator.remove();
+        }
+      }
+      member.delete();
+      PsiElement newMember=myTargetClass.add(memberCopy);
+      fixVisibility(newMember);
+      for (int i=0; i < refsToBeRebind.size(); i++) {
+        PsiReference reference=refsToBeRebind.get(i);
+        reference.bindToElement(newMember);
+      }
+      elementListener.elementMoved(newMember);
+    }
+    ChangeContextUtil.decodeContextInfo(myTargetClass,null,null);
+    myMembersToMove.clear();
+    if (myMoveCallback != null) {
+      myMoveCallback.refactoringCompleted();
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

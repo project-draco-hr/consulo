@@ -1,0 +1,72 @@
+{
+  PsiMethod oldMethod=null;
+  PsiParameter[] methodParms=null;
+  boolean[] typeCastCandidates=null;
+  boolean hasCandidate=false;
+  PsiExpressionList argumentList=expression.getArgumentList();
+  if (argumentList == null)   return;
+  PsiExpression[] args=argumentList.getExpressions();
+  for (int i=0; i < args.length; i++) {
+    PsiExpression arg=args[i];
+    arg=deParenthesize(arg);
+    if (arg instanceof PsiTypeCastExpression) {
+      if (oldMethod == null) {
+        oldMethod=expression.resolveMethod();
+        if (oldMethod == null)         return;
+        methodParms=oldMethod.getParameterList().getParameters();
+        if (methodParms.length == 0 || methodParms.length > args.length)         return;
+        typeCastCandidates=new boolean[args.length];
+      }
+      PsiExpression castOperand=((PsiTypeCastExpression)arg).getOperand();
+      if (castOperand == null)       return;
+      PsiType operandType=castOperand.getType();
+      if (operandType == null)       return;
+      PsiParameter methodParm=methodParms[Math.min(i,methodParms.length - 1)];
+      if (!methodParm.getType().isAssignableFrom(operandType))       continue;
+      if (args.length == methodParms.length) {
+        if (PsiType.NULL.equals(operandType) && methodParm.isVarArgs())         continue;
+      }
+      typeCastCandidates[i]=true;
+      hasCandidate=true;
+    }
+  }
+  if (hasCandidate) {
+    PsiManager manager=expression.getManager();
+    PsiElementFactory factory=manager.getElementFactory();
+    ResolveResult newResult;
+    try {
+      PsiCallExpression newCall=(PsiCallExpression)factory.createExpressionFromText(expression.getText(),expression);
+      PsiExpression[] newArgs=newCall.getArgumentList().getExpressions();
+      for (int i=newArgs.length - 1; i >= 0; i--) {
+        if (typeCastCandidates[i]) {
+          PsiTypeCastExpression castExpression=(PsiTypeCastExpression)deParenthesize(newArgs[i]);
+          PsiExpression castOperand=castExpression.getOperand();
+          if (castOperand == null)           return;
+          castExpression.replace(castOperand);
+        }
+      }
+      newResult=newCall.resolveMethodGenerics();
+    }
+ catch (    IncorrectOperationException e) {
+      return;
+    }
+    if (oldMethod.equals(newResult.getElement()) && newResult.isValidResult()) {
+      for (int i=0; i < args.length; i++) {
+        PsiExpression arg=deParenthesize(args[i]);
+        if (typeCastCandidates[i]) {
+          addToResults((PsiTypeCastExpression)arg);
+        }
+      }
+    }
+  }
+  for (int i=0; i < args.length; i++) {
+    PsiExpression arg=args[i];
+    if (arg instanceof PsiTypeCastExpression) {
+      PsiExpression castOperand=((PsiTypeCastExpression)arg).getOperand();
+      castOperand.accept(this);
+    }
+ else {
+      arg.accept(this);
+    }
+  }
+}

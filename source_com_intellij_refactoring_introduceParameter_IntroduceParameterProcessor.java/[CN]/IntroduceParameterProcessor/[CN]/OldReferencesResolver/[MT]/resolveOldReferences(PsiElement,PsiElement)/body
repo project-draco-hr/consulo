@@ -1,0 +1,82 @@
+{
+  if (expr == null || oldExpr == null)   return;
+  PsiManager manager=myParameterInitializer.getManager();
+  PsiElementFactory factory=manager.getElementFactory();
+  PsiElement newExpr=expr;
+  if (oldExpr instanceof PsiReferenceExpression) {
+    final PsiReferenceExpression oldRef=(PsiReferenceExpression)oldExpr;
+    final ResolveResult adv=oldRef.advancedResolve(false);
+    final PsiElement scope=getClassContainingResolve(adv);
+    final PsiClass clss=PsiTreeUtil.getParentOfType(oldExpr,PsiClass.class);
+    if (PsiTreeUtil.isAncestor(clss,scope,false)) {
+      final PsiElement subj=adv.getElement();
+      if (subj instanceof PsiParameter) {
+        PsiParameterList formalArgList=myMethodToReplaceIn.getParameterList();
+        if (formalArgList != null) {
+          PsiParameter[] formalArgs=formalArgList.getParameters();
+          int index;
+          for (index=0; index < formalArgs.length; index++) {
+            if (subj.equals(formalArgs[index]))             break;
+          }
+          if (index < formalArgs.length) {
+            PsiExpression actualArg;
+            try {
+              actualArg=myActualArgs[index];
+            }
+ catch (            NullPointerException $ex) {
+              return;
+            }
+catch (            ArrayIndexOutOfBoundsException $ex) {
+              return;
+            }
+            int copyingSafetyLevel=RefactoringUtil.verifySafeCopyExpression(actualArg);
+            if (copyingSafetyLevel == RefactoringUtil.EXPR_COPY_PROHIBITED) {
+              actualArg=factory.createExpressionFromText(getTempVar(actualArg),null);
+            }
+            newExpr=newExpr.replace(actualArg);
+          }
+        }
+      }
+ else       if ((subj instanceof PsiField || subj instanceof PsiMethod) && oldRef.getQualifierExpression() == null) {
+        boolean isStatic=((subj instanceof PsiField) && ((PsiField)subj).hasModifierProperty(PsiModifier.STATIC)) || ((subj instanceof PsiMethod) && ((PsiMethod)subj).hasModifierProperty(PsiModifier.STATIC));
+        if (myInstanceRef != null && !isStatic) {
+          String name=((PsiNamedElement)subj).getName();
+          PsiReferenceExpression newRef=(PsiReferenceExpression)factory.createExpressionFromText("a." + name,null);
+          newRef=(PsiReferenceExpression)CodeStyleManager.getInstance(myProject).reformat(newRef);
+          PsiExpression instanceRef=getInstanceRef(factory);
+          newRef.getQualifierExpression().replace(instanceRef);
+          newRef=(PsiReferenceExpression)expr.replace(newRef);
+          newExpr=newRef.getReferenceNameElement();
+        }
+      }
+      if (subj instanceof PsiField) {
+        if (myReplaceFieldsWithGetters != IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE) {
+          if (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_ALL || (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_INACCESSIBLE && !manager.getResolveHelper().isAccessible((PsiMember)subj,newExpr,null))) {
+            newExpr=replaceFieldWithGetter(newExpr,(PsiField)subj);
+          }
+        }
+      }
+    }
+  }
+ else   if (oldExpr instanceof PsiThisExpression) {
+    if (myInstanceRef != null) {
+      expr.replace(getInstanceRef(factory));
+    }
+    return;
+  }
+ else   if (oldExpr instanceof PsiSuperExpression) {
+    if (myInstanceRef != null) {
+      expr.replace(getInstanceRef(factory));
+    }
+    return;
+  }
+  PsiElement[] oldChildren=RefactoringUtil.getChilderenWithoutWhitespaceOrComments(oldExpr);
+  PsiElement[] newChildren=RefactoringUtil.getChilderenWithoutWhitespaceOrComments(newExpr);
+  if (oldChildren != null && newChildren != null & oldChildren.length == newChildren.length) {
+    for (int i=0; i < oldChildren.length; i++) {
+      PsiElement oldChild=oldChildren[i];
+      PsiElement newChild=newChildren[i];
+      resolveOldReferences(newChild,oldChild);
+    }
+  }
+}

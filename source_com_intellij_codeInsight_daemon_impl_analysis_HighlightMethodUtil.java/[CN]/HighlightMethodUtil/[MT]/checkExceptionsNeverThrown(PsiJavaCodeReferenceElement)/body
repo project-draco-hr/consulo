@@ -1,0 +1,44 @@
+{
+  if (!(referenceElement.getParent() instanceof PsiReferenceList))   return null;
+  final PsiReferenceList referenceList=(PsiReferenceList)referenceElement.getParent();
+  if (!(referenceList.getParent() instanceof PsiMethod))   return null;
+  final PsiMethod method=(PsiMethod)referenceList.getParent();
+  if (referenceList != method.getThrowsList())   return null;
+  PsiClass aClass=method.getContainingClass();
+  if (aClass == null)   return null;
+  PsiManager manager=referenceElement.getManager();
+  final PsiClassType exceptionType=manager.getElementFactory().createType(referenceElement);
+  if (ExceptionUtil.isUncheckedExceptionOrSuperclass(exceptionType))   return null;
+  if (!DaemonCodeAnalyzerSettings.getInstance().getInspectionProfile().isToolEnabled(HighlightDisplayKey.UNUSED_THROWS_DECL)) {
+    return null;
+  }
+  final PsiCodeBlock body=method.getBody();
+  if (body == null)   return null;
+  final PsiModifierList modifierList=method.getModifierList();
+  final PsiClass containingClass=method.getContainingClass();
+  if (!modifierList.hasModifierProperty(PsiModifier.PRIVATE) && !modifierList.hasModifierProperty(PsiModifier.STATIC) && !modifierList.hasModifierProperty(PsiModifier.FINAL)&& !method.isConstructor()&& !(containingClass instanceof PsiAnonymousClass)&& !(containingClass != null && containingClass.hasModifierProperty(PsiModifier.FINAL))) {
+    return null;
+  }
+  PsiClassType[] types=ExceptionUtil.collectUnhandledExceptions(body,method);
+  Collection<PsiClassType> unhandled=new HashSet<PsiClassType>(Arrays.asList(types));
+  if (method.isConstructor()) {
+    PsiField[] fields=aClass.getFields();
+    for (int i=0; i < fields.length; i++) {
+      final PsiField field=fields[i];
+      if (field.hasModifierProperty(PsiModifier.STATIC))       continue;
+      PsiExpression initializer=field.getInitializer();
+      if (initializer == null)       continue;
+      unhandled.addAll(Arrays.asList(ExceptionUtil.collectUnhandledExceptions(initializer,field)));
+    }
+  }
+  for (Iterator<PsiClassType> iterator=unhandled.iterator(); iterator.hasNext(); ) {
+    PsiClassType unhandledException=iterator.next();
+    if (unhandledException.isAssignableFrom(exceptionType) || exceptionType.isAssignableFrom(unhandledException)) {
+      return null;
+    }
+  }
+  String description=MessageFormat.format(EXCEPTION_NEVER_THROWN_IN_METHOD,new Object[]{HighlightUtil.formatType(exceptionType)});
+  HighlightInfo errorResult=HighlightInfo.createHighlightInfo(HighlightInfoType.UNUSED_THROWS_DECL,referenceElement,description);
+  QuickFixAction.registerQuickFixAction(errorResult,new MethodThrowsFix(method,exceptionType,false));
+  return errorResult;
+}

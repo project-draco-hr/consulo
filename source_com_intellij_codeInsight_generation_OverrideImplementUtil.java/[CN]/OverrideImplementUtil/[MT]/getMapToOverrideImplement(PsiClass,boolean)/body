@@ -1,0 +1,71 @@
+{
+  Map<MethodSignature,PsiMethod> abstracts=new LinkedHashMap<MethodSignature,PsiMethod>();
+  Map<MethodSignature,PsiMethod> finals=new HashMap<MethodSignature,PsiMethod>();
+  Map<MethodSignature,PsiMethod> concretes=new LinkedHashMap<MethodSignature,PsiMethod>();
+  Map<PsiClass,PsiSubstitutor> substitutors=new HashMap<PsiClass,PsiSubstitutor>();
+  PsiMethod[] allMethods=aClass.getAllMethods();
+  PsiResolveHelper resolveHelper=aClass.getManager().getResolveHelper();
+  for (int i=0; i < allMethods.length; i++) {
+    PsiMethod method=allMethods[i];
+    if (method.hasModifierProperty(PsiModifier.STATIC) || !resolveHelper.isAccessible(method,aClass,aClass))     continue;
+    PsiClass hisClass=method.getContainingClass();
+    if (method.isConstructor() && (!aClass.isInheritor(hisClass,false) || aClass instanceof PsiAnonymousClass || aClass.isEnum()))     continue;
+    PsiSubstitutor substitutor;
+    if ((substitutor=substitutors.get(hisClass)) == null) {
+      substitutor=aClass.isInheritor(hisClass,true) ? TypeConversionUtil.getSuperClassSubstitutor(hisClass,aClass,PsiSubstitutor.EMPTY) : PsiSubstitutor.EMPTY;
+      substitutors.put(hisClass,substitutor);
+    }
+    String name=method.isConstructor() ? aClass.getName() : method.getName();
+    substitutor=GenerateMembersUtil.correctSubstitutor(method,substitutor);
+    MethodSignature signature=MethodSignatureUtil.createMethodSignature(name,method.getParameterList(),method.getTypeParameterList(),substitutor);
+    if (MethodSignatureUtil.findMethodBySignature(aClass,signature,false) != null)     continue;
+    if (method.hasModifierProperty(PsiModifier.FINAL)) {
+      finals.put(signature,method);
+      continue;
+    }
+    Map<MethodSignature,PsiMethod> map=hisClass.isInterface() || method.hasModifierProperty(PsiModifier.ABSTRACT) ? abstracts : concretes;
+    PsiMethod other=map.get(signature);
+    if (other == null || PsiUtil.getAccessLevel(method.getModifierList()) > PsiUtil.getAccessLevel(other.getModifierList())) {
+      map.put(signature,method);
+    }
+  }
+  Map<MethodSignature,CandidateInfo> result=new LinkedHashMap<MethodSignature,CandidateInfo>();
+  if (toImplement) {
+    for (Iterator<Map.Entry<MethodSignature,PsiMethod>> it=abstracts.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<MethodSignature,PsiMethod> entry=it.next();
+      MethodSignature signature=entry.getKey();
+      PsiMethod abstractOne=entry.getValue();
+      PsiMethod concrete=concretes.get(signature);
+      if (concrete == null || PsiUtil.getAccessLevel(concrete.getModifierList()) < PsiUtil.getAccessLevel(abstractOne.getModifierList()) || (!abstractOne.getContainingClass().isInterface() && abstractOne.getContainingClass().isInheritor(concrete.getContainingClass(),true))) {
+        if (finals.get(signature) == null) {
+          PsiSubstitutor substitutor=GenerateMembersUtil.correctSubstitutor(abstractOne,substitutors.get(abstractOne.getContainingClass()));
+          CandidateInfo info=new CandidateInfo(abstractOne,substitutor);
+          result.put(signature,info);
+        }
+      }
+    }
+    PsiMethod[] ejbMethods=EjbUtil.getEjbMethodsToImplement(aClass);
+    for (int i=0; i < ejbMethods.length; i++) {
+      PsiMethod method=ejbMethods[i];
+      MethodSignature signature=MethodSignatureUtil.createMethodSignature(method.getName(),method.getParameterList(),method.getTypeParameterList(),PsiSubstitutor.EMPTY);
+      CandidateInfo info=new CandidateInfo(method,PsiSubstitutor.EMPTY);
+      result.put(signature,info);
+    }
+  }
+ else {
+    for (Iterator<Map.Entry<MethodSignature,PsiMethod>> it=concretes.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<MethodSignature,PsiMethod> entry=it.next();
+      MethodSignature signature=entry.getKey();
+      PsiMethod concrete=entry.getValue();
+      if (finals.get(signature) == null) {
+        PsiMethod abstractOne=abstracts.get(signature);
+        if (abstractOne == null || !abstractOne.getContainingClass().isInheritor(concrete.getContainingClass(),true) || concrete.getContainingClass().getQualifiedName().equals("java.lang.Object")) {
+          PsiSubstitutor substitutor=GenerateMembersUtil.correctSubstitutor(concrete,substitutors.get(concrete.getContainingClass()));
+          CandidateInfo info=new CandidateInfo(concrete,substitutor);
+          result.put(signature,info);
+        }
+      }
+    }
+  }
+  return result;
+}

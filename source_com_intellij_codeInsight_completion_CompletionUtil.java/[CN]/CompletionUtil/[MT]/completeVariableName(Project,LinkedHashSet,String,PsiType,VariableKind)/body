@@ -1,0 +1,59 @@
+{
+  FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.completion.variable.name");
+  CodeStyleManagerEx codeStyleManager=(CodeStyleManagerEx)CodeStyleManager.getInstance(project);
+  SuggestedNameInfo suggestedNameInfo=codeStyleManager.suggestVariableName(varKind,null,null,varType);
+  LookupItemUtil.addLookupItems(set,suggestedNameInfo.names,prefix);
+  if (set.isEmpty() && PsiType.VOID != varType) {
+    boolean isMethodPrefix=prefix.startsWith("is") || prefix.startsWith("get") || prefix.startsWith("set");
+    ArrayList newSuggestions=new ArrayList();
+    String[] suggestedNames=suggestedNameInfo.names;
+    int prefixLen=prefix.length();
+    int longestOverlap=0;
+    String requiredSuffix=codeStyleManager.getSuffixByVariableKind(varKind);
+    int suffixLen=requiredSuffix.length();
+    for (int i=0; i < suggestedNames.length; i++) {
+      String suggestedName=suggestedNames[i];
+      String propertyName=varKind == VariableKind.STATIC_FINAL_FIELD && !isMethodPrefix ? suggestedName : codeStyleManager.variableNameToPropertyName(suggestedName,varKind);
+      if (propertyName.toUpperCase().startsWith(prefix.toUpperCase())) {
+        newSuggestions.add(propertyName);
+        longestOverlap=prefixLen;
+      }
+      propertyName="" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
+      int overlap=0;
+      int propertyNameLen=propertyName.length();
+      for (int j=1; j < prefixLen && j < propertyNameLen; j++) {
+        if (prefix.substring(prefixLen - j).equals(propertyName.substring(0,j))) {
+          overlap=j;
+        }
+      }
+      if (overlap < longestOverlap)       continue;
+      if (overlap > longestOverlap) {
+        newSuggestions.clear();
+        longestOverlap=overlap;
+      }
+      if (!isMethodPrefix && varKind == VariableKind.STATIC_FINAL_FIELD && overlap == 0 && prefix.charAt(prefixLen - 1) != '_') {
+        prefix=prefix + '_';
+        prefixLen++;
+      }
+      String suggestion=prefix.substring(0,prefixLen - overlap) + propertyName;
+      int suggestionLength=suggestion.length();
+      overlap=0;
+      for (int j=1; j < suggestionLength && j < suffixLen; j++) {
+        if (suggestion.substring(0,suggestionLength - j).endsWith(requiredSuffix)) {
+          overlap=j;
+        }
+      }
+      suggestion=suggestion.substring(0,suggestionLength - overlap) + requiredSuffix;
+      if (!newSuggestions.contains(suggestion)) {
+        newSuggestions.add(suggestion);
+      }
+    }
+    suggestedNameInfo=new SuggestedNameInfo((String[])newSuggestions.toArray(new String[newSuggestions.size()])){
+      public void nameChoosen(      String name){
+      }
+    }
+;
+    LookupItemUtil.addLookupItems(set,suggestedNameInfo.names,prefix);
+  }
+  return new NamePreferencePolicy(suggestedNameInfo);
+}

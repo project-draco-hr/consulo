@@ -1,0 +1,91 @@
+{
+  checkForReachables();
+  final RefFilter filter=myPhase == 1 ? (RefFilter)new StrictUnreferencedFilter() : new RefUnreachableFilter();
+  final boolean[] requestAdded=new boolean[]{false};
+  getRefManager().iterate(new RefManager.RefIterator(){
+    public void accept(    RefElement refElement){
+      if (refElement instanceof RefClass && ((RefClass)refElement).isAnonymous())       return;
+      if (filter.accepts(refElement) && !myProcessedSuspicious.contains(refElement)) {
+        refElement.accept(new RefVisitor(){
+          public void visitField(          final RefField refField){
+            myProcessedSuspicious.add(refField);
+            PsiField psiField=(PsiField)refField.getElement();
+            if (isSerialVersionUIDField(psiField)) {
+              getEntryPointsManager().addEntryPoint(refField,false);
+              return;
+            }
+            getManager().enqueueFieldUsagesProcessor(refField,new InspectionManagerEx.UsagesProcessor(){
+              public boolean process(              PsiReference psiReference){
+                getEntryPointsManager().addEntryPoint(refField,false);
+                return false;
+              }
+            }
+);
+            requestAdded[0]=true;
+          }
+          public void visitMethod(          final RefMethod refMethod){
+            myProcessedSuspicious.add(refMethod);
+            if (refMethod instanceof RefImplicitConstructor) {
+              visitClass(refMethod.getOwnerClass());
+            }
+ else {
+              PsiMethod psiMethod=(PsiMethod)refMethod.getElement();
+              if (isSerializablePatternMethod(psiMethod)) {
+                getEntryPointsManager().addEntryPoint(refMethod,false);
+                return;
+              }
+              if (!refMethod.isLibraryOverride() && refMethod.getAccessModifier() != PsiModifier.PRIVATE) {
+                for (Iterator<RefMethod> iterator=refMethod.getDerivedMethods().iterator(); iterator.hasNext(); ) {
+                  myProcessedSuspicious.add(iterator.next());
+                }
+                if (isAddEjbInterfaceMethodsEnabled()) {
+                  if (refMethod.isEjbDeclaration() || refMethod.isEjbImplementation()) {
+                    addEjbMethodToEntries(refMethod);
+                    return;
+                  }
+                }
+                enqueueMethodUsages(refMethod);
+                requestAdded[0]=true;
+              }
+            }
+          }
+          public void visitClass(          final RefClass refClass){
+            myProcessedSuspicious.add(refClass);
+            if (refClass.isEjb()) {
+              getEntryPointsManager().addEntryPoint(refClass,false);
+            }
+ else             if (!refClass.isAnonymous()) {
+              getManager().enqueueDerivedClassesProcessing(refClass,new InspectionManagerEx.DerivedClassesProcessor(){
+                public boolean process(                PsiClass inheritor){
+                  getEntryPointsManager().addEntryPoint(refClass,false);
+                  return false;
+                }
+              }
+);
+              getManager().enqueueClassUsagesProcessing(refClass,new InspectionManagerEx.UsagesProcessor(){
+                public boolean process(                PsiReference psiReference){
+                  getEntryPointsManager().addEntryPoint(refClass,false);
+                  return false;
+                }
+              }
+);
+              requestAdded[0]=true;
+            }
+          }
+        }
+);
+      }
+    }
+  }
+);
+  if (!requestAdded[0]) {
+    if (myPhase == 2) {
+      myProcessedSuspicious=null;
+      return false;
+    }
+ else {
+      myPhase=2;
+    }
+  }
+  return true;
+}

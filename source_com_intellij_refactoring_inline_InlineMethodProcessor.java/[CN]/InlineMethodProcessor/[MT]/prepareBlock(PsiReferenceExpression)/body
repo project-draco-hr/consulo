@@ -1,0 +1,77 @@
+{
+  ChangeContextUtil.encodeContextInfo(myMethod,false);
+  myMethodCopy=(PsiMethod)myMethod.copy();
+  ChangeContextUtil.clearContextInfo(myMethod);
+  final PsiCodeBlock block=myMethodCopy.getBody();
+  final PsiStatement[] originalStatements=block.getStatements();
+  PsiLocalVariable resultVar=null;
+  PsiType returnType=myMethod.getReturnType();
+  String resultName=null;
+  if (returnType != null && returnType != PsiType.VOID) {
+    resultName=myCodeStyleManager.propertyNameToVariableName("result",VariableKind.LOCAL_VARIABLE);
+    resultName=myCodeStyleManager.suggestUniqueVariableName(resultName,block.getFirstChild(),true);
+    PsiDeclarationStatement declaration=myFactory.createVariableDeclarationStatement(resultName,returnType,null);
+    declaration=(PsiDeclarationStatement)block.addAfter(declaration,null);
+    resultVar=(PsiLocalVariable)declaration.getDeclaredElements()[0];
+  }
+  PsiParameter[] parms=myMethodCopy.getParameterList().getParameters();
+  PsiLocalVariable[] parmVars=new PsiLocalVariable[parms.length];
+  for (int i=parms.length - 1; i >= 0; i--) {
+    PsiParameter parm=parms[i];
+    String parmName=parm.getName();
+    String name=parmName;
+    name=myCodeStyleManager.variableNameToPropertyName(name,VariableKind.PARAMETER);
+    name=myCodeStyleManager.propertyNameToVariableName(name,VariableKind.LOCAL_VARIABLE);
+    if (!name.equals(parmName)) {
+      name=myCodeStyleManager.suggestUniqueVariableName(name,block.getFirstChild(),true);
+    }
+    RefactoringUtil.renameVariableReferences(parm,name,GlobalSearchScope.projectScope(myProject));
+    String defaultValue=CodeInsightUtil.getDefaultValueOfType(parm.getType());
+    PsiExpression initializer=myFactory.createExpressionFromText(defaultValue,null);
+    PsiDeclarationStatement declaration=myFactory.createVariableDeclarationStatement(name,parm.getType(),initializer);
+    declaration=(PsiDeclarationStatement)block.addAfter(declaration,null);
+    parmVars[i]=(PsiLocalVariable)declaration.getDeclaredElements()[0];
+    if (parm.hasModifierProperty(PsiModifier.FINAL)) {
+      parmVars[i].getModifierList().setModifierProperty(PsiModifier.FINAL,true);
+    }
+  }
+  PsiLocalVariable thisVar=null;
+  if (!myMethod.hasModifierProperty(PsiModifier.STATIC)) {
+    String thisVarName;
+    PsiClass containingClass=myMethod.getContainingClass();
+    if (containingClass != null) {
+      PsiType thisType=myFactory.createType(containingClass);
+      String[] names=myCodeStyleManager.suggestVariableName(VariableKind.LOCAL_VARIABLE,null,null,thisType).names;
+      thisVarName=names[0];
+      thisVarName=myCodeStyleManager.suggestUniqueVariableName(thisVarName,block.getFirstChild(),true);
+      PsiExpression initializer=myFactory.createExpressionFromText("null",null);
+      PsiDeclarationStatement declaration=myFactory.createVariableDeclarationStatement(thisVarName,thisType,initializer);
+      declaration=(PsiDeclarationStatement)block.addAfter(declaration,null);
+      thisVar=(PsiLocalVariable)declaration.getDeclaredElements()[0];
+    }
+  }
+  if (syncNeeded(thisVar,ref)) {
+    PsiSynchronizedStatement synchronizedStatement=(PsiSynchronizedStatement)myFactory.createStatementFromText("synchronized(" + thisVar.getName() + "){}",block);
+    synchronizedStatement=(PsiSynchronizedStatement)CodeStyleManager.getInstance(myProject).reformat(synchronizedStatement);
+    synchronizedStatement=(PsiSynchronizedStatement)block.add(synchronizedStatement);
+    final PsiCodeBlock synchronizedBody=synchronizedStatement.getBody();
+    for (int i=0; i < originalStatements.length; i++) {
+      final PsiStatement originalStatement=originalStatements[i];
+      synchronizedBody.add(originalStatement);
+      originalStatement.delete();
+    }
+  }
+  if (resultName != null) {
+    PsiReturnStatement[] returnStatements=RefactoringUtil.findReturnStatements(myMethodCopy);
+    for (int i=0; i < returnStatements.length; i++) {
+      PsiReturnStatement returnStatement=returnStatements[i];
+      if (returnStatement.getReturnValue() == null)       continue;
+      PsiStatement statement=myFactory.createStatementFromText(resultName + "=0;",null);
+      statement=(PsiStatement)myCodeStyleManager.reformat(statement);
+      PsiAssignmentExpression assignment=(PsiAssignmentExpression)((PsiExpressionStatement)statement).getExpression();
+      assignment.getRExpression().replace(returnStatement.getReturnValue());
+      returnStatement.replace(statement);
+    }
+  }
+  return new BlockData(block,thisVar,parmVars,resultVar);
+}

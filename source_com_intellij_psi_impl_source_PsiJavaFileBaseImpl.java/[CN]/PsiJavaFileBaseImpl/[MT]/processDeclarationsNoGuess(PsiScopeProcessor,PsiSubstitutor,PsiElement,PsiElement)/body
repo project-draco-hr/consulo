@@ -1,0 +1,102 @@
+{
+  processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,this);
+  final ElementClassHint classHint=processor.getHint(ElementClassHint.class);
+  final NameHint nameHint=processor.getHint(NameHint.class);
+  final String name=nameHint != null ? nameHint.getName() : null;
+  if (classHint == null || classHint.shouldProcess(PsiClass.class)) {
+    if (processor instanceof ClassResolverProcessor) {
+      final ResolveResult[] guessClass=getGuess(name);
+      if (guessClass != null) {
+        ((ClassResolverProcessor)processor).forceResult(guessClass);
+        return false;
+      }
+    }
+    final PsiClass[] classes=getClasses();
+    for (int i=0; i < classes.length; i++) {
+      PsiClass aClass=classes[i];
+      if (!processor.execute(aClass,substitutor))       return false;
+    }
+    PsiImportList importList=getImportList();
+    PsiImportStatement[] importStatements=importList.getImportStatements();
+    for (int i1=0; i1 < importStatements.length; i1++) {
+      PsiImportStatement statement=importStatements[i1];
+      if (!statement.isOnDemand()) {
+        if (nameHint != null) {
+          String refText=statement.getQualifiedName();
+          if (refText == null || !refText.endsWith(name))           continue;
+        }
+        PsiElement resolved=statement.resolve();
+        if (resolved instanceof PsiClass) {
+          processor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,statement);
+          if (!processor.execute(resolved,substitutor))           return false;
+        }
+      }
+    }
+    processor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,null);
+{
+      String packageName=getPackageName();
+      PsiPackage aPackage=myManager.findPackage(packageName);
+      if (aPackage != null) {
+        if (!PsiScopesUtil.processScope(aPackage,processor,substitutor,null,place))         return false;
+      }
+    }
+    for (int i=0; i < importStatements.length; i++) {
+      PsiImportStatement statement=importStatements[i];
+      if (statement.isOnDemand()) {
+        PsiElement resolved=statement.resolve();
+        if (resolved != null) {
+          processor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,statement);
+          processOnDemandTarget(resolved,processor,substitutor,place);
+        }
+      }
+    }
+    processor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,null);
+    PsiJavaCodeReferenceElement[] implicitlyImported=getImplicitlyImportedPackageReferences();
+    for (int i=0; i < implicitlyImported.length; i++) {
+      PsiElement resolved=implicitlyImported[i].resolve();
+      if (resolved != null) {
+        processOnDemandTarget(resolved,processor,substitutor,place);
+      }
+    }
+  }
+  if (classHint == null || classHint.shouldProcess(PsiPackage.class)) {
+    final PsiPackage rootPackage=getManager().findPackage("");
+    if (rootPackage != null)     rootPackage.processDeclarations(processor,substitutor,null,place);
+  }
+  final PsiImportList importList=getImportList();
+  if (importList != null) {
+    final PsiImportStaticStatement[] importStaticStatements=importList.getImportStaticStatements();
+    if (importStaticStatements.length > 0) {
+      final StaticImportFilteringProcessor staticImportProcessor=new StaticImportFilteringProcessor(processor,null);
+      for (int i=0; i < importStaticStatements.length; i++) {
+        PsiImportStaticStatement importStaticStatement=importStaticStatements[i];
+        if (!importStaticStatement.isOnDemand()) {
+          final String referenceName=importStaticStatement.getReferenceName();
+          final PsiClass targetElement=importStaticStatement.resolveTargetClass();
+          if (targetElement != null) {
+            staticImportProcessor.setNameToFilter(referenceName);
+            staticImportProcessor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,importStaticStatement);
+            final boolean result=targetElement.processDeclarations(staticImportProcessor,substitutor,lastParent,place);
+            if (!result)             return false;
+          }
+        }
+      }
+      for (int i=0; i < importStaticStatements.length; i++) {
+        PsiImportStaticStatement importStaticStatement=importStaticStatements[i];
+        if (importStaticStatement.isOnDemand()) {
+          final PsiClass targetElement=importStaticStatement.resolveTargetClass();
+          if (targetElement != null) {
+            staticImportProcessor.setNameToFilter(null);
+            staticImportProcessor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,importStaticStatement);
+            staticImportProcessor.handleEvent(PsiScopeProcessor.Event.BEGIN_GROUP,null);
+            final boolean result=targetElement.processDeclarations(staticImportProcessor,substitutor,lastParent,place);
+            staticImportProcessor.handleEvent(PsiScopeProcessor.Event.END_GROUP,null);
+            if (!result)             return false;
+          }
+        }
+      }
+      staticImportProcessor.handleEvent(PsiScopeProcessor.Event.SET_CURRENT_FILE_CONTEXT,null);
+    }
+  }
+  return true;
+}

@@ -1,0 +1,89 @@
+{
+  if (classParameterList != null) {
+    final CompositeElement errorElement=Factory.createErrorElement("Unexpected token");
+    TreeUtil.addChildren(errorElement,classParameterList);
+    TreeUtil.insertAfter(first,errorElement);
+  }
+  CompositeElement variable;
+  if (context == CLASS_CONTEXT || context == ANNOTATION_INTERFACE_CONTEXT) {
+    variable=Factory.createCompositeElement(FIELD);
+    TreeUtil.addChildren(variable,first);
+  }
+ else   if (context == CODE_BLOCK_CONTEXT) {
+    variable=Factory.createCompositeElement(LOCAL_VARIABLE);
+    TreeUtil.addChildren(variable,first);
+  }
+ else {
+    LOG.assertTrue(false);
+    return null;
+  }
+  CompositeElement variable1=variable;
+  boolean unclosed=false;
+  boolean eatSemicolon=true;
+  while (true) {
+    while (lexer.getTokenType() == LBRACKET) {
+      TreeUtil.addChildren(variable1,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+      if (lexer.getTokenType() != RBRACKET) {
+        TreeUtil.addChildren(variable1,Factory.createErrorElement("']' expected"));
+        unclosed=true;
+        break;
+      }
+      TreeUtil.addChildren(variable1,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+    }
+    if (lexer.getTokenType() == EQ) {
+      TreeUtil.addChildren(variable1,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+      TreeElement expr=myContext.getExpressionParsing().parseExpression(lexer);
+      if (expr != null) {
+        TreeUtil.addChildren(variable1,expr);
+      }
+ else {
+        TreeUtil.addChildren(variable1,Factory.createErrorElement("Expression expected"));
+        unclosed=true;
+        break;
+      }
+    }
+    if (lexer.getTokenType() != COMMA)     break;
+    TreeElement comma=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
+    lexer.advance();
+    TreeUtil.insertAfter(variable1,comma);
+    if (lexer.getTokenType() != IDENTIFIER) {
+      TreeUtil.insertAfter(comma,Factory.createErrorElement("Identifier expected"));
+      unclosed=true;
+      eatSemicolon=false;
+      break;
+    }
+    CompositeElement variable2=Factory.createCompositeElement(variable1.getElementType());
+    TreeUtil.insertAfter(comma,variable2);
+    TreeUtil.addChildren(variable2,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+    lexer.advance();
+    variable1=variable2;
+  }
+  if (lexer.getTokenType() == SEMICOLON && eatSemicolon) {
+    TreeUtil.addChildren(variable1,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+    lexer.advance();
+  }
+ else {
+    if (lexer.getTokenType() != null) {
+      int spaceStart=((FilterLexer)lexer).getPrevTokenEnd();
+      int spaceEnd=lexer.getTokenStart();
+      char[] buffer=lexer.getBuffer();
+      int lineStart=CharArrayUtil.shiftBackwardUntil(buffer,spaceEnd,"\n\r");
+      if (ParseUtil.getStoredPosition(startPos) < lineStart && lineStart < spaceStart) {
+        ParseUtil.restorePosition(lexer,startPos);
+        int bufferEnd=lexer.getBufferEnd();
+        int newBufferEnd=CharArrayUtil.shiftForward(buffer,lineStart,"\n\r \t");
+        lexer.start(buffer,ParseUtil.getStoredPosition(startPos),newBufferEnd,ParseUtil.getStoredState(startPos));
+        TreeElement result=parseDeclaration(lexer,context);
+        lexer.start(buffer,lexer.getTokenStart(),bufferEnd,lexer.getState());
+        return result;
+      }
+    }
+    if (!unclosed) {
+      TreeUtil.addChildren(variable1,Factory.createErrorElement("';' expected"));
+    }
+  }
+  return variable;
+}

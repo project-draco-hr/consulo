@@ -1,0 +1,42 @@
+{
+  if (!CodeInsightUtil.prepareFileForWrite(file))   return;
+  int offset=editor.getCaretModel().getOffset();
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  PsiElement element=findElement(file,offset);
+  final PsiTryStatement tryStatement=(PsiTryStatement)element.getParent();
+  final PsiClassType[] unhandledExceptions=ExceptionUtil.collectUnhandledExceptions(element,null);
+  IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+  PsiCodeBlock catchBlockToSelect=null;
+  try {
+    if (tryStatement.getFinallyBlock() == null && tryStatement.getCatchBlocks().length == 0) {
+      PsiCodeBlock tryBlock=(PsiCodeBlock)tryStatement.getTryBlock().copy();
+      PsiElementFactory factory=tryBlock.getManager().getElementFactory();
+      PsiTryStatement newTryStatement=(PsiTryStatement)factory.createStatementFromText("try {} catch (Exception e){}",null);
+      newTryStatement.getTryBlock().replace(tryBlock);
+      for (int i=0; i < unhandledExceptions.length; i++) {
+        PsiClassType unhandledException=unhandledExceptions[i];
+        addCatchStatement(newTryStatement,unhandledException,file);
+      }
+      newTryStatement.getCatchSections()[0].delete();
+      final CodeStyleManager codeStyleManager=tryStatement.getManager().getCodeStyleManager();
+      newTryStatement=(PsiTryStatement)tryStatement.replace(codeStyleManager.reformat(newTryStatement));
+      catchBlockToSelect=newTryStatement.getCatchBlocks()[0];
+    }
+ else {
+      for (int i=0; i < unhandledExceptions.length; i++) {
+        PsiClassType unhandledException=unhandledExceptions[i];
+        final PsiCodeBlock codeBlock=addCatchStatement(tryStatement,unhandledException,file);
+        if (i == 0)         catchBlockToSelect=codeBlock;
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  if (catchBlockToSelect != null) {
+    TextRange range=SurroundWithUtil.getRangeToSelect(catchBlockToSelect);
+    editor.getCaretModel().moveToOffset(range.getStartOffset());
+    editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    editor.getSelectionModel().setSelection(range.getStartOffset(),range.getEndOffset());
+  }
+}

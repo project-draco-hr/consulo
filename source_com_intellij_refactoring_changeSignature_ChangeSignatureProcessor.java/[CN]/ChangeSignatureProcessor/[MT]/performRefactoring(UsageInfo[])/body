@@ -1,0 +1,89 @@
+{
+  PsiElementFactory factory=myManager.getElementFactory();
+  List<UsageInfo> postponedUsages=new ArrayList<UsageInfo>();
+  try {
+    if (myChangeInfo.isNameChanged) {
+      myChangeInfo.newNameIdentifier=factory.createIdentifier(myChangeInfo.newName);
+    }
+    if (myChangeInfo.isReturnTypeChanged) {
+      myChangeInfo.newTypeElement=myChangeInfo.newReturnType.getType(myChangeInfo.getMethod());
+    }
+    myMethodsToBeChanged=new HashSet<PsiMethod>();
+    if (myGenerateDelegate) {
+      generateDelegate();
+    }
+    for (int i=0; i < usages.length; i++) {
+      UsageInfo usage=usages[i];
+      if (!(usage instanceof DefaultConstructorImplicitUsageInfo) && usage.getElement() instanceof PsiMethod) {
+        myMethodsToBeChanged.add((PsiMethod)usage.getElement());
+      }
+    }
+    if (myChangeInfo.isExceptionSetOrOrderChanged) {
+      fixThrowsLists(getChangedExceptionInfo(myChangeInfo));
+    }
+    for (int i=0; i < usages.length; i++) {
+      UsageInfo usage=usages[i];
+      if (!usage.getElement().isValid())       continue;
+      if (usage instanceof DefaultConstructorImplicitUsageInfo) {
+        addSuperCall(((DefaultConstructorImplicitUsageInfo)usage).getConstructor());
+      }
+ else       if (usage instanceof NoConstructorClassUsageInfo) {
+        addDefaultConstructor(((NoConstructorClassUsageInfo)usage).getPsiClass());
+      }
+ else       if (usage.getElement() instanceof PsiMethod) {
+        processMethod((PsiMethod)usage.getElement(),false);
+      }
+ else       if (usage.getElement() instanceof PsiJavaCodeReferenceElement) {
+        if (RefactoringUtil.isMethodUsage(usage.getElement())) {
+          processMethodUsage((PsiJavaCodeReferenceElement)usage.getElement(),myChangeInfo);
+        }
+ else {
+          String newName=((MyParameterUsageInfo)usage).newParameterName;
+          String oldName=((MyParameterUsageInfo)usage).oldParameterName;
+          processParameterUsage((PsiReferenceExpression)usage.getElement(),oldName,newName);
+        }
+      }
+ else       if (usage.getElement() instanceof PsiEnumConstant) {
+        fixActualArgumentsList(((PsiEnumConstant)usage.getElement()).getArgumentList(),myChangeInfo,false);
+      }
+ else {
+        postponedUsages.add(usage);
+      }
+    }
+    LOG.assertTrue(myChangeInfo.getMethod().isValid());
+    processMethod(myChangeInfo.getMethod(),true);
+    for (Iterator<UsageInfo> i=postponedUsages.iterator(); i.hasNext(); ) {
+      UsageInfo usageInfo=i.next();
+      PsiReference reference=usageInfo.getElement().getReference();
+      if (reference != null) {
+        PsiElement target=null;
+        if (usageInfo instanceof MyParameterUsageInfo) {
+          String newParameterName=((MyParameterUsageInfo)usageInfo).newParameterName;
+          PsiParameter[] newParams=myChangeInfo.getMethod().getParameterList().getParameters();
+          for (int j=0; j < newParams.length; j++) {
+            PsiParameter newParam=newParams[j];
+            if (newParam.getName().equals(newParameterName)) {
+              target=newParam;
+              break;
+            }
+          }
+        }
+ else {
+          target=myChangeInfo.getMethod();
+        }
+        if (target != null) {
+          reference.bindToElement(target);
+        }
+      }
+    }
+    fixJavadocsForChangedMethod(myChangeInfo.getMethod());
+    for (Iterator<PsiMethod> iterator=myMethodsToBeChanged.iterator(); iterator.hasNext(); ) {
+      PsiMethod method=iterator.next();
+      fixJavadocsForChangedMethod(method);
+    }
+    LOG.assertTrue(myChangeInfo.getMethod().isValid());
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

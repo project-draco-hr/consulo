@@ -1,0 +1,50 @@
+{
+  final PsiManager psiManager=PsiManager.getInstance(wizardData.myProject);
+  final ProjectRootManager projectRootManager=ProjectRootManager.getInstance(wizardData.myProject);
+  final ProjectFileIndex fileIndex=projectRootManager.getFileIndex();
+  final VirtualFile sourceRoot=fileIndex.getSourceRootForFile(wizardData.myFormFile);
+  if (sourceRoot == null) {
+    throw new MyException("Form file is not in source root");
+  }
+  final PsiDirectory rootDirectory=psiManager.findDirectory(sourceRoot);
+  LOG.assertTrue(rootDirectory != null);
+  final PsiPackage aPackage=psiManager.findPackage(wizardData.myPackageName);
+  if (aPackage == null) {
+    throw new MyException("Package does not exist: " + wizardData.myPackageName);
+  }
+  PsiDirectory targetDir=null;
+  final PsiDirectory[] directories=aPackage.getDirectories();
+  for (int i=0; i < directories.length; i++) {
+    final PsiDirectory psiDirectory=directories[i];
+    if (PsiTreeUtil.isAncestor(rootDirectory,psiDirectory,false)) {
+      targetDir=psiDirectory;
+      break;
+    }
+  }
+  if (targetDir == null) {
+    throw new MyException("Cannot find package: " + wizardData.myPackageName);
+  }
+  final String body="public class " + wizardData.myShortClassName + "{\n"+ "public "+ wizardData.myShortClassName+ "(){}\n"+ "}";
+  try {
+    PsiFile sourceFile=psiManager.getElementFactory().createFileFromText(wizardData.myShortClassName + ".java",body);
+    sourceFile=(PsiFile)targetDir.add(sourceFile);
+    final PsiClass beanClass=((PsiJavaFile)sourceFile).getClasses()[0];
+    final ArrayList properties=new ArrayList();
+    final HashMap<String,String> property2fqClassName=new HashMap<String,String>();
+    final FormProperty2BeanProperty[] bindings=wizardData.myBindings;
+    for (int i=0; i < bindings.length; i++) {
+      final FormProperty2BeanProperty binding=bindings[i];
+      if (binding == null || binding.myBeanProperty == null) {
+        continue;
+      }
+      properties.add(binding.myBeanProperty.myName);
+      final String propertyClassName=binding.myFormProperty.getComponentPropertyClassName();
+      property2fqClassName.put(binding.myBeanProperty.myName,propertyClassName);
+    }
+    generateBean(beanClass,(String[])properties.toArray(new String[properties.size()]),property2fqClassName);
+    return beanClass;
+  }
+ catch (  IncorrectOperationException e) {
+    throw new MyException(e.getMessage());
+  }
+}

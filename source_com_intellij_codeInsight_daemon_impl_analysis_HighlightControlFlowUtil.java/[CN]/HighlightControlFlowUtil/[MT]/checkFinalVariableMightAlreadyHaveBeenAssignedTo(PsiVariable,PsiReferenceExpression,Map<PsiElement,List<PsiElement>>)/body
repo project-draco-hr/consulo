@@ -1,0 +1,66 @@
+{
+  if (!PsiUtil.isAccessedForWriting(expression))   return null;
+  final PsiElement scope=variable instanceof PsiField ? variable.getParent() : variable.getParent() == null ? null : variable.getParent().getParent();
+  PsiElement codeBlock=PsiUtil.getTopLevelEnclosingCodeBlock(expression,scope);
+  if (codeBlock == null)   return null;
+  List<PsiElement> codeBlockProblems=getFinalVariableProblemsInBlock(finalVarProblems,codeBlock);
+  boolean alreadyAssigned=codeBlockProblems.contains(expression);
+  if (!alreadyAssigned) {
+    if (!(variable instanceof PsiField))     return null;
+    final PsiField field=(PsiField)variable;
+    final PsiClass aClass=field.getContainingClass();
+    if (aClass == null)     return null;
+    final PsiField[] fields=aClass.getFields();
+    boolean isFieldStatic=field.hasModifierProperty(PsiModifier.STATIC);
+    for (int i=0; i < fields.length; i++) {
+      PsiField psiField=fields[i];
+      final PsiExpression initializer=psiField.getInitializer();
+      if (psiField != field && psiField.hasModifierProperty(PsiModifier.STATIC) == isFieldStatic && initializer != null && initializer != codeBlock && !variableDefinitelyNotAssignedIn(field,initializer)) {
+        alreadyAssigned=true;
+        break;
+      }
+    }
+    if (!alreadyAssigned) {
+      final PsiMember enclosingConstructorOrInitializer=PsiUtil.findEnclosingConstructorOrInitializer(expression);
+      if (enclosingConstructorOrInitializer == null || !aClass.getManager().areElementsEquivalent(enclosingConstructorOrInitializer.getParent(),aClass))       return null;
+      final PsiClassInitializer[] initializers=aClass.getInitializers();
+      for (int i=0; i < initializers.length; i++) {
+        PsiClassInitializer initializer=initializers[i];
+        if (initializer.hasModifierProperty(PsiModifier.STATIC) == field.hasModifierProperty(PsiModifier.STATIC)) {
+          final PsiCodeBlock body=initializer.getBody();
+          if (body == codeBlock)           return null;
+          if (body == null)           continue;
+          try {
+            final ControlFlow controlFlow=ControlFlowFactory.getControlFlow(body,LocalsOrMyInstanceFieldsControlFlowPolicy.getInstance());
+            if (!ControlFlowUtil.isVariableDefinitelyNotAssigned(field,controlFlow)) {
+              alreadyAssigned=true;
+              break;
+            }
+          }
+ catch (          ControlFlowAnalyzer.AnalysisCanceledException e) {
+            return null;
+          }
+        }
+      }
+    }
+    if (!alreadyAssigned && !field.hasModifierProperty(PsiModifier.STATIC)) {
+      final PsiMethod ctr=codeBlock.getParent() instanceof PsiMethod ? (PsiMethod)codeBlock.getParent() : null;
+      final List<PsiMethod> redirectedConstructors=ctr != null && ctr.isConstructor() ? getRedirectedConstructors(ctr) : null;
+      for (int j=0; redirectedConstructors != null && j < redirectedConstructors.size(); j++) {
+        PsiMethod redirectedConstructor=redirectedConstructors.get(j);
+        if (redirectedConstructor.getBody() != null && variableDefinitelyAssignedIn(variable,redirectedConstructor.getBody())) {
+          alreadyAssigned=true;
+          break;
+        }
+      }
+    }
+  }
+  if (alreadyAssigned) {
+    String description=MessageFormat.format("Variable ''{0}'' might already have been assigned to",new Object[]{variable.getName()});
+    final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,expression,description);
+    QuickFixAction.registerQuickFixAction(highlightInfo,new ModifierFix(variable,PsiModifier.FINAL,false));
+    QuickFixAction.registerQuickFixAction(highlightInfo,new DeferFinalAssignmentFix(variable,expression));
+    return highlightInfo;
+  }
+  return null;
+}

@@ -1,0 +1,83 @@
+{
+  myEditor=editor;
+  myRequestFocus=requestFocus;
+  PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+  PsiElement element=TargetElementUtil.findTargetElement(editor,TargetElementUtil.ELEMENT_NAME_ACCEPTED | TargetElementUtil.REFERENCED_ELEMENT_ACCEPTED | TargetElementUtil.LOOKUP_ITEM_ACCEPTED| TargetElementUtil.NEW_AS_CONSTRUCTOR| TargetElementUtil.THIS_ACCEPTED| TargetElementUtil.SUPER_ACCEPTED);
+  PsiElement originalElement=(file != null) ? file.findElementAt(editor.getCaretModel().getOffset()) : null;
+  if (element == null && editor != null) {
+    final PsiReference ref=TargetElementUtil.findReference(editor,editor.getCaretModel().getOffset());
+    if (ref != null) {
+      final PsiElement parent=ref.getElement().getParent();
+      if (parent instanceof PsiMethodCallExpression) {
+        element=parent;
+      }
+    }
+    Lookup activeLookup=LookupManager.getInstance(myProject).getActiveLookup();
+    if (activeLookup != null) {
+      LookupItem item=activeLookup.getCurrentItem();
+      if (item == null)       return null;
+      if (file != null) {
+        DocumentationProvider documentationProvider=documentationProviders.get(file.getFileType());
+        if (documentationProvider != null) {
+          if (ref != null)           originalElement=ref.getElement();
+          element=documentationProvider.getDocumentationElementForLookupItem(item.getObject(),originalElement);
+        }
+      }
+    }
+  }
+  if (element instanceof PsiAnonymousClass) {
+    element=((PsiAnonymousClass)element).getBaseClassType().resolve();
+  }
+  if (element == null && file != null) {
+    element=originalElement;
+    if (element == null)     return null;
+    PsiDocComment comment=PsiTreeUtil.getParentOfType(element,PsiDocComment.class);
+    if (comment == null)     return null;
+    element=comment.getParent();
+    if (!(element instanceof PsiClass) && !(element instanceof PsiField) && !(element instanceof PsiMethod))     return null;
+  }
+  LightweightHint oldHint=getDocInfoHint();
+  if (oldHint != null) {
+    JavaDocInfoComponent component=(JavaDocInfoComponent)oldHint.getComponent();
+    PsiElement element1=component.getElement();
+    if (element != null && element.equals(element1)) {
+      if (requestFocus) {
+        component.getComponent().requestFocus();
+      }
+      return oldHint;
+    }
+    oldHint.hide();
+  }
+  JavaDocInfoComponent component=new JavaDocInfoComponent(this);
+  final IdeFrame frame=WindowManagerEx.getInstanceEx().getFrame(myProject);
+  try {
+    element.putUserData(ORIGINAL_ELEMENT_KEY,originalElement);
+  }
+ catch (  RuntimeException ex) {
+  }
+  LightweightHint hint=new LightweightHint(component){
+    public void hide(){
+      frame.setDefaultFocusableComponent(editor.getContentComponent());
+      try {
+        super.hide();
+      }
+  finally {
+        frame.setDefaultFocusableComponent(null);
+      }
+      editor.getContentComponent().requestFocusInWindow();
+      if (myPreviouslyFocused != null && myPreviouslyFocused.getParent() instanceof ChooseByNameBase.JPanelProvider) {
+        ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).unregisterHint();
+      }
+      myEditor=null;
+      myPreviouslyFocused=null;
+    }
+  }
+;
+  component.setHint(hint);
+  fetchDocInfo(getDefaultProvider(element),component);
+  if (LookupManager.getInstance(myProject).getActiveLookup() != null) {
+    myRequestFocus=false;
+  }
+  myDocInfoHintRef=new WeakReference<LightweightHint>(hint);
+  return hint;
+}

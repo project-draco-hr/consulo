@@ -1,0 +1,45 @@
+{
+  final PsiManager psiManager=myMethodCall.getManager();
+  final PsiFile callSite=myMethodCall.getContainingFile();
+  final Project project=psiManager.getProject();
+  final PsiElementFactory elementFactory=psiManager.getElementFactory();
+  IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+  try {
+    PsiMethod constructor=elementFactory.createConstructor();
+    constructor=(PsiMethod)targetClass.add(constructor);
+    TemplateBuilder templateBuilder=new TemplateBuilder(constructor);
+    CreateFromUsageUtils.setupMethodParameters(constructor,templateBuilder,myMethodCall.getArgumentList(),getTargetSubstitutor(myMethodCall));
+    templateBuilder.setEndVariableAfter(constructor.getBody().getLBrace());
+    final Template template=templateBuilder.buildTemplate();
+    final Editor editor=positionCursor(project,targetClass.getContainingFile(),targetClass);
+    final TextRange textRange=constructor.getTextRange();
+    final PsiFile file=targetClass.getContainingFile();
+    editor.getDocument().deleteString(textRange.getStartOffset(),textRange.getEndOffset());
+    editor.getCaretModel().moveToOffset(textRange.getStartOffset());
+    startTemplate(editor,template,project,new TemplateStateListener(){
+      public void templateFinished(      Template template){
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            try {
+              PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
+              PsiElement element=file.findElementAt(editor.getCaretModel().getOffset());
+              PsiMethod constructor=PsiTreeUtil.getParentOfType(element,PsiMethod.class);
+              PsiClass targetClass=PsiTreeUtil.getParentOfType(constructor,PsiClass.class);
+              CreateFromUsageUtils.setupMethodBody(targetClass,constructor);
+              CreateFromUsageUtils.setupEditor(constructor,editor);
+              QuickFixAction.spoilDocument(project,callSite);
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+        }
+);
+      }
+    }
+);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}

@@ -1,0 +1,53 @@
+{
+  DataContext dataContext=event.getDataContext();
+  Project project=(Project)dataContext.getData(DataConstants.PROJECT);
+  if (project == null)   return null;
+  if (ActionPlaces.PROJECT_VIEW_POPUP.equals(event.getPlace()) || ActionPlaces.STRUCTURE_VIEW_POPUP.equals(event.getPlace())) {
+    final PsiElement psiElement=(PsiElement)dataContext.getData(DataConstants.PSI_ELEMENT);
+    if (psiElement instanceof PsiField) {
+      return SourcePosition.createFromElement(psiElement);
+    }
+    return null;
+  }
+  if (DebuggerAction.isContextView(event)) {
+    DebuggerTree tree=(DebuggerTree)event.getDataContext().getData(DebuggerActions.DEBUGGER_TREE);
+    if (tree != null && tree.getSelectionPath() != null) {
+      DebuggerTreeNodeImpl node=((DebuggerTreeNodeImpl)tree.getSelectionPath().getLastPathComponent());
+      if (node != null && node.getDescriptor() instanceof FieldDescriptorImpl) {
+        Field field=((FieldDescriptorImpl)node.getDescriptor()).getField();
+        PsiClass psiClass=DebuggerUtilsEx.findClass(field.declaringType().name(),project);
+        if (psiClass != null) {
+          psiClass=(PsiClass)psiClass.getNavigationElement();
+          final PsiField psiField=psiClass.findFieldByName(field.name(),true);
+          if (psiField != null) {
+            return SourcePosition.createFromElement(psiField);
+          }
+        }
+      }
+    }
+  }
+  DebuggerTreeNodeImpl selectedNode=DebuggerAction.getSelectedNode(dataContext);
+  if (selectedNode != null && selectedNode.getDescriptor() instanceof FieldDescriptorImpl) {
+    FieldDescriptorImpl descriptor=(FieldDescriptorImpl)selectedNode.getDescriptor();
+    return descriptor.getSourcePosition(project,DebuggerAction.getDebuggerContext(dataContext));
+  }
+  Editor editor=(Editor)dataContext.getData(DataConstants.EDITOR);
+  if (editor == null) {
+    editor=FileEditorManager.getInstance(project).getSelectedTextEditor();
+  }
+  if (editor != null) {
+    final Document document=editor.getDocument();
+    PsiFile file=PsiDocumentManager.getInstance(project).getPsiFile(document);
+    if (file != null) {
+      FileTypeManager fileTypeManager=FileTypeManager.getInstance();
+      FileType fileType=fileTypeManager.getFileTypeByFile(file.getVirtualFile());
+      if (StdFileTypes.JAVA == fileType || StdFileTypes.CLASS == fileType) {
+        final PsiField field=FieldBreakpoint.findField(project,document,editor.getCaretModel().getOffset());
+        if (field != null) {
+          return SourcePosition.createFromElement(field);
+        }
+      }
+    }
+  }
+  return null;
+}

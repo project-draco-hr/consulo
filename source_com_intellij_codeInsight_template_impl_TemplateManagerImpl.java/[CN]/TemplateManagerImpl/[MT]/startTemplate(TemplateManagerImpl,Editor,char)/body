@@ -1,0 +1,63 @@
+{
+  final Document document=editor.getDocument();
+  PsiFile file=PsiDocumentManager.getInstance(templateManager.myProject).getPsiFile(document);
+  if (file == null)   return false;
+  TemplateSettings templateSettings=TemplateSettings.getInstance();
+  CharSequence text=document.getCharsSequence();
+  final int caretOffset=editor.getCaretModel().getOffset();
+  TemplateImpl template=null;
+  int wordStart=0;
+  for (int i=1; i <= templateSettings.getMaxKeyLength(); i++) {
+    wordStart=caretOffset - i;
+    if (wordStart < 0) {
+      break;
+    }
+    String key=text.subSequence(wordStart,caretOffset).toString();
+    template=templateSettings.getTemplate(key);
+    if (template != null && template.isDeactivated()) {
+      template=null;
+    }
+    if (template != null) {
+      if (Character.isJavaIdentifierStart(key.charAt(0))) {
+        if (wordStart > 0 && Character.isJavaIdentifierPart(text.charAt(wordStart - 1))) {
+          template=null;
+          continue;
+        }
+      }
+      break;
+    }
+  }
+  if (template == null)   return false;
+  if (shortcutChar != 0 && getShortcutChar(template) != shortcutChar) {
+    return false;
+  }
+  if (template.isSelectionTemplate())   return false;
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      PsiDocumentManager.getInstance(myProject).commitDocument(document);
+    }
+  }
+,"",null);
+  if (!templateManager.checkContext(template,file,caretOffset - template.getKey().length())) {
+    return false;
+  }
+  if (!editor.getDocument().isWritable()) {
+    editor.getDocument().fireReadOnlyModificationAttempt();
+    return false;
+  }
+  final int wordStart0=wordStart;
+  final TemplateImpl template0=template;
+  final TemplateState templateState0=templateManager.initTemplateState(editor);
+  CommandProcessor commandProcessor=CommandProcessor.getInstance();
+  commandProcessor.executeCommand(myProject,new Runnable(){
+    public void run(){
+      editor.getDocument().deleteString(wordStart0,caretOffset);
+      editor.getCaretModel().moveToOffset(wordStart0);
+      editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+      editor.getSelectionModel().removeSelection();
+      templateState0.start(template0);
+    }
+  }
+,"Insert Code Template",null);
+  return true;
+}

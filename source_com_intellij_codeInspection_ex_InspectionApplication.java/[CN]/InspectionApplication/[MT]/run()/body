@@ -1,0 +1,85 @@
+{
+  try {
+    myProjectPath=myProjectPath.replace(File.separatorChar,'/');
+    VirtualFile vfsProject=LocalFileSystem.getInstance().findFileByPath(myProjectPath);
+    if (vfsProject == null) {
+      logError("File " + myProjectPath + " cannot be found");
+      InspectionMain.printHelp();
+    }
+    File profileFile=new File(myProfilePath);
+    if (!profileFile.exists()) {
+      logError("File " + myProfilePath + " cannot be found");
+      InspectionMain.printHelp();
+    }
+    logMessage(1,"Opening project... ");
+    myProject=ProjectManagerEx.getInstanceEx().loadProject(myProjectPath);
+    logMessageLn(1,"done.");
+    logMessage(1,"Initializing project...");
+    final InspectionManagerEx im=(InspectionManagerEx)InspectionManager.getInstance(myProject);
+    final AnalysisScope scope;
+    InspectionProfileImpl profile=new InspectionProfileImpl(profileFile,null);
+    im.setProfile(profile);
+    if (mySourceDirectory == null) {
+      scope=new AnalysisScope(myProject,AnalysisScope.SOURCE_JAVA_FILES);
+      runStartupActivity();
+    }
+ else {
+      mySourceDirectory=mySourceDirectory.replace(File.separatorChar,'/');
+      VirtualFile vfsDir=LocalFileSystem.getInstance().findFileByPath(mySourceDirectory);
+      if (vfsDir == null) {
+        logError("Directory " + mySourceDirectory + " cannot be found");
+        InspectionMain.printHelp();
+      }
+      runStartupActivity();
+      PsiDirectory psiDirectory=PsiManager.getInstance(myProject).findDirectory(vfsDir);
+      scope=new AnalysisScope(psiDirectory,AnalysisScope.SOURCE_JAVA_FILES);
+    }
+    logMessageLn(1,"done.");
+    final OutputStream outStream=new BufferedOutputStream(new FileOutputStream(myOutPath));
+    PsiClass psiObjectClass=PsiManager.getInstance(myProject).findClass("java.lang.Object");
+    if (psiObjectClass == null) {
+      logError("The JDK is not configured properly for this project. Inspection cannot run.");
+      return;
+    }
+    ProgressManager.getInstance().runProcess(new Runnable(){
+      public void run(){
+        im.launchInspectionsOffline(scope,outStream);
+        logMessageLn(1,"\nDone.\n");
+      }
+    }
+,new ProgressIndicatorBase(){
+      private String lastPrefix="";
+      public void setText(      String text){
+        if (myVerboseLevel == 0)         return;
+        if (myVerboseLevel == 1) {
+          int idx=text.indexOf(" in ");
+          if (idx == -1) {
+            idx=text.indexOf(" of ");
+          }
+          if (idx == -1)           return;
+          String prefix=text.substring(0,idx);
+          if (prefix.equals(lastPrefix)) {
+            logMessage(1,".");
+            return;
+          }
+          lastPrefix=prefix;
+          logMessageLn(1,"");
+          logMessageLn(1,prefix);
+          return;
+        }
+        logMessageLn(2,text);
+      }
+    }
+);
+  }
+ catch (  IOException e) {
+    LOG.error(e);
+    InspectionMain.printHelp();
+  }
+catch (  InvalidDataException e) {
+    LOG.error(e);
+  }
+catch (  JDOMException e) {
+    LOG.error(e);
+  }
+}

@@ -1,0 +1,42 @@
+{
+  Command command=createCommand(root,executionEnvironment);
+  if (command == null)   return;
+  LOG.assertTrue(connection != null,root.getCvsRootAsString());
+  final CvsMessagesListener cvsMessagesListener=executionEnvironment.getCvsMessagesListener();
+  long start=System.currentTimeMillis();
+  try {
+    final IClientEnvironment clientEnvironment=createEnvironment(connection,root,myUpdatedFilesManager,executionEnvironment);
+    myUpdatedFilesManager.setCvsFileSystem(clientEnvironment.getCvsFileSystem());
+    final EventManager eventManager=new EventManager();
+    IGlobalOptions globalOptions=command.getIGlobalOptions();
+    final IRequestProcessor requestProcessor=new RequestProcessor(clientEnvironment,globalOptions,eventManager,new StreamLogger(),executionEnvironment.getCvsCommandStopper());
+    eventManager.addFileInfoListener(this);
+    eventManager.addEntryListener(this);
+    eventManager.addMessageListener(this);
+    eventManager.addModuleExpansionListener(this);
+    CvsMessagesTranslator cvsMessagesTranslator=new CvsMessagesTranslator(cvsMessagesListener,clientEnvironment.getCvsFileSystem(),myUpdatedFilesManager,root.getCvsRootAsString());
+    cvsMessagesTranslator.registerTo(eventManager);
+    final CvsEntriesManager cvsEntriesManager=CvsEntriesManager.getInstance();
+    if (shouldMakeChangesOnTheLocalFileSystem()) {
+      eventManager.addEntryListener(new MergeSupportingEntryListener(clientEnvironment,cvsEntriesManager,myUpdatedFilesManager));
+      eventManager.addMessageListener(myUpdatedFilesManager);
+    }
+    modifyOptions(command.getGlobalOptions());
+    String commandString=composeCommandString(root,command);
+    cvsMessagesListener.commandStarted(commandString);
+    setProgressText("Command '" + getOperationName() + "' running for "+ root.getCvsRootAsString());
+    command.execute(requestProcessor,eventManager,eventManager,clientEnvironment,new IProgressViewer(){
+      public void setProgress(      double value){
+      }
+    }
+);
+    cvsMessagesTranslator.operationCompleted();
+  }
+ catch (  CommandException t) {
+    throw root.processException(t);
+  }
+ finally {
+    cvsMessagesListener.commandFinished(composeCommandString(root,command),System.currentTimeMillis() - start);
+    executeFinishActions();
+  }
+}

@@ -1,0 +1,54 @@
+{
+  final Map<String,RmicProcessingItem> pathToItemMap=new HashMap<String,RmicProcessingItem>();
+  final String[] cmdLine=ApplicationManager.getApplication().runReadAction(new Computable<String[]>(){
+    public String[] compute(){
+      for (Iterator it=dirItems.iterator(); it.hasNext(); ) {
+        final RmicProcessingItem item=(RmicProcessingItem)it.next();
+        pathToItemMap.put(item.myStub.getPath().replace(File.separatorChar,'/'),item);
+        pathToItemMap.put(item.mySkel.getPath().replace(File.separatorChar,'/'),item);
+        pathToItemMap.put(item.myTie.getPath().replace(File.separatorChar,'/'),item);
+      }
+      return createStartupCommand(module,outputDir.getPath(),dirItems.toArray(new RmicProcessingItem[dirItems.size()]));
+    }
+  }
+);
+  if (LOG.isDebugEnabled()) {
+    StringBuffer buf=new StringBuffer();
+    for (int idx=0; idx < cmdLine.length; idx++) {
+      if (idx > 0) {
+        buf.append(" ");
+      }
+      buf.append(cmdLine[idx]);
+    }
+    LOG.debug(buf.toString());
+  }
+  final Process process=Runtime.getRuntime().exec(cmdLine);
+  final Set<RmicProcessingItem> successfullyCompiledItems=new HashSet<RmicProcessingItem>();
+  final CompilerParsingThread parsingThread=new CompilerParsingThread(process,new JavacOutputParser(myProject),false){
+    public void setProgressText(    String text){
+      context.getProgressIndicator().setText(text);
+    }
+    public void message(    CompilerMessageCategory category,    String message,    String url,    int lineNum,    int columnNum){
+      context.addMessage(category,message,url,lineNum,columnNum);
+    }
+    protected boolean isCancelled(){
+      return context.getProgressIndicator().isCanceled();
+    }
+    public void fileProcessed(    String path){
+    }
+    protected void processCompiledClass(    String classFileToProcess){
+      final RmicProcessingItem item=pathToItemMap.get(classFileToProcess.replace(File.separatorChar,'/'));
+      if (item != null) {
+        successfullyCompiledItems.add(item);
+      }
+    }
+  }
+;
+  parsingThread.start();
+  try {
+    parsingThread.join();
+  }
+ catch (  InterruptedException e) {
+  }
+  return successfullyCompiledItems.toArray(new RmicProcessingItem[successfullyCompiledItems.size()]);
+}

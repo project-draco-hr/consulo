@@ -1,0 +1,49 @@
+{
+  final ProgressIndicator pi=ProgressManager.getInstance().getProgressIndicator();
+  if (pi.isCanceled())   return null;
+  RepositoryContentHandler handler=new RepositoryContentHandler();
+  SAXParser parser=SAXParserFactory.newInstance().newSAXParser();
+  HttpURLConnection connection=(HttpURLConnection)new URL(url).openConnection();
+  try {
+    if (pi.isCanceled())     return null;
+    pi.setText("Waiting for reply from " + RepositoryHelper.REPOSITORY_HOST);
+    InputStreamGetter getter=new InputStreamGetter(connection);
+    final Thread thread=new Thread(getter,"InputStreamGetter");
+    thread.start();
+    while (!pi.isCanceled()) {
+      try {
+        thread.join(50);
+        pi.setFraction(System.currentTimeMillis());
+        if (!thread.isAlive())         break;
+      }
+ catch (      InterruptedException e) {
+        return null;
+      }
+    }
+    InputStream is=getter.getIs();
+    if (is == null)     return null;
+    pi.setText("Downloading List of Plugins");
+    File temp=File.createTempFile("temp","",new File(PathManagerEx.getPluginTempPath()));
+    try {
+      FileOutputStream fos=new FileOutputStream(temp,false);
+      ProgressStream ps=new ProgressStream(is,ProgressManager.getInstance().getProgressIndicator());
+      byte[] buffer=new byte[1024];
+      do {
+        int size=ps.read(buffer);
+        if (size == -1)         break;
+        fos.write(buffer,0,size);
+      }
+ while (true);
+      fos.close();
+      parser.parse(temp,handler);
+    }
+  finally {
+      temp.delete();
+    }
+  }
+ catch (  RuntimeException e) {
+    if (e.getCause() != null && e.getCause() instanceof InterruptedException)     return null;
+ else     throw e;
+  }
+  return handler.getRoot();
+}

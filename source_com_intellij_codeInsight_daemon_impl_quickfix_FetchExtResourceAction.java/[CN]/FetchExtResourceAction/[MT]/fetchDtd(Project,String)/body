@@ -1,0 +1,71 @@
+{
+  final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  final String sep=File.separator;
+  final String extResourcesPath=PathManager.getSystemPath() + sep + "extResources";
+  final File extResources=new File(extResourcesPath);
+  extResources.mkdirs();
+  LOG.assertTrue(extResources.exists());
+  final PsiManager psiManager=PsiManager.getInstance(project);
+  ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+    public void run(){
+      final Runnable action=new Runnable(){
+        public void run(){
+          final VirtualFile vFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(extResources.getAbsolutePath().replace(File.separatorChar,'/'));
+          LOG.assertTrue(vFile != null);
+          final PsiDirectory directory=psiManager.findDirectory(vFile);
+          directory.getFiles();
+        }
+      }
+;
+      ApplicationManager.getApplication().runWriteAction(action);
+    }
+  }
+,indicator.getModalityState());
+  final List<String> downloadedResources=new LinkedList<String>();
+  final List<String> resourceUrls=new LinkedList<String>();
+  final IOException[] nestedException=new IOException[1];
+  try {
+    final String resPath=fetchOneFile(indicator,dtdUrl,project,extResourcesPath);
+    resourceUrls.add(dtdUrl);
+    downloadedResources.add(resPath);
+    ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+      public void run(){
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            ExternalResourceManagerImpl.getInstance().addResource(dtdUrl,resPath);
+            VirtualFile virtualFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(resPath.replace(File.separatorChar,'/'));
+            List<String> strings=extractEmbeddedFileReferences(virtualFile,psiManager);
+            for (Iterator<String> iterator=strings.iterator(); iterator.hasNext(); ) {
+              String s=iterator.next();
+              if (s.startsWith("http://")) {
+                continue;
+              }
+              String resourceUrl=dtdUrl.substring(0,dtdUrl.lastIndexOf('/') + 1) + s;
+              String resourcePath;
+              try {
+                resourcePath=fetchOneFile(indicator,resourceUrl,project,extResourcesPath);
+              }
+ catch (              IOException e) {
+                nestedException[0]=new FetchingResourceIOException(e,resourceUrl);
+                break;
+              }
+              ExternalResourceManagerImpl.getInstance().addResource(resourceUrl,resourcePath);
+              LocalFileSystem.getInstance().refreshAndFindFileByPath(resourcePath.replace(File.separatorChar,'/'));
+              resourceUrls.add(resourceUrl);
+              downloadedResources.add(resourcePath);
+            }
+          }
+        }
+);
+      }
+    }
+,indicator.getModalityState());
+  }
+ catch (  IOException ex) {
+    nestedException[0]=ex;
+  }
+  if (nestedException[0] != null) {
+    cleanup(resourceUrls,downloadedResources);
+    throw nestedException[0];
+  }
+}

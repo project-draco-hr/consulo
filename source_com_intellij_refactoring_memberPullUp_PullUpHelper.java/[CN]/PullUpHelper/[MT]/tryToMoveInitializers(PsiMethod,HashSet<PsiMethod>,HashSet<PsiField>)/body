@@ -1,0 +1,81 @@
+{
+  final HashMap<PsiField,Initializer> fieldsToInitializers=new HashMap<PsiField,Initializer>();
+  boolean anyFound=false;
+  for (Iterator<PsiField> iterator=movedFields.iterator(); iterator.hasNext(); ) {
+    PsiField field=iterator.next();
+    PsiExpression commonInitializer=null;
+    final ArrayList<PsiElement> fieldInitializersToRemove=new ArrayList<PsiElement>();
+    for (Iterator<PsiMethod> subIterator=subConstructors.iterator(); subIterator.hasNext(); ) {
+      PsiMethod subConstructor=subIterator.next();
+      commonInitializer=hasCommonInitializer(commonInitializer,subConstructor,field,fieldInitializersToRemove);
+      if (commonInitializer == null)       break;
+    }
+    if (commonInitializer != null) {
+      final MovedFieldsUsed visitor=new MovedFieldsUsed(movedFields);
+      commonInitializer.accept(visitor);
+      fieldsToInitializers.put(field,new Initializer(commonInitializer,visitor.getUsedFields(),fieldInitializersToRemove));
+      anyFound=true;
+    }
+  }
+  if (!anyFound)   return;
+{
+    final Set<PsiField> initializedFields=fieldsToInitializers.keySet();
+    Set<PsiField> unmovable=RefactoringUtil.transitiveClosure(new RefactoringUtil.Graph<PsiField>(){
+      public Set<PsiField> getVertices(){
+        return initializedFields;
+      }
+      public Set<PsiField> getTargets(      PsiField source){
+        return fieldsToInitializers.get(source).movedFieldsUsed;
+      }
+    }
+,new Condition<PsiField>(){
+      public boolean value(      PsiField object){
+        return !initializedFields.contains(object);
+      }
+    }
+);
+    for (Iterator<PsiField> iterator=unmovable.iterator(); iterator.hasNext(); ) {
+      PsiField psiField=iterator.next();
+      fieldsToInitializers.remove(psiField);
+    }
+  }
+  final PsiElementFactory factory=myManager.getElementFactory();
+  if (constructor == null) {
+    constructor=(PsiMethod)myTargetSuperClass.add(factory.createConstructor());
+    final String visibilityModifier=VisibilityUtil.getVisibilityModifier(myTargetSuperClass.getModifierList());
+    constructor.getModifierList().setModifierProperty(visibilityModifier,true);
+  }
+  ArrayList<PsiField> initializedFields=new ArrayList<PsiField>(fieldsToInitializers.keySet());
+  Collections.sort(initializedFields,new Comparator(){
+    public int compare(    Object o1,    Object o2){
+      Initializer i1=fieldsToInitializers.get(o1);
+      Initializer i2=fieldsToInitializers.get(o2);
+      if (i1.movedFieldsUsed.contains(o2))       return 1;
+      if (i2.movedFieldsUsed.contains(o1))       return -1;
+      return 0;
+    }
+  }
+);
+  for (Iterator iterator=initializedFields.iterator(); iterator.hasNext(); ) {
+    PsiField field=(PsiField)iterator.next();
+    Initializer initializer=fieldsToInitializers.get(field);
+    PsiExpressionStatement assignmentStatement=(PsiExpressionStatement)factory.createStatementFromText(field.getName() + "=0;",constructor.getBody());
+    assignmentStatement=(PsiExpressionStatement)CodeStyleManager.getInstance(myManager.getProject()).reformat(assignmentStatement);
+    assignmentStatement=(PsiExpressionStatement)constructor.getBody().add(assignmentStatement);
+    PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)assignmentStatement.getExpression();
+    PsiReferenceExpression fieldRef=(PsiReferenceExpression)assignmentExpression.getLExpression();
+    PsiElement resolved=fieldRef.resolve();
+    if (resolved != field) {
+      PsiElement qualifiedRef=factory.createExpressionFromText("this." + field.getName(),fieldRef);
+      qualifiedRef=CodeStyleManager.getInstance(myManager.getProject()).reformat(qualifiedRef);
+      fieldRef.replace(qualifiedRef);
+    }
+    final PsiElement newInitializer=assignmentExpression.getRExpression().replace(initializer.initializer);
+    ChangeContextUtil.decodeContextInfo(newInitializer,myTargetSuperClass,RefactoringUtil.createThisExpression(myManager,null));
+    for (int i=0; i < initializer.statementsToRemove.size(); i++) {
+      PsiElement psiElement=initializer.statementsToRemove.get(i);
+      psiElement.delete();
+    }
+  }
+  return;
+}

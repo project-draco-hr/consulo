@@ -1,0 +1,78 @@
+{
+  PsiManager manager=file.getManager();
+  final Set<String> namesToImportStaticly=new HashSet<String>();
+  String[] names=collectNamesToImport(file,namesToImportStaticly);
+  Arrays.sort(names);
+  ArrayList<String> namesList=new ArrayList<String>();
+  ImportLayoutTable table=mySettings.IMPORT_LAYOUT_TABLE;
+  if (table != null) {
+    int[] entriesForName=new int[names.length];
+    for (int i=0; i < names.length; i++) {
+      entriesForName[i]=findEntryIndex(names[i]);
+    }
+    Entry[] entries=table.getEntries();
+    for (int i=0; i < entries.length; i++) {
+      Entry entry=entries[i];
+      if (entry instanceof PackageEntry) {
+        for (int j=0; j < names.length; j++) {
+          if (entriesForName[j] == i) {
+            namesList.add(names[j]);
+            names[j]=null;
+          }
+        }
+      }
+    }
+  }
+  for (int i=0; i < names.length; i++) {
+    String name=names[i];
+    if (name != null)     namesList.add(name);
+  }
+  names=namesList.toArray(new String[namesList.size()]);
+  TObjectIntHashMap<String> packageToCountMap=new TObjectIntHashMap<String>();
+  TObjectIntHashMap<String> classToCountMap=new TObjectIntHashMap<String>();
+  for (int i=0; i < names.length; i++) {
+    String name=names[i];
+    String packageOrClassName=getPackageOrClassName(name);
+    if (packageOrClassName.length() == 0)     continue;
+    if (namesToImportStaticly.contains(name)) {
+      int count=classToCountMap.get(packageOrClassName);
+      classToCountMap.put(packageOrClassName,count + 1);
+    }
+ else {
+      int count=packageToCountMap.get(packageOrClassName);
+      packageToCountMap.put(packageOrClassName,count + 1);
+    }
+  }
+  final Set<String> classesOrPackagesToImportOnDemand=new HashSet<String>();
+class MyVisitorProcedure implements TObjectIntProcedure {
+    boolean myIsVisitingPackages;
+    public MyVisitorProcedure(    boolean isVisitingPackages){
+      myIsVisitingPackages=isVisitingPackages;
+    }
+    public boolean execute(    Object a,    int count){
+      String packageOrClassName=(String)a;
+      if (isToUseImportOnDemand(packageOrClassName,count,!myIsVisitingPackages)) {
+        classesOrPackagesToImportOnDemand.add(packageOrClassName);
+      }
+      return true;
+    }
+  }
+  classToCountMap.forEachEntry(new MyVisitorProcedure(false));
+  packageToCountMap.forEachEntry(new MyVisitorProcedure(true));
+  Set<String> classesToUseSingle=findSingleImports(file,names,classesOrPackagesToImportOnDemand,namesToImportStaticly);
+  final PsiElementFactory factory=manager.getElementFactory();
+  try {
+    final String text=buildImportListText(names,classesOrPackagesToImportOnDemand,classesToUseSingle,namesToImportStaticly);
+    String ext=StdFileTypes.JAVA.getDefaultExtension();
+    final PsiJavaFile dummyFile=(PsiJavaFile)factory.createFileFromText("_Dummy_." + ext,text);
+    codeStyleManager.reformat(dummyFile);
+    PsiImportList resultList=dummyFile.getImportList();
+    PsiImportList oldList=file.getImportList();
+    if (resultList.textMatches(oldList))     return null;
+    return resultList;
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+    return null;
+  }
+}

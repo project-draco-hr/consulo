@@ -1,0 +1,75 @@
+{
+  if (modifiedClasses == null) {
+    myProgress.addMessage(MessageCategory.INFORMATION,new String[]{"Loaded classes are up to date. Nothing to reload."},null,-1,-1);
+    return;
+  }
+  VirtualMachineProxyImpl virtualMachineProxy=getDebugProcess().getVirtualMachineProxy();
+  if (virtualMachineProxy == null)   return;
+  virtualMachineProxy.suspend();
+  final Project project=getDebugProcess().getProject();
+  try {
+    Map<ThreadReferenceProxyImpl,PsiMethod[]> methodsOnTheStack=getMethodsOnTheStack();
+    Map redefineMap=new HashMap();
+    int classN=0;
+    for (Iterator iterator=modifiedClasses.keySet().iterator(); iterator.hasNext(); ) {
+      classN++;
+      String qualifiedName=(String)iterator.next();
+      if (qualifiedName != null) {
+        myProgress.setText(qualifiedName);
+        myProgress.setFraction(classN / (double)modifiedClasses.size());
+      }
+      final HotSwapFile fileDescr=modifiedClasses.get(qualifiedName);
+      byte[] buffer=(byte[])ApplicationManager.getApplication().runReadAction(new Computable(){
+        public Object compute(){
+          return loadFile(fileDescr.file);
+        }
+      }
+);
+      redefineMap.clear();
+      List classes=virtualMachineProxy.classesByName(qualifiedName);
+      for (Iterator i=classes.iterator(); i.hasNext(); ) {
+        ReferenceType reference=(ReferenceType)i.next();
+        if (buffer == null) {
+          myProgress.error(reference,"I/O error");
+        }
+        redefineMap.put(reference,buffer);
+      }
+      getDebugProcess().getVirtualMachineProxy().redefineClasses(redefineMap);
+    }
+    myProgress.setFraction(1);
+    myProgress.message(null,modifiedClasses.size() + " class" + (modifiedClasses.size() == 1 ? "" : "es")+ " reloaded.");
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("classes reloaded");
+    }
+    reportObsoleteFrames(methodsOnTheStack);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("obsolete frames reported");
+    }
+  }
+ catch (  Throwable e) {
+    processException(null,e);
+  }
+  DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+    public void run(){
+      (DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager().reloadBreakpoints();
+      (DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager().updateAllRequests();
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("requests updated");
+        LOG.debug("time stamp set");
+      }
+      myDebuggerSession.refresh();
+      getDebugProcess().getManagerThread().invokeLater(new DebuggerCommandImpl(){
+        protected void action() throws Exception {
+          try {
+            getDebugProcess().getVirtualMachineProxy().resume();
+          }
+ catch (          Exception e) {
+            processException(null,e);
+          }
+        }
+      }
+);
+    }
+  }
+);
+}

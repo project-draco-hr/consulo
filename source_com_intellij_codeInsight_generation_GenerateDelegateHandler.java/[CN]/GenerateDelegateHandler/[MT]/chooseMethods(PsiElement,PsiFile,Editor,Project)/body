@@ -1,0 +1,42 @@
+{
+  PsiClassType.ClassResolveResult resolveResult=null;
+  if (target instanceof PsiField) {
+    resolveResult=PsiUtil.resolveGenericsClassInType(((PsiField)target).getType());
+  }
+ else   if (target instanceof PsiMethod) {
+    resolveResult=PsiUtil.resolveGenericsClassInType(((PsiMethod)target).getReturnType());
+  }
+  if (resolveResult == null || resolveResult.getElement() == null)   return null;
+  PsiClass targetClass=resolveResult.getElement();
+  PsiSubstitutor substitutor=resolveResult.getSubstitutor();
+  int offset=editor.getCaretModel().getOffset();
+  PsiElement element=file.findElementAt(offset);
+  if (element == null)   return null;
+  PsiClass aClass=PsiTreeUtil.getParentOfType(element,PsiClass.class);
+  if (aClass == null)   return null;
+  List<CandidateInfo> methodInstances=new ArrayList<CandidateInfo>();
+  final PsiMethod[] allMethods=targetClass.getAllMethods();
+  PsiManager manager=targetClass.getManager();
+  for (int i=0; i < allMethods.length; i++) {
+    PsiMethod method=allMethods[i];
+    if (method.getContainingClass().getQualifiedName().equals("java.lang.Object"))     continue;
+    if (method.isConstructor())     continue;
+    PsiSubstitutor methodSubstitutor=GenerateMembersUtil.correctSubstitutor(method,substitutor);
+    if (manager.getResolveHelper().isAccessible(method,target,aClass))     methodInstances.add(new CandidateInfo(method,methodSubstitutor));
+  }
+  CandidateInfo[] result;
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    MemberChooser chooser=new MemberChooser(methodInstances.toArray(new Object[methodInstances.size()]),false,true,project);
+    chooser.setTitle("Select Methods to Generate Delegates for");
+    chooser.setCopyJavadocVisible(false);
+    chooser.show();
+    if (chooser.getExitCode() != MemberChooser.OK_EXIT_CODE)     return null;
+    final Object[] selectedElements=chooser.getSelectedElements();
+    result=new CandidateInfo[selectedElements.length];
+    System.arraycopy(selectedElements,0,result,0,selectedElements.length);
+  }
+ else {
+    result=new CandidateInfo[]{methodInstances.get(0)};
+  }
+  return result;
+}

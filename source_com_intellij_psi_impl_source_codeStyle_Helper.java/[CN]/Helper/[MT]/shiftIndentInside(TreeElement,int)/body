@@ -1,0 +1,77 @@
+{
+  if (indentShift == 0)   return element;
+  final CharTable charTableByTree=SharedImplUtil.findCharTableByTree(element);
+  String text=element.getText();
+  for (int offset=0; offset < text.length(); offset++) {
+    char c=text.charAt(offset);
+    if (c == '\n' || c == '\r') {
+      int offset1;
+      for (offset1=offset + 1; offset1 < text.length(); offset1++) {
+        c=text.charAt(offset1);
+        if (c != ' ' && c != '\t')         break;
+      }
+      if (c == '\n' || c == '\r')       continue;
+      String space=text.substring(offset + 1,offset1);
+      int indent=getIndent(space,true);
+      int newIndent=indent + indentShift;
+      newIndent=Math.max(newIndent,0);
+      String newSpace=fillIndent(newIndent);
+      TreeElement leaf=element.findLeafElementAt(offset);
+      if (leaf.getElementType() != ElementType.WHITE_SPACE && leaf.getElementType() != ElementType.C_STYLE_COMMENT && leaf.getElementType() != ElementType.JSP_TEMPLATE_DATA && leaf.getElementType() != ElementType.JSP_DIRECTIVE_WHITE_SPACE && leaf.getElementType() != ElementType.JSP_ACTION_WHITE_SPACE && leaf.getElementType() != ElementType.DOC_COMMENT_DATA && leaf.getElementType() != ElementType.XML_DATA_CHARACTERS && leaf.getElementType() != ElementType.XML_ATTRIBUTE_VALUE_TOKEN && leaf.getElementType() != ElementType.XML_COMMENT_CHARACTERS) {
+        LOG.error("Error",new String[]{leaf.getElementType().toString(),"Type: " + leaf.getElementType() + " text: "+ leaf.getText()});
+      }
+      if (offset1 < text.length()) {
+        TreeElement next=element.findLeafElementAt(offset1);
+        if ((next.getElementType() == ElementType.END_OF_LINE_COMMENT || next.getElementType() == ElementType.C_STYLE_COMMENT) && next != element) {
+          if (mySettings.KEEP_FIRST_COLUMN_COMMENT) {
+            int commentIndent=getIndent(next,true);
+            if (commentIndent == 0)             continue;
+          }
+        }
+ else         if (next.getElementType() == ElementType.XML_DATA_CHARACTERS) {
+          continue;
+        }
+      }
+      int leafOffset=getStartOffset(element,leaf);
+      if (leaf.getElementType() == ElementType.DOC_COMMENT_DATA && leafOffset + leaf.getTextLength() == offset + 1) {
+        TreeElement next=element.findLeafElementAt(offset + 1);
+        if (next.getElementType() == ElementType.WHITE_SPACE) {
+          leaf=next;
+          leafOffset=getStartOffset(element,leaf);
+        }
+ else {
+          if (newSpace.length() > 0) {
+            LeafElement newLeaf=Factory.createSingleLeafElement(ElementType.WHITE_SPACE,newSpace.toCharArray(),0,newSpace.length(),charTableByTree,null);
+            ChangeUtil.addChild(next.getTreeParent(),newLeaf,next);
+          }
+          text=text.substring(0,offset + 1) + newSpace + text.substring(offset1);
+          continue;
+        }
+      }
+      int startOffset=offset + 1 - leafOffset;
+      int endOffset=offset1 - leafOffset;
+      if (!LOG.assertTrue(0 <= startOffset && startOffset <= endOffset && endOffset <= leaf.getTextLength())) {
+        continue;
+      }
+      String leafText=leaf.getText();
+      String newLeafText=leafText.substring(0,startOffset) + newSpace + leafText.substring(endOffset);
+      if (newLeafText.length() > 0) {
+        LeafElement newLeaf=Factory.createSingleLeafElement(leaf.getElementType(),newLeafText.toCharArray(),0,newLeafText.length(),charTableByTree,null);
+        if (leaf.getTreeParent() != null) {
+          ChangeUtil.replaceChild(leaf.getTreeParent(),leaf,newLeaf);
+        }
+        if (leaf == element) {
+          element=newLeaf;
+        }
+      }
+ else {
+        CompositeElement parent=leaf.getTreeParent();
+        if (parent != null) {
+          ChangeUtil.removeChild(parent,leaf);
+        }
+      }
+      text=text.substring(0,offset + 1) + newSpace + text.substring(offset1);
+    }
+  }
+  return element;
+}

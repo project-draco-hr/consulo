@@ -1,0 +1,48 @@
+{
+  PsiManager manager=method.getManager();
+  PsiSearchHelper helper=manager.getSearchHelper();
+  GlobalSearchScope projectScope=GlobalSearchScope.projectScope(myProject);
+  PsiMethod[] overridingMethods=helper.findOverridingMethods(method,projectScope,true);
+  for (int i=0; i < overridingMethods.length; i++) {
+    PsiMethod overridingMethod=overridingMethods[i];
+    result.add(new UsageInfo(overridingMethod));
+  }
+  boolean needToChangeCalls=!myGenerateDelegate && (needToChangeCalls() || myChangeInfo.isVisibilityChanged);
+  if (needToChangeCalls) {
+    List<PsiElement> l=new ArrayList<PsiElement>();
+    PsiReference[] refs=helper.findReferencesIncludingOverriding(method,projectScope,true);
+    for (int i=0; i < refs.length; i++) {
+      PsiReference reference=refs[i];
+      l.add(reference.getElement());
+    }
+    int parameterCount=method.getParameterList().getParameters().length;
+    for (Iterator<PsiElement> iterator=l.iterator(); iterator.hasNext(); ) {
+      PsiElement ref=iterator.next();
+      if (myChangeInfo.isParameterSetOrOrderChanged) {
+        if (RefactoringUtil.isMethodUsage(ref)) {
+          PsiExpressionList list=RefactoringUtil.getArgumentListByMethodReference((PsiJavaCodeReferenceElement)ref);
+          if (!method.isVarArgs() && list.getExpressions().length != parameterCount)           continue;
+        }
+      }
+      result.add(new UsageInfo(ref));
+    }
+    if (method.isConstructor() && parameterCount == 0) {
+      RefactoringUtil.visitImplicitConstructorUsages(method.getContainingClass(),new DefaultConstructorUsageCollector(result));
+    }
+  }
+ else   if (myChangeInfo.isParameterTypesChanged) {
+    PsiReference[] refs=helper.findReferencesIncludingOverriding(method,projectScope,true);
+    for (int i=0; i < refs.length; i++) {
+      PsiReference reference=refs[i];
+      if (reference.getElement() instanceof PsiDocTagValue) {
+        result.add(new UsageInfo(reference.getElement()));
+      }
+    }
+  }
+  findParametersUsage(method,result,overridingMethods);
+  detectLocalsCollisionsInMethod(method,result);
+  for (int j=0; j < overridingMethods.length; j++) {
+    final PsiMethod overridingMethod=overridingMethods[j];
+    detectLocalsCollisionsInMethod(overridingMethod,result);
+  }
+}

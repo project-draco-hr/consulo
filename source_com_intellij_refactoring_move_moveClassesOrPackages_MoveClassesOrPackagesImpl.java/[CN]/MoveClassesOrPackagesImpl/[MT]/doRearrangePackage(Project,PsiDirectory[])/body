@@ -1,0 +1,46 @@
+{
+  final ArrayList<VirtualFile> readOnly=new ArrayList<VirtualFile>();
+  for (int i=0; i < directories.length; i++) {
+    PsiDirectory directory=directories[i];
+    checkMove(directory,readOnly);
+  }
+  if (!readOnly.isEmpty()) {
+    Messages.showErrorDialog(project,"Cannot perform refactorings.\n Some files or directories are read only.","Move");
+    VirtualFileManager.getInstance().fireReadOnlyModificationAttempt((VirtualFile[])readOnly.toArray(new VirtualFile[readOnly.size()]));
+    return;
+  }
+  List<PsiDirectory> sourceRootDirectories=buildRearrangeTargetsList(project,directories);
+  DirectoryChooser chooser=new DirectoryChooser(project);
+  chooser.setTitle("Select source root");
+  chooser.fillList((PsiDirectory[])sourceRootDirectories.toArray(new PsiDirectory[sourceRootDirectories.size()]),null,project,"");
+  chooser.show();
+  if (!chooser.isOK())   return;
+  final PsiDirectory selectedTarget=chooser.getSelectedDirectory();
+  if (selectedTarget == null)   return;
+  final Ref<IncorrectOperationException> ex=Ref.create(null);
+  final String commandDescription="Moving directories";
+  Runnable runnable=new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          final LvcsAction lvcsAction=LvcsIntegration.checkinFilesBeforeRefactoring(project,commandDescription);
+          try {
+            rearrangeDirectoriesToTarget(directories,selectedTarget);
+          }
+ catch (          IncorrectOperationException e) {
+            ex.set(e);
+          }
+ finally {
+            LvcsIntegration.checkinFilesAfterRefactoring(project,lvcsAction);
+          }
+        }
+      }
+);
+    }
+  }
+;
+  CommandProcessor.getInstance().executeCommand(project,runnable,commandDescription,null);
+  if (ex.get() != null) {
+    RefactoringUtil.processIncorrectOperation(project,ex.get());
+  }
+}

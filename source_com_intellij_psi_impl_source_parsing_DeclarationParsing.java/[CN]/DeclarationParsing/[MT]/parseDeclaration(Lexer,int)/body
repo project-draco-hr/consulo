@@ -1,0 +1,157 @@
+{
+  IElementType tokenType=lexer.getTokenType();
+  if (tokenType == null)   return null;
+  if (tokenType == LBRACE) {
+    if (context == FILE_CONTEXT || context == CODE_BLOCK_CONTEXT)     return null;
+  }
+ else   if (tokenType == IDENTIFIER || PRIMITIVE_TYPE_BIT_SET.isInSet(tokenType)) {
+    if (context == FILE_CONTEXT)     return null;
+  }
+ else   if (tokenType == JSP_HOLDER_TOKEN) {
+    LeafElement element=Factory.createLeafElement(HOLDER_TEMPLATE_DATA,lexer.getBuffer(),lexer.getTokenStart(),lexer.getTokenEnd(),lexer.getState(),myContext.getCharTable());
+    lexer.advance();
+    return element;
+  }
+ else   if (!MODIFIER_BIT_SET.isInSet(tokenType) && !CLASS_KEYWORD_BIT_SET.isInSet(tokenType) && tokenType != AT && (context == CODE_BLOCK_CONTEXT || tokenType != LT)) {
+    return null;
+  }
+  long startPos=ParseUtil.savePosition(lexer);
+  CompositeElement modifierList=parseModifierList(lexer);
+  tokenType=lexer.getTokenType();
+  if (tokenType == AT) {
+    TreeElement atToken=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
+    lexer.advance();
+    tokenType=lexer.getTokenType();
+    if (tokenType == INTERFACE_KEYWORD) {
+      return parseClassFromKeyword(lexer,modifierList,atToken);
+    }
+ else {
+      ParseUtil.restorePosition(lexer,startPos);
+      return null;
+    }
+  }
+ else   if (CLASS_KEYWORD_BIT_SET.isInSet(tokenType)) {
+    return parseClassFromKeyword(lexer,modifierList,null);
+  }
+  TreeElement classParameterList=null;
+  if (tokenType == LT) {
+    classParameterList=parseTypeParameterList(lexer);
+    tokenType=lexer.getTokenType();
+  }
+  if (context == FILE_CONTEXT) {
+    final CompositeElement errorElement=Factory.createErrorElement("'class' or 'interface' expected");
+    TreeUtil.insertAfter(modifierList,errorElement);
+    if (classParameterList != null) {
+      TreeUtil.insertAfter(errorElement,classParameterList);
+    }
+    return modifierList;
+  }
+  final TreeElement first=modifierList;
+  TreeElement last=modifierList;
+  TreeElement type;
+  if (tokenType != null && PRIMITIVE_TYPE_BIT_SET.isInSet(tokenType)) {
+    type=parseType(lexer);
+  }
+ else   if (tokenType == IDENTIFIER) {
+    long idPos=ParseUtil.savePosition(lexer);
+    type=parseType(lexer);
+    if (lexer.getTokenType() == LPARENTH) {
+      if (context == CODE_BLOCK_CONTEXT) {
+        ParseUtil.restorePosition(lexer,startPos);
+        return null;
+      }
+      ParseUtil.restorePosition(lexer,idPos);
+      CompositeElement method=Factory.createCompositeElement(METHOD);
+      TreeUtil.addChildren(method,first);
+      if (classParameterList == null) {
+        classParameterList=Factory.createCompositeElement(TYPE_PARAMETER_LIST);
+      }
+      TreeUtil.addChildren(method,classParameterList);
+      TreeUtil.addChildren(method,ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+      lexer.advance();
+      if (lexer.getTokenType() != LPARENTH) {
+        ParseUtil.restorePosition(lexer,startPos);
+        return null;
+      }
+      parseMethodFromLparenth(lexer,method,false);
+      return method;
+    }
+  }
+ else   if (tokenType == LBRACE) {
+    if (context == CODE_BLOCK_CONTEXT) {
+      TreeElement errorElement=Factory.createErrorElement("Identifier or type expected");
+      TreeUtil.insertAfter(last,errorElement);
+      last=errorElement;
+      return first;
+    }
+    CompositeElement codeBlock=myContext.getStatementParsing().parseCodeBlock(lexer,false);
+    LOG.assertTrue(codeBlock != null);
+    CompositeElement initializer=Factory.createCompositeElement(CLASS_INITIALIZER);
+    TreeUtil.addChildren(initializer,modifierList);
+    if (classParameterList != null) {
+      final CompositeElement errorElement=Factory.createErrorElement("Unexpected token");
+      TreeUtil.addChildren(errorElement,classParameterList);
+      TreeUtil.addChildren(initializer,errorElement);
+    }
+    TreeUtil.addChildren(initializer,codeBlock);
+    return initializer;
+  }
+ else {
+    CompositeElement errorElement=Factory.createErrorElement("Identifier or type expected");
+    if (classParameterList != null) {
+      TreeUtil.addChildren(errorElement,classParameterList);
+    }
+    TreeUtil.insertAfter(last,errorElement);
+    last=errorElement;
+    return first;
+  }
+  TreeUtil.insertAfter(last,type);
+  last=type;
+  if (lexer.getTokenType() != IDENTIFIER) {
+    if (context == CODE_BLOCK_CONTEXT && modifierList.firstChild == null) {
+      ParseUtil.restorePosition(lexer,startPos);
+      return null;
+    }
+ else {
+      TreeElement errorElement=Factory.createErrorElement("Identifier expected");
+      if (classParameterList != null) {
+        final CompositeElement errorElement1=Factory.createErrorElement("Unexpected token");
+        TreeUtil.addChildren(errorElement1,classParameterList);
+        TreeUtil.insertBefore(last,errorElement1);
+      }
+      TreeUtil.insertAfter(last,errorElement);
+      last=errorElement;
+      return first;
+    }
+  }
+  TreeElement identifier=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
+  lexer.advance();
+  TreeUtil.insertAfter(last,identifier);
+  last=identifier;
+  if (lexer.getTokenType() == LPARENTH) {
+    if (context == CLASS_CONTEXT) {
+      CompositeElement method=Factory.createCompositeElement(METHOD);
+      if (classParameterList == null) {
+        classParameterList=Factory.createCompositeElement(TYPE_PARAMETER_LIST);
+      }
+      TreeUtil.insertAfter(first,classParameterList);
+      TreeUtil.addChildren(method,first);
+      parseMethodFromLparenth(lexer,method,false);
+      return method;
+    }
+ else     if (context == ANNOTATION_INTERFACE_CONTEXT) {
+      CompositeElement method=Factory.createCompositeElement(ANNOTATION_METHOD);
+      if (classParameterList == null) {
+        classParameterList=Factory.createCompositeElement(TYPE_PARAMETER_LIST);
+      }
+      TreeUtil.insertAfter(first,classParameterList);
+      TreeUtil.addChildren(method,first);
+      parseMethodFromLparenth(lexer,method,true);
+      return method;
+    }
+ else     return parseFieldOrLocalVariable(classParameterList,first,context,lexer,startPos);
+  }
+ else {
+    return parseFieldOrLocalVariable(classParameterList,first,context,lexer,startPos);
+  }
+}

@@ -1,0 +1,33 @@
+{
+class MyVisitor extends InstructionClientVisitor<Integer> {
+    boolean[] normalCompletion=new boolean[endOffset];
+    boolean[] returnCalled=new boolean[endOffset];
+    public void visitInstruction(    Instruction instruction,    int offset,    int nextOffset){
+      boolean ret=nextOffset < endOffset ? returnCalled[nextOffset] : false;
+      boolean normal=nextOffset < endOffset ? normalCompletion[nextOffset] : false;
+      final PsiElement element=flow.getElement(offset);
+      boolean goToReturn=instruction instanceof GoToInstruction && ((GoToInstruction)instruction).isReturn;
+      boolean condGoToReturn=instruction instanceof ConditionalGoToInstruction && ((ConditionalGoToInstruction)instruction).isReturn;
+      if (goToReturn || condGoToReturn || isInsideReturnStatement(element)) {
+        ret=true;
+      }
+ else       if (instruction instanceof ConditionalThrowToInstruction) {
+        final int throwOffset=((ConditionalThrowToInstruction)instruction).offset;
+        boolean normalWhenThrow=throwOffset < endOffset && normalCompletion[throwOffset];
+        boolean normalWhenNotThrow=offset == endOffset - 1 || normalCompletion[offset + 1];
+        normal=normalWhenThrow || normalWhenNotThrow;
+      }
+ else       if (!(instruction instanceof ThrowToInstruction) && nextOffset >= endOffset) {
+        normal=true;
+      }
+      returnCalled[offset]|=ret;
+      normalCompletion[offset]|=normal;
+    }
+    public Integer getResult(){
+      return new Integer((returnCalled[offset] ? RETURN_COMPLETION_REASON : 0) | (normalCompletion[offset] ? NORMAL_COMPLETION_REASON : 0));
+    }
+  }
+  MyVisitor visitor=new MyVisitor();
+  depthFirstSearch(flow,visitor,offset,endOffset);
+  return visitor.getResult().intValue();
+}

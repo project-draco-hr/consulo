@@ -1,0 +1,41 @@
+{
+  final List<PsiModifierList> modifiersList=new ArrayList<PsiModifierList>();
+  PsiElement owner=myModifierList.getParent();
+  if (owner instanceof PsiMethod) {
+    PsiSearchHelper helper=PsiManager.getInstance(project).getSearchHelper();
+    PsiModifierList copy=(PsiModifierList)myModifierList.copy();
+    changeModifierList(copy);
+    final int accessLevel=PsiUtil.getAccessLevel(copy);
+    helper.processOverridingMethods(new PsiBaseElementProcessor<PsiMethod>(){
+      public boolean execute(      PsiMethod element){
+        PsiMethod inheritor=element;
+        PsiModifierList list=inheritor.getModifierList();
+        if (element.isWritable() && PsiUtil.getAccessLevel(list) < accessLevel) {
+          modifiersList.add(list);
+        }
+        return true;
+      }
+    }
+,(PsiMethod)owner,owner.getResolveScope(),true);
+  }
+  if (!CodeInsightUtil.prepareFileForWrite(myModifierList.getContainingFile()))   return;
+  if (modifiersList.size() > 0) {
+    if (Messages.showYesNoDialog(project,"Do you want to change inheritors' visibility to visibility of the base method?","Change Inheritors",Messages.getQuestionIcon()) == DialogWrapper.OK_EXIT_CODE) {
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          for (Iterator<PsiModifierList> iterator=modifiersList.iterator(); iterator.hasNext(); ) {
+            changeModifierList(iterator.next());
+          }
+        }
+      }
+);
+    }
+  }
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      changeModifierList(myModifierList);
+      QuickFixAction.spoilDocument(project,file);
+    }
+  }
+);
+}

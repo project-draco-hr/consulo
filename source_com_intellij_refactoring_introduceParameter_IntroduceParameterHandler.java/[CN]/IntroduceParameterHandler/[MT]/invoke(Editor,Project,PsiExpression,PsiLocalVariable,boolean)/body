@@ -1,0 +1,106 @@
+{
+  final PsiMethod method;
+  if (expr != null) {
+    method=Util.getContainingMethod(expr);
+  }
+ else {
+    method=Util.getContainingMethod(localVar);
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("expression:" + expr);
+  }
+  myLocalVar=localVar;
+  myProject=project;
+  if (expr == null && myLocalVar == null) {
+    String message="Cannot perform the refactoring.\n" + "Selected block should represent an expression.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INTRODUCE_PARAMETER,myProject);
+    return false;
+  }
+  myMethod=method;
+  if (myMethod == null) {
+    String message="Cannot perform the refactoring.\n" + REFACTORING_NAME + " is not supported in the current context.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INTRODUCE_PARAMETER,myProject);
+    return false;
+  }
+  if (!myMethod.isWritable()) {
+    RefactoringMessageUtil.showReadOnlyElementRefactoringMessage(myProject,myMethod);
+    return false;
+  }
+  final PsiType typeByExpression=!invokedOnDeclaration ? RefactoringUtil.getTypeByExpressionWithExpectedType(expr) : null;
+  if (!invokedOnDeclaration && typeByExpression == null) {
+    String message="Cannot perform the refactoring.\n" + "Type of the selected expression cannot be determined.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INTRODUCE_PARAMETER,myProject);
+    return false;
+  }
+  if (!invokedOnDeclaration && typeByExpression == PsiType.VOID) {
+    String message="Cannot perform the refactoring.\n" + "Selected expression has void type.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INTRODUCE_PARAMETER,project);
+    return false;
+  }
+  final List<PsiMethod> validEnclosingMethods=getEnclosingMethods(myMethod);
+  if (validEnclosingMethods.size() > 1 && !ApplicationManager.getApplication().isUnitTestMode()) {
+    final EnclosingMethodSelectionDialog dialog=new EnclosingMethodSelectionDialog(project,validEnclosingMethods);
+    dialog.show();
+    if (!dialog.isOK())     return false;
+    myMethod=dialog.getSelectedMethod();
+  }
+  myMethodToSearchFor=SuperMethodWarningUtil.checkSuperMethod(myMethod,"refactor");
+  if (myMethodToSearchFor == null) {
+    return false;
+  }
+  if (!myMethodToSearchFor.isWritable()) {
+    RefactoringMessageUtil.showReadOnlyElementRefactoringMessage(myProject,myMethodToSearchFor);
+    return false;
+  }
+  PsiExpression[] occurences;
+  if (expr != null) {
+    occurences=CodeInsightUtil.findExpressionOccurrences(myMethod,expr);
+  }
+ else {
+    occurences=CodeInsightUtil.findReferenceExpressions(myMethod,myLocalVar);
+  }
+  if (editor != null) {
+    RefactoringUtil.highlightOccurences(myProject,occurences,editor);
+  }
+  ArrayList localVars=new ArrayList();
+  ArrayList classMemberRefs=new ArrayList();
+  ArrayList params=new ArrayList();
+  if (expr != null) {
+    Util.analyzeExpression(expr,localVars,classMemberRefs,params);
+  }
+  boolean previewUsages=false;
+  String parameterName="anObject";
+  boolean replaceAllOccurences=true;
+  boolean isDeleteLocalVariable=true;
+  myParameterInitializer=expr;
+  myExpressionToSearchFor=expr;
+  if (expr instanceof PsiReferenceExpression) {
+    PsiElement resolved=((PsiReferenceExpression)expr).resolve();
+    if (resolved instanceof PsiLocalVariable) {
+      myLocalVar=(PsiLocalVariable)resolved;
+    }
+  }
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    final String propName=myLocalVar != null ? CodeStyleManager.getInstance(myProject).variableNameToPropertyName(myLocalVar.getName(),VariableKind.LOCAL_VARIABLE) : null;
+    final PsiType initializerType=IntroduceParameterProcessor.getInitializerType(null,expr,myLocalVar);
+    TypeSelectorManager typeSelectorManager=(expr != null ? new TypeSelectorManagerImpl(project,initializerType,expr,occurences) : new TypeSelectorManagerImpl(project,initializerType,occurences));
+    final IntroduceParameterDialog dialog=new IntroduceParameterDialog(myProject,localVars,params,classMemberRefs,occurences.length,expr == null,myLocalVar != null,(myLocalVar != null) && (myLocalVar.getInitializer() != null),this,new NameSuggestionsGenerator(){
+      public SuggestedNameInfo getSuggestedNameInfo(      PsiType type){
+        return CodeStyleManager.getInstance(myProject).suggestVariableName(VariableKind.PARAMETER,propName,expr,initializerType);
+      }
+      public Pair<LookupItemPreferencePolicy,Set<LookupItem>> completeVariableName(      String prefix,      PsiType type){
+        LinkedHashSet<LookupItem> set=new LinkedHashSet<LookupItem>();
+        LookupItemPreferencePolicy policy=CompletionUtil.completeVariableName(myProject,set,prefix,type,VariableKind.PARAMETER);
+        return new Pair<LookupItemPreferencePolicy,Set<LookupItem>>(policy,set);
+      }
+    }
+,typeSelectorManager);
+    dialog.show();
+    if (!dialog.isOK()) {
+      return true;
+    }
+    return true;
+  }
+  new IntroduceParameterProcessor(myProject,myMethod,myMethodToSearchFor,myParameterInitializer,myExpressionToSearchFor,myLocalVar,isDeleteLocalVariable,parameterName,previewUsages,replaceAllOccurences,IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE,false,null,null).run(null);
+  return true;
+}

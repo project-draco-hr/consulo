@@ -1,0 +1,48 @@
+{
+  PsiClass baseClass=aClass.getBaseClassType().resolve();
+  if (baseClass == null)   return;
+  PsiMethod[] allBaseMethods=baseClass.getMethods();
+  if (allBaseMethods.length == 0)   return;
+  List<CandidateInfo> methods=new ArrayList<CandidateInfo>();
+  for (int i=0; i < allBaseMethods.length; i++) {
+    final PsiMethod method=allBaseMethods[i];
+    if (OverrideImplementUtil.isOverridable(method)) {
+      methods.add(new CandidateInfo(method,PsiSubstitutor.UNKNOWN));
+    }
+  }
+  boolean isJdk15Enabled=LanguageLevel.JDK_1_5.compareTo(PsiManager.getInstance(project).getEffectiveLanguageLevel()) <= 0;
+  final MemberChooser chooser=new MemberChooser(methods.toArray(),false,true,project,isJdk15Enabled);
+  chooser.setTitle("Select Methods to Override");
+  chooser.setCopyJavadocVisible(true);
+  chooser.show();
+  Object[] selectedElements=chooser.getSelectedElements();
+  if (selectedElements == null || selectedElements.length == 0)   return;
+  CandidateInfo[] selectedCandidates=new CandidateInfo[selectedElements.length];
+  try {
+    System.arraycopy(selectedElements,0,selectedCandidates,0,selectedCandidates.length);
+    final PsiMethod[] prototypes=OverrideImplementUtil.overrideOrImplementMethods(aClass,selectedCandidates,chooser.isCopyJavadoc(),chooser.isInsertOverrideAnnotation());
+    for (int i=0; i < prototypes.length; i++) {
+      PsiMethod prototype=prototypes[i];
+      PsiStatement[] statements=prototype.getBody().getStatements();
+      if (statements.length > 0 && prototype.getReturnType() == PsiType.VOID) {
+        statements[0].delete();
+      }
+    }
+    final int offset=editor.getCaretModel().getOffset();
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        try {
+          Object[] resultMembers=GenerateMembersUtil.insertMembersAtOffset(project,editor.getDocument(),aClass.getContainingFile(),offset,prototypes);
+          GenerateMembersUtil.positionCaret(editor,(PsiElement)resultMembers[0],true);
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
+        }
+      }
+    }
+);
+  }
+ catch (  IncorrectOperationException ioe) {
+    LOG.error(ioe);
+  }
+}

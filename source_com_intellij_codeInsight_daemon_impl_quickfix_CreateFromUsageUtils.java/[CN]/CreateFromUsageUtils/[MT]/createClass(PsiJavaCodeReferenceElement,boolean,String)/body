@@ -1,0 +1,92 @@
+{
+  final String name=referenceElement.getReferenceName();
+  if (referenceElement.getQualifier() instanceof PsiJavaCodeReferenceElement) {
+    PsiJavaCodeReferenceElement qualifier=(PsiJavaCodeReferenceElement)referenceElement.getQualifier();
+    final PsiElement psiElement=qualifier.resolve();
+    if (psiElement instanceof PsiClass) {
+      return ApplicationManager.getApplication().runWriteAction(new Computable<PsiClass>(){
+        public PsiClass compute(){
+          try {
+            PsiClass psiClass=(PsiClass)psiElement;
+            if (!CodeInsightUtil.prepareClassForWrite(psiClass))             return null;
+            PsiManager manager=psiClass.getManager();
+            PsiElementFactory elementFactory=manager.getElementFactory();
+            PsiClass result=createInterface ? elementFactory.createInterface(name) : elementFactory.createClass(name);
+            result=(PsiClass)manager.getCodeStyleManager().reformat(result);
+            return (PsiClass)psiClass.add(result);
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+            return null;
+          }
+        }
+      }
+);
+    }
+  }
+  final PsiFile sourceFile=referenceElement.getContainingFile();
+  PsiDirectory sourceDir=sourceFile.getContainingDirectory();
+  final PsiManager manager=referenceElement.getManager();
+  final PsiElementFactory factory=manager.getElementFactory();
+  PsiDirectory targetDirectory=null;
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    Project project=manager.getProject();
+    String title=createInterface ? "Create Interface" : "Create Class";
+    final PsiPackage aPackage=sourceDir.getPackage();
+    CreateClassDialog dialog=new CreateClassDialog(project,title,name,aPackage != null ? aPackage.getQualifiedName() : "",createInterface,false);
+    dialog.show();
+    if (dialog.getExitCode() != CreateClassDialog.OK_EXIT_CODE)     return null;
+    targetDirectory=dialog.getTargetDirectory();
+    if (targetDirectory == null)     return null;
+  }
+  final PsiDirectory directory=targetDirectory;
+  return ApplicationManager.getApplication().runWriteAction(new Computable<PsiClass>(){
+    public PsiClass compute(){
+      try {
+        PsiClass targetClass;
+        if (!ApplicationManager.getApplication().isUnitTestMode()) {
+          try {
+            if (createInterface) {
+              targetClass=directory.createInterface(name);
+            }
+ else {
+              targetClass=directory.createClass(name);
+            }
+          }
+ catch (          final IncorrectOperationException e) {
+            ApplicationManager.getApplication().invokeLater(new Runnable(){
+              public void run(){
+                Messages.showErrorDialog("Cannot create " + name + ".java in "+ directory.getVirtualFile().getName()+ ": "+ e.getMessage(),"File Creation Failed");
+              }
+            }
+);
+            return null;
+          }
+          if (!manager.getResolveHelper().isAccessible(targetClass,referenceElement,null)) {
+            targetClass.getModifierList().setModifierProperty("public",true);
+          }
+        }
+ else {
+          final PsiClass aClass;
+          if (createInterface) {
+            aClass=factory.createInterface(name);
+          }
+ else {
+            aClass=factory.createClass(name);
+          }
+          targetClass=(PsiClass)sourceFile.add(aClass);
+        }
+        if (superClassName != null) {
+          PsiJavaCodeReferenceElement superClass=factory.createReferenceElementByFQClassName(superClassName,targetClass.getResolveScope());
+          targetClass.getExtendsList().add(superClass);
+        }
+        return targetClass;
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+        return null;
+      }
+    }
+  }
+);
+}

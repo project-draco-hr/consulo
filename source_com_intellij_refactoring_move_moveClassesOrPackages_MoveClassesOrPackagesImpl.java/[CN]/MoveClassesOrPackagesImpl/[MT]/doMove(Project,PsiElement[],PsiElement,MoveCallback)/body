@@ -1,0 +1,101 @@
+{
+  final PsiElement[] psiElements=new PsiElement[elements.length];
+  List<VirtualFile> readOnly=new ArrayList<VirtualFile>();
+  for (int idx=0; idx < elements.length; idx++) {
+    PsiElement element=elements[idx];
+    if (element instanceof PsiDirectory) {
+      PsiPackage aPackage=((PsiDirectory)element).getPackage();
+      LOG.assertTrue(aPackage != null);
+      if (aPackage.getQualifiedName().length() == 0) {
+        String message="Move Package refactoring cannot be applied to default package";
+        RefactoringMessageUtil.showErrorMessage("Move",message,HelpID.getMoveHelpID(element),project);
+        return;
+      }
+      element=checkMovePackage(project,aPackage,readOnly);
+      if (element == null)       return;
+    }
+ else     if (element instanceof PsiPackage) {
+      element=checkMovePackage(project,(PsiPackage)element,readOnly);
+      if (element == null)       return;
+    }
+ else     if (element instanceof PsiClass) {
+      PsiClass aClass=(PsiClass)element;
+      if (aClass instanceof PsiAnonymousClass) {
+        String message="Move Class refactoring cannot be applied to anonymous classes";
+        RefactoringMessageUtil.showErrorMessage("Move",message,HelpID.getMoveHelpID(element),project);
+        return;
+      }
+      boolean condition=aClass.getParent() instanceof PsiFile;
+      if (!condition) {
+        String message="Cannot perform the refactoring.\n" + "Moving local classes is not supported.";
+        RefactoringMessageUtil.showErrorMessage("Move",message,HelpID.getMoveHelpID(element),project);
+        return;
+      }
+      if (!aClass.isWritable()) {
+        readOnly.add(aClass.getContainingFile().getVirtualFile());
+      }
+    }
+    psiElements[idx]=element;
+  }
+  if (!readOnly.isEmpty()) {
+    Messages.showErrorDialog(project,"Cannot perform refactorings.\n Some files or directories are read only.","Move");
+    VirtualFileManager.getInstance().fireReadOnlyModificationAttempt((VirtualFile[])readOnly.toArray(new VirtualFile[readOnly.size()]));
+    return;
+  }
+  final String initialTargetPackageName=getInitialTargetPackageName(initialTargetElement,psiElements);
+  final PsiDirectory initialTargetDirectory=getInitialTargetDirectory(initialTargetElement,psiElements);
+  final boolean isTargetDirectoryFixed=getContainerDirectory(initialTargetElement) != null;
+  final MoveClassesOrPackagesDialog.Callback doRun=new MoveClassesOrPackagesDialog.Callback(){
+    public void run(    final MoveClassesOrPackagesDialog moveDialog){
+      final RefactoringSettings refactoringSettings=RefactoringSettings.getInstance();
+      final boolean searchInComments=moveDialog.isSearchInComments();
+      final boolean searchInNonJavaFiles=moveDialog.isSearchInNonJavaFiles();
+      refactoringSettings.MOVE_SEARCH_IN_COMMENTS=searchInComments;
+      refactoringSettings.MOVE_SEARCH_IN_NONJAVA_FILES=searchInNonJavaFiles;
+      final MoveDestination moveDestination=moveDialog.getMoveDestination();
+      PsiManager manager=PsiManager.getInstance(project);
+      for (int i=0; i < psiElements.length; i++) {
+        final PsiElement element=psiElements[i];
+        String message=verifyDestinationForElement(element,moveDestination);
+        if (message != null) {
+          String helpId=HelpID.getMoveHelpID(psiElements[0]);
+          RefactoringMessageUtil.showErrorMessage("Error",message,helpId,project);
+          return;
+        }
+      }
+      try {
+        for (int idx=0; idx < psiElements.length; idx++) {
+          PsiElement psiElement=psiElements[idx];
+          if (psiElement instanceof PsiClass) {
+            final PsiDirectory targetDirectory=moveDestination.getTargetIfExists(psiElement.getContainingFile());
+            if (targetDirectory != null) {
+              manager.checkMove(psiElement,targetDirectory);
+            }
+          }
+        }
+        new MoveClassesOrPackagesProcessor(project,psiElements,moveDestination,searchInComments,searchInNonJavaFiles,moveDialog.isPreviewUsages(),moveCallback,new Runnable(){
+          public void run(){
+            moveDialog.close(DialogWrapper.CANCEL_EXIT_CODE);
+          }
+        }
+).run(null);
+      }
+ catch (      IncorrectOperationException e) {
+        String helpId=HelpID.getMoveHelpID(psiElements[0]);
+        RefactoringMessageUtil.showErrorMessage("Error",e.getMessage(),helpId,project);
+        return;
+      }
+    }
+  }
+;
+  boolean searchInNonJavaEnabled=false;
+  for (int i=0; i < psiElements.length && !searchInNonJavaEnabled; i++) {
+    PsiElement psiElement=psiElements[i];
+    searchInNonJavaEnabled=RefactoringUtil.isSearchInNonJavaEnabled(psiElement);
+  }
+  final MoveClassesOrPackagesDialog moveDialog=new MoveClassesOrPackagesDialog(project,doRun,searchInNonJavaEnabled);
+  boolean searchInComments=RefactoringSettings.getInstance().MOVE_SEARCH_IN_COMMENTS;
+  boolean searchInNonJavaFiles=RefactoringSettings.getInstance().MOVE_SEARCH_IN_NONJAVA_FILES;
+  moveDialog.setData(psiElements,initialTargetPackageName,initialTargetDirectory,isTargetDirectoryFixed,searchInComments,searchInNonJavaFiles,HelpID.getMoveHelpID(psiElements[0]));
+  moveDialog.show();
+}

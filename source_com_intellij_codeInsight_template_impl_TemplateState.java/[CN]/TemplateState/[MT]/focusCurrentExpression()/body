@@ -1,0 +1,96 @@
+{
+  if (isFinished()) {
+    return;
+  }
+  PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+  int currentSegmentNumber=getCurrentSegmentNumber();
+  if (currentSegmentNumber < 0)   return;
+  int start=mySegments.getSegmentStart(currentSegmentNumber);
+  int end=mySegments.getSegmentEnd(currentSegmentNumber);
+  myEditor.getCaretModel().moveToOffset(end);
+  myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  myEditor.getSelectionModel().removeSelection();
+  myEditor.getSelectionModel().setSelection(start,end);
+  Expression expressionNode=myTemplate.getExpressionAt(myCurrentVariableNumber);
+  final ExpressionContext context=createExpressionContext(start);
+  final LookupItem[] lookupItems=expressionNode.calculateLookupItems(context);
+  final PsiFile psiFile=PsiDocumentManager.getInstance(myProject).getPsiFile(myDocument);
+  if (lookupItems != null && lookupItems.length > 0) {
+    final LookupItemPreferencePolicy preferencePolicy=new LookupItemPreferencePolicy(){
+      public int compare(      Object o1,      Object o2){
+        if (o1.equals(o2))         return 0;
+        if (o1.equals(lookupItems[0]))         return -1;
+        if (o2.equals(lookupItems[0]))         return +1;
+        return 0;
+      }
+      public void setPrefix(      String prefix){
+      }
+      public void itemSelected(      LookupItem item){
+      }
+    }
+;
+    ApplicationManager.getApplication().invokeLater(new Runnable(){
+      public void run(){
+        if (myEditor == null)         return;
+        final LookupManager lookupManager=LookupManager.getInstance(myProject);
+        if (lookupManager.isDisposed())         return;
+        final Lookup lookup=lookupManager.showLookup(myEditor,lookupItems,"",preferencePolicy,new DefaultCharFilter(psiFile));
+        lookup.setCurrentItem(lookupItems[0]);
+        toProcessTab=false;
+        lookup.addLookupListener(new LookupAdapter(){
+          public void lookupCanceled(          LookupEvent event){
+            lookup.removeLookupListener(this);
+            toProcessTab=true;
+          }
+          public void itemSelected(          LookupEvent event){
+            lookup.removeLookupListener(this);
+            toProcessTab=true;
+            final LookupItem item=event.getItem();
+            PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+            Integer bracketCount=(Integer)item.getAttribute(LookupItem.BRACKETS_COUNT_ATTR);
+            if (bracketCount != null) {
+              StringBuffer tail=new StringBuffer();
+              for (int i=0; i < bracketCount.intValue(); i++) {
+                tail.append("[]");
+              }
+              EditorModificationUtil.insertStringAtCaret(myEditor,tail.toString());
+              PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+            }
+            updateTypeBindings(item.getObject(),psiFile,context);
+            char c=event.getCompletionChar();
+            if (c == '.') {
+              EditorModificationUtil.insertStringAtCaret(myEditor,".");
+              AutoPopupController.getInstance(myProject).autoPopupMemberLookup(myEditor);
+              return;
+            }
+            if (item.getAttribute(Expression.AUTO_POPUP_NEXT_LOOKUP) != null) {
+              AutoPopupController.getInstance(myProject).autoPopupMemberLookup(myEditor);
+              return;
+            }
+            if (!isFinished()) {
+              toProcessChangedUpdate=false;
+              calcResults(true);
+              toProcessChangedUpdate=true;
+            }
+            nextTab();
+          }
+        }
+);
+      }
+    }
+);
+  }
+ else {
+    Result result=expressionNode.calculateResult(context);
+    if (result instanceof PsiElementResult) {
+      updateTypeBindings(((PsiElementResult)result).getElement(),psiFile,context);
+    }
+    if (result instanceof PsiTypeResult) {
+      updateTypeBindings(((PsiTypeResult)result).getType(),psiFile,context);
+    }
+    if (result instanceof InvokeActionResult) {
+      ((InvokeActionResult)result).getAction().run();
+    }
+  }
+  focusCurrentHighlighter(true);
+}

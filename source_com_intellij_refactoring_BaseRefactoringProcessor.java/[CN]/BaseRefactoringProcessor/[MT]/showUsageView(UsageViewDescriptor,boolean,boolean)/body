@@ -1,0 +1,53 @@
+{
+  UsageViewManager viewManager=myProject.getComponent(UsageViewManager.class);
+  final UsageTarget[] targets=PsiElement2UsageTargetAdapter.convert(viewDescriptor.getElements());
+  Factory<UsageSearcher> searcherFactory=new Factory<UsageSearcher>(){
+    boolean myRequireRefresh=false;
+    public UsageSearcher create(){
+      UsageSearcher usageSearcher=new UsageSearcher(){
+        public void generate(        Processor<Usage> processor){
+          if (myRequireRefresh) {
+            List<PsiElement> elements=new ArrayList<PsiElement>();
+            for (int i=0; i < targets.length; i++) {
+              UsageTarget target=targets[i];
+              if (target.isValid()) {
+                elements.add(((PsiElement2UsageTargetAdapter)target).getElement());
+              }
+            }
+            viewDescriptor.refresh(elements.toArray(new PsiElement[elements.size()]));
+          }
+ else {
+            myRequireRefresh=true;
+          }
+          UsageInfo[] usageInfos=viewDescriptor.getUsages();
+          final Usage[] usages=UsageInfo2UsageAdapter.convert(usageInfos);
+          for (int i=0; i < usages.length; i++) {
+            Usage usage=usages[i];
+            if (!processor.process(usage))             return;
+          }
+          if (usages.length > 0) {
+            ApplicationManager.getApplication().invokeLater(new Runnable(){
+              public void run(){
+                RefactoringUtil.showInfoDialog(getInfo(),myProject);
+              }
+            }
+,ModalityState.NON_MMODAL);
+          }
+        }
+      }
+;
+      return usageSearcher;
+    }
+  }
+;
+  final com.intellij.usages.UsageView usageView=viewManager.searchAndShowUsages(targets,searcherFactory,true,false,createPresentation(viewDescriptor));
+  final Runnable refactoringRunnable=new Runnable(){
+    public void run(){
+      final Set<UsageInfo> excludedUsageInfos=getExcludedUsages(usageView);
+      doRefactoring(viewDescriptor.getUsages(),excludedUsageInfos);
+    }
+  }
+;
+  String canNotMakeString="Cannot perform the refactoring operation.\n" + "There were changes in code after the usages have been found.\n" + "Please, perform the usage search again.";
+  usageView.addPerformOperationAction(refactoringRunnable,getCommandName(),canNotMakeString,"Do Refactor",SystemInfo.isMac ? 0 : 'D');
+}

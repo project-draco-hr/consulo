@@ -1,0 +1,81 @@
+{
+  if (checkValidity) {
+    checkTargetJPDAInstalled(parameters);
+  }
+  final boolean useSockets=transport == DebuggerSettings.SOCKET_TRANSPORT;
+  TransportService transportService=getTransportService(useSockets);
+  String address="";
+  String listenTo=null;
+  if (debugPort == null || "".equals(debugPort)) {
+    if (useSockets) {
+      try {
+        ServerSocket serverSocket=new ServerSocket(0);
+        address=Integer.toString(serverSocket.getLocalPort());
+synchronized (parameters) {
+          try {
+            parameters.wait(1);
+          }
+ catch (          InterruptedException e) {
+            LOG.error(e);
+          }
+        }
+        serverSocket.close();
+      }
+ catch (      IOException e) {
+        if (checkValidity) {
+          throw new ExecutionException(DebugProcessImpl.processError(e));
+        }
+      }
+    }
+ else {
+      try {
+        address=transportService.startListening();
+        transportService.stopListening(address);
+      }
+ catch (      IOException e) {
+        if (checkValidity) {
+          throw new ExecutionException(DebugProcessImpl.processError(e));
+        }
+      }
+    }
+  }
+ else {
+    address=debugPort;
+  }
+  if (serverMode && useSockets) {
+    try {
+      listenTo=InetAddress.getLocalHost().getHostName() + ":" + address;
+    }
+ catch (    UnknownHostException e) {
+      listenTo="localhost:" + address;
+    }
+  }
+ else {
+    listenTo=address;
+  }
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      PathUtilEx.addRtJar(parameters.getClassPath());
+      boolean classicVM=shouldForceClassicVM(parameters.getJdk());
+      parameters.getVMParametersList().replaceOrPrepend("-classic",classicVM ? "-classic" : "");
+      parameters.getVMParametersList().replaceOrAppend("-Xdebug","-Xdebug");
+      if (shouldForceNoJIT(parameters.getJdk())) {
+        parameters.getVMParametersList().replaceOrAppend("-Xnoagent","-Xnoagent");
+        parameters.getVMParametersList().replaceOrAppend("-Djava.compiler=","-Djava.compiler=NONE");
+      }
+    }
+  }
+);
+  String xrun="transport=" + transportService.name() + ",address="+ listenTo;
+  if (serverMode) {
+    xrun+=",suspend=y,server=n";
+  }
+ else {
+    xrun+=",suspend=n,server=y";
+  }
+  if (hasWhitespace(xrun)) {
+    xrun="\"" + xrun + "\"";
+  }
+  parameters.getVMParametersList().replaceOrAppend("-Xrunjdwp:","-Xrunjdwp:" + xrun);
+  return new RemoteConnection(useSockets,"127.0.0.1",address,serverMode);
+}

@@ -1,0 +1,68 @@
+{
+  final ArrayList<FileProcessingCompiler.ProcessingItem> compiledItems=new ArrayList<FileProcessingCompiler.ProcessingItem>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      context.getProgressIndicator().setText("Compiling UI forms...");
+      final HashMap<Module,ArrayList<MyInstrumentationItem>> module2itemsList=sortByModules(items);
+      int formsProcessed=0;
+      for (Iterator<Module> iterator=module2itemsList.keySet().iterator(); iterator.hasNext(); ) {
+        final Module module=iterator.next();
+        final String classPath=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.FULL_CLASSPATH_RECURSIVE).getPathsString();
+        final ClassLoader loader=createClassLoader(classPath);
+        if (GuiDesignerConfiguration.getInstance(myProject).COPY_FORMS_RUNTIME_TO_OUTPUT) {
+          final String moduleOutputPath=CompilerPaths.getModuleOutputPath(module,false);
+          try {
+            if (moduleOutputPath != null) {
+              CopyResourcesUtil.copyFormsRuntime(moduleOutputPath,false);
+            }
+            final String testsOutputPath=CompilerPaths.getModuleOutputPath(module,true);
+            if (testsOutputPath != null && !testsOutputPath.equals(moduleOutputPath)) {
+              CopyResourcesUtil.copyFormsRuntime(testsOutputPath,false);
+            }
+          }
+ catch (          IOException e) {
+            addError(context,"Cannot copy GUI designer form runtime classes to the output directory of module " + module.getName() + ".\nReason: "+ e.toString(),null);
+          }
+        }
+        BcelUtils.initBcel(new ClassPath(classPath));
+        try {
+          final ArrayList<MyInstrumentationItem> list=module2itemsList.get(module);
+          for (int i=0; i < list.size(); i++) {
+            context.getProgressIndicator().setFraction((double)(++formsProcessed) / ((double)items.length));
+            final MyInstrumentationItem item=list.get(i);
+            final VirtualFile formFile=item.getFormFile();
+            final Document doc=FileDocumentManager.getInstance().getDocument(formFile);
+            final LwRootContainer rootContainer;
+            try {
+              rootContainer=Utils.getRootContainer(doc.getText(),new CompiledClassPropertiesProvider(loader));
+            }
+ catch (            Exception e) {
+              addError(context,"Cannot process form file. Reason: " + e,formFile);
+              continue;
+            }
+            final File classFile=VfsUtil.virtualToIoFile(item.getFile());
+            LOG.assertTrue(classFile.exists());
+            final CodeGenerator codeGenerator=new CodeGenerator(rootContainer,classFile,loader);
+            codeGenerator.patch();
+            final String[] errors=codeGenerator.getErrors();
+            final String[] warnings=codeGenerator.getWarnings();
+            for (int j=0; j < warnings.length; j++) {
+              addWarning(context,warnings[j],formFile);
+            }
+            for (int j=0; j < errors.length; j++) {
+              addError(context,errors[j],formFile);
+            }
+            if (errors.length == 0) {
+              compiledItems.add(item);
+            }
+          }
+        }
+  finally {
+          BcelUtils.disposeBcel();
+        }
+      }
+    }
+  }
+);
+  return compiledItems.toArray(new FileProcessingCompiler.ProcessingItem[compiledItems.size()]);
+}

@@ -1,0 +1,57 @@
+{
+  final PsiFile containingFile=getContainingFile();
+  final FileType fileType=containingFile.getFileType();
+  final PomModel model=getProject().getModel();
+  final XmlAspect aspect=model.getModelAspect(XmlAspect.class);
+  try {
+    final TreeElement treePrev=child.getTreePrev();
+    final TreeElement treeNext=child.getTreeNext();
+    if (child.getElementType() != XmlElementType.XML_TEXT) {
+      if (treePrev.getElementType() == XmlElementType.XML_TEXT && treeNext.getElementType() == XmlElementType.XML_TEXT) {
+        final XmlText xmlText=((XmlText)SourceTreeToPsiMap.treeElementToPsi(treePrev));
+        xmlText.add(SourceTreeToPsiMap.treeElementToPsi(treeNext));
+        model.runTransaction(new PomTransaction(){
+          public PomModelEvent run(){
+            final PomModelEvent event=new PomModelEvent(model);
+            final XmlAspectChangeSet xmlAspectChangeSet=new XmlAspectChangeSet(model,(XmlFile)getContainingFile());
+            xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)treeNext));
+            xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)child));
+            event.registerChangeSet(model.getModelAspect(XmlAspect.class),xmlAspectChangeSet);
+            ChangeUtil.removeChild(XmlTagImpl.this,treeNext);
+            ChangeUtil.removeChild(XmlTagImpl.this,child);
+            return event;
+          }
+        }
+,aspect);
+        if (fileType != StdFileTypes.XHTML) {
+          model.runTransaction(new PomTransaction(){
+            public PomModelEvent run() throws IncorrectOperationException {
+              final Project project=getProject();
+              CodeStyleManager instance=CodeStyleManager.getInstance(project);
+              instance.reformat(XmlTagImpl.this);
+              XmlElement parent=getParent();
+              if (parent instanceof XmlTag)               return XmlTagChildChanged.createXmlTagChildChanged(model,(XmlTag)parent,XmlTagImpl.this);
+ else               return XmlDocumentChanged.createXmlDocumentChanged(model,(XmlDocument)parent);
+            }
+          }
+,aspect);
+        }
+        return;
+      }
+    }
+    model.runTransaction(new PomTransaction(){
+      public PomModelEvent run(){
+        if (child.getElementType() == XmlElementType.XML_ATTRIBUTE) {
+          final String name=((XmlAttribute)child).getName();
+          XmlTagImpl.super.deleteChildInternal(child);
+          return XmlAttributeSet.createXmlAttributeSet(model,XmlTagImpl.this,name,null);
+        }
+        XmlTagImpl.super.deleteChildInternal(child);
+        return XmlTagChildRemoved.createXmlTagChildRemoved(model,XmlTagImpl.this,(XmlTagChild)SourceTreeToPsiMap.treeElementToPsi(child));
+      }
+    }
+,aspect);
+  }
+ catch (  IncorrectOperationException e) {
+  }
+}

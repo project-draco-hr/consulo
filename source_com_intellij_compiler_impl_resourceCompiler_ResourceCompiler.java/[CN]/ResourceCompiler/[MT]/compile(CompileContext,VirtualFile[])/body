@@ -1,0 +1,61 @@
+{
+  context.getProgressIndicator().pushState();
+  context.getProgressIndicator().setText("Copying resources...");
+  final List<OutputItem> processed=new ArrayList<OutputItem>(files.length);
+  final List<CopyCommand> copyCommands=new ArrayList<CopyCommand>(files.length);
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+      for (int idx=0; idx < files.length; idx++) {
+        final VirtualFile file=files[idx];
+        if (context.getProgressIndicator().isCanceled()) {
+          break;
+        }
+        context.getProgressIndicator().setFraction(((double)(idx)) / ((double)files.length));
+        final Module module=context.getModuleByFile(file);
+        if (module == null) {
+          continue;
+        }
+        final VirtualFile fileRoot=MakeUtil.getSourceRoot(context,module,file);
+        if (fileRoot == null) {
+          continue;
+        }
+        final String sourcePath=file.getPath();
+        final String relativePath=VfsUtil.getRelativePath(file,fileRoot,'/');
+        final String outputPath=CompilerPaths.getModuleOutputPath(module,fileIndex.isInTestSourceContent(file));
+        if (outputPath == null) {
+          continue;
+        }
+        final String packagePrefix=fileIndex.getPackageNameByDirectory(fileRoot);
+        final String targetPath;
+        if (packagePrefix != null && packagePrefix.length() > 0) {
+          targetPath=outputPath + "/" + packagePrefix.replace('.','/')+ "/"+ relativePath;
+        }
+ else {
+          targetPath=outputPath + "/" + relativePath;
+        }
+        if (!sourcePath.equals(targetPath)) {
+          copyCommands.add(new CopyCommand(outputPath,sourcePath,targetPath,file));
+        }
+      }
+    }
+  }
+);
+  final List<File> filesToRefresh=new ArrayList<File>();
+  for (Iterator<CopyCommand> it=copyCommands.iterator(); it.hasNext(); ) {
+    final CopyCommand command=it.next();
+    try {
+      final MyOutputItem outputItem=command.copy(filesToRefresh);
+      processed.add(outputItem);
+    }
+ catch (    IOException e) {
+      context.addMessage(CompilerMessageCategory.ERROR,"Error copying " + command.getFromPath() + " to "+ command.getToPath()+ ":\n"+ e.getMessage(),command.getSourceFileUrl(),-1,-1);
+    }
+  }
+  if (filesToRefresh.size() > 0) {
+    CompilerUtil.refreshIOFiles(filesToRefresh.toArray(new File[filesToRefresh.size()]));
+  }
+  context.getProgressIndicator().popState();
+  final OutputItem[] itemsArray=processed.toArray(new OutputItem[processed.size()]);
+  return new MyExitStatus(itemsArray);
+}

@@ -1,0 +1,65 @@
+{
+  final PsiFileImpl fileImpl=(PsiFileImpl)file;
+  final int textLength=file.getTextLength() + lengthShift;
+  if (fileImpl.getFileType() == StdFileTypes.JSP) {
+    makeFullParse(fileImpl.getTreeElement(),newFileText,textLength,fileImpl,fileImpl.getFileType());
+    return;
+  }
+  final FileElement treeFileElement=fileImpl.getTreeElement();
+  final LeafElement leafAtStart=treeFileElement.findLeafElementAt(startOffset);
+  final LeafElement leafAtEnd=treeFileElement.findLeafElementAt(endOffset);
+  TreeElement parent=leafAtStart != null && leafAtEnd != null ? TreeUtil.findCommonParent(leafAtStart,leafAtEnd) : treeFileElement;
+  int minErrorLevel=Integer.MAX_VALUE;
+  Reparseable bestReparseable=null;
+  Reparseable prevReparseable=null;
+  boolean theOnlyReparseable=false;
+  while (parent != null && !(parent instanceof FileElement)) {
+    if (parent instanceof Reparseable) {
+      final TextRange textRange=parent.getTextRange();
+      final Reparseable reparseable=(Reparseable)parent;
+      boolean lexerChanged=false;
+      if (prevReparseable != null) {
+        lexerChanged=prevReparseable.getLexerClass().equals(reparseable.getLexerClass());
+      }
+      int currentErrorLevel=reparseable.getErrorsCount(newFileText,textRange.getStartOffset(),textRange.getEndOffset(),lengthShift);
+      if (currentErrorLevel == Reparseable.NO_ERRORS) {
+        final FileElement treeElement=new DummyHolder(parent.getManager(),null,treeFileElement.getCharTable()).getTreeElement();
+        final ChameleonElement chameleon=reparseable.createChameleon(newFileText,textRange.getStartOffset(),textRange.getEndOffset() + lengthShift);
+        TreeUtil.addChildren(treeElement,chameleon);
+        ChangeUtil.replaceAllChildren((CompositeElement)parent,chameleon.transform(treeFileElement.getCharTable(),fileImpl.createLexer()).getTreeParent());
+        return;
+      }
+ else       if (currentErrorLevel == Reparseable.FATAL_ERROR) {
+        prevReparseable=reparseable;
+      }
+ else       if (Math.abs(currentErrorLevel) < Math.abs(minErrorLevel)) {
+        theOnlyReparseable=bestReparseable == null;
+        bestReparseable=reparseable;
+        minErrorLevel=currentErrorLevel;
+        if (lexerChanged)         break;
+      }
+    }
+    parent=parent.getTreeParent();
+  }
+  if (bestReparseable != null && !theOnlyReparseable) {
+    final CompositeElement treeElement=((CompositeElement)bestReparseable);
+    final TextRange textRange=treeElement.getTextRange();
+    final ChameleonElement chameleon=bestReparseable.createChameleon(newFileText,textRange.getStartOffset(),textRange.getEndOffset() + lengthShift);
+    chameleon.putUserData(CharTable.CHAR_TABLE_KEY,treeFileElement.getCharTable());
+    chameleon.setTreeParent((CompositeElement)parent);
+    ChangeUtil.replaceAllChildren(treeElement,chameleon.transform(treeFileElement.getCharTable(),fileImpl.createLexer()).getTreeParent());
+  }
+ else {
+    FileType fileType=file.getFileType();
+    if (file instanceof PsiPlainTextFile) {
+      fileType=StdFileTypes.PLAIN_TEXT;
+    }
+    final Grammar grammarByFileType=GrammarUtil.getGrammarByFileType(fileType);
+    if (grammarByFileType != null) {
+      ParsingUtil.reparse(grammarByFileType,treeFileElement.getCharTable(),treeFileElement,newFileText,startOffset,endOffset,lengthShift);
+    }
+ else {
+      makeFullParse(parent,newFileText,textLength,fileImpl,fileType);
+    }
+  }
+}

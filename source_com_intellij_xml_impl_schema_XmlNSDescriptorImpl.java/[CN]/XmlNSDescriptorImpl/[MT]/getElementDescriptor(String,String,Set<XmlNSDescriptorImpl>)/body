@@ -1,0 +1,54 @@
+{
+  if (visited.contains(this))   return null;
+  final Pair<String,String> pair=new Pair<String,String>(namespace,localName);
+  final CachedValue<XmlElementDescriptor> descriptor=myDescriptorsMap.get(pair);
+  if (descriptor != null)   return descriptor.getValue();
+  XmlDocument document=myFile.getDocument();
+  XmlTag rootTag=document.getRootTag();
+  if (rootTag == null)   return null;
+  XmlTag[] tags=rootTag.getSubTags();
+  for (int i=0; i < tags.length; i++) {
+    final XmlTag tag=tags[i];
+    if (equalsToSchemaName(tag,"element")) {
+      String name=tag.getAttributeValue("name");
+      if (name != null) {
+        if (checkElementNameEquivalence(localName,namespace,name,tag)) {
+          final CachedValue<XmlElementDescriptor> cachedValue=tag.getManager().getCachedValuesManager().createCachedValue(new CachedValueProvider<XmlElementDescriptor>(){
+            public Result<XmlElementDescriptor> compute(){
+              final XmlElementDescriptorImpl xmlElementDescriptor=new XmlElementDescriptorImpl(tag);
+              return new Result<XmlElementDescriptor>(xmlElementDescriptor,xmlElementDescriptor.getDependences());
+            }
+          }
+,false);
+          myDescriptorsMap.put(pair,cachedValue);
+          return cachedValue.getValue();
+        }
+      }
+    }
+ else     if (equalsToSchemaName(tag,"include")) {
+      final XmlAttribute schemaLocation=tag.getAttribute("schemaLocation",XmlUtil.ALL_NAMESPACE);
+      if (schemaLocation != null) {
+        final XmlFile xmlFile=XmlUtil.findXmlFile(rootTag.getContainingFile(),schemaLocation.getValue());
+        if (xmlFile != null) {
+          final XmlDocument includedDocument=xmlFile.getDocument();
+          if (includedDocument != null) {
+            final PsiMetaData data=includedDocument.getMetaData();
+            if (data instanceof XmlNSDescriptorImpl) {
+              final XmlElementDescriptor elementDescriptor=((XmlNSDescriptorImpl)data).getElementDescriptor(localName,namespace);
+              if (elementDescriptor != null) {
+                final CachedValue<XmlElementDescriptor> value=includedDocument.getManager().getCachedValuesManager().createCachedValue(new CachedValueProvider<XmlElementDescriptor>(){
+                  public Result<XmlElementDescriptor> compute(){
+                    return new Result<XmlElementDescriptor>(elementDescriptor,elementDescriptor.getDependences());
+                  }
+                }
+,false);
+                return value.getValue();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}

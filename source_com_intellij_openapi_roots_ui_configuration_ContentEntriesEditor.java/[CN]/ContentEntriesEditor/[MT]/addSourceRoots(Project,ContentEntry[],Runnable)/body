@@ -1,0 +1,60 @@
+{
+  final HashMap<ContentEntry,java.util.List<Pair<File,String>>> entryToRootMap=new HashMap<ContentEntry,java.util.List<Pair<File,String>>>();
+  final Map<File,ContentEntry> fileToEntryMap=new HashMap<File,ContentEntry>();
+  for (int idx=0; idx < contentEntries.length; idx++) {
+    final ContentEntry contentEntry=contentEntries[idx];
+    entryToRootMap.put(contentEntry,null);
+    fileToEntryMap.put(VfsUtil.virtualToIoFile(contentEntry.getFile()),contentEntry);
+  }
+  final ProgressWindow progressWindow=new ProgressWindow(true,project);
+  final ProgressIndicator progressIndicator=Patches.MAC_HIDE_QUIT_HACK ? progressWindow : (ProgressIndicator)new SmoothProgressAdapter(progressWindow,project);
+  final Runnable searchRunnable=new Runnable(){
+    public void run(){
+      final Runnable process=new Runnable(){
+        public void run(){
+          for (Iterator it=fileToEntryMap.keySet().iterator(); it.hasNext(); ) {
+            final File entryFile=(File)it.next();
+            progressIndicator.setText("Searching for source roots in " + entryFile.getPath());
+            final java.util.List<Pair<File,String>> roots=JavaUtil.suggestRoots(entryFile);
+            entryToRootMap.put(fileToEntryMap.get(entryFile),roots);
+          }
+        }
+      }
+;
+      progressWindow.setTitle("Adding Source Roots");
+      ProgressManager.getInstance().runProcess(process,progressIndicator);
+    }
+  }
+;
+  final Runnable addSourcesRunnable=new Runnable(){
+    public void run(){
+      for (int idx=0; idx < contentEntries.length; idx++) {
+        final ContentEntry contentEntry=contentEntries[idx];
+        final java.util.List<Pair<File,String>> suggestedRoots=entryToRootMap.get(contentEntry);
+        if (suggestedRoots != null) {
+          for (int j=0; j < suggestedRoots.size(); j++) {
+            final Pair<File,String> suggestedRoot=suggestedRoots.get(j);
+            final VirtualFile sourceRoot=LocalFileSystem.getInstance().findFileByIoFile(suggestedRoot.first);
+            if (sourceRoot != null && VfsUtil.isAncestor(contentEntry.getFile(),sourceRoot,false)) {
+              contentEntry.addSourceFolder(sourceRoot,false,suggestedRoot.getSecond());
+            }
+          }
+        }
+      }
+      if (finishRunnable != null) {
+        finishRunnable.run();
+      }
+    }
+  }
+;
+  new SwingWorker(){
+    public Object construct(){
+      searchRunnable.run();
+      return null;
+    }
+    public void finished(){
+      addSourcesRunnable.run();
+    }
+  }
+.start();
+}

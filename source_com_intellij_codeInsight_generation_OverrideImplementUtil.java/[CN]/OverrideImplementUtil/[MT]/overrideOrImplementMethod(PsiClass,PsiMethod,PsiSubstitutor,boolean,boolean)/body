@@ -1,0 +1,49 @@
+{
+  if (!method.isValid() || !substitutor.isValid())   return PsiMethod.EMPTY_ARRAY;
+  PsiMethod[] results=EjbUtil.suggestImplementations(method);
+  if (results.length == 0) {
+    PsiMethod method1=substitutor != PsiSubstitutor.EMPTY ? GenerateMembersUtil.substituteGenericMethod(method,substitutor) : method;
+    PsiElementFactory factory=method.getManager().getElementFactory();
+    PsiMethod result=(PsiMethod)factory.createClass("Dummy").add(method1);
+    result.getModifierList().setModifierProperty(PsiModifier.ABSTRACT,aClass.isInterface());
+    result.getModifierList().setModifierProperty(PsiModifier.NATIVE,false);
+    if (!toCopyJavaDoc) {
+      PsiDocComment comment=result.getDocComment();
+      if (comment != null) {
+        comment.delete();
+      }
+    }
+    if (insertAtOverride) {
+      PsiModifierList modifierList=result.getModifierList();
+      if (modifierList.findAnnotation("java.lang.Override") == null) {
+        PsiAnnotation annotation=factory.createAnnotationFromText("@java.lang.Override",null);
+        modifierList.addAfter(annotation,null);
+      }
+    }
+    final PsiCodeBlock body=method.getManager().getElementFactory().createCodeBlockFromText("{}",null);
+    if (result.getBody() != null) {
+      result.getBody().replace(body);
+    }
+ else {
+      result.add(body);
+    }
+    results=new PsiMethod[]{result};
+  }
+  List<PsiMethod> list=new ArrayList<PsiMethod>();
+  for (int i=0; i < results.length; i++) {
+    PsiMethod result=results[i];
+    EjbUtil.tuneMethodForEjb(J2EERolesUtil.getEjbRole(aClass),method,result);
+    setupBody(result,method,aClass);
+    CodeStyleManager codeStyleManager=method.getManager().getCodeStyleManager();
+    CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(codeStyleManager.getProject());
+    boolean keepBreaks=settings.KEEP_LINE_BREAKS;
+    settings.KEEP_LINE_BREAKS=false;
+    result=(PsiMethod)codeStyleManager.shortenClassReferences(result);
+    result=(PsiMethod)codeStyleManager.reformat(result);
+    settings.KEEP_LINE_BREAKS=keepBreaks;
+    if (aClass.findMethodBySignature(result,false) == null) {
+      list.add(result);
+    }
+  }
+  return list.toArray(new PsiMethod[list.size()]);
+}

@@ -1,0 +1,165 @@
+{
+  LOG.assertTrue(originalScope != null);
+  if (refElement instanceof PsiAnnotationMethod) {
+    PsiMethod method=(PsiMethod)refElement;
+    if (PsiAnnotation.DEFAULT_REFERENCED_METHOD_NAME.equals(method.getName()) && method.getParameterList().getParameters().length == 0) {
+      PsiReference[] references=findReferences(method.getContainingClass(),originalScope,ignoreAccessScope);
+      for (int i=0; i < references.length; i++) {
+        PsiReference reference=references[i];
+        if (reference instanceof PsiJavaCodeReferenceElement) {
+          PsiJavaCodeReferenceElement javaReference=(PsiJavaCodeReferenceElement)reference;
+          if (javaReference.getParent() instanceof PsiAnnotation) {
+            PsiNameValuePair[] members=((PsiAnnotation)javaReference.getParent()).getParameterList().getAttributes();
+            if (members.length == 1 && members[0].getNameIdentifier() == null) {
+              processor.execute(members[0].getReference());
+            }
+          }
+        }
+      }
+    }
+  }
+  String text;
+  if (refElement instanceof PsiPackage) {
+    text=((PsiPackage)refElement).getName();
+    if (text == null)     return true;
+  }
+ else   if (refElement instanceof PsiClass) {
+    if (refElement instanceof PsiAnonymousClass)     return true;
+    text=((PsiClass)refElement).getName();
+  }
+ else   if (refElement instanceof PsiVariable) {
+    text=((PsiVariable)refElement).getName();
+    if (text == null)     return true;
+  }
+ else   if (refElement instanceof PsiMethod) {
+    if (((PsiMethod)refElement).isConstructor()) {
+      return processConstructorReferences(processor,(PsiMethod)refElement,originalScope,ignoreAccessScope,isStrictSignatureSearch);
+    }
+    text=((PsiMethod)refElement).getName();
+  }
+ else   if (refElement instanceof PsiAntElement) {
+    final PsiAntElement antElement=(PsiAntElement)refElement;
+    final SearchScope searchScope=antElement.getSearchScope().intersectWith(originalScope);
+    if (searchScope instanceof LocalSearchScope) {
+      final PsiElement[] scopes=((LocalSearchScope)searchScope).getScope();
+      for (int i=0; i < scopes.length; i++) {
+        final PsiElement scope=scopes[i];
+        if (!processAntElementScopeRoot(scope,refElement,antElement,processor))         return false;
+      }
+      return true;
+    }
+ else {
+      return true;
+    }
+  }
+ else   if (refElement instanceof XmlAttributeValue) {
+    text=((XmlAttributeValue)refElement).getValue();
+  }
+ else   if (refElement instanceof PsiPointcutDef) {
+    text=((PsiPointcutDef)refElement).getName();
+  }
+ else   if (refElement instanceof PsiNamedElement) {
+    text=((PsiNamedElement)refElement).getName();
+  }
+ else {
+    return true;
+  }
+  SearchScope searchScope;
+  if (!ignoreAccessScope) {
+    SearchScope accessScope=getAccessScope(refElement);
+    searchScope=originalScope.intersectWith(accessScope);
+    if (searchScope == null)     return true;
+  }
+ else {
+    searchScope=originalScope;
+  }
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("visitReferences() search scope: " + searchScope);
+  }
+  final PsiElementProcessorEx processor1=new PsiElementProcessorEx(){
+    public boolean execute(    PsiElement element,    int offsetInElement){
+      final PsiReference reference=element.findReferenceAt(offsetInElement);
+      if (reference == null)       return true;
+      if (reference.isReferenceTo(refElement)) {
+        return processor.execute(reference);
+      }
+ else {
+        return true;
+      }
+    }
+  }
+;
+  final CustomSearchHelper customSearchHelper=getCustomSearchHelper(refElement);
+  final short occurrenceMask;
+  if (customSearchHelper != null) {
+    occurrenceMask=customSearchHelper.getOccurenceMask();
+    if (customSearchHelper.caseInsensitive())     text=text.toLowerCase();
+  }
+ else   if (refElement instanceof XmlAttributeValue) {
+    occurrenceMask=WordInfo.PLAIN_TEXT;
+  }
+ else {
+    occurrenceMask=WordInfo.IN_CODE | WordInfo.JSP_ATTRIBUTE_VALUE | WordInfo.IN_COMMENTS;
+  }
+  final TokenSet elementTypes;
+  if (customSearchHelper != null) {
+    elementTypes=customSearchHelper.getElementTokenSet();
+  }
+ else   if (refElement instanceof XmlAttributeValue) {
+    elementTypes=XML_ATTRIBUTE_VALUE_TOKEN_BIT_SET;
+  }
+ else {
+    elementTypes=IDENTIFIER_OR_DOC_VALUE_OR_JSP_ATTRIBUTE_VALUE_BIT_SET;
+  }
+  if (!processElementsWithWord(processor1,searchScope,text,elementTypes,occurrenceMask,customSearchHelper != null && customSearchHelper.caseInsensitive())) {
+    return false;
+  }
+  if (refElement instanceof PsiMethod) {
+    PsiMethod method=(PsiMethod)refElement;
+    if (PropertyUtil.isSimplePropertyAccessor(method)) {
+      final String propertyName=PropertyUtil.getPropertyName(method);
+      if (myManager.getNameHelper().isIdentifier(propertyName)) {
+        if (!processElementsWithWord(processor1,searchScope,propertyName,IDENTIFIER_OR_ATTRIBUTE_VALUE_BIT_SET,WordInfo.JSP_ATTRIBUTE_VALUE,false)) {
+          return false;
+        }
+      }
+    }
+  }
+  if (refElement.getContainingFile() instanceof JspFile) {
+    boolean canBeAccessedByIncludes;
+    if (refElement instanceof PsiField || refElement instanceof PsiMethod) {
+      canBeAccessedByIncludes=refElement.getParent() instanceof JspDeclaration;
+    }
+ else     if (refElement instanceof JspImplicitVariable) {
+      canBeAccessedByIncludes=true;
+    }
+ else     if (refElement instanceof PsiLocalVariable) {
+      canBeAccessedByIncludes=refElement.getParent().getParent() instanceof JspFile;
+    }
+ else {
+      canBeAccessedByIncludes=false;
+    }
+    if (canBeAccessedByIncludes) {
+      PsiElementProcessor processor2=new PsiBaseElementProcessor(){
+        public boolean execute(        PsiElement element){
+          return processor1.execute(element,0);
+        }
+      }
+;
+      PsiFile[] files=JspUtil.findIncludingFiles(refElement.getContainingFile(),searchScope);
+      for (int i=0; i < files.length; i++) {
+        if (!processIdentifiers(processor2,text,new LocalSearchScope(files[i]),IdentifierPosition.IN_CODE))         return false;
+      }
+    }
+  }
+  if (refElement instanceof PsiPackage && originalScope instanceof GlobalSearchScope) {
+    if (!UIFormUtil.processReferencesInUIForms(processor,(PsiPackage)refElement,(GlobalSearchScope)originalScope))     return false;
+  }
+ else   if (refElement instanceof PsiClass && originalScope instanceof GlobalSearchScope) {
+    if (!UIFormUtil.processReferencesInUIForms(processor,(PsiClass)refElement,(GlobalSearchScope)originalScope))     return false;
+  }
+ else   if (refElement instanceof PsiField && originalScope instanceof GlobalSearchScope) {
+    if (!UIFormUtil.processReferencesInUIForms(processor,(PsiField)refElement,(GlobalSearchScope)originalScope))     return false;
+  }
+  return true;
+}

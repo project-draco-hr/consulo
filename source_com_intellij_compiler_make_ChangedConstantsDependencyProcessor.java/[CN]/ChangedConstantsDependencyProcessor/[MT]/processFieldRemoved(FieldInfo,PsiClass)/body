@@ -1,0 +1,38 @@
+{
+  if (info.isPrivate()) {
+    return;
+  }
+  SearchScope searchScope=GlobalSearchScope.projectScope(myProject);
+  if (info.isPackageLocal()) {
+    final PsiFile containingFile=aClass.getContainingFile();
+    if (containingFile instanceof PsiJavaFile) {
+      final String packageName=((PsiJavaFile)containingFile).getPackageName();
+      final PsiPackage aPackage=PsiManager.getInstance(myProject).findPackage(packageName);
+      if (aPackage != null) {
+        searchScope=GlobalSearchScope.packageScope(aPackage,false);
+        searchScope=searchScope.intersectWith(aClass.getUseScope());
+      }
+    }
+  }
+  final PsiSearchHelper psiSearchHelper=PsiManager.getInstance(myProject).getSearchHelper();
+  PsiIdentifier[] identifiers=psiSearchHelper.findIdentifiers(myDependencyCache.resolve(info.getName()),searchScope,IdentifierPosition.IN_CODE);
+  for (int idx=0; idx < identifiers.length; idx++) {
+    PsiIdentifier identifier=identifiers[idx];
+    PsiElement parent=identifier.getParent();
+    if (parent instanceof PsiReferenceExpression) {
+      PsiReferenceExpression refExpr=(PsiReferenceExpression)parent;
+      PsiReference reference=refExpr.getReference();
+      if (reference.resolve() == null) {
+        PsiClass ownerClass=getOwnerClass(refExpr);
+        if (ownerClass != null && !ownerClass.equals(aClass)) {
+          int qualifiedName=myDependencyCache.getSymbolTable().getId(ownerClass.getQualifiedName());
+          if (myDependencyCache.markClass(qualifiedName,true)) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("Mark dependent class " + myDependencyCache.resolve(qualifiedName) + "; reason: some constants were removed from "+ myDependencyCache.resolve(myQName));
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,149 @@
+{
+  if (!local.isWritable()) {
+    RefactoringMessageUtil.showReadOnlyElementRefactoringMessage(project,local);
+    return;
+  }
+  final HighlightManager highlightManager=HighlightManager.getInstance(project);
+  final String localName=local.getName();
+  final PsiExpression initializer=local.getInitializer();
+  if (initializer == null) {
+    String message="Cannot perform the refactoring.\n" + "Variable " + localName + " has no initializer.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  PsiSearchHelper searchHelper=PsiManager.getInstance(project).getSearchHelper();
+  final PsiReference[] refs=searchHelper.findReferences(local,GlobalSearchScope.projectScope(project),false);
+  if (refs.length == 0) {
+    String message="Variable " + localName + " is never used";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  final ArrayList<PsiReference> toInline=new ArrayList<PsiReference>(refs.length);
+  final PsiJavaCodeReferenceElement firstWriteUsage=(PsiJavaCodeReferenceElement)filterUsagesToInline(refs,toInline);
+  if (toInline.size() == 0) {
+    String message="Variable " + localName + " is never used before modification";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  final PsiElement lastUsage=(toInline.get(toInline.size() - 1)).getElement();
+  final PsiElement codeFragment=ControlFlowUtil.findCodeFragment(local);
+  EditorColorsManager manager=EditorColorsManager.getInstance();
+  final TextAttributes attributes=manager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+  ControlFlow controlFlow;
+  try {
+    controlFlow=new ControlFlowAnalyzer(codeFragment,new LocalsControlFlowPolicy(codeFragment),false).buildControlFlow();
+    PsiElement commonParent=PsiTreeUtil.findCommonParent(local,lastUsage);
+    PsiElement anchor=lastUsage;
+    while (!commonParent.equals(anchor.getParent())) {
+      anchor=anchor.getParent();
+    }
+    while (controlFlow.getEndOffset(anchor) < 0) {
+      anchor=anchor.getParent();
+    }
+    int offset=controlFlow.getEndOffset(anchor);
+    if (ControlFlowUtil.needVariableValueAt(local,controlFlow,offset)) {
+      ArrayList<PsiReference> refsForWriting=new ArrayList<PsiReference>(refs.length);
+      for (int idx=0; idx < refs.length; idx++) {
+        PsiReference ref=refs[idx];
+        if (PsiUtil.isAccessedForWriting((PsiExpression)ref.getElement())) {
+          refsForWriting.add(ref);
+        }
+      }
+      if (refsForWriting.size() > 0) {
+        highlightManager.addOccurrenceHighlights(editor,refsForWriting.toArray(new PsiReference[refsForWriting.size()]),attributes,true,null);
+        String message="Cannot perform the refactoring.\n" + "Variable " + localName + " is accessed for writing.";
+        RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+        WindowManager.getInstance().getStatusBar(project).setInfo("Press Escape to remove the highlighting");
+        return;
+      }
+    }
+    if (firstWriteUsage != null) {
+      PsiElement tmp=firstWriteUsage;
+      int writeInstructionOffset;
+      do {
+        writeInstructionOffset=controlFlow.getEndOffset(tmp);
+        tmp=tmp.getParent();
+      }
+ while (writeInstructionOffset < 0);
+      for (Iterator<PsiReference> iterator=toInline.iterator(); iterator.hasNext(); ) {
+        PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)iterator.next();
+        if (ControlFlowUtil.isInstructionReachable(controlFlow,controlFlow.getStartOffset(ref),writeInstructionOffset)) {
+          String message="Cannot perform the refactoring.\n" + "Variable initializer does not dominate its usages.";
+          RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+          return;
+        }
+      }
+    }
+  }
+ catch (  ControlFlowAnalyzer.AnalysisCanceledException e) {
+  }
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    highlightManager.addOccurrenceHighlights(editor,toInline.toArray(new PsiReference[toInline.size()]),attributes,true,null);
+    int occurrencesCount=toInline.size();
+    RefactoringMessageDialog dialog=new RefactoringMessageDialog(REFACTORING_NAME,"Inline local variable " + localName + "? ("+ occurrencesCount+ (occurrencesCount == 1 ? " occurrence)" : " occurrences)"),HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
+    dialog.show();
+    if (!dialog.isOK()) {
+      WindowManager.getInstance().getStatusBar(project).setInfo("Press Escape to remove the highlighting");
+      return;
+    }
+  }
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      try {
+        final PsiExpression initializer=local.getInitializer();
+        PsiExpression[] exprs=new PsiExpression[toInline.size()];
+        for (int idx=0; idx < toInline.size(); idx++) {
+          PsiReference ref=toInline.get(idx);
+          PsiJavaCodeReferenceElement refElement=(PsiJavaCodeReferenceElement)ref.getElement();
+          exprs[idx]=RefactoringUtil.inlineVariable(local,initializer,refElement);
+        }
+        if (firstWriteUsage != null) {
+          ControlFlow controlFlow;
+          try {
+            controlFlow=new ControlFlowAnalyzer(codeFragment,new LocalsControlFlowPolicy(codeFragment),false).buildControlFlow();
+          }
+ catch (          ControlFlowAnalyzer.AnalysisCanceledException e) {
+            controlFlow=ControlFlow.EMPTY;
+          }
+          PsiElement insertAnchor=firstWriteUsage.getElement();
+          PsiElement parent=PsiTreeUtil.findCommonParent(local,insertAnchor);
+          while (!parent.equals(insertAnchor.getParent())) {
+            insertAnchor=insertAnchor.getParent();
+          }
+          int startOffset=controlFlow.getStartOffset(insertAnchor);
+          if (startOffset != -1) {
+            insertAnchor=controlFlow.getElement(startOffset);
+          }
+          parent=PsiTreeUtil.findCommonParent(local,insertAnchor);
+          while (!parent.equals(insertAnchor.getParent())) {
+            insertAnchor=insertAnchor.getParent();
+          }
+          if (initializer != null) {
+            initializer.delete();
+          }
+          PsiAssignmentExpression assignment=getAssignmentExpression(firstWriteUsage);
+          PsiDeclarationStatement newDeclaration=createDeclarationStatement(local,assignment);
+          parent.addBefore(newDeclaration,insertAnchor);
+          if (assignment != null && local.getParent().getParent().equals(assignment.getParent().getParent())) {
+            assignment.getParent().delete();
+          }
+        }
+        local.delete();
+        if (!ApplicationManager.getApplication().isUnitTestMode()) {
+          highlightManager.addOccurrenceHighlights(editor,exprs,attributes,true,null);
+          WindowManager.getInstance().getStatusBar(project).setInfo("Press Escape to remove the highlighting");
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+;
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(runnable);
+    }
+  }
+,"Inline " + localName,null);
+}

@@ -1,0 +1,60 @@
+{
+  LOG.assertTrue(!myInitialized);
+  myDisposed=false;
+  myInitialized=true;
+  myRootManager=new RootManager(this,myProjectRootManager);
+  PsiManagerConfiguration configuration=PsiManagerConfiguration.getInstance();
+  myUseRepository=configuration.REPOSITORY_ENABLED;
+  myProjectFileIndex=myProjectRootManager.getFileIndex();
+  Runnable runnable=new Runnable(){
+    public void run(){
+synchronized (PsiLock.LOCK) {
+        myCachedObjectClassMap=null;
+      }
+    }
+  }
+;
+  myManager.registerRunnableToRunOnChange(runnable);
+  myVirtualFileListener=new MyVirtualFileListener();
+  myVirtualFileManager.addVirtualFileListener(myVirtualFileListener);
+  myFileDocumentManagerListener=new FileDocumentManagerAdapter(){
+    public void fileWithNoDocumentChanged(    VirtualFile file){
+      if (!myUseRepository) {
+        clearNonRepositoryMaps();
+      }
+      final PsiFile psiFile=myVFileToPsiFileMap.get(file);
+      if (psiFile != null) {
+        ApplicationManager.getApplication().runWriteAction(new PsiExternalChangeAction(){
+          public void run(){
+            reloadFromDisk(psiFile,true);
+          }
+        }
+);
+      }
+    }
+  }
+;
+  myFileDocumentManager.addFileDocumentManagerListener(myFileDocumentManagerListener);
+  myModuleRootListener=new MyModuleRootListener();
+  myProjectRootManager.addModuleRootListener(myModuleRootListener);
+  myFileTypeListener=new FileTypeListener(){
+    public void beforeFileTypesChanged(    FileTypeEvent event){
+    }
+    public void fileTypesChanged(    FileTypeEvent e){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          PsiTreeChangeEventImpl event=new PsiTreeChangeEventImpl(myManager);
+          event.setPropertyName(PsiTreeChangeEvent.PROP_FILE_TYPES);
+          myManager.beforePropertyChange(event);
+          removeInvalidFilesAndDirs(true);
+          event=new PsiTreeChangeEventImpl(myManager);
+          event.setPropertyName(PsiTreeChangeEvent.PROP_FILE_TYPES);
+          myManager.propertyChanged(event);
+        }
+      }
+);
+    }
+  }
+;
+  myFileTypeManager.addFileTypeListener(myFileTypeListener);
+}

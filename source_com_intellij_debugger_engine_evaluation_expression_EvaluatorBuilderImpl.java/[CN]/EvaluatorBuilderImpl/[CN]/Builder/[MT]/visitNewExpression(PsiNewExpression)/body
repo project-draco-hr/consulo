@@ -1,0 +1,72 @@
+{
+  PsiType expressionPsiType=expression.getType();
+  if (expressionPsiType instanceof PsiArrayType) {
+    Evaluator dimensionEvaluator=null;
+    PsiExpression[] dimensions=expression.getArrayDimensions();
+    if (dimensions.length == 1) {
+      PsiExpression dimensionExpression=dimensions[0];
+      dimensionExpression.accept(this);
+      if (myResult != null) {
+        dimensionEvaluator=myResult;
+      }
+ else {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Invalid expression for array dimension: " + dimensionExpression.getText()));
+      }
+    }
+ else     if (dimensions.length > 1) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Multi-dimensional arrays new is not supported"));
+    }
+    Evaluator initializerEvaluator=null;
+    PsiArrayInitializerExpression arrayInitializer=expression.getArrayInitializer();
+    if (arrayInitializer != null) {
+      if (dimensionEvaluator != null) {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(expression.getText()));
+      }
+      arrayInitializer.accept(this);
+      if (myResult != null) {
+        initializerEvaluator=myResult;
+      }
+ else {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(arrayInitializer.getText()));
+      }
+    }
+    if (dimensionEvaluator == null && initializerEvaluator == null) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(expression.getText()));
+    }
+    myResult=new NewArrayInstanceEvaluator(new TypeEvaluator(JVMNameUtil.getJVMQualifiedName(expressionPsiType)),dimensionEvaluator,initializerEvaluator);
+  }
+ else {
+    LOG.assertTrue(expressionPsiType instanceof PsiClassType);
+    PsiClass aClass=((PsiClassType)expressionPsiType).resolve();
+    if (aClass instanceof PsiAnonymousClass) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException("Anonymous class evaluation is not supported"));
+    }
+    PsiExpressionList argumentList=expression.getArgumentList();
+    if (argumentList == null) {
+      throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(expression.getText()));
+    }
+    PsiExpression[] argExpressions=argumentList.getExpressions();
+    PsiMethod constructor=expression.resolveConstructor();
+    if (constructor == null && argExpressions.length > 0) {
+      throw new EvaluateRuntimeException(new EvaluateException("Cannot resolve constructor '" + expression.getText() + "'",null));
+    }
+    Evaluator[] argumentEvaluators=new Evaluator[argExpressions.length];
+    for (int idx=0; idx < argExpressions.length; idx++) {
+      PsiExpression argExpression=argExpressions[idx];
+      argExpression.accept(this);
+      if (myResult != null) {
+        argumentEvaluators[idx]=myResult;
+      }
+ else {
+        throw new EvaluateRuntimeException(EvaluateExceptionUtil.INVALID_EXPRESSION(argExpression.getText()));
+      }
+    }
+    try {
+      JVMName signature=(constructor != null) ? JVMNameUtil.getJVMSignature(constructor) : JVMNameUtil.getJVMRawText("()V");
+      myResult=new NewClassInstanceEvaluator(new TypeEvaluator(JVMNameUtil.getJVMQualifiedName(expressionPsiType)),signature,argumentEvaluators);
+    }
+ catch (    EvaluateException e) {
+      throw new EvaluateRuntimeException(e);
+    }
+  }
+}

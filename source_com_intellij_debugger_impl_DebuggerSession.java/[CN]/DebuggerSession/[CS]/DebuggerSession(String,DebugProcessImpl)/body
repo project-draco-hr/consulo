@@ -1,0 +1,160 @@
+{
+  mySessionName=sessionName;
+  myDebugProcess=debugProcess;
+  SESSION_EMPTY_CONTEXT=DebuggerContextImpl.createDebuggerContext(DebuggerSession.this,null,null,null);
+  myContextManager=new MyDebuggerStateManager();
+  myState=new DebuggerSessionState(STATE_STOPPED,null);
+  myDebugProcess.addDebugProcessListener(new DebugProcessAdapterImpl(){
+    public void connectorIsReady(){
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          RemoteConnection connection=myDebugProcess.getConnection();
+          final String connectionStatusMessage=DebugProcessImpl.createConnectionStatusMessage(connection.isServerMode() ? DebuggerSession.MSG_LISTENING : DebuggerSession.MSG_CONNECTING,connection);
+          getContextManager().setState(SESSION_EMPTY_CONTEXT,DebuggerSession.STATE_WAITING_ATTACH,DebuggerSession.EVENT_START_WAIT_ATTACH,connectionStatusMessage);
+        }
+      }
+);
+    }
+    public void paused(    final SuspendContextImpl suspendContext){
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("paused");
+      }
+      ThreadReferenceProxyImpl currentThread=suspendContext.getThread();
+      final StackFrameContext positionContext;
+      if (currentThread == null) {
+        LOG.assertTrue(suspendContext.getSuspendPolicy() == EventRequest.SUSPEND_ALL);
+        SuspendContextImpl oldContext=getProcess().getSuspendManager().getPausedContext();
+        if (oldContext != null) {
+          currentThread=oldContext.getThread();
+        }
+        if (currentThread == null) {
+          currentThread=getProcess().getVirtualMachineProxy().allThreads().iterator().next();
+        }
+        StackFrameProxyImpl proxy;
+        try {
+          proxy=(currentThread.frameCount() > 0) ? currentThread.frame(0) : null;
+        }
+ catch (        EvaluateException e) {
+          proxy=null;
+          LOG.error(e);
+        }
+        positionContext=new SimpleStackFrameContext(proxy,debugProcess);
+      }
+ else {
+        positionContext=suspendContext;
+      }
+      final SourcePosition position=PsiDocumentManager.getInstance(getProject()).commitAndRunReadAction(new Computable<SourcePosition>(){
+        public SourcePosition compute(){
+          return ContextUtil.getSourcePosition(positionContext);
+        }
+      }
+);
+      if (position != null) {
+        ArrayList<LineBreakpoint> toDelete=new ArrayList<LineBreakpoint>();
+        java.util.List<Pair<Breakpoint,com.sun.jdi.event.Event>> eventDescriptors=DebuggerUtilsEx.getEventDescriptors(suspendContext);
+        for (Iterator<Pair<Breakpoint,com.sun.jdi.event.Event>> iterator=eventDescriptors.iterator(); iterator.hasNext(); ) {
+          Pair<Breakpoint,com.sun.jdi.event.Event> eventDescriptor=iterator.next();
+          Breakpoint breakpoint=eventDescriptor.getFirst();
+          if (breakpoint instanceof LineBreakpoint) {
+            SourcePosition sourcePosition=((BreakpointWithHighlighter)breakpoint).getSourcePosition();
+            if (sourcePosition == null || sourcePosition.getLine() != position.getLine()) {
+              toDelete.add((LineBreakpoint)breakpoint);
+            }
+          }
+        }
+        RequestManagerImpl requestsManager=suspendContext.getDebugProcess().getRequestsManager();
+        for (Iterator<LineBreakpoint> iterator=toDelete.iterator(); iterator.hasNext(); ) {
+          BreakpointWithHighlighter breakpointWithHighlighter=iterator.next();
+          requestsManager.deleteRequest(breakpointWithHighlighter);
+          requestsManager.setInvalid(breakpointWithHighlighter,"Source code changed");
+          breakpointWithHighlighter.updateUI();
+        }
+        if (toDelete.size() > 0 && toDelete.size() == eventDescriptors.size()) {
+          getProcess().getManagerThread().invokeLater(myDebugProcess.createResumeCommand(suspendContext));
+          return;
+        }
+      }
+      final DebuggerContextImpl debuggerContext=DebuggerContextImpl.createDebuggerContext(DebuggerSession.this,suspendContext,currentThread,null);
+      debuggerContext.setPositionCache(position);
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          getContextManager().setState(debuggerContext,STATE_PAUSED,EVENT_PAUSE,null);
+        }
+      }
+);
+    }
+    public void resumed(    final SuspendContextImpl suspendContext){
+      final SuspendContextImpl currentContext=getProcess().getSuspendManager().getPausedContext();
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          if (currentContext != null) {
+            getContextManager().setState(DebuggerContextUtil.createDebuggerContext(DebuggerSession.this,currentContext),STATE_PAUSED,EVENT_REFRESH,null);
+          }
+ else {
+            getContextManager().setState(SESSION_EMPTY_CONTEXT,STATE_RUNNING,EVENT_REFRESH,null);
+          }
+        }
+      }
+);
+    }
+    public void processAttached(    final DebugProcessImpl process){
+      final String message=DebugProcessImpl.createConnectionStatusMessage(MSG_CONNECTED,getProcess().getConnection());
+      process.getExecutionResult().getProcessHandler().notifyTextAvailable(message + "\n",ProcessOutputTypes.SYSTEM);
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          getContextManager().setState(SESSION_EMPTY_CONTEXT,STATE_RUNNING,EVENT_ATTACHED,message);
+        }
+      }
+);
+    }
+    public void attachException(    final RunProfileState state,    final ExecutionException exception,    final RemoteConnection remoteConnection){
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          String message="";
+          if (state instanceof RemoteState) {
+            message=DebugProcessImpl.createConnectionStatusMessage(DebugProcessImpl.MSG_FAILD_TO_CONNECT,remoteConnection);
+          }
+          message+=exception.getMessage();
+          getContextManager().setState(SESSION_EMPTY_CONTEXT,STATE_STOPPED,EVENT_DETACHED,message);
+        }
+      }
+);
+    }
+    public void processDetached(    final DebugProcessImpl debugProcess){
+      ExecutionResult executionResult=debugProcess.getExecutionResult();
+      if (executionResult != null) {
+        executionResult.getProcessHandler().notifyTextAvailable(DebugProcessImpl.createConnectionStatusMessage(MSG_DISCONNECTED,getProcess().getConnection()) + "\n",ProcessOutputTypes.SYSTEM);
+      }
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          getContextManager().setState(SESSION_EMPTY_CONTEXT,STATE_STOPPED,EVENT_DETACHED,MSG_DISCONNECTED);
+        }
+      }
+);
+      mySteppingThroughThreads.clear();
+    }
+  }
+);
+  myDebugProcess.addEvaluationListener(new EvaluationListener(){
+    public void evaluationStarted(    SuspendContextImpl context){
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          myIsEvaluating=true;
+        }
+      }
+);
+    }
+    public void evaluationFinished(    final SuspendContextImpl context){
+      DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+        public void run(){
+          myIsEvaluating=false;
+          if (context != getSuspendContext()) {
+            getContextManager().setState(DebuggerContextUtil.createDebuggerContext(DebuggerSession.this,context),STATE_PAUSED,EVENT_REFRESH,null);
+          }
+        }
+      }
+);
+    }
+  }
+);
+}

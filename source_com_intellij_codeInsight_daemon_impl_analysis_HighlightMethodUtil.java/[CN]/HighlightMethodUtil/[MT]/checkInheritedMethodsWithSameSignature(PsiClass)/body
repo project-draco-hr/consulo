@@ -1,0 +1,71 @@
+{
+  PsiClass[] superClasses=aClass.getSupers();
+  if (superClasses.length <= 1)   return null;
+  final PsiManager manager=aClass.getManager();
+  PsiClass objectClass=manager.findClass("java.lang.Object",aClass.getResolveScope());
+  final MethodSignatureUtil.MethodSignatureToMethods allMethods=MethodSignatureUtil.getSameSignatureMethods(aClass);
+  for (Iterator<List<MethodSignatureBackedByPsiMethod>> iterator=allMethods.values().iterator(); iterator.hasNext(); ) {
+    ProgressManager.getInstance().checkCanceled();
+    List<MethodSignatureBackedByPsiMethod> superMethodSignatures=new ArrayList<MethodSignatureBackedByPsiMethod>(iterator.next());
+    final MethodSignatureBackedByPsiMethod firstMethodSignature=superMethodSignatures.get(0);
+    if (firstMethodSignature.getMethod().isConstructor())     continue;
+    removeNotInheritedMethods(superMethodSignatures,aClass);
+    if (superMethodSignatures.size() < 2)     continue;
+    MethodSignatureBackedByPsiMethod overridingMethodSignature=null;
+    int overridingSignatureIndex=-1;
+    for (int i=0; i < superMethodSignatures.size(); i++) {
+      final MethodSignatureBackedByPsiMethod superMethodSignature=superMethodSignatures.get(i);
+      PsiMethod superMethod=superMethodSignature.getMethod();
+      if (!manager.getResolveHelper().isAccessible(superMethod,aClass,null)) {
+        superMethodSignatures.remove(i);
+        continue;
+      }
+      if (superMethod.hasModifierProperty(PsiModifier.ABSTRACT))       continue;
+      if (overridingSignatureIndex < 0 || !manager.areElementsEquivalent(superMethod.getContainingClass(),objectClass)) {
+        overridingMethodSignature=superMethodSignature;
+        overridingSignatureIndex=i;
+      }
+    }
+    HighlightInfo highlightInfo=null;
+    if (overridingMethodSignature != null) {
+      PsiMethod overridingMethod=overridingMethodSignature.getMethod();
+      PsiClass overridingClass=overridingMethod.getContainingClass();
+      if (!manager.areElementsEquivalent(overridingClass,objectClass) || !aClass.isInterface()) {
+        superMethodSignatures.set(0,overridingMethodSignature);
+        superMethodSignatures.set(overridingSignatureIndex,firstMethodSignature);
+        highlightInfo=checkMethodIncompatibleReturnType(overridingMethodSignature,superMethodSignatures,false);
+        if (highlightInfo == null) {
+          for (int i=1; i < superMethodSignatures.size(); i++) {
+            final MethodSignatureBackedByPsiMethod superMethodSignature=superMethodSignatures.get(i);
+            PsiMethod superMethod=superMethodSignature.getMethod();
+            if (aClass.isInterface() && manager.areElementsEquivalent(overridingClass,objectClass))             continue;
+            final List<MethodSignatureBackedByPsiMethod> list=new ArrayList<MethodSignatureBackedByPsiMethod>();
+            list.add(superMethodSignature);
+            highlightInfo=checkMethodIncompatibleThrows(overridingMethodSignature,list,false);
+            if (highlightInfo == null) {
+              highlightInfo=checkMethodWeakerPrivileges(overridingMethodSignature,list,false);
+            }
+            if (highlightInfo == null) {
+              highlightInfo=checkStaticMethodOverride(overridingClass,overridingMethod,superMethod.getContainingClass(),superMethod,false);
+            }
+            if (highlightInfo != null)             break;
+          }
+        }
+      }
+    }
+ else {
+      if (aClass.isInterface()) {
+        highlightInfo=checkInterfaceInheritedMethodsReturnTypes(superMethodSignatures);
+      }
+ else {
+        highlightInfo=checkAllAbstractInheritedMethodsReturnTypes(superMethodSignatures);
+      }
+    }
+    if (highlightInfo != null) {
+      final TextRange textRange=ClassUtil.getClassDeclarationTextRange(aClass);
+      String message=highlightInfo.description;
+      return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,textRange,message);
+    }
+  }
+  return null;
+}
