@@ -1,0 +1,35 @@
+{
+  LOG.assertTrue(DebuggerManager.getInstance(myDebugProcess.getProject()).isDebuggerManagerThread());
+  final EvaluationContext evaluationContext=command.getEvaluationContext();
+  final SuspendContext suspendContext=evaluationContext.getSuspendContext();
+  if (!hasBatchEvaluator(evaluationContext)) {
+    myDebugProcess.getManagerThread().invokeCommand(command);
+  }
+ else {
+    List<ToStringCommand> toStringCommands=myBuffer.get(suspendContext);
+    if (toStringCommands == null) {
+      final List<ToStringCommand> commands=new ArrayList<ToStringCommand>();
+      toStringCommands=commands;
+      myBuffer.put(suspendContext,commands);
+      myDebugProcess.getManagerThread().invokeCommand(new SuspendContextCommand(){
+        public SuspendContext getSuspendContext(){
+          return suspendContext;
+        }
+        public void action(){
+          myBuffer.remove(suspendContext);
+          if (!doEvaluateBatch(commands,evaluationContext)) {
+            for (Iterator<ToStringCommand> iterator=commands.iterator(); iterator.hasNext(); ) {
+              ToStringCommand toStringCommand=iterator.next();
+              toStringCommand.action();
+            }
+          }
+        }
+        public void commandCancelled(){
+          myBuffer.remove(suspendContext);
+        }
+      }
+);
+    }
+    toStringCommands.add(command);
+  }
+}
