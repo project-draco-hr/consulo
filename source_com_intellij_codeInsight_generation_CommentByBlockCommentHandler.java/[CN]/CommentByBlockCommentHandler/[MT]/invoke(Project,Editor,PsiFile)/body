@@ -4,29 +4,49 @@
   myFile=file;
   myDocument=editor.getDocument();
   if (!myFile.isWritable()) {
-    if (!FileDocumentManager.fileForDocumentCheckedOutSuccessfully(getDocument(),project)) {
+    if (!FileDocumentManager.fileForDocumentCheckedOutSuccessfully(myDocument,project)) {
       return;
     }
   }
   FeatureUsageTracker.getInstance().triggerFeatureUsed("codeassists.comment.block");
-  final SelectionModel selectionModel=myEditor.getSelectionModel();
-  BlockCommenter commenter=getCommenter(myFile);
+  final Commenter commenter=getCommenter();
   if (commenter == null)   return;
-  final BlockCommenter blockCommenter=(BlockCommenter)commenter.clone();
-  if (selectionModel.hasSelection()) {
-    int startOffset=selectionModel.getSelectionStart();
-    int endOffset=selectionModel.getSelectionEnd();
-    blockCommenter.commentRange(startOffset,endOffset,this);
+  final SelectionModel selectionModel=myEditor.getSelectionModel();
+  final String prefix=commenter.getBlockCommentPrefix();
+  final String suffix=commenter.getBlockCommentSuffix();
+  if (prefix == null || suffix == null)   return;
+  TextRange commentedRange=findCommentedRange(commenter);
+  if (commentedRange != null) {
+    uncommentRange(commentedRange,prefix,suffix);
   }
  else {
-    int offset=editor.getCaretModel().getOffset();
-    PsiDocumentManager.getInstance(project).commitDocument(myDocument);
-    PsiElement element=file.findElementAt(offset);
-    if (element == null && offset > 0) {
-      element=file.findElementAt(offset - 1);
+    if (selectionModel.hasBlockSelection()) {
+      final LogicalPosition start=selectionModel.getBlockStart();
+      final LogicalPosition end=selectionModel.getBlockEnd();
+      int startColumn=Math.min(start.column,end.column);
+      int endColumn=Math.max(start.column,end.column);
+      int startLine=Math.min(start.line,end.line);
+      int endLine=Math.max(start.line,end.line);
+      for (int i=startLine; i <= endLine; i++) {
+        editor.getCaretModel().moveToLogicalPosition(new LogicalPosition(i,endColumn));
+        EditorModificationUtil.insertStringAtCaret(editor,suffix,true,true);
+      }
+      for (int i=startLine; i <= endLine; i++) {
+        editor.getCaretModel().moveToLogicalPosition(new LogicalPosition(i,startColumn));
+        EditorModificationUtil.insertStringAtCaret(editor,prefix,true,true);
+      }
     }
-    if (element == null)     return;
-    int commentStart=(element instanceof PsiWhiteSpace) ? offset : element.getTextRange().getStartOffset();
-    blockCommenter.uncommentRange(element,commentStart,this);
+ else     if (selectionModel.hasSelection()) {
+      int selectionStart=selectionModel.getSelectionStart();
+      int selectionEnd=selectionModel.getSelectionEnd();
+      commentRange(selectionStart,selectionEnd,prefix,suffix);
+    }
+ else {
+      final LogicalPosition caretPosition=myEditor.getCaretModel().getLogicalPosition();
+      EditorUtil.fillVirtualSpaceUntil(editor,caretPosition.column,caretPosition.line);
+      int caretOffset=myEditor.getCaretModel().getOffset();
+      myDocument.insertString(caretOffset,prefix + suffix);
+      myEditor.getCaretModel().moveToOffset(caretOffset + prefix.length());
+    }
   }
 }
