@@ -1,0 +1,93 @@
+{
+  final Set<Usage> _usages=replaceContext.getUsageView().getUsages();
+  if (FindInProjectUtil.hasReadOnlyUsages(_usages)) {
+    WindowManager.getInstance().getStatusBar(myProject).setInfo("Occurrences found in read-only files");
+    return;
+  }
+  final Usage[] usages;
+  _usages.toArray(usages=new Usage[_usages.size()]);
+  for (int i=0; i < usages.length; ++i) {
+    final Usage usage=usages[i];
+    final UsageInfo usageInfo=((UsageInfo2UsageAdapter)usage).getUsageInfo();
+    final PsiFile psiFile=usageInfo.getElement().getContainingFile();
+    if (!psiFile.isWritable())     continue;
+    Runnable selectOnEditorRunnable=new Runnable(){
+      public void run(){
+        final VirtualFile virtualFile=psiFile.getVirtualFile();
+        if (virtualFile != null && ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+          public Boolean compute(){
+            return virtualFile.isValid() ? Boolean.TRUE : Boolean.FALSE;
+          }
+        }
+).booleanValue()) {
+          if (usage.isValid()) {
+            usage.highlightInEditor();
+            replaceContext.getUsageView().selectUsages(new Usage[]{usage});
+          }
+        }
+      }
+    }
+;
+    CommandProcessor.getInstance().executeCommand(myProject,selectOnEditorRunnable,"Select on Editor",null);
+    String title="Replace Usage " + (i + 1) + " of "+ usages.length+ " Found";
+    int result=FindManager.getInstance(myProject).showPromptDialog(replaceContext.getFindModel(),title);
+    if (result == PromptResult.CANCEL) {
+      return;
+    }
+    if (result == PromptResult.SKIP) {
+      continue;
+    }
+    final int currentNumber=i;
+    if (result == PromptResult.OK) {
+      Runnable runnable=new Runnable(){
+        public void run(){
+          doReplace(replaceContext,usage);
+          replaceContext.getUsageView().removeUsage(usage);
+        }
+      }
+;
+      CommandProcessor.getInstance().executeCommand(myProject,runnable,"Replace",null);
+      if ((i + 1) == usages.length) {
+        replaceContext.getUsageView().close();
+        return;
+      }
+    }
+    if (result == PromptResult.ALL_IN_THIS_FILE) {
+      final int[] nextNumber=new int[1];
+      Runnable runnable=new Runnable(){
+        public void run(){
+          int j=currentNumber;
+          for (; j < usages.length; j++) {
+            final Usage usage=usages[j];
+            final UsageInfo usageInfo=((UsageInfo2UsageAdapter)usage).getUsageInfo();
+            PsiFile otherPsiFile=usageInfo.getElement().getContainingFile();
+            if (!otherPsiFile.equals(psiFile)) {
+              break;
+            }
+            doReplace(replaceContext,usage);
+            replaceContext.getUsageView().removeUsage(usage);
+          }
+          if (j == usages.length) {
+            replaceContext.getUsageView().close();
+          }
+          nextNumber[0]=j;
+        }
+      }
+;
+      CommandProcessor.getInstance().executeCommand(myProject,runnable,"Replace",null);
+      i=nextNumber[0] - 1;
+    }
+    if (result == PromptResult.ALL_FILES) {
+      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+        public void run(){
+          for (int i=0; i < usages.length; ++i) {
+            doReplace(replaceContext,usages[i]);
+          }
+          replaceContext.getUsageView().close();
+        }
+      }
+,"Replace",null);
+      break;
+    }
+  }
+}

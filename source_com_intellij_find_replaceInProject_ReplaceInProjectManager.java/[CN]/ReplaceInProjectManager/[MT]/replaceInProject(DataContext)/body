@@ -17,45 +17,55 @@
   if (!findModel.isProjectScope() && psiDirectory == null && findModel.getModuleName() == null) {
     return;
   }
-class AsyncFindUsagesCommandImpl implements AsyncFindUsagesCommand {
-    ReplaceInProjectViewDescriptor viewDescriptor;
-    UsageView usagesPanel;
-    ProgressIndicator progress;
-    public void findUsages(    final AsyncFindUsagesProcessListener consumer){
-      progress=new FindProgressIndicator(myProject,FindInProjectUtil.getTitleForScope(findModel));
-      final Runnable findUsagesRunnable=new Runnable(){
-        public void run(){
-          FindInProjectUtil.findUsages(findManager.getFindInProjectModel(),psiDirectory,myProject,consumer);
-        }
-      }
-;
-      final Runnable showUsagesPanelRunnable=new Runnable(){
-        public void run(){
-          myIsFindInProgress=false;
-          if (consumer.getCount() != 0 && findManager.getFindInProjectModel().isPromptOnReplace()) {
-            replaceWithPrompt(usagesPanel,viewDescriptor);
+  com.intellij.usages.UsageViewManager manager=myProject.getComponent(com.intellij.usages.UsageViewManager.class);
+  if (manager != null) {
+    final UsageViewPresentation presentation=FindInProjectUtil.setupViewPresentation(true,findModel);
+    final ReplaceContext context[]=new ReplaceContext[1];
+    manager.searchAndShowUsages(new UsageTarget[]{new FindInProjectUtil.StringUsageTarget(findModel.getStringToFind())},new Factory<UsageSearcher>(){
+      public UsageSearcher create(){
+        return new UsageSearcher(){
+          public void generate(          final Processor<Usage> processor){
+            myIsFindInProgress=true;
+            FindInProjectUtil.findUsages(findModel,psiDirectory,myProject,new AsyncFindUsagesProcessListener(){
+              int count;
+              public void foundUsage(              UsageInfo info){
+                ++count;
+                processor.process(new UsageInfo2UsageAdapter(info));
+              }
+              public void findUsagesCompleted(){
+              }
+              public int getCount(){
+                return count;
+              }
+            }
+);
+            myIsFindInProgress=false;
           }
         }
-      }
 ;
-      Runnable showUsagesPanelRunnable1=new Runnable(){
-        public void run(){
-          SwingUtilities.invokeLater(showUsagesPanelRunnable);
+      }
+    }
+,true,true,presentation,new Factory<ProgressIndicator>(){
+      public ProgressIndicator create(){
+        return new FindProgressIndicator(myProject,FindInProjectUtil.getTitleForScope(findModel));
+      }
+    }
+,new UsageViewManager.UsageViewStateListener(){
+      public void usageViewCreated(      UsageView usageView){
+        context[0]=new ReplaceContext(usageView,findModel);
+        addReplaceActions(context[0]);
+      }
+      public void findingUsagesFinished(){
+        if (context[0] != null && findManager.getFindInProjectModel().isPromptOnReplace()) {
+          SwingUtilities.invokeLater(new Runnable(){
+            public void run(){
+              replaceWithPrompt(context[0]);
+            }
+          }
+);
         }
       }
-;
-      myIsFindInProgress=true;
-      findManager.getFindInProjectModel().copyFrom(findModel);
-      FindInProjectUtil.runProcessWithProgress(progress,findUsagesRunnable,showUsagesPanelRunnable1,myProject);
     }
-    public void stopAsyncSearch(){
-      progress.cancel();
-    }
+);
   }
-  ;
-  AsyncFindUsagesCommandImpl findUsagesCommand=new AsyncFindUsagesCommandImpl();
-  ReplaceInProjectViewDescriptor viewDescriptor=new ReplaceInProjectViewDescriptor(findModel,findUsagesCommand);
-  UsageView usagesPanel=showUsagesPanel(viewDescriptor);
-  findUsagesCommand.viewDescriptor=viewDescriptor;
-  findUsagesCommand.usagesPanel=usagesPanel;
 }
