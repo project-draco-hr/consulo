@@ -1,0 +1,84 @@
+{
+  if (!file.isWritable()) {
+    if (!RefactoringMessageUtil.checkReadOnlyStatus(project,file))     return;
+  }
+  String localName=local.getName();
+  final PsiExpression initializer=local.getInitializer();
+  if (initializer == null) {
+    String message="Cannot perform the refactoring.\n" + "Variable " + localName + " has no initializer.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.REPLACE_TEMP_WITH_QUERY,project);
+    return;
+  }
+  PsiSearchHelper searchHelper=PsiManager.getInstance(project).getSearchHelper();
+  final PsiReference[] refs=searchHelper.findReferences(local,GlobalSearchScope.projectScope(project),false);
+  if (refs.length == 0) {
+    String message="Variable " + localName + " is never used";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.REPLACE_TEMP_WITH_QUERY,project);
+    return;
+  }
+  final HighlightManager highlightManager=HighlightManager.getInstance(project);
+  ArrayList<PsiReference> array=new ArrayList<PsiReference>();
+  EditorColorsManager manager=EditorColorsManager.getInstance();
+  final TextAttributes attributes=manager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+  for (int idx=0; idx < refs.length; idx++) {
+    PsiReference ref=refs[idx];
+    PsiElement refElement=ref.getElement();
+    if (PsiUtil.isAccessedForWriting((PsiExpression)refElement)) {
+      array.add(ref);
+    }
+    if (array.size() > 0) {
+      PsiReference[] refsForWriting=array.toArray(new PsiReference[array.size()]);
+      highlightManager.addOccurrenceHighlights(editor,refsForWriting,attributes,true,null);
+      String message="Cannot perform the refactoring.\n" + "Variable " + localName + " is accessed for writing.";
+      RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.REPLACE_TEMP_WITH_QUERY,project);
+      WindowManager.getInstance().getStatusBar(project).setInfo("Press Escape to remove the highlighting");
+      return;
+    }
+  }
+  final ExtractMethodProcessor processor=new ExtractMethodProcessor(project,editor,file,new PsiElement[]{initializer},local.getType(),REFACTORING_NAME,localName,HelpID.REPLACE_TEMP_WITH_QUERY);
+  try {
+    if (!processor.prepare())     return;
+  }
+ catch (  PrepareFailedException e) {
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,e.getMessage(),HelpID.REPLACE_TEMP_WITH_QUERY,project);
+    ExtractMethodHandler.highlightPrepareError(e,file,editor,project);
+    return;
+  }
+  final PsiClass targetClass=processor.getTargetClass();
+  if (targetClass != null && targetClass.isInterface()) {
+    String message="Cannot replace temp with query in interface.";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.REPLACE_TEMP_WITH_QUERY,project);
+    return;
+  }
+  if (processor.showDialog()) {
+    CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+      public void run(){
+        final Runnable action=new Runnable(){
+          public void run(){
+            try {
+              processor.doRefactoring();
+              local.normalizeDeclaration();
+              PsiExpression initializer=local.getInitializer();
+              PsiExpression[] exprs=new PsiExpression[refs.length];
+              for (int idx=0; idx < refs.length; idx++) {
+                PsiElement ref=refs[idx].getElement();
+                exprs[idx]=(PsiExpression)ref.replace(initializer);
+              }
+              PsiDeclarationStatement declaration=(PsiDeclarationStatement)local.getParent();
+              declaration.delete();
+              highlightManager.addOccurrenceHighlights(editor,exprs,attributes,true,null);
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+        }
+;
+        ApplicationManager.getApplication().runWriteAction(action);
+      }
+    }
+,REFACTORING_NAME,null);
+    DuplicatesImpl.processDuplicates(processor,project,editor,REFACTORING_NAME);
+  }
+  WindowManager.getInstance().getStatusBar(project).setInfo("Press Escape to remove the highlighting");
+}
