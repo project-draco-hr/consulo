@@ -1,43 +1,42 @@
 {
-  PsiManager manager=aClass.getManager();
   PsiFile file=aClass.getContainingFile();
   PsiDirectory newDirectory=moveDestination.getTargetDirectory(file);
-  if (!newDirectory.equals(file.getContainingDirectory())) {
-    manager.moveFile(file,newDirectory);
-    if (file instanceof PsiJavaFile) {
-      PsiPackage newPackage=newDirectory.getPackage();
-      PsiJavaFile javaFile=(PsiJavaFile)file;
-      PsiPackageStatement packageStatement=javaFile.getPackageStatement();
-      String packageName=newPackage.getQualifiedName();
-      if (packageStatement != null) {
-        if (packageName.length() > 0) {
-          packageStatement.getPackageReference().bindToElement(newPackage);
-        }
+  PsiClass newClass;
+  if (file instanceof PsiJavaFile && ((PsiJavaFile)file).getClasses().length > 1) {
+    shortenSelfReferences(aClass);
+    final PsiClass created=newDirectory.createClass(aClass.getName());
+    if (aClass.getDocComment() == null && created.getDocComment() != null) {
+      aClass.addAfter(created.getDocComment(),null);
+    }
+    newClass=(PsiClass)created.replace(aClass);
+    aClass.delete();
+  }
  else {
-          packageStatement.delete();
-        }
-      }
- else {
-        if (packageName.length() > 0) {
-          file.add(manager.getElementFactory().createPackageStatement(packageName));
-        }
+    newClass=aClass;
+    if (!newDirectory.equals(file.getContainingDirectory())) {
+      aClass.getManager().moveFile(file,newDirectory);
+      if (file instanceof PsiJavaFile) {
+        setPackageStatement((PsiJavaFile)file,newDirectory.getPackage());
       }
     }
   }
-  for (int i=0; i < usages.length; i++) {
-    MoveRenameUsageInfo usage=(MoveRenameUsageInfo)usages[i];
-    if (usage.getElement() == null || !usage.getElement().isValid())     continue;
-    PsiReference reference=usage.reference;
-    if (reference != null) {
-      PsiElement parent=reference.getElement().getParent();
-      if (parent instanceof PsiImportStatement) {
-        if (parent.getContainingFile().getContainingDirectory().equals(newDirectory)) {
-          parent.delete();
-          continue;
+  if (!newDirectory.equals(file.getContainingDirectory())) {
+    for (int i=0; i < usages.length; i++) {
+      MoveRenameUsageInfo usage=(MoveRenameUsageInfo)usages[i];
+      if (usage.getElement() == null)       continue;
+      PsiReference reference=usage.reference;
+      if (reference != null) {
+        PsiElement parent=reference.getElement().getParent();
+        if (parent instanceof PsiImportStatement) {
+          if (parent.getContainingFile().getContainingDirectory().equals(newDirectory)) {
+            parent.delete();
+            continue;
+          }
         }
+        reference.bindToElement(newClass);
       }
-      reference.bindToElement(aClass);
     }
+    return newClass;
   }
   return aClass;
 }
