@@ -1,20 +1,12 @@
 {
-  final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
-  if (progressIndicator != null)   progressIndicator.startNonCancelableSection();
-  final PsiDocumentManagerImpl manager=(PsiDocumentManagerImpl)PsiDocumentManager.getInstance(myPomProject.getPsiProject());
-  final PsiToDocumentSynchronizer synchronizer=manager.getSynchronizer();
-  Document document=null;
-  try {
 synchronized (PsiLock.LOCK) {
-      if (transaction.getChangeScope().getContainingFile() != null) {
-        document=manager.getCachedDocument(transaction.getChangeScope().getContainingFile());
-      }
-      myBlockedAspects.push(aspect);
-      if (document != null)       synchronizer.startTransaction(document,transaction.getChangeScope());
+    startTransaction(transaction);
+    try {
       final PomModelEvent event;
+      myBlockedAspects.push(new Pair<PomModelAspect,PomTransaction>(aspect,transaction));
       try {
-        event=transaction.run();
-        if (event == null)         return;
+        transaction.run();
+        event=transaction.getAccumulatedEvent();
       }
  catch (      IncorrectOperationException ioe) {
         return;
@@ -22,13 +14,24 @@ synchronized (PsiLock.LOCK) {
  finally {
         myBlockedAspects.pop();
       }
-      if (myBlockedAspects.contains(aspect))       return;
-      final List<PomModelAspect> dependants=getAllDependants(aspect);
+      final Pair<PomModelAspect,PomTransaction> block=getBlockingTransaction(aspect,transaction);
+      if (block != null) {
+        final PomModelEvent currentEvent=block.getSecond().getAccumulatedEvent();
+        currentEvent.merge(event);
+        return;
+      }
 {
+        final Set<PomModelAspect> changedAspects=event.getChangedAspects();
+        final Set<PomModelAspect> dependants=new HashSet<PomModelAspect>();
+        final Iterator<PomModelAspect> changedIterator=changedAspects.iterator();
+        while (changedIterator.hasNext()) {
+          final PomModelAspect pomModelAspect=changedIterator.next();
+          dependants.addAll(getAllDependants(pomModelAspect));
+        }
         final Iterator<PomModelAspect> depsIter=dependants.iterator();
         while (depsIter.hasNext()) {
           final PomModelAspect modelAspect=depsIter.next();
-          if (myBlockedAspects.contains(modelAspect))           continue;
+          if (myBlockedAspects.contains(modelAspect) || changedAspects.contains(modelAspect))           continue;
           modelAspect.update(event);
         }
       }
@@ -37,9 +40,8 @@ synchronized (PsiLock.LOCK) {
         for (int i=0; i < listeners.length; i++)         listeners[i].modelChanged(event);
       }
     }
-  }
   finally {
-    if (document != null)     synchronizer.commitTransaction(document);
-    if (progressIndicator != null)     progressIndicator.finishNonCancelableSection();
+      commitTransaction(transaction);
+    }
   }
 }

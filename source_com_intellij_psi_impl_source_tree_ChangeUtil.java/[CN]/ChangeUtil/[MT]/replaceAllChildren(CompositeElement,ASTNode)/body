@@ -1,56 +1,29 @@
 {
-  int offset=parent.getStartOffset();
-  int oldLength=parent.getTextLength();
-  int newLength=newChildrenParent.getTextLength();
-  PsiTreeChangeEventImpl event=null;
-  PsiElement parentPsiElement=SourceTreeToPsiMap.treeElementToPsi(parent);
-  boolean physical=parentPsiElement.isPhysical();
-  PsiFile file=parentPsiElement.getContainingFile();
-  ChameleonTransforming.transformChildren(newChildrenParent);
+  transformAll((TreeElement)parent.getFirstChildNode());
+  transformAll((TreeElement)newChildrenParent.getFirstChildNode());
+  final CharTable newCharTab=SharedImplUtil.findCharTableByTree(parent);
+  final CharTable oldCharTab=SharedImplUtil.findCharTableByTree(newChildrenParent);
   final ASTNode firstChild=newChildrenParent.getFirstChildNode();
-  if (physical) {
-    PsiManagerImpl manager=(PsiManagerImpl)parent.getManager();
-    manager.invalidateFile(file);
-    event=new PsiTreeChangeEventImpl(manager);
-    event.setParent(parentPsiElement);
-    event.setFile(file);
-    event.setOffset(offset);
-    event.setOldLength(oldLength);
-    manager.beforeChildrenChange(event);
-    VirtualFile vFile=file.getVirtualFile();
-    if (vFile != null) {
-      RepositoryManager repositoryManager=manager.getRepositoryManager();
-      if (repositoryManager != null) {
-        ChameleonTransforming.transformChildren(parent);
-        for (ASTNode child=parent.getFirstChildNode(); child != null; child=child.getTreeNext()) {
-          repositoryManager.beforeChildAddedOrRemoved(file,parent,child);
+  removeChildrenInner((TreeElement)newChildrenParent.getFirstChildNode(),null,oldCharTab);
+  if (firstChild != null) {
+    registerLeafsInCharTab(newCharTab,firstChild,oldCharTab);
+    prepareAndRunChangeAction(new ChangeAction(){
+      public void makeChange(      TreeChangeEvent destinationTreeChange){
+        if (parent.getTreeParent() != null) {
+          final ChangeInfoImpl changeInfo=ChangeInfoImpl.create(ChangeInfo.CONTENTS_CHANGED,parent,newCharTab);
+          changeInfo.setOldLength(parent.getTextLength());
+          destinationTreeChange.addElementaryChange(parent,changeInfo);
+          TreeUtil.removeRange((TreeElement)parent.getFirstChildNode(),null);
+          TreeUtil.addChildren(parent,(TreeElement)firstChild);
         }
-        for (ASTNode child=firstChild; child != null; child=child.getTreeNext()) {
-          repositoryManager.beforeChildAddedOrRemoved(file,parent,child);
+ else {
+          final TreeElement first=(TreeElement)parent.getFirstChildNode();
+          remove(destinationTreeChange,newCharTab,first,null);
+          add(destinationTreeChange,newCharTab,parent,(TreeElement)firstChild);
+          repairRemovedElement(parent,newCharTab,first);
         }
       }
     }
+,parent);
   }
-  final CharTable newCharTab=SharedImplUtil.findCharTableByTree(parent);
-  ASTNode oldChild=parent.getFirstChildNode();
-  while (oldChild != null) {
-    oldChild.putUserData(CharTable.CHAR_TABLE_KEY,newCharTab);
-    oldChild=oldChild.getTreeNext();
-  }
-  TreeUtil.removeRange((TreeElement)parent.getFirstChildNode(),null);
-  if (firstChild != null) {
-    final CharTable oldCharTab=SharedImplUtil.findCharTableByTree(newChildrenParent);
-    registerLeafsInCharTab(newCharTab,firstChild,oldCharTab);
-    TreeUtil.addChildren(parent,(TreeElement)firstChild);
-  }
-  parent.setCachedLength(newLength);
-  parent.subtreeChanged();
-  PsiManagerImpl manager=(PsiManagerImpl)parent.getManager();
-  if (physical) {
-    manager.childrenChanged(event);
-  }
- else   if (manager != null) {
-    manager.nonPhysicalChange();
-  }
-  checkConsistency(file);
 }
