@@ -9,22 +9,43 @@
     final PsiCodeBlock body=methodCopy.getBody();
     if (body != null) {
       body.accept(new PsiRecursiveElementVisitor(){
+        public void visitThisExpression(        PsiThisExpression expression){
+          final PsiClass classReferencedByThis=MoveMethodUtil.getClassReferencedByThis(expression);
+          if (classReferencedByThis != null) {
+            final PsiElementFactory factory=PsiManager.getInstance(myProject).getElementFactory();
+            String paramName=getParameterNameToCreate(classReferencedByThis);
+            try {
+              final PsiExpression refExpression=factory.createExpressionFromText(paramName,null);
+              expression.replace(refExpression);
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+        }
         public void visitReferenceExpression(        PsiReferenceExpression expression){
           try {
             final PsiExpression qualifier=expression.getQualifierExpression();
             if (qualifier instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifier).isReferenceTo(variableCopy)) {
               qualifier.delete();
+              return;
             }
  else {
               final PsiElement resolved=expression.resolve();
               if (variableCopy.equals(resolved)) {
                 PsiThisExpression thisExpression=(PsiThisExpression)factory.createExpressionFromText("this",null);
                 expression.replace(thisExpression);
+                return;
               }
- else               if (MoveMethodUtil.isClassInstanceReference(expression,methodCopy.getContainingClass())) {
-                PsiReferenceExpression qualified=(PsiReferenceExpression)factory.createExpressionFromText(myOldClassParameterName + ".f",null);
-                qualified.getReferenceNameElement().replace(expression.getReferenceNameElement());
-                expression.replace(qualified);
+ else {
+                PsiClass classReferencedByThis=MoveMethodUtil.getClassReferencedByThis(expression);
+                if (classReferencedByThis != null) {
+                  final String paramName=getParameterNameToCreate(classReferencedByThis);
+                  PsiReferenceExpression qualified=(PsiReferenceExpression)factory.createExpressionFromText(paramName + ".f",null);
+                  qualified.getReferenceNameElement().replace(expression.getReferenceNameElement());
+                  expression.replace(qualified);
+                  return;
+                }
               }
             }
             super.visitReferenceExpression(expression);
@@ -40,10 +61,12 @@
               qualifier.delete();
             }
  else {
-              if (MoveMethodUtil.isClassInstanceReference(expression,methodCopy.getContainingClass())) {
+              final PsiClass classReferencedByThis=MoveMethodUtil.getClassReferencedByThis(expression);
+              if (classReferencedByThis != null) {
                 if (qualifier != null)                 qualifier.delete();
-                final PsiExpression newExpression=factory.createExpressionFromText(myOldClassParameterName + "." + expression.getText(),null);
-                expression.replace(newExpression);
+                final String paramName=getParameterNameToCreate(classReferencedByThis);
+                final PsiExpression newExpression=factory.createExpressionFromText(paramName + "." + expression.getText(),null);
+                expression=(PsiNewExpression)expression.replace(newExpression);
               }
             }
             super.visitNewExpression(expression);
@@ -53,9 +76,7 @@
           }
         }
         public void visitMethodCallExpression(        PsiMethodCallExpression expression){
-          if (expression.getMethodExpression().isReferenceTo(myMethod)) {
-            correctMethodCall(expression,true);
-          }
+          correctMethodCall(expression,true);
           super.visitMethodCallExpression(expression);
         }
       }
@@ -66,11 +87,7 @@
       final int index=myMethod.getParameterList().getParameterIndex((PsiParameter)myTargetVariable);
       methodCopy.getParameterList().getParameters()[index].delete();
     }
-    if (myOldThisNeeded) {
-      final PsiClassType type=factory.createType(myMethod.getContainingClass());
-      final PsiParameter parameter=factory.createParameter(myOldClassParameterName,type);
-      methodCopy.getParameterList().add(parameter);
-    }
+    addParameters(factory,methodCopy);
     final List<PsiParameter> newParameters=Arrays.asList(methodCopy.getParameterList().getParameters());
     RefactoringUtil.fixJavadocsForParams(methodCopy,new HashSet<PsiParameter>(newParameters));
   }
