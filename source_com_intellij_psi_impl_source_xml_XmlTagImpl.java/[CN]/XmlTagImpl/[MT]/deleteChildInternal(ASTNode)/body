@@ -8,34 +8,32 @@
     final ASTNode treeNext=child.getTreeNext();
     if (child.getElementType() != XmlElementType.XML_TEXT) {
       if (treePrev.getElementType() == XmlElementType.XML_TEXT && treeNext.getElementType() == XmlElementType.XML_TEXT) {
-        final XmlText xmlText=((XmlText)SourceTreeToPsiMap.treeElementToPsi(treePrev));
-        xmlText.add(SourceTreeToPsiMap.treeElementToPsi(treeNext));
+        final XmlTextImpl xmlText=(XmlTextImpl)SourceTreeToPsiMap.treeElementToPsi(treePrev);
         model.runTransaction(new PomTransactionBase(this){
-          public PomModelEvent run(){
-            final PomModelEvent event=new PomModelEvent(model);
-            final XmlAspectChangeSet xmlAspectChangeSet=new XmlAspectChangeSet(model,(XmlFile)getContainingFile());
-            xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)treeNext));
-            xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)child));
-            event.registerChangeSet(model.getModelAspect(XmlAspect.class),xmlAspectChangeSet);
+          public PomModelEvent run() throws IncorrectOperationException {
+            final int displayOffset=xmlText.getValue().length();
+            xmlText.insertText(((XmlText)treeNext).getValue(),displayOffset);
             removeChild(treeNext);
             removeChild(child);
+{
+              final LeafElement leafElementAt=xmlText.findLeafElementAt(displayOffset);
+              if (leafElementAt != null && leafElementAt.getElementType() == XmlTokenType.XML_WHITE_SPACE) {
+                final String wsText=CodeEditUtil.getWhiteSpaceBetweenTokens(ParseUtil.prevLeaf(leafElementAt,null),ParseUtil.nextLeaf(leafElementAt,null),getLanguage());
+                final LeafElement newWhitespace=Factory.createSingleLeafElement(XmlTokenType.XML_WHITE_SPACE,wsText.toCharArray(),0,wsText.length(),null,null);
+                xmlText.replaceChild(leafElementAt,newWhitespace);
+              }
+            }
+            final PomModelEvent event=new PomModelEvent(model);
+{
+              final XmlAspectChangeSet xmlAspectChangeSet=new XmlAspectChangeSet(model,(XmlFile)getContainingFile());
+              xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)treeNext));
+              xmlAspectChangeSet.add(new XmlTagChildRemoved(XmlTagImpl.this,(XmlTagChild)child));
+              event.registerChangeSet(model.getModelAspect(XmlAspect.class),xmlAspectChangeSet);
+            }
             return event;
           }
         }
 ,aspect);
-        if (fileType != StdFileTypes.XHTML) {
-          model.runTransaction(new PomTransactionBase(this){
-            public PomModelEvent run() throws IncorrectOperationException {
-              final Project project=getProject();
-              CodeStyleManager instance=CodeStyleManager.getInstance(project);
-              instance.reformat(XmlTagImpl.this);
-              XmlElement parent=getParent();
-              if (parent instanceof XmlTag)               return XmlTagChildChanged.createXmlTagChildChanged(model,(XmlTag)parent,XmlTagImpl.this);
- else               return XmlDocumentChanged.createXmlDocumentChanged(model,(XmlDocument)parent);
-            }
-          }
-,aspect);
-        }
         return;
       }
     }
