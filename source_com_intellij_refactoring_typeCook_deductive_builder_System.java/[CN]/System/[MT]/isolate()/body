@@ -1,77 +1,95 @@
 {
 class Node {
-    int myVar;
     int myComponent=-1;
+    Constraint myConstraint;
     HashSet<Node> myNeighbours=new HashSet<Node>();
-    public Node(    int var){
-      myVar=var;
+    public Node(){
+      myConstraint=null;
+    }
+    public Node(    final Constraint c){
+      myConstraint=c;
+    }
+    public Constraint getConstraint(){
+      return myConstraint;
     }
     public void addEdge(    final Node n){
       if (!myNeighbours.contains(n)) {
         myNeighbours.add(n);
+        n.addEdge(this);
       }
-    }
-    public boolean equals(    Object o){
-      if (this == o)       return true;
-      if (!(o instanceof Node))       return false;
-      final Node node=(Node)o;
-      if (myVar != node.myVar)       return false;
-      return true;
-    }
-    public int hashCode(){
-      return myVar;
     }
   }
-  final Node[] nodes=new Node[myTypeVariableFactory.getNumber()];
-  for (int i=0; i < nodes.length; i++) {
-    nodes[i]=new Node(i);
+  final Node[] typeVariableNodes=new Node[myTypeVariableFactory.getNumber()];
+  final Node[] constraintNodes=new Node[myConstraints.size()];
+  final HashMap<Constraint,HashSet<PsiTypeVariable>> boundVariables=new HashMap<Constraint,HashSet<PsiTypeVariable>>();
+  for (int i=0; i < typeVariableNodes.length; i++) {
+    typeVariableNodes[i]=new Node();
   }
-  final HashMap<Constraint,Integer> constraintVar=new HashMap<Constraint,Integer>();
-  for (Iterator<Constraint> i=myConstraints.iterator(); i.hasNext(); ) {
-    final HashSet<Integer> boundVariables=new HashSet<Integer>();
-    new Object(){
-      private Constraint myCurrent;
-      void visit(      final Constraint c){
-        myCurrent=c;
-        visit(c.getLeft());
-        visit(c.getRight());
-      }
-      private void visit(      final PsiType t){
-        if (t instanceof PsiTypeVariable) {
-          final Integer index=new Integer(((PsiTypeVariable)t).getIndex());
-          boundVariables.add(index);
-          if (constraintVar.get(myCurrent) == null) {
-            constraintVar.put(myCurrent,index);
-          }
-        }
- else         if (t instanceof PsiArrayType) {
-          visit(((PsiArrayType)t).getDeepComponentType());
-        }
- else         if (t instanceof PsiClassType) {
-          final PsiSubstitutor subst=Util.resolveType(t).getSubstitutor();
-          for (Iterator<PsiType> j=subst.getSubstitutionMap().values().iterator(); j.hasNext(); ) {
-            visit(j.next());
-          }
-        }
- else         if (t instanceof PsiTypeIntersection) {
-          visit(((PsiTypeIntersection)t).getLeft());
-          visit(((PsiTypeIntersection)t).getRight());
-        }
-      }
+{
+    int j=0;
+    for (Iterator<Constraint> c=myConstraints.iterator(); c.hasNext(); ) {
+      constraintNodes[j++]=new Node(c.next());
     }
-.visit(i.next());
-    final Integer[] bound=boundVariables.toArray(new Integer[]{});
-    for (int j=0; j < bound.length; j++) {
-      final int x=bound[j].intValue();
-      for (int k=j + 1; k < bound.length; k++) {
-        final int y=bound[k].intValue();
-        nodes[x].addEdge(nodes[y]);
+  }
+{
+    int l=0;
+    for (Iterator<Constraint> i=myConstraints.iterator(); i.hasNext(); ) {
+      final HashSet<PsiTypeVariable> boundVars=new HashSet<PsiTypeVariable>();
+      final Constraint constraint=i.next();
+      final Node constraintNode=constraintNodes[l++];
+      new Object(){
+        void visit(        final Constraint c){
+          visit(c.getLeft());
+          visit(c.getRight());
+        }
+        private void visit(        final PsiType t){
+          if (t instanceof PsiTypeVariable) {
+            boundVars.add((PsiTypeVariable)t);
+          }
+ else           if (t instanceof PsiArrayType) {
+            visit(((PsiArrayType)t).getDeepComponentType());
+          }
+ else           if (t instanceof PsiClassType) {
+            final PsiSubstitutor subst=Util.resolveType(t).getSubstitutor();
+            for (Iterator<PsiType> j=subst.getSubstitutionMap().values().iterator(); j.hasNext(); ) {
+              visit(j.next());
+            }
+          }
+ else           if (t instanceof PsiTypeIntersection) {
+            visit(((PsiTypeIntersection)t).getLeft());
+            visit(((PsiTypeIntersection)t).getRight());
+          }
+        }
       }
+.visit(constraint);
+      final PsiTypeVariable[] bound=boundVars.toArray(new PsiTypeVariable[]{});
+      for (int j=0; j < bound.length; j++) {
+        final int x=bound[j].getIndex();
+        final Node typeVariableNode=typeVariableNodes[x];
+        typeVariableNode.addEdge(constraintNode);
+        for (int k=j + 1; k < bound.length; k++) {
+          final int y=bound[k].getIndex();
+          typeVariableNode.addEdge(typeVariableNodes[y]);
+        }
+      }
+      boundVariables.put(constraint,boundVars);
+    }
+  }
+  final LinkedList<HashSet<PsiTypeVariable>> clusters=myTypeVariableFactory.getClusters();
+  for (final Iterator<HashSet<PsiTypeVariable>> c=clusters.iterator(); c.hasNext(); ) {
+    final HashSet<PsiTypeVariable> cluster=c.next();
+    Node prev=null;
+    for (final Iterator<PsiTypeVariable> v=cluster.iterator(); v.hasNext(); ) {
+      final Node curr=typeVariableNodes[v.next().getIndex()];
+      if (prev != null) {
+        prev.addEdge(curr);
+      }
+      prev=curr;
     }
   }
   int currComponent=0;
-  for (int i=0; i < nodes.length; i++) {
-    final Node node=nodes[i];
+  for (int i=0; i < typeVariableNodes.length; i++) {
+    final Node node=typeVariableNodes[i];
     if (node.myComponent == -1) {
       final int component=currComponent;
       new Object(){
@@ -95,14 +113,14 @@ class Node {
     }
   }
   final System[] systems=new System[currComponent];
-  for (Iterator<Constraint> c=myConstraints.iterator(); c.hasNext(); ) {
-    final Constraint constraint=c.next();
-    final Integer variable=constraintVar.get(constraint);
-    final int index=nodes[variable.intValue()].myComponent;
+  for (int i=0; i < constraintNodes.length; i++) {
+    final Node node=constraintNodes[i];
+    final Constraint constraint=node.getConstraint();
+    final int index=node.myComponent;
     if (systems[index] == null) {
-      systems[index]=new System(myElements,myTypes,myTypeVariableFactory);
+      systems[index]=new System(myProject,myElements,myTypes,myTypeVariableFactory);
     }
-    systems[index].addConstraint(constraint);
+    systems[index].addConstraint(constraint,boundVariables.get(constraint));
   }
   return systems;
 }

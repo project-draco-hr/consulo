@@ -1,0 +1,116 @@
+{
+  if (myConstraints.size() == 0) {
+    return;
+  }
+  if (myCurrentBinding.isCyclic()) {
+    reduceCyclicVariables();
+  }
+  final HashMap<PsiTypeVariable,Constraint> myTypeVarConstraints=new HashMap<PsiTypeVariable,Constraint>();
+  final HashMap<PsiTypeVariable,Constraint> myVarTypeConstraints=new HashMap<PsiTypeVariable,Constraint>();
+  for (Iterator<Constraint> i=myConstraints.iterator(); i.hasNext(); ) {
+    final Constraint constr=i.next();
+    final PsiType left=constr.getLeft();
+    final PsiType right=constr.getRight();
+switch ((left instanceof PsiTypeVariable ? 0 : 1) + (right instanceof PsiTypeVariable ? 0 : 2)) {
+case 0:
+      continue;
+case 1:
+{
+      final Constraint c=myTypeVarConstraints.get(right);
+      if (c == null) {
+        final Constraint d=myVarTypeConstraints.get(right);
+        if (d != null) {
+          reduceInterval(constr,d);
+          return;
+        }
+        myTypeVarConstraints.put((PsiTypeVariable)right,constr);
+      }
+ else {
+        reduceTypeVar(constr,c);
+        return;
+      }
+    }
+  break;
+case 2:
+{
+  final Constraint c=myVarTypeConstraints.get(left);
+  if (c == null) {
+    final Constraint d=myTypeVarConstraints.get(left);
+    if (d != null) {
+      reduceInterval(d,constr);
+      return;
+    }
+    myVarTypeConstraints.put((PsiTypeVariable)left,constr);
+  }
+ else {
+    reduceVarType(constr,c);
+    return;
+  }
+  break;
+}
+case 3:
+reduceTypeType(constr);
+return;
+}
+}
+for (final Iterator<Constraint> c=myConstraints.iterator(); c.hasNext(); ) {
+final Constraint constr=c.next();
+final PsiType left=constr.getLeft();
+final PsiType right=constr.getRight();
+if (!(left instanceof PsiTypeVariable) && right instanceof PsiTypeVariable) {
+final PsiType leftType=left instanceof PsiWildcardType ? ((PsiWildcardType)left).getBound() : left;
+final PsiManager manager=PsiManager.getInstance(myProject);
+final PsiType[] types=getTypeRange(PsiType.getJavaLangObject(manager,GlobalSearchScope.allScope(myProject)),leftType);
+mySons=new ResolverTree[types.length];
+if (types.length > 0) {
+myConstraints.remove(constr);
+}
+for (int i=0; i < types.length; i++) {
+final PsiType type=types[i];
+mySons[i]=applyRule(myBindingFactory.create(((PsiTypeVariable)right),type));
+}
+return;
+}
+}
+final HashSet<PsiTypeVariable> haveLeftBound=new HashSet<PsiTypeVariable>();
+Constraint target=null;
+final HashSet<PsiTypeVariable> boundVariables=new HashSet<PsiTypeVariable>();
+for (final Iterator<Constraint> c=myConstraints.iterator(); c.hasNext(); ) {
+final Constraint constr=c.next();
+final PsiType leftType=constr.getLeft();
+final PsiType rightType=constr.getRight();
+if (leftType instanceof PsiTypeVariable) {
+boundVariables.add((PsiTypeVariable)leftType);
+if (rightType instanceof PsiTypeVariable) {
+boundVariables.add((PsiTypeVariable)rightType);
+haveLeftBound.add(((PsiTypeVariable)rightType));
+}
+ else if (!Util.bindsTypeVariables(rightType)) {
+target=constr;
+}
+}
+ else {
+LOG.error("Must not happen");
+}
+}
+if (target == null) {
+Binding binding=myBindingFactory.create();
+for (final Iterator<PsiTypeVariable> v=myBindingFactory.getBoundVariables().iterator(); v.hasNext(); ) {
+final PsiTypeVariable var=v.next();
+if (!myCurrentBinding.binds(var) && !boundVariables.contains(var)) {
+binding=binding.compose(myBindingFactory.create(var,Bottom.BOTTOM));
+}
+}
+if (!binding.nonEmpty()) {
+myConstraints.clear();
+}
+mySons=new ResolverTree[]{applyRule(binding)};
+}
+ else {
+final PsiType type=target.getRight();
+final PsiTypeVariable var=(PsiTypeVariable)target.getLeft();
+final Binding binding=haveLeftBound.contains(var) ? myBindingFactory.create(var,type) : myBindingFactory.create(var,PsiWildcardType.createExtends(PsiManager.getInstance(myProject),type));
+myConstraints.remove(target);
+mySons=new ResolverTree[]{applyRule(binding)};
+}
+}

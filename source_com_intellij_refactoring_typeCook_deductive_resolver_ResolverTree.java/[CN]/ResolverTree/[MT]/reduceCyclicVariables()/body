@@ -1,0 +1,87 @@
+{
+  final HashSet<PsiTypeVariable> nodes=new HashSet<PsiTypeVariable>();
+  final HashSet<Constraint> candidates=new HashSet<Constraint>();
+  final HashMap<PsiTypeVariable,HashSet<PsiTypeVariable>> ins=new HashMap<PsiTypeVariable,HashSet<PsiTypeVariable>>();
+  final HashMap<PsiTypeVariable,HashSet<PsiTypeVariable>> outs=new HashMap<PsiTypeVariable,HashSet<PsiTypeVariable>>();
+  for (Iterator<Constraint> c=myConstraints.iterator(); c.hasNext(); ) {
+    final Constraint constraint=c.next();
+    final PsiType left=constraint.getLeft();
+    final PsiType right=constraint.getRight();
+    if (left instanceof PsiTypeVariable && right instanceof PsiTypeVariable) {
+      final PsiTypeVariable leftVar=(PsiTypeVariable)left;
+      final PsiTypeVariable rightVar=(PsiTypeVariable)right;
+      candidates.add(constraint);
+      nodes.add(leftVar);
+      nodes.add(rightVar);
+      final HashSet<PsiTypeVariable> in=ins.get(leftVar);
+      final HashSet<PsiTypeVariable> out=outs.get(rightVar);
+      if (in == null) {
+        final HashSet<PsiTypeVariable> newIn=new HashSet<PsiTypeVariable>();
+        newIn.add(rightVar);
+        ins.put(leftVar,newIn);
+      }
+ else {
+        in.add(rightVar);
+      }
+      if (out == null) {
+        final HashSet<PsiTypeVariable> newOut=new HashSet<PsiTypeVariable>();
+        newOut.add(leftVar);
+        outs.put(rightVar,newOut);
+      }
+ else {
+        out.add(leftVar);
+      }
+    }
+  }
+  final DFSTBuilder<PsiTypeVariable> dfstBuilder=new DFSTBuilder<PsiTypeVariable>(new Graph<PsiTypeVariable>(){
+    public Collection<PsiTypeVariable> getNodes(){
+      return nodes;
+    }
+    public Iterator<PsiTypeVariable> getIn(    final PsiTypeVariable n){
+      final HashSet<PsiTypeVariable> in=ins.get(n);
+      if (in == null) {
+        return new HashSet<PsiTypeVariable>().iterator();
+      }
+      return in.iterator();
+    }
+    public Iterator<PsiTypeVariable> getOut(    final PsiTypeVariable n){
+      final HashSet<PsiTypeVariable> out=outs.get(n);
+      if (out == null) {
+        return new HashSet<PsiTypeVariable>().iterator();
+      }
+      return out.iterator();
+    }
+  }
+);
+  final LinkedList<Pair<Integer,Integer>> sccs=dfstBuilder.getSCCs();
+  final HashMap<PsiTypeVariable,Integer> index=new HashMap<PsiTypeVariable,Integer>();
+  for (Iterator<Pair<Integer,Integer>> i=sccs.iterator(); i.hasNext(); ) {
+    final Pair<Integer,Integer> p=i.next();
+    final Integer biT=p.getFirst();
+    final int binum=biT.intValue();
+    for (int j=0; j < p.getSecond().intValue(); j++) {
+      index.put(dfstBuilder.getNodeByTNumber(binum + j),biT);
+    }
+  }
+  for (Iterator<Constraint> c=candidates.iterator(); c.hasNext(); ) {
+    final Constraint constraint=c.next();
+    if (index.get(constraint.getLeft()).equals(index.get(constraint.getRight()))) {
+      myConstraints.remove(constraint);
+    }
+  }
+  Binding binding=myBindingFactory.create();
+  for (Iterator<PsiTypeVariable> v=index.keySet().iterator(); v.hasNext(); ) {
+    final PsiTypeVariable fromVar=v.next();
+    final PsiTypeVariable toVar=dfstBuilder.getNodeByNNumber(index.get(fromVar).intValue());
+    if (!fromVar.equals(toVar)) {
+      binding=binding.compose(myBindingFactory.create(fromVar,toVar));
+      if (binding == null) {
+        break;
+      }
+    }
+  }
+  if (binding != null && binding.nonEmpty()) {
+    myCurrentBinding=myCurrentBinding.compose(binding);
+    myConstraints=apply(binding,myConstraints);
+  }
+}

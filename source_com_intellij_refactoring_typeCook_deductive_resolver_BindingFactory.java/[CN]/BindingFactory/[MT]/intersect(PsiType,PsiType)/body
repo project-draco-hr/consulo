@@ -1,0 +1,61 @@
+{
+  final LinkedList<Pair<PsiType,Binding>> list=new LinkedList<Pair<PsiType,Binding>>();
+  new Object(){
+    void intersect(    final PsiType x,    final PsiType y,    final LinkedList<Pair<PsiType,Binding>> list){
+      if (x instanceof PsiWildcardType || y instanceof PsiWildcardType) {
+        final PsiType xType=x instanceof PsiWildcardType ? ((PsiWildcardType)x).getBound() : x;
+        final PsiType yType=y instanceof PsiWildcardType ? ((PsiWildcardType)y).getBound() : y;
+        intersect(xType,yType,list);
+      }
+      if (x instanceof PsiArrayType || y instanceof PsiArrayType) {
+        if (x instanceof PsiClassType || y instanceof PsiClassType) {
+          final PsiElementFactory f=PsiManager.getInstance(myProject).getElementFactory();
+          try {
+            list.addFirst(new Pair<PsiType,Binding>(f.createTypeFromText("java.lang.Object",null),create()));
+            list.addFirst(new Pair<PsiType,Binding>(f.createTypeFromText("java.lang.Cloneable",null),create()));
+            list.addFirst(new Pair<PsiType,Binding>(f.createTypeFromText("java.io.Serializable",null),create()));
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error("Exception " + e);
+          }
+        }
+ else         if (x instanceof PsiArrayType && y instanceof PsiArrayType) {
+          intersect(((PsiArrayType)x).getComponentType(),((PsiArrayType)y).getComponentType(),list);
+        }
+      }
+ else       if (x instanceof PsiClassType && y instanceof PsiClassType) {
+        final PsiClassType.ClassResolveResult xResult=Util.resolveType(x);
+        final PsiClassType.ClassResolveResult yResult=Util.resolveType(y);
+        final PsiClass xClass=xResult.getElement();
+        final PsiClass yClass=yResult.getElement();
+        final PsiSubstitutor xSubst=xResult.getSubstitutor();
+        final PsiSubstitutor ySubst=yResult.getSubstitutor();
+        if (xClass == null || yClass == null) {
+          return;
+        }
+        if (xClass.equals(yClass)) {
+          final Binding risen=rise(x,y);
+          if (risen == null) {
+            return;
+          }
+          list.addFirst(new Pair<PsiType,Binding>(risen.apply(x),risen));
+        }
+ else {
+          final PsiClass[] ancestors=GenericsUtil.getLeastUpperClasses(xClass,yClass);
+          for (int i=0; i < ancestors.length; i++) {
+            final PsiClass ancestor=ancestors[i];
+            if (ancestor.getQualifiedName().equals("java.lang.Object") && ancestors.length > 1) {
+              continue;
+            }
+            final PsiSubstitutor x2aSubst=TypeConversionUtil.getSuperClassSubstitutor(ancestor,xClass,xSubst);
+            final PsiSubstitutor y2aSubst=TypeConversionUtil.getSuperClassSubstitutor(ancestor,yClass,ySubst);
+            final PsiElementFactory factory=xClass.getManager().getElementFactory();
+            intersect(factory.createType(ancestor,x2aSubst),factory.createType(ancestor,y2aSubst),list);
+          }
+        }
+      }
+    }
+  }
+.intersect(x,y,list);
+  return list;
+}
