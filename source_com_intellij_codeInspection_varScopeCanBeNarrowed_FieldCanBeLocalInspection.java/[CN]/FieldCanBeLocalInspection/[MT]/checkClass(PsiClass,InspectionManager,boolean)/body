@@ -1,0 +1,58 @@
+{
+  PsiManager psiManager=aClass.getManager();
+  final Set<PsiField> candidates=new LinkedHashSet<PsiField>();
+  final PsiClass topLevelClass=PsiUtil.getTopLevelClass(aClass);
+  if (topLevelClass == null)   return null;
+  final PsiField[] fields=aClass.getFields();
+  NextField:   for (int i=0; i < fields.length; i++) {
+    PsiField field=fields[i];
+    if (field.hasModifierProperty(PsiModifier.PRIVATE)) {
+      final PsiReference[] refs=psiManager.getSearchHelper().findReferences(field,GlobalSearchScope.allScope(psiManager.getProject()),false);
+      for (int j=0; j < refs.length; j++) {
+        PsiElement element=refs[j].getElement();
+        while (element != null) {
+          if (element instanceof PsiMethod) {
+            candidates.add(field);
+            continue NextField;
+          }
+          element=PsiTreeUtil.getParentOfType(element,PsiMember.class);
+        }
+        continue NextField;
+      }
+    }
+  }
+  topLevelClass.accept(new PsiRecursiveElementVisitor(){
+    public void visitElement(    PsiElement element){
+      if (candidates.size() > 0)       super.visitElement(element);
+    }
+    public void visitMethod(    PsiMethod method){
+      super.visitMethod(method);
+      final PsiCodeBlock body=method.getBody();
+      if (body != null) {
+        try {
+          final ControlFlow controlFlow=ControlFlowFactory.getControlFlow(body,AllVariablesControlFlowPolicy.getInstance());
+          final List<PsiReferenceExpression> readBeforeWrite=ControlFlowUtil.getReadBeforeWrite(controlFlow);
+          for (Iterator<PsiReferenceExpression> iterator=readBeforeWrite.iterator(); iterator.hasNext(); ) {
+            final PsiElement resolved=iterator.next().resolve();
+            if (resolved instanceof PsiField) {
+              candidates.remove(resolved);
+            }
+          }
+        }
+ catch (        AnalysisCanceledException e) {
+          candidates.clear();
+        }
+      }
+    }
+  }
+);
+  if (candidates.isEmpty())   return null;
+  ProblemDescriptor[] result=new ProblemDescriptor[candidates.size()];
+  int i=0;
+  for (Iterator<PsiField> iterator=candidates.iterator(); iterator.hasNext(); i++) {
+    PsiField field=iterator.next();
+    final String message="Field can be converted to one or more local variables.";
+    result[i]=manager.createProblemDescriptor(field,message,new MyQuickFix(field),ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+  }
+  return result;
+}
