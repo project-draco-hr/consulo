@@ -1,0 +1,75 @@
+{
+  final ProjectFileIndex projectFileIndex=ProjectRootManager.getInstance(getProject()).getFileIndex();
+  getScope().accept(new PsiRecursiveElementVisitor(){
+    public void visitReferenceExpression(    PsiReferenceExpression expression){
+    }
+    public void visitFile(    PsiFile file){
+      if (file != null && file instanceof PsiJavaFile) {
+        PsiJavaFile psiJavaFile=(PsiJavaFile)file;
+        if (getScope().contains(psiJavaFile)) {
+          final PsiPackage aPackage=findPackage(psiJavaFile.getPackageName());
+          if (aPackage != null) {
+            myPackages.put(psiJavaFile.getPackageName(),aPackage);
+          }
+        }
+        final Set<PsiPackage> packs=getPackageHierarhy(psiJavaFile.getPackageName());
+        final ForwardDependenciesBuilder builder=new ForwardDependenciesBuilder(getProject(),new AnalysisScope(psiJavaFile,AnalysisScope.SOURCE_JAVA_FILES));
+        builder.setTotalFileCount(getScope().getFileCount());
+        builder.setInitialFileCount(++myFileCount);
+        builder.analyze();
+        final Set<PsiFile> psiFiles=builder.getDependencies().get(psiJavaFile);
+        for (Iterator<PsiPackage> iterator=packs.iterator(); iterator.hasNext(); ) {
+          PsiPackage pack=iterator.next();
+          Set<PsiPackage> pack2Packages=myPackageDependencies.get(pack);
+          if (pack2Packages == null) {
+            pack2Packages=new HashSet<PsiPackage>();
+            myPackageDependencies.put(pack,pack2Packages);
+          }
+          for (Iterator<PsiFile> it=psiFiles.iterator(); it.hasNext(); ) {
+            PsiFile psiFile=it.next();
+            if (!(psiFile instanceof PsiJavaFile) || !projectFileIndex.isInSourceContent(psiFile.getVirtualFile()) || !getScope().contains(psiFile)) {
+              continue;
+            }
+            Set<PsiFile> wholeDependencies=myForwardBuilder.getDependencies().get(psiJavaFile);
+            if (wholeDependencies == null) {
+              wholeDependencies=new HashSet<PsiFile>();
+              myForwardBuilder.getDependencies().put(psiJavaFile,wholeDependencies);
+            }
+            wholeDependencies.add(psiFile);
+            final String packageName=((PsiJavaFile)psiFile).getPackageName();
+            if (packageName == null || packageName.startsWith(pack.getQualifiedName())) {
+              continue;
+            }
+            final PsiPackage depPackage=findPackage(packageName);
+            if (depPackage == null) {
+              continue;
+            }
+            pack2Packages.add(depPackage);
+            Map<PsiPackage,Set<PsiFile>> dependentPackages2Files=myFilesInDependentPackages.get(pack);
+            if (dependentPackages2Files == null) {
+              dependentPackages2Files=new HashMap<PsiPackage,Set<PsiFile>>();
+              myFilesInDependentPackages.put(pack,dependentPackages2Files);
+            }
+            Set<PsiFile> depFiles=dependentPackages2Files.get(depPackage);
+            if (depFiles == null) {
+              depFiles=new HashSet<PsiFile>();
+              dependentPackages2Files.put(depPackage,depFiles);
+            }
+            depFiles.add(psiFile);
+          }
+        }
+      }
+    }
+  }
+);
+  ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  if (indicator != null) {
+    if (indicator.isCanceled()) {
+      throw new ProcessCanceledException();
+    }
+    indicator.setText("Building dependencies graph");
+    indicator.setText2("");
+    indicator.setIndeterminate(true);
+  }
+  myCyclicDependencies=getCycles(myPackages.values(),myPerPackageCycleCount);
+}
