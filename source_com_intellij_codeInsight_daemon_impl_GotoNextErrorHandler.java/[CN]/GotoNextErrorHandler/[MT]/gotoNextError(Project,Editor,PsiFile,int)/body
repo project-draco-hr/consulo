@@ -1,42 +1,32 @@
 {
   HighlightInfo[] highlights=DaemonCodeAnalyzerImpl.getHighlights(editor.getDocument(),HighlightSeverity.WARNING,project);
-  if (highlights == null || highlights.length == 0) {
+  if (highlights.length == 0) {
     showMessageWhenNoHighlights(project,file,editor);
     return;
   }
-  int minOffset=Integer.MAX_VALUE;
-  HighlightInfo minInfo=null;
+  DaemonCodeAnalyzerSettings settings=DaemonCodeAnalyzerSettings.getInstance();
+  if (settings.NEXT_ERROR_ACTION_GOES_TO_ERRORS_FIRST) {
+    HighlightInfo[] errors=DaemonCodeAnalyzerImpl.getHighlights(editor.getDocument(),HighlightSeverity.ERROR,project);
+    if (errors.length != 0) {
+      highlights=errors;
+    }
+  }
+  int offsetToGo=Integer.MAX_VALUE;
+  HighlightInfo infoToGo=null;
   for (int i=0; i < highlights.length; i++) {
     HighlightInfo info=highlights[i];
     int startOffset=info.highlighter.getStartOffset();
-    if (startOffset > caretOffset) {
-      if (startOffset < minOffset) {
-        minOffset=startOffset;
-        minInfo=info;
-      }
+    int endOffset=info.highlighter.getStartOffset();
+    final boolean isItBetter=myGoForward ? startOffset > caretOffset && startOffset < offsetToGo : endOffset < caretOffset && startOffset > offsetToGo;
+    if (isItBetter) {
+      offsetToGo=startOffset;
+      infoToGo=info;
     }
   }
-  if (minInfo != null) {
-    if (!navigateToError(project,editor,minInfo)) {
-      new Alarm().addRequest(new Runnable(){
-        public void run(){
-          CommandProcessor.getInstance().executeCommand(project,new Runnable(){
-            public void run(){
-              ApplicationManager.getApplication().runWriteAction(new Runnable(){
-                public void run(){
-                  invoke(project,editor,file);
-                }
-              }
-);
-            }
-          }
-,"",null);
-        }
-      }
-,500);
-    }
+  if (infoToGo == null) {
+    gotoNextError(project,editor,file,myGoForward ? -1 : editor.getDocument().getTextLength());
   }
  else {
-    gotoNextError(project,editor,file,-1);
+    navigateToError(project,editor,infoToGo);
   }
 }
