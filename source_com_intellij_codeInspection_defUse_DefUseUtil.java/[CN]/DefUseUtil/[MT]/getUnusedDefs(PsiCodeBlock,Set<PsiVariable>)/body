@@ -1,108 +1,108 @@
 {
-  if (body != null) {
-    List<Info> unusedDefs=new ArrayList<Info>();
-    IntArrayList exitPoints=new IntArrayList();
-    ControlFlow flow;
-    try {
-      flow=new ControlFlowAnalyzer(body,ourPolicy).buildControlFlow();
+  if (body == null) {
+    return null;
+  }
+  List<Info> unusedDefs=new ArrayList<Info>();
+  IntArrayList exitPoints=new IntArrayList();
+  ControlFlow flow;
+  try {
+    flow=new ControlFlowAnalyzer(body,ourPolicy).buildControlFlow();
+  }
+ catch (  AnalysisCanceledException e) {
+    return null;
+  }
+  Instruction[] instructions=flow.getInstructions();
+  if (LOG.isDebugEnabled()) {
+    System.out.println(flow);
+  }
+  Set<PsiVariable> assignedVariables=new THashSet<PsiVariable>();
+  Set<PsiVariable> readVariables=new THashSet<PsiVariable>();
+  for (int i=0; i < instructions.length; i++) {
+    Instruction instruction=instructions[i];
+    ProgressManager.getInstance().checkCanceled();
+    if (instruction instanceof WriteVariableInstruction) {
+      WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
+      PsiElement context=flow.getElement(i);
+      context=PsiTreeUtil.getParentOfType(context,PsiStatement.class,false);
+      PsiVariable psiVariable=writeInstruction.variable;
+      if (context != null && !(context instanceof PsiDeclarationStatement && psiVariable.getInitializer() == null)) {
+        assignedVariables.add(psiVariable);
+      }
     }
- catch (    AnalysisCanceledException e) {
-      return null;
+ else     if (instruction instanceof ReadVariableInstruction) {
+      ReadVariableInstruction readInstruction=(ReadVariableInstruction)instruction;
+      readVariables.add(readInstruction.variable);
     }
-    Instruction[] instructions=flow.getInstructions();
-    if (LOG.isDebugEnabled()) {
-      System.out.println(flow);
+  }
+  InstructionState[] states=getStates(instructions);
+  boolean[] defsArmed=new boolean[instructions.length];
+  for (int i=0; i < defsArmed.length; i++)   defsArmed[i]=false;
+  List<InstructionState> queue=new ArrayList<InstructionState>();
+  InstructionState startupState=states[instructions.length];
+  startupState.touch();
+  for (Iterator<PsiVariable> iterator=assignedVariables.iterator(); iterator.hasNext(); ) {
+    PsiVariable psiVariable=iterator.next();
+    if (psiVariable instanceof PsiField) {
+      startupState.mergeUseArmed(psiVariable);
     }
-    Set<PsiVariable> assignedVariables=new THashSet<PsiVariable>();
-    Set<PsiVariable> readVariables=new THashSet<PsiVariable>();
-    for (int i=0; i < instructions.length; i++) {
-      Instruction instruction=instructions[i];
-      ProgressManager.getInstance().checkCanceled();
+  }
+  ControlFlowUtil.findExitPointsAndStatements(flow,0,flow.getSize() - 1,exitPoints,new ArrayList<PsiStatement>(),ControlFlowUtil.DEFAULT_EXIT_STATEMENTS_CLASSES);
+  if (exitPoints.isEmpty())   return null;
+  for (int i=0; i < exitPoints.size(); i++) {
+    startupState.addBackwardTrace(exitPoints.get(i));
+  }
+  queue.add(startupState);
+  while (!queue.isEmpty()) {
+    ProgressManager.getInstance().checkCanceled();
+    InstructionState state=queue.remove(0);
+    int idx=state.getInstructionIdx();
+    if (idx < instructions.length) {
+      Instruction instruction=instructions[idx];
       if (instruction instanceof WriteVariableInstruction) {
         WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
-        PsiElement context=flow.getElement(i);
-        context=PsiTreeUtil.getParentOfType(context,PsiStatement.class,false);
         PsiVariable psiVariable=writeInstruction.variable;
-        if (context != null && !(context instanceof PsiDeclarationStatement && psiVariable.getInitializer() == null)) {
-          assignedVariables.add(psiVariable);
+        outUsedVariables.add(psiVariable);
+        if (state.mergeUseDisarmed(psiVariable)) {
+          defsArmed[idx]=true;
         }
       }
  else       if (instruction instanceof ReadVariableInstruction) {
         ReadVariableInstruction readInstruction=(ReadVariableInstruction)instruction;
-        readVariables.add(readInstruction.variable);
+        state.mergeUseArmed(readInstruction.variable);
+        outUsedVariables.add(readInstruction.variable);
       }
-    }
-    InstructionState[] states=getStates(instructions);
-    boolean[] defsArmed=new boolean[instructions.length];
-    for (int i=0; i < defsArmed.length; i++)     defsArmed[i]=false;
-    List<InstructionState> queue=new ArrayList<InstructionState>();
-    InstructionState startupState=states[instructions.length];
-    startupState.touch();
-    for (Iterator<PsiVariable> iterator=assignedVariables.iterator(); iterator.hasNext(); ) {
-      PsiVariable psiVariable=iterator.next();
-      if (psiVariable instanceof PsiField) {
-        startupState.mergeUseArmed(psiVariable);
-      }
-    }
-    ControlFlowUtil.findExitPointsAndStatements(flow,0,flow.getSize() - 1,exitPoints,new ArrayList<PsiStatement>(),ControlFlowUtil.DEFAULT_EXIT_STATEMENTS_CLASSES);
-    if (exitPoints.isEmpty())     return null;
-    for (int i=0; i < exitPoints.size(); i++) {
-      startupState.addBackwardTrace(exitPoints.get(i));
-    }
-    queue.add(startupState);
-    while (!queue.isEmpty()) {
-      ProgressManager.getInstance().checkCanceled();
-      InstructionState state=queue.remove(0);
-      int idx=state.getInstructionIdx();
-      if (idx < instructions.length) {
-        Instruction instruction=instructions[idx];
-        if (instruction instanceof WriteVariableInstruction) {
-          WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
-          PsiVariable psiVariable=writeInstruction.variable;
-          outUsedVariables.add(psiVariable);
-          if (state.mergeUseDisarmed(psiVariable)) {
-            defsArmed[idx]=true;
-          }
-        }
- else         if (instruction instanceof ReadVariableInstruction) {
-          ReadVariableInstruction readInstruction=(ReadVariableInstruction)instruction;
-          state.mergeUseArmed(readInstruction.variable);
-          outUsedVariables.add(readInstruction.variable);
-        }
  else {
-          state.touch();
-        }
-      }
-      for (int i=0; i < state.getBackwardTraces().size(); i++) {
-        int prevIdx=state.getBackwardTraces().get(i);
-        if (!state.equals(states[prevIdx])) {
-          states[prevIdx].merge(state);
-          queue.add(states[prevIdx]);
-        }
+        state.touch();
       }
     }
-    for (int i=0; i < instructions.length; i++) {
-      Instruction instruction=instructions[i];
-      if (instruction instanceof WriteVariableInstruction) {
-        WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
-        if (!defsArmed[i]) {
-          PsiElement context=flow.getElement(i);
-          context=PsiTreeUtil.getParentOfType(context,new Class[]{PsiStatement.class,PsiAssignmentExpression.class,PsiPostfixExpression.class,PsiPrefixExpression.class},false);
-          PsiVariable psiVariable=writeInstruction.variable;
-          if (context != null && !(context instanceof PsiTryStatement)) {
-            if (context instanceof PsiDeclarationStatement && psiVariable.getInitializer() == null) {
-              if (!assignedVariables.contains(psiVariable)) {
-                unusedDefs.add(new Info(psiVariable,context,false));
-              }
-            }
- else {
-              unusedDefs.add(new Info(psiVariable,context,readVariables.contains(psiVariable)));
-            }
-          }
-        }
+    for (int i=0; i < state.getBackwardTraces().size(); i++) {
+      int prevIdx=state.getBackwardTraces().get(i);
+      if (!state.equals(states[prevIdx])) {
+        states[prevIdx].merge(state);
+        queue.add(states[prevIdx]);
       }
     }
-    return unusedDefs;
   }
-  return null;
+  for (int i=0; i < instructions.length; i++) {
+    Instruction instruction=instructions[i];
+    if (instruction instanceof WriteVariableInstruction) {
+      WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
+      if (!defsArmed[i]) {
+        PsiElement context=flow.getElement(i);
+        context=PsiTreeUtil.getParentOfType(context,new Class[]{PsiStatement.class,PsiAssignmentExpression.class,PsiPostfixExpression.class,PsiPrefixExpression.class},false);
+        PsiVariable psiVariable=writeInstruction.variable;
+        if (context != null && !(context instanceof PsiTryStatement)) {
+          if (context instanceof PsiDeclarationStatement && psiVariable.getInitializer() == null) {
+            if (!assignedVariables.contains(psiVariable)) {
+              unusedDefs.add(new Info(psiVariable,context,false));
+            }
+          }
+ else {
+            unusedDefs.add(new Info(psiVariable,context,readVariables.contains(psiVariable)));
+          }
+        }
+      }
+    }
+  }
+  return unusedDefs;
 }
