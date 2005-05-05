@@ -1,0 +1,68 @@
+{
+  if (!editor.getSelectionModel().hasSelection()) {
+    String message="Cannot extract: no selection";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.EXTRACT_INCLUDE,project);
+    return;
+  }
+  final int start=editor.getSelectionModel().getSelectionStart();
+  final int end=editor.getSelectionModel().getSelectionEnd();
+  final Pair<XmlTagChild,XmlTagChild> children=findTagChildrenInRange(start,end);
+  if (children == null) {
+    String message="Cannot extract: selection does not form a fragment for extraction";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.EXTRACT_INCLUDE,project);
+    return;
+  }
+  if (!verifyChildRange(children.getFirst(),children.getSecond())) {
+    String message="Cannot extract selected elements into include file";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.EXTRACT_INCLUDE,project);
+    return;
+  }
+  Language language=children.getFirst().getLanguage();
+  if (language == null) {
+    String message="Cannot determine the language for selected elements";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.EXTRACT_INCLUDE,project);
+    return;
+  }
+  final FileType fileType=getFileType(language);
+  if (!(fileType instanceof LanguageFileType)) {
+    String message="The language for selected elements has no associated file type";
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.EXTRACT_INCLUDE,project);
+    return;
+  }
+  ExtractIncludeDialog dialog=new ExtractIncludeDialog(file.getContainingDirectory(),(LanguageFileType)fileType);
+  dialog.show();
+  if (dialog.getExitCode() == DialogWrapper.OK_EXIT_CODE) {
+    final PsiDirectory targetDirectory=dialog.getTargetDirectory();
+    LOG.assertTrue(targetDirectory != null);
+    final String targetfileName=dialog.getTargetFileName();
+    CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+      public void run(){
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            try {
+              final List<Pair<PsiElement,PsiElement>> duplicates=new ArrayList<Pair<PsiElement,PsiElement>>();
+              final XmlTagChild first=children.getFirst();
+              final XmlTagChild second=children.getSecond();
+              CodeInsightUtil.findChildRangeDuplicates(first,second,duplicates,file);
+              final String includePath=doExtract(targetDirectory,targetfileName,first,second,file.getLanguage());
+              LOG.assertTrue(includePath != null);
+              doReplaceRange(includePath,first,second);
+              ApplicationManager.getApplication().invokeLater(new Runnable(){
+                public void run(){
+                  replaceDuplicates(includePath,duplicates,editor,project);
+                }
+              }
+);
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+        }
+);
+      }
+    }
+,REFACTORING_NAME,null);
+  }
+  return;
+}
