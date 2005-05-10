@@ -1,0 +1,105 @@
+{
+  final Module module=(Module)e.getDataContext().getData(DataConstants.MODULE);
+  try {
+    final String defaultZipPath=new File(module.getModuleFilePath()).getParent() + File.separator + module.getName()+ ".zip";
+    final File file=new File(defaultZipPath);
+    if (file.exists() || file.createNewFile()) {
+      final ZipOutputStream zos=new ZipOutputStream(new FileOutputStream(file));
+      File jarFile=FileUtil.createTempFile("temp","jar");
+      jarFile.deleteOnExit();
+      final Manifest manifest=new Manifest();
+      Attributes mainAttributes=manifest.getMainAttributes();
+      ManifestBuilder.setGlobalAttributes(mainAttributes);
+      ZipOutputStream jarPlugin=new JarOutputStream(new FileOutputStream(jarFile),manifest);
+      HashSet<Module> modules=new HashSet<Module>();
+      PluginBuildUtil.getDependencies(module,modules);
+      modules.add(module);
+      final HashSet<String> writtenItemRelativePaths=new HashSet<String>();
+      for (      Module module1 : modules) {
+        ZipUtil.addDirToZipRecursively(jarPlugin,jarFile,new File(ModuleRootManager.getInstance(module1).getCompilerOutputPath().getPath()),"",new FileFilter(){
+          public boolean accept(          File pathname){
+            return true;
+          }
+        }
+,writtenItemRelativePaths);
+      }
+      final String pluginXmlPath=((PluginModuleBuildProperties)ModuleBuildProperties.getInstance(module)).getPluginXmlPath();
+      ZipUtil.addFileToZip(jarPlugin,new File(pluginXmlPath),"/META-INF/plugin.xml",writtenItemRelativePaths,new FileFilter(){
+        public boolean accept(        File pathname){
+          return true;
+        }
+      }
+);
+      jarPlugin.close();
+      ZipUtil.addFileToZip(zos,jarFile,"/lib/" + module.getName() + ".jar",new HashSet<String>(),new FileFilter(){
+        public boolean accept(        File pathname){
+          return true;
+        }
+      }
+);
+      HashSet<Library> libs=new HashSet<Library>();
+      PluginBuildUtil.getLibraries(module,libs);
+      for (Iterator<Module> iterator=modules.iterator(); iterator.hasNext(); ) {
+        Module module1=iterator.next();
+        PluginBuildUtil.getLibraries(module1,libs);
+      }
+      Set<String> names=new HashSet<String>();
+      for (      Library library : libs) {
+        String libraryName=null;
+        final VirtualFile[] files=library.getFiles(OrderRootType.CLASSES);
+        final HashSet<String> libraryWrittenItems=new HashSet<String>();
+        File libraryJar=FileUtil.createTempFile("temp",".jar");
+        libraryJar.deleteOnExit();
+        ZipOutputStream jar=null;
+        for (        VirtualFile virtualFile : files) {
+          File ioFile=VfsUtil.virtualToIoFile(virtualFile);
+          if (!(virtualFile.getFileSystem() instanceof JarFileSystem)) {
+            if (jar == null) {
+              jar=new JarOutputStream(new FileOutputStream(libraryJar));
+            }
+            ZipUtil.addFileOrDirRecursively(jar,libraryJar,VfsUtil.virtualToIoFile(virtualFile),"",new FileFilter(){
+              public boolean accept(              File pathname){
+                return true;
+              }
+            }
+,libraryWrittenItems);
+            if (libraryName == null) {
+              libraryName=library.getName() != null ? library.getName() : virtualFile.getName();
+              if (names.contains(libraryName)) {
+                int i=1;
+                while (true) {
+                  if (!names.contains(libraryName + i)) {
+                    libraryName=libraryName + i;
+                    break;
+                  }
+                  i++;
+                }
+              }
+              names.add(libraryName);
+            }
+          }
+ else {
+            ZipUtil.addFileOrDirRecursively(zos,jarFile,ioFile,"/lib/" + ioFile.getName(),new FileFilter(){
+              public boolean accept(              File pathname){
+                return true;
+              }
+            }
+,new HashSet<String>());
+          }
+        }
+        if (libraryName != null) {
+          jar.close();
+          ZipUtil.addFileOrDirRecursively(zos,jarFile,libraryJar,"/lib/" + libraryName + ".jar",new FileFilter(){
+            public boolean accept(            File pathname){
+              return true;
+            }
+          }
+,new HashSet<String>());
+        }
+      }
+      zos.close();
+    }
+  }
+ catch (  IOException e1) {
+  }
+}
