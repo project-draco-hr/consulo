@@ -1,0 +1,108 @@
+{
+  final PsiJavaToken switchToken=(PsiJavaToken)element;
+  PsiIfStatement ifStatement=(PsiIfStatement)switchToken.getParent();
+  boolean breaksNeedRelabeled=false;
+  PsiStatement breakTarget=null;
+  String labelString="";
+  if (ControlFlowUtils.statementContainsExitingBreak(ifStatement)) {
+    PsiElement ancestor=ifStatement.getParent();
+    while (ancestor != null) {
+      if (ancestor instanceof PsiForStatement || ancestor instanceof PsiDoWhileStatement || ancestor instanceof PsiWhileStatement|| ancestor instanceof PsiSwitchStatement) {
+        breakTarget=(PsiStatement)ancestor;
+        break;
+      }
+      ancestor=ancestor.getParent();
+    }
+    if (breakTarget != null) {
+      labelString=CaseUtil.findUniqueLabel(ifStatement,"Label");
+      breaksNeedRelabeled=true;
+    }
+  }
+  final PsiIfStatement statementToReplace=ifStatement;
+  final StringBuffer switchStatementBuffer=new StringBuffer(1024);
+  final PsiExpression caseExpression=CaseUtil.getCaseExpression(ifStatement);
+  switchStatementBuffer.append("switch(" + caseExpression.getText() + ')');
+  switchStatementBuffer.append('{');
+  final List<IfStatementBranch> branches=new ArrayList<IfStatementBranch>(20);
+  while (true) {
+    final Set<String> topLevelVariables=new HashSet<String>(5);
+    final Set<String> innerVariables=new HashSet<String>(5);
+    final PsiExpression condition=ifStatement.getCondition();
+    final PsiExpression[] labels=getValuesFromCondition(condition,caseExpression);
+    final PsiStatement thenBranch=ifStatement.getThenBranch();
+    DeclarationUtils.calculateVariablesDeclared(thenBranch,topLevelVariables,innerVariables,true);
+    final IfStatementBranch ifBranch=new IfStatementBranch();
+    ifBranch.setInnerVariables(innerVariables);
+    ifBranch.setTopLevelVariables(topLevelVariables);
+    ifBranch.setStatement(thenBranch);
+    for (    final PsiExpression label : labels) {
+      if (label instanceof PsiReferenceExpression) {
+        final PsiReferenceExpression reference=(PsiReferenceExpression)label;
+        final PsiElement referent=reference.resolve();
+        if (referent instanceof PsiEnumConstant) {
+          final PsiEnumConstant constant=(PsiEnumConstant)referent;
+          final String constantName=constant.getName();
+          ifBranch.addCondition(constantName);
+        }
+ else {
+          final String labelText=label.getText();
+          ifBranch.addCondition(labelText);
+        }
+      }
+ else {
+        final String labelText=label.getText();
+        ifBranch.addCondition(labelText);
+      }
+    }
+    branches.add(ifBranch);
+    final PsiStatement elseBranch=ifStatement.getElseBranch();
+    if (elseBranch instanceof PsiIfStatement) {
+      ifStatement=(PsiIfStatement)elseBranch;
+    }
+ else     if (elseBranch == null) {
+      break;
+    }
+ else {
+      final Set<String> elseTopLevelVariables=new HashSet<String>(5);
+      final Set<String> elseInnerVariables=new HashSet<String>(5);
+      DeclarationUtils.calculateVariablesDeclared(elseBranch,elseTopLevelVariables,elseInnerVariables,true);
+      final IfStatementBranch elseIfBranch=new IfStatementBranch();
+      elseIfBranch.setInnerVariables(elseInnerVariables);
+      elseIfBranch.setTopLevelVariables(elseTopLevelVariables);
+      elseIfBranch.setElse();
+      elseIfBranch.setStatement(elseBranch);
+      branches.add(elseIfBranch);
+      break;
+    }
+  }
+  for (  IfStatementBranch branch : branches) {
+    boolean hasConflicts=false;
+    for (    Object branche1 : branches) {
+      final IfStatementBranch testBranch=(IfStatementBranch)branche1;
+      if (branch.topLevelDeclarationsConfictWith(testBranch)) {
+        hasConflicts=true;
+      }
+    }
+    final PsiStatement branchStatement=branch.getStatement();
+    if (branch.isElse()) {
+      dumpDefaultBranch(switchStatementBuffer,branchStatement,hasConflicts,breaksNeedRelabeled,labelString);
+    }
+ else {
+      final List<String> conditions=branch.getConditions();
+      dumpBranch(switchStatementBuffer,conditions,branchStatement,hasConflicts,breaksNeedRelabeled,labelString);
+    }
+  }
+  switchStatementBuffer.append('}');
+  final String switchStatementString=switchStatementBuffer.toString();
+  if (breaksNeedRelabeled) {
+    final int length=switchStatementBuffer.length();
+    final StringBuffer out=new StringBuffer(length);
+    out.append(labelString + ':');
+    termReplace(out,breakTarget,statementToReplace,switchStatementString);
+    final String newStatement=out.toString();
+    replaceStatement(newStatement,breakTarget);
+  }
+ else {
+    replaceStatement(switchStatementString,statementToReplace);
+  }
+}
