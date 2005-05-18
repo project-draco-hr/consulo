@@ -1,16 +1,45 @@
 {
   if (myDisposedFlag)   return;
-  myListModel.clear();
   if (elements.size() == 0) {
+    myListModel.clear();
     myTextField.setForeground(Color.red);
+    myListUpdater.cancelAll();
     hideList();
     return;
   }
-  myTextField.setForeground(UIManager.getColor("TextField.foreground"));
-  for (int i=0; i < elements.size(); i++) {
-    myListModel.addElement(elements.get(i));
+  Object[] oldElements=myListModel.toArray();
+  Object[] newElements=elements.toArray();
+  Diff.Change change=Diff.buildChanges(oldElements,newElements);
+  if (change == null)   return;
+  List<Cmd> commands=new ArrayList<Cmd>();
+  int inserted=0;
+  int deleted=0;
+  while (change != null) {
+    if (change.deleted > 0) {
+      final int start=change.line0 + inserted - deleted;
+      commands.add(new RemoveCmd(start,start + change.deleted - 1));
+    }
+    if (change.inserted > 0) {
+      for (int i=0; i < change.inserted; i++) {
+        commands.add(new InsertCmd(change.line0 + i + inserted - deleted,newElements[change.line1 + i]));
+      }
+    }
+    deleted+=change.deleted;
+    inserted+=change.inserted;
+    change=change.link;
   }
-  ListScrollingUtil.selectItem(myList,Math.min(pos,myListModel.size() - 1));
-  myList.setVisibleRowCount(Math.min(VISIBLE_LIST_SIZE_LIMIT,myList.getModel().getSize()));
-  showList();
+  myTextField.setForeground(UIManager.getColor("TextField.foreground"));
+  int itemsToAppendImmediately=Math.min(Math.max(pos,1),elements.size());
+  while (myListModel.size() < itemsToAppendImmediately && commands.size() > 0) {
+    commands.remove(0).apply();
+  }
+  if (!commands.isEmpty()) {
+    showList(false);
+    myListUpdater.appendToModel(commands,pos);
+  }
+ else {
+    ListScrollingUtil.selectItem(myList,Math.min(pos,myListModel.size() - 1));
+    myList.setVisibleRowCount(Math.min(VISIBLE_LIST_SIZE_LIMIT,myList.getModel().getSize()));
+    showList(true);
+  }
 }
