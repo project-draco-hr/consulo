@@ -6,18 +6,18 @@
   boolean negated=element instanceof PsiPrefixExpression && ((PsiPrefixExpression)element).getOperationSign().getTokenType() == JavaTokenType.EXCL;
   PsiStatement statement=PsiTreeUtil.getParentOfType(instanceOfExpression,PsiStatement.class);
   PsiElementFactory factory=toInsert.getManager().getElementFactory();
-  PsiElement anchorAfter;
+  PsiElement anchorAfter=null;
+  PsiBlockStatement emptyBlockStatement=(PsiBlockStatement)factory.createStatementFromText("{}",instanceOfExpression);
   if (statement instanceof PsiIfStatement) {
     PsiIfStatement ifStatement=(PsiIfStatement)statement;
-    PsiBlockStatement codeBlockStatement=(PsiBlockStatement)factory.createStatementFromText("{}",ifStatement);
     if (negated) {
       PsiStatement elseBranch=ifStatement.getElseBranch();
       if (elseBranch == null) {
         anchorAfter=ifStatement;
       }
  else       if (!(elseBranch instanceof PsiBlockStatement)) {
-        codeBlockStatement.add(elseBranch);
-        PsiBlockStatement newBranch=(PsiBlockStatement)elseBranch.replace(codeBlockStatement);
+        emptyBlockStatement.add(elseBranch);
+        PsiBlockStatement newBranch=(PsiBlockStatement)elseBranch.replace(emptyBlockStatement);
         anchorAfter=newBranch.getCodeBlock().getLBrace();
       }
  else {
@@ -27,19 +27,44 @@
  else {
       PsiStatement thenBranch=ifStatement.getThenBranch();
       if (thenBranch == null) {
-        ifStatement.setThenBranch(codeBlockStatement);
+        ifStatement.setThenBranch(emptyBlockStatement);
         anchorAfter=((PsiBlockStatement)ifStatement.getThenBranch()).getCodeBlock().getLBrace();
       }
  else       if (!(thenBranch instanceof PsiBlockStatement)) {
-        codeBlockStatement.add(thenBranch);
-        PsiBlockStatement newBranch=(PsiBlockStatement)thenBranch.replace(codeBlockStatement);
+        emptyBlockStatement.add(thenBranch);
+        PsiBlockStatement newBranch=(PsiBlockStatement)thenBranch.replace(emptyBlockStatement);
         anchorAfter=newBranch.getCodeBlock().getLBrace();
       }
  else {
         anchorAfter=((PsiBlockStatement)thenBranch).getCodeBlock().getLBrace();
       }
     }
-    return (PsiDeclarationStatement)anchorAfter.getParent().addAfter(toInsert,anchorAfter);
   }
-  return null;
+  if (statement instanceof PsiWhileStatement) {
+    PsiWhileStatement whileStatement=(PsiWhileStatement)statement;
+    LOG.assertTrue(whileStatement.getLParenth() != null);
+    LOG.assertTrue(whileStatement.getCondition() != null);
+    if (whileStatement.getRParenth() == null) {
+      PsiWhileStatement statementPattern=(PsiWhileStatement)factory.createStatementFromText("while (){}",instanceOfExpression);
+      whileStatement.addAfter(statementPattern.getRParenth(),whileStatement.getCondition());
+    }
+    if (negated) {
+      anchorAfter=whileStatement;
+    }
+ else {
+      PsiStatement body=whileStatement.getBody();
+      if (body == null) {
+        whileStatement.add(emptyBlockStatement);
+      }
+ else       if (!(body instanceof PsiBlockStatement)) {
+        emptyBlockStatement.add(body);
+        whileStatement.getBody().replace(emptyBlockStatement);
+      }
+      anchorAfter=((PsiBlockStatement)whileStatement.getBody()).getCodeBlock().getLBrace();
+    }
+  }
+  if (anchorAfter == null) {
+    return null;
+  }
+  return (PsiDeclarationStatement)anchorAfter.getParent().addAfter(toInsert,anchorAfter);
 }
