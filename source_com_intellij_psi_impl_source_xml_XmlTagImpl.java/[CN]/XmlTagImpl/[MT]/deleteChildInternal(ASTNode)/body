@@ -1,58 +1,49 @@
 {
   final PomModel model=getProject().getModel();
   final XmlAspect aspect=model.getModelAspect(XmlAspect.class);
-  try {
-    final ASTNode treePrev=child.getTreePrev();
-    final ASTNode treeNext=child.getTreeNext();
-    if (child.getElementType() != XmlElementType.XML_TEXT) {
-      if (treePrev.getElementType() == XmlElementType.XML_TEXT && treeNext.getElementType() == XmlElementType.XML_TEXT) {
-        final XmlTextImpl xmlText=(XmlTextImpl)SourceTreeToPsiMap.treeElementToPsi(treePrev);
-        final String oldText=xmlText.getText();
-        model.runTransaction(new PomTransactionBase(this){
-          public PomModelEvent runInner() throws IncorrectOperationException {
-            final int displayOffset=xmlText.getValue().length();
-            xmlText.insertText(((XmlText)treeNext).getValue(),displayOffset);
-            removeChild(treeNext);
-            removeChild(child);
-{
-              final LeafElement leafElementAt=xmlText.findLeafElementAt(displayOffset);
-              if (leafElementAt != null && leafElementAt.getElementType() == XmlTokenType.XML_WHITE_SPACE) {
-                final String wsText=CodeEditUtil.getStringWhiteSpaceBetweenTokens(ParseUtil.prevLeaf(leafElementAt,null),ParseUtil.nextLeaf(leafElementAt,null),getLanguage());
-                final LeafElement newWhitespace=Factory.createSingleLeafElement(XmlTokenType.XML_WHITE_SPACE,wsText.toCharArray(),0,wsText.length(),null,getManager());
-                xmlText.replaceChild(leafElementAt,newWhitespace);
-              }
-            }
-            final PomModelEvent event=new PomModelEvent(model);
-{
-              final XmlAspectChangeSetImpl xmlAspectChangeSet=new XmlAspectChangeSetImpl(model,(XmlFile)getContainingFile());
-              xmlAspectChangeSet.add(new XmlTagChildRemovedImpl(XmlTagImpl.this,(XmlTagChild)treeNext));
-              xmlAspectChangeSet.add(new XmlTagChildRemovedImpl(XmlTagImpl.this,(XmlTagChild)child));
-              xmlAspectChangeSet.add(new XmlTextChangedImpl(xmlText,oldText));
-              event.registerChangeSet(model.getModelAspect(XmlAspect.class),xmlAspectChangeSet);
-            }
-            return event;
-          }
-        }
-,aspect);
-        return;
-      }
-    }
-    model.runTransaction(new PomTransactionBase(this){
-      public PomModelEvent runInner(){
-        if (child.getElementType() == XmlElementType.XML_ATTRIBUTE) {
+  if (child.getElementType() == XmlElementType.XML_ATTRIBUTE) {
+    try {
+      model.runTransaction(new PomTransactionBase(this,aspect){
+        public PomModelEvent runInner(){
           final String name=((XmlAttribute)child).getName();
           XmlTagImpl.super.deleteChildInternal(child);
           return XmlAttributeSetImpl.createXmlAttributeSet(model,XmlTagImpl.this,name,null);
         }
-        XmlTagImpl.super.deleteChildInternal(child);
-        return XmlTagChildRemovedImpl.createXmlTagChildRemoved(model,XmlTagImpl.this,(XmlTagChild)SourceTreeToPsiMap.treeElementToPsi(child));
+      }
+);
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+  }
+ else   if (child.getElementType() != XmlElementType.XML_TEXT) {
+    final ASTNode treePrev=child.getTreePrev();
+    final ASTNode treeNext=child.getTreeNext();
+    if (treePrev.getElementType() == XmlElementType.XML_TEXT && treeNext.getElementType() == XmlElementType.XML_TEXT) {
+      try {
+        model.runTransaction(new PomTransactionBase(getParent(),aspect){
+          public PomModelEvent runInner() throws IncorrectOperationException {
+            final XmlTextImpl xmlText=(XmlTextImpl)treePrev.getPsi();
+            try {
+              xmlText.insertText(((XmlText)treeNext).getValue(),xmlText.getValue().length());
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+            removeChild(treeNext);
+            removeChild(child);
+            return null;
+          }
+        }
+);
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
       }
     }
-,aspect);
+ else     XmlTagImpl.super.deleteChildInternal(child);
   }
- catch (  IncorrectOperationException e) {
-  }
- finally {
-    clearCaches();
+ else {
+    XmlTagImpl.super.deleteChildInternal(child);
   }
 }
