@@ -1,0 +1,50 @@
+{
+  ModuleContainer moduleContainer=buildJarSettings.getModuleContainer();
+  String jarPath=buildJarSettings.getJarPath();
+  final File jarFile=new File(jarPath);
+  jarFile.delete();
+  FileUtil.createParentDirs(jarFile);
+  final File tempFile=File.createTempFile("___" + FileUtil.getNameWithoutExtension(jarFile),".jar",jarFile.getParentFile());
+  final JarOutputStream jarOutputStream=new JarOutputStream(new FileOutputStream(tempFile));
+  BuildRecipeImpl buildRecipe=new BuildRecipeImpl();
+  LibraryLink[] libraries=moduleContainer.getContainingLibraries();
+  final DummyCompileContext compileContext=DummyCompileContext.getInstance();
+  for (  LibraryLink libraryLink : libraries) {
+    MakeUtil.getInstance().addLibraryLink(compileContext,buildRecipe,libraryLink,module,null);
+  }
+  ModuleLink[] modules=moduleContainer.getContainingModules();
+  MakeUtil.getInstance().addJavaModuleOutputs(module,modules,buildRecipe,compileContext,null);
+  final Set<String> tempWrittenRelativePaths=new THashSet<String>();
+  final BuildRecipeImpl dependencies=new BuildRecipeImpl();
+  try {
+    buildRecipe.visitInstructionsWithExceptions(new BuildInstructionVisitor(){
+      public boolean visitInstruction(      BuildInstruction instruction) throws IOException {
+        ProgressManager.getInstance().checkCanceled();
+        instruction.addFilesToJar(compileContext,tempFile,jarOutputStream,dependencies,tempWrittenRelativePaths,null);
+        if (instruction instanceof FileCopyInstruction) {
+          FileCopyInstruction fileCopyInstruction=(FileCopyInstruction)instruction;
+          File file=fileCopyInstruction.getFile();
+          String presentablePath=file == null ? "" : FileUtil.toSystemDependentName(file.getPath());
+          ProgressManager.getInstance().getProgressIndicator().setText2("Processing file " + presentablePath + " ...");
+        }
+        return true;
+      }
+    }
+,false);
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Exception e) {
+    LOG.error(e);
+  }
+ finally {
+    jarOutputStream.close();
+    try {
+      FileUtil.rename(tempFile,jarFile);
+    }
+ catch (    IOException e) {
+      LOG.error(e);
+    }
+  }
+}
