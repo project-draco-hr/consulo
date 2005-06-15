@@ -1,9 +1,33 @@
 {
+  final PsiIdentifier identifier=field.getNameIdentifier();
+  final PsiFile boundForm=getFormFile(field);
+  final boolean isBoundToForm=boundForm != null;
+  if (isBoundToForm) {
+    LOG.assertTrue(boundForm instanceof PsiPlainTextFile);
+    final PsiType guiComponentType=ReferenceUtil.getGUIComponentType((PsiPlainTextFile)boundForm,field.getName());
+    if (guiComponentType != null) {
+      final PsiType fieldType=field.getType();
+      if (!fieldType.isAssignableFrom(guiComponentType)) {
+        String message=MessageFormat.format(BOUND_FIELD_TYPE_MISMATCH,new Object[]{guiComponentType.getCanonicalText(),fieldType.getCanonicalText()});
+        final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,field.getTypeElement(),message);
+        QuickFixAction.registerQuickFixAction(highlightInfo,new ChangeFormComponentTypeFix((PsiPlainTextFile)boundForm,field.getName(),field.getType()),options);
+        QuickFixAction.registerQuickFixAction(highlightInfo,new ChangeBoundFieldTypeFix(field,guiComponentType),options);
+        return highlightInfo;
+      }
+    }
+    if (field.hasInitializer()) {
+      String message=MessageFormat.format(FIELD_IS_OVERWRITTEN,new Object[]{identifier.getText()});
+      final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.WARNING,field.getInitializer(),message);
+      QuickFixAction.registerQuickFixAction(highlightInfo,new EmptyIntentionAction(HighlightDisplayKey.getDisplayNameByKey(HighlightDisplayKey.UNUSED_SYMBOL),options),options);
+      return highlightInfo;
+    }
+  }
   if (field.hasModifierProperty(PsiModifier.PRIVATE)) {
-    PsiIdentifier identifier=field.getNameIdentifier();
-    int count=myRefCountHolder.getRefCount(field);
-    if (count == 0) {
-      if (isSerializationImplicitlyUsedField(field))       return null;
+    final int refCount=myRefCountHolder.getRefCount(field);
+    if (refCount == 0) {
+      if (isSerializationImplicitlyUsedField(field)) {
+        return null;
+      }
       String message=MessageFormat.format(PRIVATE_FIELD_IS_NOT_USED,new Object[]{identifier.getText()});
       HighlightInfo highlightInfo=createUnusedSymbolInfo(identifier,message);
       QuickFixAction.registerQuickFixAction(highlightInfo,new RemoveUnusedVariableFix(field),options);
@@ -12,8 +36,8 @@
       QuickFixAction.registerQuickFixAction(highlightInfo,new CreateGetterOrSetterAction(true,true,field),options);
       return highlightInfo;
     }
-    count=myRefCountHolder.getReadRefCount(field);
-    if (count == 0) {
+    final int readRefCount=myRefCountHolder.getReadRefCount(field);
+    if (readRefCount == 0) {
       String message=MessageFormat.format(PRIVATE_FIELD_IS_NOT_USED_FOR_READING,new Object[]{identifier.getText()});
       HighlightInfo highlightInfo=createUnusedSymbolInfo(identifier,message);
       QuickFixAction.registerQuickFixAction(highlightInfo,new RemoveUnusedVariableFix(field),options);
@@ -21,22 +45,12 @@
       return highlightInfo;
     }
     if (!field.hasInitializer()) {
-      count=myRefCountHolder.getWriteRefCount(field);
-      if (count == 0) {
-        if (!assignedByUIForm(field)) {
-          String message=MessageFormat.format(PRIVATE_FIELD_IS_NOT_ASSIGNED,new Object[]{identifier.getText()});
-          HighlightInfo info=createUnusedSymbolInfo(identifier,message);
-          QuickFixAction.registerQuickFixAction(info,new CreateGetterOrSetterAction(false,true,field),options);
-          return info;
-        }
-      }
-    }
- else {
-      if (assignedByUIForm(field)) {
-        String message=MessageFormat.format(FIELD_IS_OVERWRITTEN,new Object[]{identifier.getText()});
-        final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.WARNING,field.getInitializer(),message);
-        QuickFixAction.registerQuickFixAction(highlightInfo,new EmptyIntentionAction(HighlightDisplayKey.getDisplayNameByKey(HighlightDisplayKey.UNUSED_SYMBOL),options),options);
-        return highlightInfo;
+      final int writeRefCount=myRefCountHolder.getWriteRefCount(field);
+      if (writeRefCount == 0 && !isBoundToForm) {
+        String message=MessageFormat.format(PRIVATE_FIELD_IS_NOT_ASSIGNED,new Object[]{identifier.getText()});
+        HighlightInfo info=createUnusedSymbolInfo(identifier,message);
+        QuickFixAction.registerQuickFixAction(info,new CreateGetterOrSetterAction(false,true,field),options);
+        return info;
       }
     }
   }
