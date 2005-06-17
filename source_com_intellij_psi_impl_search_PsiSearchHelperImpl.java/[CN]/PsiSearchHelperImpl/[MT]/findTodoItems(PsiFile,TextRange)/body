@@ -16,12 +16,19 @@
  else {
 synchronized (PsiLock.LOCK) {
       final Language lang=file.getLanguage();
-      if (lang == null)       return EMPTY_TODO_ITEMS;
       Lexer lexer=lang.getSyntaxHighlighter(file.getProject()).getHighlightingLexer();
       ;
       TokenSet commentTokens=null;
-      if (file instanceof PsiJavaFile || file instanceof JspFile) {
-        commentTokens=ElementType.COMMENT_BIT_SET;
+      if (file instanceof PsiJavaFile) {
+        commentTokens=TokenSet.orSet(ElementType.COMMENT_BIT_SET,XML_COMMENT_BIT_SET);
+      }
+ else       if (file instanceof JspFile) {
+        final JspFile jspFile=(JspFile)file;
+        commentTokens=TokenSet.orSet(XML_COMMENT_BIT_SET,ElementType.COMMENT_BIT_SET);
+        final ParserDefinition parserDefinition=jspFile.getBaseLanguage().getParserDefinition();
+        if (parserDefinition != null) {
+          commentTokens=TokenSet.orSet(commentTokens,parserDefinition.getCommentTokens());
+        }
       }
  else       if (file instanceof XmlFile) {
         commentTokens=XML_COMMENT_BIT_SET;
@@ -35,12 +42,24 @@ synchronized (PsiLock.LOCK) {
       if (commentTokens == null)       return EMPTY_TODO_ITEMS;
       for (lexer.start(chars); ; lexer.advance()) {
         IElementType tokenType=lexer.getTokenType();
+        if (tokenType instanceof JspHighlightLexer.ScriptletJavaElementTypeToken) {
+          tokenType=((JspHighlightLexer.ScriptletJavaElementTypeToken)tokenType).getBase();
+        }
         if (tokenType == null)         break;
         if (range != null) {
           if (lexer.getTokenEnd() <= range.getStartOffset())           continue;
           if (lexer.getTokenStart() >= range.getEndOffset())           break;
         }
-        if (commentTokens.isInSet(tokenType)) {
+        boolean isComment=commentTokens.isInSet(tokenType);
+        if (!isComment) {
+          final Language commentLang=tokenType.getLanguage();
+          final ParserDefinition parserDefinition=commentLang.getParserDefinition();
+          if (parserDefinition != null) {
+            final TokenSet langCommentTokens=parserDefinition.getCommentTokens();
+            isComment=langCommentTokens.isInSet(tokenType);
+          }
+        }
+        if (isComment) {
           commentStarts.add(lexer.getTokenStart());
           commentEnds.add(lexer.getTokenEnd());
         }
