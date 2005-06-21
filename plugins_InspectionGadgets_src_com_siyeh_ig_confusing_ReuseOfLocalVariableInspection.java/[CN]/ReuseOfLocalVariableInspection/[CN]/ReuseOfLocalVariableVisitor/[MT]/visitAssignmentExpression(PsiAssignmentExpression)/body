@@ -1,0 +1,63 @@
+{
+  super.visitAssignmentExpression(assignment);
+  if (!WellFormednessUtils.isWellFormed(assignment)) {
+    return;
+  }
+  if (!(assignment.getParent() instanceof PsiExpressionStatement)) {
+    return;
+  }
+  final PsiExpression lhs=assignment.getLExpression();
+  if (!(lhs instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression ref=(PsiReferenceExpression)lhs;
+  final PsiElement referent=ref.resolve();
+  if (!(referent instanceof PsiLocalVariable)) {
+    return;
+  }
+  final PsiVariable variable=(PsiVariable)referent;
+  if (variable.getInitializer() == null) {
+    return;
+  }
+  final PsiJavaToken sign=assignment.getOperationSign();
+  final IElementType tokenType=sign.getTokenType();
+  if (!JavaTokenType.EQ.equals(tokenType)) {
+    return;
+  }
+  final PsiExpression rhs=assignment.getRExpression();
+  if (VariableAccessUtils.variableIsUsed(rhs,variable)) {
+    return;
+  }
+  final PsiCodeBlock variableBlock=PsiTreeUtil.getParentOfType(variable,PsiCodeBlock.class);
+  if (variableBlock == null) {
+    return;
+  }
+  if (loopExistsBetween(assignment,variableBlock)) {
+    return;
+  }
+  final PsiElement assignmentBlock=assignment.getParent().getParent();
+  if (assignmentBlock == null) {
+    return;
+  }
+  if (variableBlock.equals(assignmentBlock)) {
+    registerError(lhs);
+  }
+  final PsiStatement[] statements=variableBlock.getStatements();
+  final PsiElement containingStatement=getChildWhichContainsElement(variableBlock,assignment);
+  int statementPosition=-1;
+  for (int i=0; i < statements.length; i++) {
+    if (statements[i].equals(containingStatement)) {
+      statementPosition=i;
+      break;
+    }
+  }
+  if (statementPosition == -1) {
+    return;
+  }
+  for (int i=statementPosition + 1; i < statements.length; i++) {
+    if (VariableAccessUtils.variableIsUsed(statements[i],variable)) {
+      return;
+    }
+  }
+  registerError(lhs);
+}
