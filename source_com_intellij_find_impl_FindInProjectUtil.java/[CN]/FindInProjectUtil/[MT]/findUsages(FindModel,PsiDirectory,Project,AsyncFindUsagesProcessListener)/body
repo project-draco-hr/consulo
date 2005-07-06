@@ -4,18 +4,30 @@
   final FileDocumentManager manager=FileDocumentManager.getInstance();
   try {
     int i=0;
+    final Set<VirtualFile> processedFiles=new HashSet<VirtualFile>();
+    long totalFilesSize=0;
+    final int[] count=new int[]{0};
+    boolean warningShown=false;
     for (    final PsiFile psiFile : psiFiles) {
       ProgressManager.getInstance().checkCanceled();
       final VirtualFile virtualFile=psiFile.getVirtualFile();
       final int index=i++;
       if (virtualFile == null)       continue;
+      if (!processedFiles.contains(virtualFile)) {
+        processedFiles.add(virtualFile);
+        totalFilesSize+=virtualFile.getLength();
+        if (totalFilesSize > FILES_SIZE_LIMIT && !warningShown) {
+          showTooManyUsagesWaring(project,"Usages in files of total size " + totalFilesSize + " (bytes) found. IDEA may become "+ "unresponsive or even fail with OutOfMemoryError if you continue. Continue?");
+          warningShown=true;
+        }
+      }
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         public void run(){
           if (virtualFile.isValid()) {
             if (FileTypeManager.getInstance().getFileTypeByFile(virtualFile).isBinary())             return;
             final Document document=manager.getDocument(virtualFile);
             if (document != null) {
-              addToUsages(project,document,consumer,findModel,psiFile);
+              addToUsages(project,document,consumer,findModel,psiFile,count);
               if (progress != null) {
                 progress.setFraction((double)index / psiFiles.size());
                 String text="Searching for '" + findModel.getStringToFind() + "' in "+ virtualFile.getPresentableUrl()+ "...";
@@ -28,6 +40,10 @@
         }
       }
 );
+      if (count[0] > USAGES_LIMIT && !warningShown) {
+        showTooManyUsagesWaring(project,Integer.toString(count[0]) + " usages found so far. Are you sure wish to continue?");
+        warningShown=true;
+      }
     }
   }
  catch (  ProcessCanceledException e) {
