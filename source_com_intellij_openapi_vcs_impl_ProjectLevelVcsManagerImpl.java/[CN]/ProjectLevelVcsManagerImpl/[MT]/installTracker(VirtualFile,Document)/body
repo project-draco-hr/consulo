@@ -4,13 +4,40 @@
   if (activeVcs == null)   return;
   if (virtualFile == null)   return;
   if (!(virtualFile.getFileSystem() instanceof LocalFileSystem))   return;
-  UpToDateRevisionProvider upToDateRevisionProvider=activeVcs.getUpToDateRevisionProvider();
+  final UpToDateRevisionProvider upToDateRevisionProvider=activeVcs.getUpToDateRevisionProvider();
   if (upToDateRevisionProvider == null)   return;
-  try {
-    String lastUpToDateContent=upToDateRevisionProvider.getLastUpToDateContentFor(virtualFile,true);
-    if (lastUpToDateContent == null)     return;
-    setUpToDateContent(document,lastUpToDateContent);
+  if (System.getProperty("idea.ignore.changemarkers") != null)   return;
+  final Alarm alarm;
+  if (myLineStatusUpdateAlarms.containsKey(document)) {
+    alarm=myLineStatusUpdateAlarms.get(document);
+    alarm.cancelAllRequests();
   }
- catch (  VcsException e) {
+ else {
+    alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+    myLineStatusUpdateAlarms.put(document,alarm);
   }
+  alarm.addRequest(new Runnable(){
+    public void run(){
+      try {
+        try {
+          alarm.cancelAllRequests();
+          if (!virtualFile.isValid())           return;
+          final String lastUpToDateContent=upToDateRevisionProvider.getLastUpToDateContentFor(virtualFile,true);
+          if (lastUpToDateContent == null)           return;
+          ApplicationManager.getApplication().invokeLater(new Runnable(){
+            public void run(){
+              setUpToDateContent(document,lastUpToDateContent);
+            }
+          }
+);
+        }
+  finally {
+          myLineStatusUpdateAlarms.remove(document);
+        }
+      }
+ catch (      VcsException e) {
+      }
+    }
+  }
+,10);
 }
