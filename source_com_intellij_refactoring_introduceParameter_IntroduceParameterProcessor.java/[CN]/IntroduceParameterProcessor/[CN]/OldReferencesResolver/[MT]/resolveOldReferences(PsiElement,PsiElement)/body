@@ -1,7 +1,6 @@
 {
   if (expr == null || oldExpr == null)   return;
-  PsiManager manager=myParameterInitializer.getManager();
-  PsiElementFactory factory=manager.getElementFactory();
+  PsiElementFactory factory=myManager.getElementFactory();
   PsiElement newExpr=expr;
   if (oldExpr instanceof PsiReferenceExpression) {
     final PsiReferenceExpression oldRef=(PsiReferenceExpression)oldExpr;
@@ -11,30 +10,17 @@
     if (PsiTreeUtil.isAncestor(clss,scope,false)) {
       final PsiElement subj=adv.getElement();
       if (subj instanceof PsiParameter) {
-        PsiParameterList formalArgList=myMethodToReplaceIn.getParameterList();
-        if (formalArgList != null) {
-          PsiParameter[] formalArgs=formalArgList.getParameters();
-          int index;
-          for (index=0; index < formalArgs.length; index++) {
-            if (subj.equals(formalArgs[index]))             break;
+        PsiParameterList parameterList=myMethodToReplaceIn.getParameterList();
+        PsiParameter[] parameters=parameterList.getParameters();
+        int index=parameterList.getParameterIndex((PsiParameter)subj);
+        if (index < 0)         return;
+        if (index < parameters.length) {
+          PsiExpression actualArg=myActualArgs[index];
+          int copyingSafetyLevel=RefactoringUtil.verifySafeCopyExpression(actualArg);
+          if (copyingSafetyLevel == RefactoringUtil.EXPR_COPY_PROHIBITED) {
+            actualArg=factory.createExpressionFromText(getTempVar(actualArg),null);
           }
-          if (index < formalArgs.length) {
-            PsiExpression actualArg;
-            try {
-              actualArg=myActualArgs[index];
-            }
- catch (            NullPointerException $ex) {
-              return;
-            }
-catch (            ArrayIndexOutOfBoundsException $ex) {
-              return;
-            }
-            int copyingSafetyLevel=RefactoringUtil.verifySafeCopyExpression(actualArg);
-            if (copyingSafetyLevel == RefactoringUtil.EXPR_COPY_PROHIBITED) {
-              actualArg=factory.createExpressionFromText(getTempVar(actualArg),null);
-            }
-            newExpr=newExpr.replace(actualArg);
-          }
+          newExpr=newExpr.replace(actualArg);
         }
       }
  else       if ((subj instanceof PsiField || subj instanceof PsiMethod) && oldRef.getQualifierExpression() == null) {
@@ -51,20 +37,20 @@ catch (            ArrayIndexOutOfBoundsException $ex) {
       }
       if (subj instanceof PsiField) {
         if (myReplaceFieldsWithGetters != IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE) {
-          if (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_ALL || (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_INACCESSIBLE && !manager.getResolveHelper().isAccessible((PsiMember)subj,newExpr,null))) {
+          if (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_ALL || (myReplaceFieldsWithGetters == IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_INACCESSIBLE && !myManager.getResolveHelper().isAccessible((PsiMember)subj,newExpr,null))) {
             newExpr=replaceFieldWithGetter(newExpr,(PsiField)subj);
           }
         }
       }
     }
   }
- else   if (oldExpr instanceof PsiThisExpression) {
+ else   if (oldExpr instanceof PsiThisExpression && ((PsiThisExpression)oldExpr).getQualifier() == null) {
     if (myInstanceRef != null) {
       expr.replace(getInstanceRef(factory));
     }
     return;
   }
- else   if (oldExpr instanceof PsiSuperExpression) {
+ else   if (oldExpr instanceof PsiSuperExpression && ((PsiSuperExpression)oldExpr).getQualifier() == null) {
     if (myInstanceRef != null) {
       expr.replace(getInstanceRef(factory));
     }
@@ -74,9 +60,7 @@ catch (            ArrayIndexOutOfBoundsException $ex) {
   PsiElement[] newChildren=newExpr.getChildren();
   if (oldChildren != null && newChildren != null & oldChildren.length == newChildren.length) {
     for (int i=0; i < oldChildren.length; i++) {
-      PsiElement oldChild=oldChildren[i];
-      PsiElement newChild=newChildren[i];
-      resolveOldReferences(newChild,oldChild);
+      resolveOldReferences(newChildren[i],oldChildren[i]);
     }
   }
 }
