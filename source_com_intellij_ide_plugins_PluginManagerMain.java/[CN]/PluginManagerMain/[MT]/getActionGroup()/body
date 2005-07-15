@@ -33,13 +33,19 @@
               break;
             }
  else {
-              String list="";
-              for (int i=0; i < updateList.size(); i++) {
-                PluginNode pluginNode=updateList.get(i);
-                list+=pluginNode.getName() + "\n";
+              Set<PluginNode> pluginsToUpdate=new HashSet<PluginNode>();
+              final PluginDescriptor[] installedPlugins=PluginManager.getPlugins();
+              for (              PluginNode pluginNode : updateList) {
+                for (                PluginDescriptor descriptor : installedPlugins) {
+                  if (descriptor.getPluginId().equals(pluginNode.getId())) {
+                    pluginsToUpdate.add(pluginNode);
+                  }
+                }
               }
-              if (Messages.showYesNoDialog(main,"Plugin(s) can be updated: \n" + list + "Would you like to update them?","Update Installed Plugins",Messages.getQuestionIcon()) == 0) {
-                if (downloadPlugins(updateList)) {
+              DialogWrapper dlg=new PluginsToUpdateChooser(pluginsToUpdate);
+              dlg.show();
+              if (dlg.isOK()) {
+                if (downloadPlugins(new ArrayList<PluginNode>(pluginsToUpdate))) {
                   availablePluginTable.updateUI();
                   requireShutdown=true;
                 }
@@ -61,17 +67,26 @@
     }
 ;
     actionGroup.add(updatePluginsAction);
-    installPluginAction=new AnAction("Download and Install Plugin","Download and Install Plugin",IconLoader.getIcon("/actions/install.png")){
+    final String downloadMessage="Download and Install Plugin";
+    final String updateMessage="Update Plugin";
+    installPluginAction=new AnAction(downloadMessage,downloadMessage,IconLoader.getIcon("/actions/install.png")){
       public void update(      AnActionEvent e){
         Presentation presentation=e.getPresentation();
         boolean enabled=false;
-        if (tabs.getSelectedIndex() == AVAILABLE_TAB && availablePluginTable != null) {
-          PluginNode pluginNode=availablePluginTable.getSelectedObject();
-          if (pluginNode != null) {
-            int status=PluginManagerColumnInfo.getRealNodeState(pluginNode);
+        PluginTable table=tabs.getSelectedIndex() == AVAILABLE_TAB ? availablePluginTable : installedPluginTable;
+        if ((tabs.getSelectedIndex() == AVAILABLE_TAB && availablePluginTable != null) || (tabs.getSelectedIndex() == INSTALLED_TAB && installedPluginTable != null)) {
+          Object pluginObject=table.getSelectedObject();
+          if (pluginObject instanceof PluginNode) {
+            int status=PluginManagerColumnInfo.getRealNodeState((PluginNode)pluginObject);
             if (status == PluginNode.STATUS_MISSING || status == PluginNode.STATUS_NEWEST || status == PluginNode.STATUS_OUT_OF_DATE || status == PluginNode.STATUS_UNKNOWN) {
               enabled=true;
             }
+            presentation.setText(downloadMessage);
+          }
+ else           if (pluginObject instanceof PluginDescriptor) {
+            presentation.setText(updateMessage);
+            presentation.setDescription(updateMessage);
+            enabled=true;
           }
         }
         presentation.setEnabled(enabled);
@@ -79,17 +94,57 @@
       public void actionPerformed(      AnActionEvent e){
         do {
           try {
-            PluginNode pluginNode=availablePluginTable.getSelectedObject();
-            if (Messages.showYesNoDialog(main,"Would you like to download and install plugin \"" + pluginNode.getName() + "\"?","Download and Install Plugin",Messages.getQuestionIcon()) == 0) {
+            if (root == null) {
+              loadAvailablePlugins();
+            }
+            final boolean isUpdate=tabs.getSelectedIndex() == INSTALLED_TAB;
+            PluginTable pluginTable=isUpdate ? installedPluginTable : availablePluginTable;
+            if (pluginTable == null)             return;
+            final Object selectedObject=pluginTable.getSelectedObject();
+            PluginNode pluginNode;
+            if (selectedObject instanceof PluginNode) {
+              pluginNode=(PluginNode)selectedObject;
+            }
+ else             if (selectedObject instanceof PluginDescriptor) {
+              final PluginDescriptor pluginDescriptor=(PluginDescriptor)selectedObject;
+              pluginNode=new PluginNode(pluginDescriptor.getPluginId());
+              pluginNode.setName(pluginDescriptor.getName());
+              pluginNode.setDepends(Arrays.asList(pluginDescriptor.getDependentPluginIds()));
+              pluginNode.setSize("-1");
+              boolean smthFoundToUpdate=false;
+              ArrayList<PluginNode> toUpdate=new ArrayList<PluginNode>();
+              try {
+                checkForUpdate(toUpdate,root);
+                for (                PluginNode node : toUpdate) {
+                  if (node.getId().equals(pluginDescriptor.getPluginId())) {
+                    smthFoundToUpdate=true;
+                  }
+                }
+                if (!smthFoundToUpdate) {
+                  Messages.showMessageDialog(main,"Nothing to update","Plugin Manager",Messages.getInformationIcon());
+                  return;
+                }
+              }
+ catch (              IOException e1) {
+                LOG.error(e1);
+              }
+            }
+ else {
+              return;
+            }
+            final String message=isUpdate ? updateMessage : downloadMessage;
+            if (Messages.showYesNoDialog(main,"Would you like to " + message.toLowerCase() + "\""+ pluginNode.getName()+ "\"?",message,Messages.getQuestionIcon()) == 0) {
               if (downloadPlugin(pluginNode)) {
                 requireShutdown=true;
-                availablePluginTable.updateUI();
+                if (availablePluginTable != null) {
+                  availablePluginTable.updateUI();
+                }
               }
             }
             break;
           }
  catch (          IOException e1) {
-            if (!IOExceptionDialog.showErrorDialog(e1,"Download and Install Plugin","Plugin download failed")) {
+            if (!IOExceptionDialog.showErrorDialog(e1,downloadMessage,"Plugin download failed")) {
               break;
             }
  else {
