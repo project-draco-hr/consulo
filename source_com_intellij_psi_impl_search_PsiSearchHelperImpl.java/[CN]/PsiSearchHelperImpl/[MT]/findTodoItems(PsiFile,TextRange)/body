@@ -10,8 +10,18 @@
   TIntArrayList commentEnds=new TIntArrayList();
   char[] chars=file.textToCharArray();
   if (file instanceof PsiPlainTextFile) {
-    commentStarts.add(0);
-    commentEnds.add(file.getTextLength());
+    FileType fType=file.getFileType();
+synchronized (PsiLock.LOCK) {
+      if (fType instanceof CustomFileType) {
+        TokenSet commentTokens=TokenSet.create(CustomHighlighterTokenType.LINE_COMMENT,CustomHighlighterTokenType.MULTI_LINE_COMMENT);
+        Lexer lexer=((CustomFileType)fType).getHighlighter(myManager.getProject()).getHighlightingLexer();
+        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
+      }
+ else {
+        commentStarts.add(0);
+        commentEnds.add(file.getTextLength());
+      }
+    }
   }
  else {
 synchronized (PsiLock.LOCK) {
@@ -39,30 +49,7 @@ synchronized (PsiLock.LOCK) {
         }
       }
       if (commentTokens == null)       return EMPTY_TODO_ITEMS;
-      for (lexer.start(chars); ; lexer.advance()) {
-        IElementType tokenType=lexer.getTokenType();
-        if (tokenType instanceof CopyCreatorLexer.HighlightingCopyElementType) {
-          tokenType=((CopyCreatorLexer.HighlightingCopyElementType)tokenType).getBase();
-        }
-        if (tokenType == null)         break;
-        if (range != null) {
-          if (lexer.getTokenEnd() <= range.getStartOffset())           continue;
-          if (lexer.getTokenStart() >= range.getEndOffset())           break;
-        }
-        boolean isComment=commentTokens.isInSet(tokenType);
-        if (!isComment) {
-          final Language commentLang=tokenType.getLanguage();
-          final ParserDefinition parserDefinition=commentLang.getParserDefinition();
-          if (parserDefinition != null) {
-            final TokenSet langCommentTokens=parserDefinition.getCommentTokens();
-            isComment=langCommentTokens.isInSet(tokenType);
-          }
-        }
-        if (isComment) {
-          commentStarts.add(lexer.getTokenStart());
-          commentEnds.add(lexer.getTokenEnd());
-        }
-      }
+      findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
     }
   }
   ArrayList<TodoItem> list=new ArrayList<TodoItem>();
