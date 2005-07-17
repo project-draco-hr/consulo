@@ -5,12 +5,10 @@
     return match.putParameter(parameter,candidate);
   }
   if (!canBeEquivalent(pattern,candidate))   return false;
-  PsiReference ref1=pattern.getReference();
-  if (ref1 != null) {
-    PsiReference ref2=candidate.getReference();
-    if (ref2 == null)     return false;
-    final PsiElement resolveResult1=ref1.resolve();
-    final PsiElement resolveResult2=ref2.resolve();
+  if (pattern instanceof PsiJavaCodeReferenceElement) {
+    final PsiElement resolveResult1=((PsiJavaCodeReferenceElement)pattern).resolve();
+    final PsiElement resolveResult2=((PsiJavaCodeReferenceElement)candidate).resolve();
+    if (resolveResult1 instanceof PsiClass && resolveResult2 instanceof PsiClass)     return true;
     if (isUnder(resolveResult1,myPatternAsList) && isUnder(resolveResult2,candidates)) {
       return match.putDeclarationCorrespondence(resolveResult1,resolveResult2);
     }
@@ -18,11 +16,35 @@
       return false;
     }
   }
-  if (pattern instanceof PsiReturnStatement) {
+  if (pattern instanceof PsiTypeCastExpression) {
+    final PsiTypeElement castTypeElement1=((PsiTypeCastExpression)pattern).getCastType();
+    final PsiTypeElement castTypeElement2=((PsiTypeCastExpression)candidate).getCastType();
+    if (castTypeElement1 != null && castTypeElement2 != null) {
+      final PsiType type1=TypeConversionUtil.erasure(castTypeElement1.getType());
+      final PsiType type2=TypeConversionUtil.erasure(castTypeElement2.getType());
+      if (!type1.equals(type2))       return false;
+    }
+  }
+ else   if (pattern instanceof PsiNewExpression) {
+    final PsiJavaCodeReferenceElement classReference1=((PsiNewExpression)pattern).getClassReference();
+    final PsiJavaCodeReferenceElement classReference2=((PsiNewExpression)candidate).getClassReference();
+    if ((classReference1 == null) != (classReference2 != null))     return false;
+    if (classReference1 != null && classReference2 != null) {
+      final PsiElement resolved1=classReference1.resolve();
+      final PsiElement resolved2=classReference2.resolve();
+      if (!pattern.getManager().areElementsEquivalent(resolved1,resolved2))       return false;
+    }
+  }
+ else   if (pattern instanceof PsiClassObjectAccessExpression) {
+    final PsiTypeElement operand1=((PsiClassObjectAccessExpression)pattern).getOperand();
+    final PsiTypeElement operand2=((PsiClassObjectAccessExpression)candidate).getOperand();
+    return operand1.getType().equals(operand2.getType());
+  }
+ else   if (pattern instanceof PsiReturnStatement) {
     final PsiReturnStatement patternReturnStatement=((PsiReturnStatement)pattern);
     return matchReturnStatement(patternReturnStatement,candidate,candidates,match);
   }
-  if (pattern instanceof PsiReferenceExpression && candidate instanceof PsiReferenceExpression) {
+ else   if (pattern instanceof PsiReferenceExpression) {
     final PsiReferenceExpression patternRefExpr=((PsiReferenceExpression)pattern);
     final PsiReferenceExpression candidateRefExpr=((PsiReferenceExpression)candidate);
     if (patternRefExpr.getQualifierExpression() == null) {
