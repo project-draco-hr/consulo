@@ -1,0 +1,62 @@
+{
+  final boolean force=true;
+  final SVNException[] exception=new SVNException[1];
+  final Collection failedUnlocks=new ArrayList();
+  final int[] count=new int[]{ioFiles.length};
+  final ISVNEventHandler eventHandler=new ISVNEventHandler(){
+    public void handleEvent(    SVNEvent event,    double progress){
+      if (event.getAction() == SVNEventAction.UNLOCK_FAILED) {
+        failedUnlocks.add(event.getErrorMessage() != null ? event.getErrorMessage() : event.getFile().getAbsolutePath());
+        count[0]--;
+      }
+    }
+    public void checkCancelled(){
+    }
+  }
+;
+  Runnable command=new Runnable(){
+    public void run(){
+      ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+      SVNWCClient wcClient;
+      try {
+        wcClient=activeVcs.createWCClient();
+        wcClient.setEventHandler(eventHandler);
+        if (progress != null) {
+          progress.setText("Unlocking files in repository...");
+        }
+        for (int i=0; i < ioFiles.length; i++) {
+          if (progress != null) {
+            progress.checkCanceled();
+          }
+          File file=ioFiles[i];
+          if (progress != null) {
+            progress.setText2("Processing file " + file.getName());
+          }
+          wcClient.doUnlock(new File[]{file},force);
+        }
+      }
+ catch (      SVNException e) {
+        exception[0]=e;
+      }
+    }
+  }
+;
+  ApplicationManager.getApplication().runProcessWithProgressSynchronously(command,"Unlock Files",false,project);
+  if (!failedUnlocks.isEmpty() && helper != null) {
+    String[] failedFiles=(String[])failedUnlocks.toArray(new String[failedUnlocks.size()]);
+    List exceptions=new ArrayList();
+    for (int i=0; i < failedFiles.length; i++) {
+      String file=failedFiles[i];
+      exceptions.add(new VcsException("Failed to unlock file: " + file));
+    }
+    helper.showErrors(exceptions,"Unlock Failures");
+  }
+  String message="Failed to unlock files";
+  if (count[0] > 0 && exception[0] == null) {
+    message=count[0] == 1 ? "1 file unlocked" : count[0] + " files unlocked";
+  }
+  WindowManager.getInstance().getStatusBar(project).setInfo(message);
+  if (exception[0] != null) {
+    throw new VcsException(exception[0]);
+  }
+}

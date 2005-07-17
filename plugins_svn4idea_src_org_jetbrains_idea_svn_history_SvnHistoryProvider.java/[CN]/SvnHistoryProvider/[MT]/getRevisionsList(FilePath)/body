@@ -1,0 +1,49 @@
+{
+  final SVNException[] exception=new SVNException[1];
+  final ArrayList<VcsFileRevision> result=new ArrayList<VcsFileRevision>();
+  Runnable command=new Runnable(){
+    public void run(){
+      final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+      if (indicator != null) {
+        indicator.setText("Collecting revisions history for '" + file.getName() + "'");
+      }
+      try {
+        SVNWCClient wcClient=myVcs.createWCClient();
+        SVNInfo info=wcClient.doInfo(new File(file.getIOFile().getAbsolutePath()),SVNRevision.WORKING);
+        final String url=info.getURL();
+        if (indicator != null) {
+          indicator.setText2("Establishing connection to '" + url + "'");
+        }
+        final SVNRevision pegRevision=info.getRevision();
+        SVNLogClient client=myVcs.createLogClient();
+        client.doLog(new File[]{new File(file.getIOFile().getAbsolutePath())},SVNRevision.HEAD,SVNRevision.create(1),false,false,0,new ISVNLogEntryHandler(){
+          public void handleLogEntry(          SVNLogEntry logEntry){
+            if (indicator != null) {
+              indicator.setText2("Revision '" + logEntry.getRevision() + " processed");
+            }
+            Date date=logEntry.getDate();
+            String author=logEntry.getAuthor();
+            String message=logEntry.getMessage();
+            SVNRevision rev=SVNRevision.create(logEntry.getRevision());
+            result.add(new SvnFileRevision(myVcs,pegRevision,rev,url,author,date,message));
+          }
+        }
+);
+      }
+ catch (      SVNException e) {
+        exception[0]=e;
+      }
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isDispatchThread()) {
+    ApplicationManager.getApplication().runProcessWithProgressSynchronously(command,"Revisions History",false,myVcs.getProject());
+  }
+ else {
+    command.run();
+  }
+  if (exception[0] != null) {
+    throw new VcsException(exception[0]);
+  }
+  return result;
+}

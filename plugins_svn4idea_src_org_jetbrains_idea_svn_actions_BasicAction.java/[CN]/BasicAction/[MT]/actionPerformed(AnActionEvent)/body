@@ -1,0 +1,54 @@
+{
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("enter: actionPerformed(id='" + ActionManager.getInstance().getId(this) + "')");
+  }
+  final DataContext dataContext=event.getDataContext();
+  final Project project=(Project)dataContext.getData(DataConstants.PROJECT);
+  final VirtualFile[] files=(VirtualFile[])dataContext.getData(DataConstants.VIRTUAL_FILE_ARRAY);
+  if (LOG.isDebugEnabled() && files != null) {
+    LOG.debug("files='" + Arrays.asList(files) + "'");
+  }
+  if ((files == null || files.length == 0) && needsFiles())   return;
+  final SvnVcs vcs=SvnVcs.getInstance(project);
+  if (!ProjectLevelVcsManager.getInstance(project).checkAllFilesAreUnder(vcs,files)) {
+    return;
+  }
+  if (project != null) {
+    project.save();
+  }
+  final String actionName=getActionName(vcs);
+  final AbstractVcsHelper helper=AbstractVcsHelper.getInstance(project);
+  if (actionName != null) {
+    helper.startVcsAction(actionName);
+  }
+  try {
+    List exceptions=helper.runTransactionRunnable(vcs,new TransactionRunnable(){
+      public void run(      List exceptions){
+        VirtualFile badFile=null;
+        try {
+          if (isBatchAction()) {
+            batchExecute(project,vcs,files,dataContext,helper);
+          }
+ else {
+            for (int i=0; files != null && i < files.length; i++) {
+              VirtualFile file=files[i];
+              badFile=file;
+              execute(project,vcs,file,dataContext,helper);
+            }
+          }
+        }
+ catch (        VcsException ex) {
+          ex.setVirtualFile(badFile);
+          exceptions.add(ex);
+        }
+      }
+    }
+,null);
+    helper.showErrors(exceptions,actionName != null ? actionName : vcs.getName());
+  }
+  finally {
+    if (actionName != null) {
+      helper.finishVcsAction(LvcsAction.EMPTY);
+    }
+  }
+}

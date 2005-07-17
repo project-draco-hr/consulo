@@ -1,0 +1,49 @@
+{
+  final ArrayList<VcsException> exceptions=new ArrayList<VcsException>();
+  ISVNEventHandler eventHandler=new UpdateEventHandler(myVcs,progressIndicator,updatedFiles);
+  boolean totalUpdate=true;
+  UpdateCrawler crawler=new UpdateCrawler(myVcs,eventHandler,totalUpdate,exceptions,updatedFiles);
+  Collection updatedRoots=new HashSet();
+  for (int i=0; i < contentRoots.length; i++) {
+    if (progressIndicator != null && progressIndicator.isCanceled()) {
+      throw new ProcessCanceledException();
+    }
+    if (contentRoots[i].getIOFile() != null) {
+      Collection roots=SvnUtil.crawlWCRoots(myVcs,contentRoots[i].getIOFile(),crawler,progressIndicator);
+      updatedRoots.addAll(roots);
+    }
+  }
+  if (updatedRoots.isEmpty()) {
+    Messages.showErrorDialog(myVcs.getProject(),"No versioned directories to update was found","SVN: Update Error");
+  }
+  SvnUpdateConfigurable config=(SvnUpdateConfigurable)(myConfigurable instanceof SvnUpdateConfigurable ? myConfigurable : null);
+  if (config != null && config.isDryRun() && config.isMerge()) {
+    return new UpdateSessionAdapter(exceptions,false);
+  }
+  final Collection conflictedFiles=updatedFiles.getGroupById(FileGroup.MERGED_WITH_CONFLICT_ID).getFiles();
+  return new UpdateSessionAdapter(exceptions,false){
+    public void onRefreshFilesCompleted(){
+      ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+        public void run(){
+          if (conflictedFiles != null && !conflictedFiles.isEmpty()) {
+            List<VirtualFile> vfFiles=new ArrayList<VirtualFile>();
+            for (Iterator paths=conflictedFiles.iterator(); paths.hasNext(); ) {
+              String path=(String)paths.next();
+              path="file://" + path.replace(File.separatorChar,'/');
+              VirtualFile vf=VirtualFileManager.getInstance().findFileByUrl(path);
+              if (vf != null) {
+                vfFiles.add(vf);
+              }
+            }
+            if (!vfFiles.isEmpty()) {
+              final MergeAction mergeAction=new MergeAction(vfFiles,myVcs.getProject());
+              mergeAction.execute(null);
+            }
+          }
+        }
+      }
+,ModalityState.defaultModalityState());
+    }
+  }
+;
+}
