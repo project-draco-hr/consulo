@@ -6,18 +6,15 @@
   final PsiField[] fields=aClass.getFields();
   NextField:   for (  PsiField field : fields) {
     if (field.hasModifierProperty(PsiModifier.PRIVATE)) {
-      final PsiReference[] refs=psiManager.getSearchHelper().findReferences(field,GlobalSearchScope.allScope(psiManager.getProject()),false);
+      final PsiReference[] refs=psiManager.getSearchHelper().findReferences(field,new LocalSearchScope(field.getContainingFile()),true);
       for (      PsiReference ref : refs) {
         PsiElement element=ref.getElement();
-        while (element != null) {
-          if (element instanceof PsiMethod) {
-            candidates.add(field);
-            continue NextField;
-          }
-          element=PsiTreeUtil.getParentOfType(element,PsiMember.class);
+        final PsiMember parentOfType=PsiTreeUtil.getParentOfType(element,PsiMember.class);
+        if (!(parentOfType instanceof PsiMethod) && !(parentOfType instanceof PsiClassInitializer)) {
+          continue NextField;
         }
-        continue NextField;
       }
+      candidates.add(field);
     }
   }
   topLevelClass.accept(new PsiRecursiveElementVisitor(){
@@ -28,20 +25,27 @@
       super.visitMethod(method);
       final PsiCodeBlock body=method.getBody();
       if (body != null) {
-        try {
-          final ControlFlow controlFlow=ControlFlowFactory.getControlFlow(body,AllVariablesControlFlowPolicy.getInstance());
-          final List<PsiReferenceExpression> readBeforeWrites=ControlFlowUtil.getReadBeforeWrite(controlFlow);
-          for (          final PsiReferenceExpression readBeforeWrite : readBeforeWrites) {
-            final PsiElement resolved=readBeforeWrite.resolve();
-            if (resolved instanceof PsiField) {
-              final PsiField field=(PsiField)resolved;
-              candidates.remove(field);
-            }
+        checkCodeBlock(body,candidates);
+      }
+    }
+    public void visitClassInitializer(    PsiClassInitializer initializer){
+      super.visitClassInitializer(initializer);
+      checkCodeBlock(initializer.getBody(),candidates);
+    }
+    private void checkCodeBlock(    final PsiCodeBlock body,    final Set<PsiField> candidates){
+      try {
+        final ControlFlow controlFlow=ControlFlowFactory.getControlFlow(body,AllVariablesControlFlowPolicy.getInstance());
+        final List<PsiReferenceExpression> readBeforeWrites=ControlFlowUtil.getReadBeforeWrite(controlFlow);
+        for (        final PsiReferenceExpression readBeforeWrite : readBeforeWrites) {
+          final PsiElement resolved=readBeforeWrite.resolve();
+          if (resolved instanceof PsiField) {
+            final PsiField field=(PsiField)resolved;
+            candidates.remove(field);
           }
         }
- catch (        AnalysisCanceledException e) {
-          candidates.clear();
-        }
+      }
+ catch (      AnalysisCanceledException e) {
+        candidates.clear();
       }
     }
   }
