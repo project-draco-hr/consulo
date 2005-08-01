@@ -1,0 +1,85 @@
+{
+  if (arg instanceof PsiCapturedWildcardType)   arg=((PsiCapturedWildcardType)arg).getWildcard();
+  if (patternType.equals(param)) {
+    return processArgType(arg,captureWildcard,constraintType);
+  }
+  if (param instanceof PsiWildcardType) {
+    final PsiWildcardType wildcardParam=(PsiWildcardType)param;
+    final PsiType paramBound=wildcardParam.getBound();
+    if (paramBound == null)     return null;
+    ConstraintType constrType=wildcardParam.isExtends() ? ConstraintType.SUPERTYPE : ConstraintType.SUBTYPE;
+    if (arg instanceof PsiWildcardType) {
+      if (((PsiWildcardType)arg).isExtends() == wildcardParam.isExtends()) {
+        Pair<PsiType,ConstraintType> res=getSubstitutionForTypeParameterInner(paramBound,((PsiWildcardType)arg).getBound(),patternType,captureWildcard,constrType);
+        if (res != null)         return res;
+      }
+    }
+ else     if (patternType.equals(paramBound)) {
+      Pair<PsiType,ConstraintType> res=getSubstitutionForTypeParameterInner(paramBound,arg,patternType,captureWildcard,constrType);
+      if (res != null)       return res;
+    }
+ else     if (paramBound instanceof PsiClassType && arg instanceof PsiClassType) {
+      final PsiClassType.ClassResolveResult boundResult=((PsiClassType)paramBound).resolveGenerics();
+      final PsiClass boundClass=boundResult.getElement();
+      if (boundClass != null) {
+        final PsiClassType.ClassResolveResult argResult=((PsiClassType)arg).resolveGenerics();
+        final PsiClass argClass=argResult.getElement();
+        if (argClass != null) {
+          if (wildcardParam.isExtends()) {
+            PsiSubstitutor superSubstitutor=TypeConversionUtil.getClassSubstitutor(boundClass,argClass,argResult.getSubstitutor());
+            if (superSubstitutor != null) {
+              final Iterator<PsiTypeParameter> iterator=PsiUtil.typeParametersIterator(boundClass);
+              while (iterator.hasNext()) {
+                final PsiTypeParameter typeParameter=iterator.next();
+                final Pair<PsiType,ConstraintType> res=getSubstitutionForTypeParameterInner(boundResult.getSubstitutor().substitute(typeParameter),superSubstitutor.substitute(typeParameter),patternType,captureWildcard,ConstraintType.EQUALS);
+                if (res != null)                 return res;
+              }
+            }
+          }
+ else {
+            PsiSubstitutor superSubstitutor=TypeConversionUtil.getClassSubstitutor(argClass,boundClass,boundResult.getSubstitutor());
+            if (superSubstitutor != null) {
+              final Iterator<PsiTypeParameter> iterator=PsiUtil.typeParametersIterator(argClass);
+              while (iterator.hasNext()) {
+                final PsiTypeParameter typeParameter=iterator.next();
+                final Pair<PsiType,ConstraintType> res=getSubstitutionForTypeParameterInner(superSubstitutor.substitute(typeParameter),argResult.getSubstitutor().substitute(typeParameter),patternType,captureWildcard,ConstraintType.EQUALS);
+                if (res != null)                 return res;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (param instanceof PsiArrayType && arg instanceof PsiArrayType) {
+    return getSubstitutionForTypeParameterInner(((PsiArrayType)param).getComponentType(),((PsiArrayType)arg).getComponentType(),patternType,captureWildcard,constraintType);
+  }
+  if (param instanceof PsiClassType && arg instanceof PsiClassType) {
+    PsiClass paramClass=((PsiClassType)param).resolve();
+    if (paramClass == null)     return null;
+    PsiClass argClass=((PsiClassType)arg).resolve();
+    if (argClass != paramClass)     return null;
+    PsiType[] paramTypes=((PsiClassType)param).getParameters();
+    PsiType[] argTypes=((PsiClassType)arg).getParameters();
+    if (paramTypes.length != argTypes.length)     return null;
+    Pair<PsiType,ConstraintType> capturedWildcard=null;
+    for (int i=0; i < argTypes.length; i++) {
+      Pair<PsiType,ConstraintType> res=getSubstitutionForTypeParameterInner(paramTypes[i],argTypes[i],patternType,captureWildcard,ConstraintType.EQUALS);
+      if (res != null) {
+        if (!captureWildcard) {
+          return res;
+        }
+ else {
+          if (capturedWildcard != null) {
+            return null;
+          }
+ else {
+            capturedWildcard=res;
+          }
+        }
+      }
+    }
+    return capturedWildcard;
+  }
+  return null;
+}
