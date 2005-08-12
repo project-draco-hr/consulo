@@ -1,0 +1,61 @@
+{
+  final StringDescriptor descriptor=(StringDescriptor)myProperty.getValue(myComponent);
+  final Project project=myEditor.getProject();
+  final PsiManager psiManager=PsiManager.getInstance(project);
+  final PsiFile formPsiFile=psiManager.findFile(myEditor.getFile());
+  PsiLiteralExpression expr;
+  try {
+    final PsiElementFactory elementFactory=psiManager.getElementFactory();
+    expr=(PsiLiteralExpression)elementFactory.createExpressionFromText("\"" + StringUtil.escapeStringCharacters(descriptor.getValue()) + "\"",formPsiFile);
+  }
+ catch (  IncorrectOperationException e) {
+    return;
+  }
+  final I18nizeQuickFixDialog dlg=new I18nizeQuickFixDialog(project,expr,false);
+  dlg.show();
+  if (!dlg.isOK()) {
+    return;
+  }
+  if (!myEditor.ensureEditable()) {
+    return;
+  }
+  final Collection<PropertiesFile> propertiesFiles=dlg.getAllPropertiesFiles(project);
+  PropertiesFile aPropertiesFile=null;
+  for (  PropertiesFile file : propertiesFiles) {
+    if (!CodeInsightUtil.prepareFileForWrite(file))     return;
+    if (aPropertiesFile == null) {
+      aPropertiesFile=file;
+    }
+  }
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          try {
+            I18nizeQuickFix.createProperty(project,dlg,propertiesFiles);
+          }
+ catch (          IncorrectOperationException e) {
+            LOG.error(e);
+          }
+        }
+      }
+);
+    }
+  }
+,"i18nize",project);
+  if (aPropertiesFile != null) {
+    final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+    String packageName=fileIndex.getPackageNameByDirectory(aPropertiesFile.getVirtualFile().getParent());
+    if (packageName != null) {
+      String bundleName=packageName + "." + aPropertiesFile.getResourceBundle().getBaseName();
+      bundleName=bundleName.replace('.','/');
+      try {
+        myProperty.setValue(myComponent,new StringDescriptor(bundleName,dlg.getKey()));
+      }
+ catch (      Exception e) {
+        LOG.error(e);
+      }
+      myEditor.refreshAndSave(true);
+    }
+  }
+}
