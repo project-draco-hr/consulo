@@ -1,6 +1,7 @@
 {
   ArrayList<AbstractTreeNode> children=new ArrayList<AbstractTreeNode>();
-  final ProjectFileIndex projectFileIndex=ProjectRootManager.getInstance(getProject()).getFileIndex();
+  final Project project=getProject();
+  final ProjectFileIndex projectFileIndex=ProjectRootManager.getInstance(project).getFileIndex();
   final PsiPackage psiPackage=getValue().getPackage();
   final Module module=getValue().getModule();
   if (!getStructure().getIsFlattenPackages() || psiPackage == null) {
@@ -12,7 +13,7 @@
         continue;
       }
       final PsiDirectory containingDirectory=psiFile.getContainingDirectory();
-      TodoFileNode todoFileNode=new TodoFileNode(getProject(),psiFile,myBuilder,false);
+      TodoFileNode todoFileNode=new TodoFileNode(project,psiFile,myBuilder,false);
       if (ArrayUtil.find(psiPackage.getDirectories(),containingDirectory) > -1 && !children.contains(todoFileNode)) {
         children.add(todoFileNode);
         continue;
@@ -22,10 +23,15 @@
         final PsiDirectory parentDirectory=_dir.getParentDirectory();
         if (parentDirectory != null) {
           PsiPackage _package=_dir.getPackage();
-          TodoPackageNode todoPackageNode=new TodoPackageNode(getProject(),new PackageElement(module,_package,false),myBuilder);
-          if (_package != null && _package.getParentPackage() != null && psiPackage.equals(_package.getParentPackage()) && !children.contains(todoPackageNode)) {
-            children.add(todoPackageNode);
-            break;
+          if (_package != null && _package.getParentPackage() != null && psiPackage.equals(_package.getParentPackage())) {
+            final GlobalSearchScope scope=module != null ? GlobalSearchScope.moduleScope(module) : GlobalSearchScope.projectScope(project);
+            _package=TodoPackageUtil.findNonEmptyPackage(_package,module,project,myBuilder,scope);
+            final String name=_package.getParentPackage().equals(psiPackage) ? null : _package.getQualifiedName().substring(psiPackage.getQualifiedName().length() + 1);
+            TodoPackageNode todoPackageNode=new TodoPackageNode(project,new PackageElement(module,_package,false),myBuilder,name);
+            if (!children.contains(todoPackageNode)) {
+              children.add(todoPackageNode);
+              break;
+            }
           }
         }
         _dir=parentDirectory;
@@ -46,15 +52,6 @@
       if (ArrayUtil.find(psiPackage.getDirectories(),_dir) > -1 && !children.contains(todoFileNode)) {
         children.add(todoFileNode);
         continue;
-      }
-      PsiPackage _package=_dir.getPackage();
-      final PackageElement element=new PackageElement(module,_package,false);
-      if (_package != null && !TodoPackageUtil.isPackageEmpty(element,myBuilder,getProject())) {
-        TodoPackageNode todoPackageNode=new TodoPackageNode(getProject(),element,myBuilder);
-        if (PsiTreeUtil.isAncestor(psiPackage,_package,true) && !children.contains(todoPackageNode)) {
-          children.add(todoPackageNode);
-          continue;
-        }
       }
     }
     Collections.sort(children,TodoFileDirAndModuleComparator.ourInstance);
