@@ -1,0 +1,206 @@
+{
+  if (expr instanceof PsiArrayAccessExpression && !mySettings.preserveRawArrays()) {
+    final PsiType at=evaluateType(((PsiArrayAccessExpression)expr).getArrayExpression(),system);
+    if (at instanceof PsiArrayType) {
+      return ((PsiArrayType)at).getComponentType();
+    }
+  }
+ else   if (expr instanceof PsiAssignmentExpression) {
+    return evaluateType(((PsiAssignmentExpression)expr).getLExpression(),system);
+  }
+ else   if (expr instanceof PsiCallExpression) {
+    final PsiCallExpression call=((PsiCallExpression)expr);
+    final PsiMethod method=call.resolveMethod();
+    if (method != null) {
+      final PsiClass aClass=method.getContainingClass();
+      final PsiTypeParameter[] methodTypeParams=method.getTypeParameters();
+      final PsiParameter[] parameters=method.getParameterList().getParameters();
+      final PsiExpression[] arguments=call.getArgumentList().getExpressions();
+      final PsiExpression aQualifier=expr instanceof PsiMethodCallExpression ? ((PsiMethodCallExpression)expr).getMethodExpression().getQualifierExpression() : null;
+      final HashSet<PsiTypeParameter> typeParameters=new HashSet<PsiTypeParameter>(Arrays.asList(methodTypeParams));
+      PsiSubstitutor qualifierSubstitutor=PsiSubstitutor.EMPTY;
+      PsiSubstitutor supertypeSubstitutor=PsiSubstitutor.EMPTY;
+      PsiType aType;
+      if (method.isConstructor()) {
+        aType=isCooked(expr) ? getType(expr) : expr.getType();
+        qualifierSubstitutor=Util.resolveType(aType).getSubstitutor();
+      }
+ else {
+        aType=getType(method);
+      }
+      if (aQualifier != null) {
+        final PsiType qualifierType=evaluateType(aQualifier,system);
+        final PsiClassType.ClassResolveResult result=Util.resolveType(qualifierType);
+        if (result.getElement() != null) {
+          final PsiClass qualifierClass=result.getElement();
+          qualifierSubstitutor=TypeConversionUtil.getClassSubstitutor(aClass,qualifierClass,result.getSubstitutor());
+          if (qualifierSubstitutor != null) {
+            aType=qualifierSubstitutor.substitute(aType);
+          }
+        }
+      }
+      final HashMap<PsiTypeParameter,PsiType> mapping=new HashMap<PsiTypeParameter,PsiType>();
+      for (int i=0; i < Math.min(parameters.length,arguments.length); i++) {
+        final PsiType argumentType=evaluateType(arguments[i],system);
+        PsiType parmType;
+        if (isCooked(parameters[i])) {
+          parmType=getType(parameters[i]);
+          system.addSubtypeConstraint(argumentType,parmType);
+        }
+ else {
+          parmType=qualifierSubstitutor.substitute(supertypeSubstitutor.substitute(parameters[i].getType()));
+          if (!Util.bindsTypeVariables(parmType) && !Util.bindsTypeParameters(parmType,typeParameters)) {
+            parmType=Util.banalize(parmType);
+          }
+          final PsiType theType=new Object(){
+            PsiType introduceAdditionalTypeVariables(            final PsiType type,            final PsiSubstitutor qualifier,            final PsiSubstitutor supertype){
+              final int level=type.getArrayDimensions();
+              final PsiClassType.ClassResolveResult result=Util.resolveType(type);
+              final PsiClass aClass=result.getElement();
+              if (aClass != null) {
+                if (aClass instanceof PsiTypeParameter) {
+                  final PsiTypeParameter tp=((PsiTypeParameter)aClass);
+                  final PsiClassType[] extypes=tp.getExtendsListTypes();
+                  PsiType pv=mapping.get(tp);
+                  if (pv == null) {
+                    pv=myTypeVariableFactory.create();
+                    mapping.put(tp,pv);
+                  }
+                  for (                  final PsiClassType ext : extypes) {
+                    final PsiType extype=qualifier.substitute(new Object(){
+                      public PsiType substitute(                      final PsiType ext){
+                        final PsiClassType.ClassResolveResult result=Util.resolveType(ext);
+                        final PsiClass aClass=result.getElement();
+                        if (aClass != null) {
+                          if (aClass instanceof PsiTypeParameter) {
+                            final PsiType type=mapping.get(aClass);
+                            if (type != null) {
+                              return type;
+                            }
+                            return ext;
+                          }
+                          final PsiSubstitutor aSubst=result.getSubstitutor();
+                          PsiSubstitutor theSubst=PsiSubstitutor.EMPTY;
+                          for (                          final PsiTypeParameter parm : aSubst.getSubstitutionMap().keySet()) {
+                            PsiType type=aSubst.substitute(parm);
+                            if (type != null) {
+                              type=substitute(type);
+                            }
+                            theSubst=theSubst.put(parm,type);
+                          }
+                          return aClass.getManager().getElementFactory().createType(aClass,theSubst);
+                        }
+                        return ext;
+                      }
+                    }
+.substitute(ext));
+                    system.addSubtypeConstraint(pv,extype);
+                  }
+                  return Util.createArrayType(pv,level);
+                }
+                final Map<PsiTypeParameter,PsiType> substitutionMap=result.getSubstitutor().getSubstitutionMap();
+                PsiSubstitutor theSubst=PsiSubstitutor.EMPTY;
+                for (                final PsiTypeParameter p : substitutionMap.keySet()) {
+                  final PsiType pType=substitutionMap.get(p);
+                  if (pType instanceof PsiWildcardType) {
+                    final PsiWildcardType wildcard=((PsiWildcardType)pType);
+                    final PsiType theBound=wildcard.getBound();
+                    if (theBound != null) {
+                      final PsiType bound=qualifier.substitute(supertype.substitute(theBound));
+                      if (Util.bindsTypeVariables(bound)) {
+                        final PsiType var=myTypeVariableFactory.create();
+                        if (wildcard.isExtends()) {
+                          system.addSubtypeConstraint(var,bound);
+                        }
+ else {
+                          system.addSubtypeConstraint(bound,var);
+                        }
+                        theSubst=theSubst.put(p,var);
+                      }
+ else                       if (Util.bindsTypeParameters(bound,typeParameters)) {
+                        final PsiType var=myTypeVariableFactory.create();
+                        PsiSubstitutor subst=PsiSubstitutor.EMPTY;
+                        for (                        final PsiTypeParameter aTypeParm : methodTypeParams) {
+                          PsiType parmVar=mapping.get(aTypeParm);
+                          if (parmVar == null) {
+                            parmVar=myTypeVariableFactory.create();
+                            mapping.put(aTypeParm,parmVar);
+                          }
+                          subst=subst.put(aTypeParm,parmVar);
+                        }
+                        final PsiType bnd=subst.substitute(bound);
+                        if (wildcard.isExtends()) {
+                          system.addSubtypeConstraint(bnd,var);
+                        }
+ else {
+                          system.addSubtypeConstraint(var,bnd);
+                        }
+                        theSubst=theSubst.put(p,var);
+                      }
+ else {
+                        theSubst=theSubst.put(p,pType);
+                      }
+                    }
+                  }
+ else {
+                    theSubst=theSubst.put(p,introduceAdditionalTypeVariables(pType,qualifier,supertype));
+                  }
+                }
+                return Util.createArrayType(aClass.getManager().getElementFactory().createType(aClass,theSubst),level);
+              }
+              return Util.createArrayType(type,level);
+            }
+          }
+.introduceAdditionalTypeVariables(parmType,qualifierSubstitutor,supertypeSubstitutor);
+          system.addSubtypeConstraint(argumentType,theType);
+        }
+      }
+      PsiSubstitutor theSubst=PsiSubstitutor.EMPTY;
+      for (      final PsiTypeParameter parm : mapping.keySet()) {
+        final PsiType type=mapping.get(parm);
+        theSubst=theSubst.put(parm,type);
+      }
+      for (      PsiTypeParameter typeParam : methodTypeParams) {
+        final PsiType inferred=inferTypeForMethodTypeParameter(typeParam,parameters,arguments,theSubst,expr,system);
+        theSubst=theSubst.put(typeParam,inferred);
+      }
+      return theSubst.substitute(aType);
+    }
+  }
+ else   if (expr instanceof PsiParenthesizedExpression) {
+    return evaluateType(((PsiParenthesizedExpression)expr).getExpression(),system);
+  }
+ else   if (expr instanceof PsiConditionalExpression) {
+    return evaluateType(((PsiConditionalExpression)expr).getThenExpression(),system);
+  }
+ else   if (expr instanceof PsiReferenceExpression) {
+    final PsiReferenceExpression ref=((PsiReferenceExpression)expr);
+    final PsiExpression qualifier=ref.getQualifierExpression();
+    if (qualifier == null) {
+      return getType(ref.resolve());
+    }
+ else {
+      final PsiType qualifierType=evaluateType(qualifier,system);
+      final PsiElement element=ref.resolve();
+      final PsiClassType.ClassResolveResult result=Util.resolveType(qualifierType);
+      if (result.getElement() != null) {
+        final PsiClass aClass=result.getElement();
+        final PsiSubstitutor aSubst=result.getSubstitutor();
+        if (element instanceof PsiField) {
+          final PsiField field=(PsiField)element;
+          final PsiType fieldType=getType(field);
+          final PsiClass superClass=field.getContainingClass();
+          PsiType aType=fieldType;
+          if (!aClass.equals(superClass) && field.isPhysical()) {
+            aType=TypeConversionUtil.getSuperClassSubstitutor(superClass,aClass,PsiSubstitutor.EMPTY).substitute(aType);
+          }
+          return aSubst.substitute(aType);
+        }
+      }
+ else       if (element != null) {
+        return getType(element);
+      }
+    }
+  }
+  return getType(expr);
+}
