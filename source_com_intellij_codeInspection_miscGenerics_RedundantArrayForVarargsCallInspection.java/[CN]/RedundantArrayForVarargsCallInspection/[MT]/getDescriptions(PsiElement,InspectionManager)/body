@@ -1,0 +1,53 @@
+{
+  if (place.getManager().getEffectiveLanguageLevel().compareTo(LanguageLevel.JDK_1_5) < 0)   return null;
+  final List<ProblemDescriptor> problems=new ArrayList<ProblemDescriptor>();
+  place.accept(new PsiRecursiveElementVisitor(){
+    public void visitCallExpression(    PsiCallExpression expression){
+      super.visitCallExpression(expression);
+      checkCall(expression);
+    }
+    public void visitEnumConstant(    PsiEnumConstant enumConstant){
+      super.visitEnumConstant(enumConstant);
+      checkCall(enumConstant);
+    }
+    private void checkCall(    PsiCall expression){
+      PsiMethod method=expression.resolveMethod();
+      if (method != null && method.isVarArgs()) {
+        PsiParameter[] parameters=method.getParameterList().getParameters();
+        PsiExpressionList argumentList=expression.getArgumentList();
+        if (argumentList != null) {
+          PsiExpression[] args=argumentList.getExpressions();
+          if (parameters.length == args.length) {
+            PsiExpression lastArg=args[args.length - 1];
+            if (lastArg instanceof PsiNewExpression) {
+              PsiArrayInitializerExpression arrayInitializer=((PsiNewExpression)lastArg).getArrayInitializer();
+              if (arrayInitializer != null) {
+                if (isSafeToFlatten(expression,method,arrayInitializer.getInitializers())) {
+                  final ProblemDescriptor descriptor=manager.createProblemDescriptor(lastArg,InspectionsBundle.message("inspection.redundant.array.creation.for.varargs.call.descriptor"),myQuickFixAction,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+                  problems.add(descriptor);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    private boolean isSafeToFlatten(    PsiCall callExpression,    PsiMethod oldRefMethod,    PsiExpression[] arrayElements){
+      PsiCall copy=(PsiCall)callExpression.copy();
+      PsiExpressionList copyArgumentList=copy.getArgumentList();
+      LOG.assertTrue(copyArgumentList != null);
+      PsiExpression[] args=copyArgumentList.getExpressions();
+      try {
+        args[args.length - 1].delete();
+        copyArgumentList.addRange(arrayElements[0],arrayElements[arrayElements.length - 1]);
+        return copy.resolveMethod() == oldRefMethod;
+      }
+ catch (      IncorrectOperationException e) {
+        return false;
+      }
+    }
+  }
+);
+  if (problems.isEmpty())   return null;
+  return problems.toArray(new ProblemDescriptor[problems.size()]);
+}
