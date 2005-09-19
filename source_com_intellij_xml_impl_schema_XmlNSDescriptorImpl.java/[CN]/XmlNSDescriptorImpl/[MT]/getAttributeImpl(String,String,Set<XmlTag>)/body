@@ -1,0 +1,48 @@
+{
+  XmlDocument document=myFile.getDocument();
+  XmlTag rootTag=document.getRootTag();
+  if (rootTag == null)   return null;
+  XmlNSDescriptorImpl nsDescriptor=(XmlNSDescriptorImpl)rootTag.getNSDescriptor(namespace,true);
+  if (nsDescriptor != this && nsDescriptor != null) {
+    return nsDescriptor.getAttribute(localName,namespace);
+  }
+  if (visited == null)   visited=new HashSet<XmlTag>(1);
+ else   if (visited.contains(rootTag))   return null;
+  visited.add(rootTag);
+  XmlTag[] tags=rootTag.getSubTags();
+  for (  XmlTag tag : tags) {
+    if (equalsToSchemaName(tag,"attribute")) {
+      String name=tag.getAttributeValue("name");
+      if (name != null) {
+        if (checkElementNameEquivalence(localName,namespace,name,tag)) {
+          return createAttributeDescriptor(tag);
+        }
+      }
+    }
+ else     if (equalsToSchemaName(tag,"include") || (equalsToSchemaName(tag,"import") && namespace.equals(tag.getAttributeValue("namespace")))) {
+      final XmlAttribute schemaLocation=tag.getAttribute("schemaLocation",tag.getNamespace());
+      if (schemaLocation != null) {
+        final XmlFile xmlFile=XmlUtil.findXmlFile(rootTag.getContainingFile(),schemaLocation.getValue());
+        if (xmlFile != null) {
+          final XmlDocument includedDocument=xmlFile.getDocument();
+          if (includedDocument != null) {
+            final PsiMetaData data=includedDocument.getMetaData();
+            if (data instanceof XmlNSDescriptorImpl) {
+              final XmlAttributeDescriptorImpl attributeDescriptor=((XmlNSDescriptorImpl)data).getAttributeImpl(localName,namespace,visited);
+              if (attributeDescriptor != null) {
+                final CachedValue<XmlAttributeDescriptorImpl> value=includedDocument.getManager().getCachedValuesManager().createCachedValue(new CachedValueProvider<XmlAttributeDescriptorImpl>(){
+                  public Result<XmlAttributeDescriptorImpl> compute(){
+                    return new Result<XmlAttributeDescriptorImpl>(attributeDescriptor,attributeDescriptor.getDependences());
+                  }
+                }
+,false);
+                return value.getValue();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
