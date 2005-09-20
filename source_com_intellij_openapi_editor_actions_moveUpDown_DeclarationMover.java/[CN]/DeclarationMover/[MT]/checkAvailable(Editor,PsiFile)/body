@@ -1,0 +1,74 @@
+{
+  if (!(file instanceof PsiJavaFile)) {
+    return false;
+  }
+  boolean available=super.checkAvailable(editor,file);
+  if (!available)   return false;
+  LineRange oldRange=whatToMove;
+  final Pair<PsiElement,PsiElement> psiRange=getElementRange(editor,file,oldRange);
+  if (psiRange == null)   return false;
+  final PsiMember firstMember=PsiTreeUtil.getParentOfType(psiRange.getFirst(),PsiMember.class,false);
+  final PsiMember lastMember=PsiTreeUtil.getParentOfType(psiRange.getSecond(),PsiMember.class,false);
+  LineRange range;
+  if (firstMember != null && firstMember == lastMember) {
+    range=memberRange(firstMember,editor,oldRange);
+    if (range == null)     return false;
+    range.firstElement=firstMember;
+    range.lastElement=lastMember;
+  }
+ else {
+    if (firstMember == null || lastMember == null)     return false;
+    final PsiElement parent=PsiTreeUtil.findCommonParent(firstMember,lastMember);
+    if (parent == null)     return false;
+    final Pair<PsiElement,PsiElement> combinedRange=getElementRange(parent,firstMember,lastMember);
+    if (combinedRange == null)     return false;
+    final LineRange lineRange1=memberRange(combinedRange.getFirst(),editor,oldRange);
+    if (lineRange1 == null)     return false;
+    final LineRange lineRange2=memberRange(combinedRange.getSecond(),editor,oldRange);
+    if (lineRange2 == null)     return false;
+    range=new LineRange(lineRange1.startLine,lineRange2.endLine);
+    range.firstElement=combinedRange.getFirst();
+    range.lastElement=combinedRange.getSecond();
+  }
+  PsiElement nextWhitespace=range.lastElement.getNextSibling();
+  if (nextWhitespace instanceof PsiWhiteSpace) {
+    int endLine=editor.offsetToLogicalPosition(nextWhitespace.getTextRange().getEndOffset()).line;
+    Document document=editor.getDocument();
+    while (true) {
+      int lineStartOffset=document.getLineStartOffset(endLine);
+      int lineEndOffset=document.getLineEndOffset(endLine);
+      PsiElement elementAtStart=file.findElementAt(lineStartOffset);
+      PsiElement elementAtEnd=file.findElementAt(lineEndOffset - 1);
+      if (elementAtEnd == nextWhitespace && elementAtStart == nextWhitespace)       break;
+      endLine--;
+      if (endLine == range.endLine)       break;
+    }
+    LineRange newRange=new LineRange(range.startLine,endLine);
+    newRange.firstElement=range.firstElement;
+    newRange.lastElement=nextWhitespace;
+    range=newRange;
+  }
+  PsiElement sibling=myIsDown ? range.lastElement.getNextSibling() : range.firstElement.getPrevSibling();
+  if (sibling == null)   return false;
+  final boolean areWeMovingClass=range.firstElement instanceof PsiClass;
+  sibling=firstNonWhiteElement(sibling,myIsDown);
+  int offset=moveInsideOutsideClassOffset(editor,sibling,myIsDown,areWeMovingClass);
+  if (offset == -1) {
+    insertOffset=-1;
+    return true;
+  }
+  if (offset != 0) {
+    whatToMove=range;
+    insertOffset=offset;
+    return true;
+  }
+  if (myIsDown) {
+    sibling=sibling.getNextSibling();
+    if (sibling == null)     return false;
+    sibling=firstNonWhiteElement(sibling,myIsDown);
+    if (sibling == null)     return false;
+  }
+  whatToMove=range;
+  insertOffset=sibling.getTextRange().getStartOffset();
+  return true;
+}
