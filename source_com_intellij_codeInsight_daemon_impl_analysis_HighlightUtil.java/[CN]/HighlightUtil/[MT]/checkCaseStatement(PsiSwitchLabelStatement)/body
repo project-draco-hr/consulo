@@ -4,9 +4,14 @@
     return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,statement,"Case statement outside switch");
   }
   if (switchStatement.getBody() == null)   return null;
-  Object value=null;
+  PsiExpression switchExpression=switchStatement.getExpression();
+  PsiType switchType=switchExpression == null ? PsiType.INT : switchExpression.getType();
   PsiExpression caseValue=statement.getCaseValue();
-  PsiConstantEvaluationHelper evalHelper=statement.getManager().getConstantEvaluationHelper();
+  if (caseValue != null && switchExpression != null) {
+    HighlightInfo highlightInfo=checkAssignability(switchType,caseValue.getType(),caseValue,caseValue);
+    if (highlightInfo != null)     return highlightInfo;
+  }
+  Object value=null;
   boolean isEnumSwitch=false;
   if (!statement.isDefaultCase() && caseValue != null) {
     if (caseValue instanceof PsiReferenceExpression) {
@@ -21,16 +26,11 @@
       }
     }
     if (!isEnumSwitch) {
-      value=evalHelper.computeConstantExpression(caseValue);
+      value=ConstantExpressionUtil.computeCastTo(caseValue,switchType);
     }
     if (value == null) {
       return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,caseValue,"Constant expression required");
     }
-  }
-  PsiExpression switchExpression=switchStatement.getExpression();
-  if (caseValue != null && switchExpression != null) {
-    HighlightInfo highlightInfo=checkAssignability(switchExpression.getType(),caseValue.getType(),caseValue,caseValue);
-    if (highlightInfo != null)     return highlightInfo;
   }
   PsiStatement[] statements=switchStatement.getBody().getStatements();
   for (  PsiStatement st : statements) {
@@ -43,7 +43,10 @@
       PsiElement element=((PsiReferenceExpression)caseExpr).resolve();
       if (!(element instanceof PsiEnumConstant && Comparing.equal(((PsiEnumConstant)element).getName(),value)))       continue;
     }
- else     if (!Comparing.equal(evalHelper.computeConstantExpression(caseExpr),value))     continue;
+ else {
+      if (!TypeConversionUtil.areTypesAssignmentCompatible(switchType,caseExpr))       continue;
+      if (!Comparing.equal(ConstantExpressionUtil.computeCastTo(caseExpr,switchType),value))       continue;
+    }
     String description=statement.isDefaultCase() ? "Duplicate default label" : MessageFormat.format("Duplicate label ''{0}''",new Object[]{value});
     return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,value == null ? (PsiElement)statement : caseValue,description);
   }
