@@ -12,7 +12,7 @@
     CopyResourcesUtil.copyFormsRuntime(tempPath,true);
   }
  catch (  IOException e) {
-    Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ e.toString(),"Error");
+    Messages.showErrorDialog(module.getProject(),UIDesignerBundle.message("error.cannot.preview.form",formFile.getPath().replace('/',File.separatorChar),e.toString()),CommonBundle.getErrorTitle());
     return;
   }
   final PathsList sources=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.PROJECT_SOURCES);
@@ -26,11 +26,11 @@
       rootContainer=Utils.getRootContainer(doc.getText(),new CompiledClassPropertiesProvider(loader));
     }
  catch (    Exception e) {
-      Messages.showErrorDialog(module.getProject(),"Cannot read form file '" + formFile.getPath().replace('/',File.separatorChar) + "'.\n"+ "Reason: "+ e.getMessage(),"Error");
+      Messages.showErrorDialog(module.getProject(),UIDesignerBundle.message("error.cannot.read.form",formFile.getPath().replace('/',File.separatorChar),e.getMessage()),CommonBundle.getErrorTitle());
       return;
     }
     if (rootContainer.getComponentCount() == 0) {
-      Messages.showErrorDialog(module.getProject(),"Cannot preview an empty form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n","Error");
+      Messages.showErrorDialog(module.getProject(),UIDesignerBundle.message("error.cannot.preview.empty.form",formFile.getPath().replace('/',File.separatorChar)),CommonBundle.getErrorTitle());
       return;
     }
     rootContainer.setClassToBind(CLASS_TO_BIND_NAME);
@@ -51,40 +51,61 @@
       CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MyExitAction",true);
       CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MyPackAction",true);
       CopyResourcesUtil.copyClass(tempPath,CLASS_TO_BIND_NAME + "$MySetLafAction",true);
+      Locale locale=Locale.getDefault();
+      if (locale.getCountry().length() > 0 && locale.getLanguage().length() > 0) {
+        CopyResourcesUtil.copyProperties(tempPath,RUNTIME_BUNDLE_PREFIX + locale.getLanguage() + "_"+ locale.getCountry()+ RUNTIME_BUNDLE_EXTENSION);
+      }
+      if (locale.getLanguage().length() > 0) {
+        CopyResourcesUtil.copyProperties(tempPath,RUNTIME_BUNDLE_PREFIX + locale.getLanguage() + RUNTIME_BUNDLE_EXTENSION);
+      }
+      CopyResourcesUtil.copyProperties(tempPath,RUNTIME_BUNDLE_PREFIX + locale.getLanguage() + RUNTIME_BUNDLE_EXTENSION);
       final CodeGenerator codeGenerator=new CodeGenerator(rootContainer,tempFile,loader);
       codeGenerator.patch();
       final String[] errors=codeGenerator.getErrors();
       if (errors.length != 0) {
-        Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ errors[0],"Error");
+        Messages.showErrorDialog(module.getProject(),UIDesignerBundle.message("error.cannot.preview.form",formFile.getPath().replace('/',File.separatorChar),errors[0]),CommonBundle.getErrorTitle());
         return;
       }
     }
  catch (    Exception e) {
-      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ (e.getMessage() != null ? e.getMessage() : e.toString()),"Error");
+      Messages.showErrorDialog(module.getProject(),UIDesignerBundle.message("error.cannot.preview.form",formFile.getPath().replace('/',File.separatorChar),(e.getMessage() != null ? e.getMessage() : e.toString())),CommonBundle.getErrorTitle());
       return;
     }
-    final JavaParameters parameters=new JavaParameters();
-    parameters.getClassPath().add(tempPath);
-    final List<String> paths=sources.getPathList();
-    for (Iterator<String> it=paths.iterator(); it.hasNext(); ) {
-      parameters.getClassPath().add(it.next());
+    final HashSet<String> bundleSet=new HashSet<String>();
+    FormEditingUtil.iterateStringDescriptors(rootContainer,new FormEditingUtil.StringDescriptorVisitor<LwComponent>(){
+      public boolean visit(      final IComponent component,      final StringDescriptor descriptor){
+        if (descriptor.getBundleName() != null) {
+          bundleSet.add(descriptor.getBundleName());
+        }
+        return true;
+      }
     }
-    try {
-      parameters.configureByModule(module,JavaParameters.JDK_AND_CLASSES);
+);
+    if (bundleSet.size() > 0) {
+      HashSet<VirtualFile> virtualFiles=new HashSet<VirtualFile>();
+      HashSet<Module> modules=new HashSet<Module>();
+      for (      String bundleName : bundleSet) {
+        PropertiesFile basePropFile=ReferenceUtil.getPropertiesFile(bundleName,module);
+        if (basePropFile != null) {
+          ResourceBundle resBundle=basePropFile.getResourceBundle();
+          for (          PropertiesFile propFile : resBundle.getPropertiesFiles(module.getProject())) {
+            virtualFiles.add(propFile.getVirtualFile());
+            modules.add(ModuleUtil.getModuleForFile(module.getProject(),propFile.getVirtualFile()));
+          }
+        }
+      }
+      FileSetCompileScope scope=new FileSetCompileScope(virtualFiles.toArray(new VirtualFile[]{}),modules.toArray(new Module[]{}));
+      CompilerManager.getInstance(module.getProject()).make(scope,new CompileStatusNotification(){
+        public void finished(        boolean aborted,        int errors,        int warnings){
+          if (!aborted && errors == 0) {
+            runPreviewProcess(tempPath,sources,module,formFile,dataContext);
+          }
+        }
+      }
+);
     }
- catch (    CantRunException e) {
-      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\n"+ "Reason: "+ e.getMessage(),"Error");
-      return;
-    }
-    parameters.setMainClass("FormPreviewFrame");
-    parameters.setWorkingDirectory(tempPath);
-    try {
-      JavaProgramRunner defaultRunner=ExecutionRegistry.getInstance().getDefaultRunner();
-      RunStrategy.getInstance().execute(new MyRunProfile(module,parameters,formFile.getPresentableUrl() + " preview started"),dataContext,defaultRunner,null,null);
-    }
- catch (    ExecutionException e) {
-      Messages.showErrorDialog(module.getProject(),"Cannot preview form '" + formFile.getPath().replace('/',File.separatorChar) + "'\nReason: "+ e.getMessage(),"Error");
-      return;
+ else {
+      runPreviewProcess(tempPath,sources,module,formFile,dataContext);
     }
   }
   finally {

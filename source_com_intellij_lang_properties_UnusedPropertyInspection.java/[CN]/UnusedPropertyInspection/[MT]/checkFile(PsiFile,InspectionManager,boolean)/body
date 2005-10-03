@@ -1,20 +1,30 @@
 {
   if (!(file instanceof PropertiesFile))   return null;
-  List<ProblemDescriptor> descriptors=new SmartList<ProblemDescriptor>();
-  PsiSearchHelper searchHelper=file.getManager().getSearchHelper();
-  List<Property> properties=((PropertiesFile)file).getProperties();
+  final List<ProblemDescriptor> descriptors=new SmartList<ProblemDescriptor>();
+  final PsiSearchHelper searchHelper=file.getManager().getSearchHelper();
+  final List<Property> properties=((PropertiesFile)file).getProperties();
   Module module=ModuleUtil.findModuleForPsiElement(file);
   if (module == null)   return null;
   final GlobalSearchScope searchScope=GlobalSearchScope.moduleWithDependentsScope(module);
-  for (  Property property : properties) {
-    PsiReferenceProcessor.FindElement processor=new PsiReferenceProcessor.FindElement();
-    searchHelper.processReferences(processor,property,searchScope,false);
-    if (!processor.isFound()) {
-      ASTNode[] nodes=property.getNode().getChildren(null);
-      PsiElement key=nodes.length == 0 ? property : nodes[0].getPsi();
-      ProblemDescriptor descriptor=manager.createProblemDescriptor(key,"Unused property",QUICK_FIX,ProblemHighlightType.LIKE_UNUSED_SYMBOL);
-      descriptors.add(descriptor);
+  final ProgressIndicator original=ProgressManager.getInstance().getProgressIndicator();
+  final ProgressIndicator progress=original == null ? null : new ProgressWrapper(original);
+  ProgressManager.getInstance().runProcess(new Runnable(){
+    public void run(){
+      for (      Property property : properties) {
+        PsiReferenceProcessor.FindElement processor=new PsiReferenceProcessor.FindElement();
+        if (original != null) {
+          original.setText(PropertiesBundle.message("searching.for.property.key.progress.text",property.getKey()));
+        }
+        searchHelper.processReferences(processor,property,searchScope,false);
+        if (!processor.isFound()) {
+          ASTNode[] nodes=property.getNode().getChildren(null);
+          PsiElement key=nodes.length == 0 ? property : nodes[0].getPsi();
+          ProblemDescriptor descriptor=manager.createProblemDescriptor(key,PropertiesBundle.message("unused.property.problem.descriptor.name"),QUICK_FIX,ProblemHighlightType.LIKE_UNUSED_SYMBOL);
+          descriptors.add(descriptor);
+        }
+      }
     }
   }
+,progress);
   return descriptors.toArray(new ProblemDescriptor[descriptors.size()]);
 }

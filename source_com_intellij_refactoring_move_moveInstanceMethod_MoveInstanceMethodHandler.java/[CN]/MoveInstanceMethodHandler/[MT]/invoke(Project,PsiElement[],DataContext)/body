@@ -1,64 +1,63 @@
 {
   if (elements.length != 1 || !(elements[0] instanceof PsiMethod))   return;
   final PsiMethod method=((PsiMethod)elements[0]);
+  String message=null;
   if (method.isConstructor()) {
-    String message="Cannot perform the refactoring.\n" + "Move method is not supported for constructors";
-    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
-    return;
+    message=RefactoringBundle.message("move.method.is.not.supported.for.constructors");
   }
-  if (PsiUtil.typeParametersIterator(method.getContainingClass()).hasNext()) {
-    String message="Cannot perform the refactoring.\n" + "Move method is not supported for generic classes";
-    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
-    return;
+ else   if (PsiUtil.typeParametersIterator(method.getContainingClass()).hasNext()) {
+    message=RefactoringBundle.message("move.method.is.not.supported.for.generic.classes");
   }
-  if (PsiSuperMethodUtil.findSuperMethods(method).length > 0 || method.getManager().getSearchHelper().findOverridingMethods(method,GlobalSearchScope.allScope(project),true).length > 0) {
-    String message="Cannot perform the refactoring.\n" + "Move method is not supported when method is a part of inheritance hierarchy";
-    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
-    return;
+ else   if (method.findSuperMethods().length > 0 || method.getManager().getSearchHelper().findOverridingMethods(method,GlobalSearchScope.allScope(project),true).length > 0) {
+    message=RefactoringBundle.message("move.method.is.not.supported.when.method.is.part.of.inheritance.hierarchy");
   }
-  final Set<PsiClass> classes=MoveInstanceMembersUtil.getThisClassesToMembers(method).keySet();
-  for (  PsiClass aClass : classes) {
-    if (aClass instanceof JspClass) {
-      String message="Cannot perform the refactoring.\n" + "Synthetic jsp class is referenced in the method";
-      RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
-      return;
-    }
-  }
-  List<PsiVariable> suitableVariables=new ArrayList<PsiVariable>();
-  List<PsiVariable> allVariables=new ArrayList<PsiVariable>();
-  allVariables.addAll(Arrays.asList(method.getParameterList().getParameters()));
-  allVariables.addAll(Arrays.asList(method.getContainingClass().getFields()));
-  boolean classTypesFound=false;
-  boolean resolvableClassesFound=false;
-  boolean classesInProjectFound=false;
-  for (  PsiVariable variable : allVariables) {
-    final PsiType type=variable.getType();
-    if (type instanceof PsiClassType && !((PsiClassType)type).hasParameters()) {
-      classTypesFound=true;
-      final PsiClass psiClass=((PsiClassType)type).resolve();
-      if (psiClass != null && !(psiClass instanceof PsiTypeParameter)) {
-        resolvableClassesFound=true;
-        final boolean inProject=method.getManager().isInProject(psiClass);
-        if (inProject) {
-          classesInProjectFound=true;
-          suitableVariables.add(variable);
-        }
+ else {
+    final Set<PsiClass> classes=MoveInstanceMembersUtil.getThisClassesToMembers(method).keySet();
+    for (    PsiClass aClass : classes) {
+      if (aClass instanceof JspClass) {
+        message=RefactoringBundle.message("synthetic.jsp.class.is.referenced.in.the.method");
+        RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.MOVE_INSTANCE_METHOD,project);
+        break;
       }
     }
   }
-  if (suitableVariables.isEmpty()) {
-    String message=null;
-    if (!classTypesFound) {
-      message="There are no variables that have a reference type";
+  List<PsiVariable> suitableVariables=new ArrayList<PsiVariable>();
+  if (message == null) {
+    List<PsiVariable> allVariables=new ArrayList<PsiVariable>();
+    allVariables.addAll(Arrays.asList(method.getParameterList().getParameters()));
+    allVariables.addAll(Arrays.asList(method.getContainingClass().getFields()));
+    boolean classTypesFound=false;
+    boolean resolvableClassesFound=false;
+    boolean classesInProjectFound=false;
+    for (    PsiVariable variable : allVariables) {
+      final PsiType type=variable.getType();
+      if (type instanceof PsiClassType && !((PsiClassType)type).hasParameters()) {
+        classTypesFound=true;
+        final PsiClass psiClass=((PsiClassType)type).resolve();
+        if (psiClass != null && !(psiClass instanceof PsiTypeParameter)) {
+          resolvableClassesFound=true;
+          final boolean inProject=method.getManager().isInProject(psiClass);
+          if (inProject) {
+            classesInProjectFound=true;
+            suitableVariables.add(variable);
+          }
+        }
+      }
     }
- else     if (!resolvableClassesFound) {
-      message="All candidate variables have unknown types";
+    if (suitableVariables.isEmpty()) {
+      if (!classTypesFound) {
+        message=RefactoringBundle.message("there.are.no.variables.that.have.reference.type");
+      }
+ else       if (!resolvableClassesFound) {
+        message=RefactoringBundle.message("all.candidate.variables.have.unknown.types");
+      }
+ else       if (!classesInProjectFound) {
+        message=RefactoringBundle.message("all.candidate.variables.have.types.not.in.project");
+      }
     }
- else     if (!classesInProjectFound) {
-      message="All candidate variables have types that are not in project";
-    }
-    LOG.assertTrue(message != null);
-    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,"Cannot perform refactoring.\n" + message,HelpID.CONVERT_TO_INSTANCE_METHOD,project);
+  }
+  if (message != null) {
+    RefactoringMessageUtil.showErrorMessage(REFACTORING_NAME,RefactoringBundle.getCannotRefactorMessage(message),HelpID.CONVERT_TO_INSTANCE_METHOD,project);
     return;
   }
   new MoveInstanceMethodDialog(method,suitableVariables.toArray(new PsiVariable[suitableVariables.size()])).show();

@@ -1,71 +1,50 @@
 {
-  PsiClass[] superClasses=aClass.getSupers();
-  if (superClasses.length <= 1)   return null;
-  PsiManager manager=aClass.getManager();
-  PsiClass objectClass=manager.findClass("java.lang.Object",aClass.getResolveScope());
-  MethodSignatureUtil.MethodSignatureToMethods allMethods=MethodSignatureUtil.getOverrideEquivalentMethods(aClass);
-  for (  List<MethodSignatureBackedByPsiMethod> methodSignatureBackedByPsiMethods : allMethods.values()) {
-    ProgressManager.getInstance().checkCanceled();
-    List<MethodSignatureBackedByPsiMethod> superMethodSignatures=new ArrayList<MethodSignatureBackedByPsiMethod>(methodSignatureBackedByPsiMethods);
-    MethodSignatureBackedByPsiMethod firstMethodSignature=superMethodSignatures.get(0);
-    if (firstMethodSignature.getMethod().isConstructor())     continue;
-    removeNotInheritedMethods(superMethodSignatures,aClass);
-    if (superMethodSignatures.size() < 2)     continue;
-    MethodSignatureBackedByPsiMethod overridingMethodSignature=null;
-    int overridingSignatureIndex=-1;
-    for (int i=0; i < superMethodSignatures.size(); i++) {
-      MethodSignatureBackedByPsiMethod superMethodSignature=superMethodSignatures.get(i);
-      PsiMethod superMethod=superMethodSignature.getMethod();
-      if (!manager.getResolveHelper().isAccessible(superMethod,aClass,null)) {
-        superMethodSignatures.remove(i);
-        continue;
-      }
-      if (superMethod.hasModifierProperty(PsiModifier.ABSTRACT))       continue;
-      if (overridingSignatureIndex < 0 || !manager.areElementsEquivalent(superMethod.getContainingClass(),objectClass)) {
-        overridingMethodSignature=superMethodSignature;
-        overridingSignatureIndex=i;
+  String errorDescription=null;
+  final Collection<HierarchicalMethodSignature> visibleSignatures=aClass.getVisibleSignatures();
+  PsiResolveHelper resolveHelper=aClass.getManager().getResolveHelper();
+  Ultimate:   for (  HierarchicalMethodSignature signature : visibleSignatures) {
+    PsiMethod method=signature.getMethod();
+    if (!resolveHelper.isAccessible(method,aClass,null))     continue;
+    List<HierarchicalMethodSignature> superSignatures=signature.getSuperSignatures();
+    boolean allAbstracts=method.hasModifierProperty(PsiModifier.ABSTRACT);
+    HighlightInfo highlightInfo=null;
+    if (!allAbstracts) {
+      if (!aClass.equals(method.getContainingClass())) {
+        highlightInfo=checkMethodIncompatibleReturnType(signature,superSignatures,false);
       }
     }
-    HighlightInfo highlightInfo=null;
-    if (overridingMethodSignature != null) {
-      PsiMethod overridingMethod=overridingMethodSignature.getMethod();
-      PsiClass overridingClass=overridingMethod.getContainingClass();
-      if (!manager.areElementsEquivalent(overridingClass,objectClass) || !aClass.isInterface()) {
-        superMethodSignatures.set(0,overridingMethodSignature);
-        superMethodSignatures.set(overridingSignatureIndex,firstMethodSignature);
-        highlightInfo=checkMethodIncompatibleReturnType(overridingMethodSignature,superMethodSignatures,false);
-        if (highlightInfo == null) {
-          for (int i=1; i < superMethodSignatures.size(); i++) {
-            MethodSignatureBackedByPsiMethod superMethodSignature=superMethodSignatures.get(i);
-            PsiMethod superMethod=superMethodSignature.getMethod();
-            if (aClass.isInterface() && manager.areElementsEquivalent(overridingClass,objectClass))             continue;
-            List<MethodSignatureBackedByPsiMethod> list=new ArrayList<MethodSignatureBackedByPsiMethod>();
-            list.add(superMethodSignature);
-            highlightInfo=checkMethodIncompatibleThrows(overridingMethodSignature,list,false);
-            if (highlightInfo == null) {
-              highlightInfo=checkMethodWeakerPrivileges(overridingMethodSignature,list,false);
-            }
-            if (highlightInfo == null) {
-              highlightInfo=checkStaticMethodOverride(overridingClass,overridingMethod,superMethod.getContainingClass(),superMethod,false);
-            }
-            if (highlightInfo != null)             break;
-          }
+ else {
+      if (!method.getContainingClass().equals(aClass)) {
+        superSignatures=new ArrayList<HierarchicalMethodSignature>(superSignatures);
+        superSignatures.add(signature);
+      }
+      highlightInfo=checkInterfaceInheritedMethodsReturnTypes(superSignatures);
+    }
+    if (highlightInfo != null)     errorDescription=highlightInfo.description;
+    if (aClass.equals(method.getContainingClass()))     continue;
+    if (method.hasModifierProperty(PsiModifier.STATIC)) {
+      for (      HierarchicalMethodSignature superSignature : superSignatures) {
+        PsiMethod superMethod=superSignature.getMethod();
+        if (!superMethod.hasModifierProperty(PsiModifier.STATIC)) {
+          errorDescription=JavaErrorMessages.message("static.method.cannot.override.instance.method",HighlightUtil.formatMethod(method),HighlightUtil.formatClass(method.getContainingClass()),HighlightUtil.formatMethod(superMethod),HighlightUtil.formatClass(superMethod.getContainingClass()));
+          break Ultimate;
         }
       }
+      continue;
     }
- else {
-      if (aClass.isInterface()) {
-        highlightInfo=checkInterfaceInheritedMethodsReturnTypes(superMethodSignatures);
-      }
- else {
-        highlightInfo=checkAllAbstractInheritedMethodsReturnTypes(superMethodSignatures);
-      }
+    if (errorDescription == null) {
+      highlightInfo=checkMethodIncompatibleThrows(signature,superSignatures,false);
+      if (highlightInfo != null)       errorDescription=highlightInfo.description;
     }
-    if (highlightInfo != null) {
-      TextRange textRange=ClassUtil.getClassDeclarationTextRange(aClass);
-      String message=highlightInfo.description;
-      return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,textRange,message);
+    if (errorDescription == null) {
+      highlightInfo=checkMethodWeakerPrivileges(signature,superSignatures,false);
+      if (highlightInfo != null)       errorDescription=highlightInfo.description;
     }
+    if (errorDescription != null)     break;
+  }
+  if (errorDescription != null) {
+    TextRange textRange=ClassUtil.getClassDeclarationTextRange(aClass);
+    return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,textRange,errorDescription);
   }
   return null;
 }
