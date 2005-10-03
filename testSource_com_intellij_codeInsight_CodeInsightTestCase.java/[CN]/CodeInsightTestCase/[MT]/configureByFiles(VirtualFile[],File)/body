@@ -16,28 +16,35 @@
   final String[] newFileTexts=new String[vFiles.length];
   boolean projectCopied=false;
   List<Writer> writersToClose=new ArrayList<Writer>(vFiles.length);
+  List<OutputStream> streamsToClose=new ArrayList<OutputStream>(0);
   for (int i=0; i < vFiles.length; i++) {
     VirtualFile vFile=vFiles[i];
     assertNotNull(vFile);
-    String fileText=new String(vFile.contentsToCharArray());
-    fileText=StringUtil.convertLineSeparators(fileText,"\n");
-    Document document=EditorFactory.getInstance().createDocument(fileText);
-    int caretIndex=fileText.indexOf(CARET_MARKER);
-    int selStartIndex=fileText.indexOf(SELECTION_START_MARKER);
-    int selEndIndex=fileText.indexOf(SELECTION_END_MARKER);
-    final RangeMarker caretMarker=caretIndex >= 0 ? document.createRangeMarker(caretIndex,caretIndex) : null;
-    final RangeMarker selStartMarker=selStartIndex >= 0 ? document.createRangeMarker(selStartIndex,selStartIndex) : null;
-    final RangeMarker selEndMarker=selEndIndex >= 0 ? document.createRangeMarker(selEndIndex,selEndIndex) : null;
-    if (caretMarker != null) {
-      document.deleteString(caretMarker.getStartOffset(),caretMarker.getStartOffset() + CARET_MARKER.length());
+    byte[] content=vFile.getFileType().isBinary() ? vFile.contentsToByteArray() : null;
+    final String fileText=vFile.getFileType().isBinary() ? null : StringUtil.convertLineSeparators(new String(vFile.contentsToCharArray()),"\n");
+    String newFileText=null;
+    RangeMarker caretMarker=null;
+    RangeMarker selStartMarker=null;
+    RangeMarker selEndMarker=null;
+    if (fileText != null) {
+      Document document=EditorFactory.getInstance().createDocument(fileText);
+      int caretIndex=fileText.indexOf(CARET_MARKER);
+      int selStartIndex=fileText.indexOf(SELECTION_START_MARKER);
+      int selEndIndex=fileText.indexOf(SELECTION_END_MARKER);
+      caretMarker=caretIndex >= 0 ? document.createRangeMarker(caretIndex,caretIndex) : null;
+      selStartMarker=selStartIndex >= 0 ? document.createRangeMarker(selStartIndex,selStartIndex) : null;
+      selEndMarker=selEndIndex >= 0 ? document.createRangeMarker(selEndIndex,selEndIndex) : null;
+      if (caretMarker != null) {
+        document.deleteString(caretMarker.getStartOffset(),caretMarker.getStartOffset() + CARET_MARKER.length());
+      }
+      if (selStartMarker != null) {
+        document.deleteString(selStartMarker.getStartOffset(),selStartMarker.getStartOffset() + SELECTION_START_MARKER.length());
+      }
+      if (selEndMarker != null) {
+        document.deleteString(selEndMarker.getStartOffset(),selEndMarker.getStartOffset() + SELECTION_END_MARKER.length());
+      }
+      newFileText=document.getText();
     }
-    if (selStartMarker != null) {
-      document.deleteString(selStartMarker.getStartOffset(),selStartMarker.getStartOffset() + SELECTION_START_MARKER.length());
-    }
-    if (selEndMarker != null) {
-      document.deleteString(selEndMarker.getStartOffset(),selEndMarker.getStartOffset() + SELECTION_END_MARKER.length());
-    }
-    String newFileText=document.getText();
     VirtualFile newVFile;
     if (projectRoot != null) {
       if (!projectCopied) {
@@ -46,15 +53,11 @@
       }
       String path=vDir.getPath() + vFile.getPath().substring(projectRoot.getPath().length());
       newVFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(path);
-      Writer writer=newVFile.getWriter(this);
-      writer.write(newFileText);
-      writersToClose.add(writer);
+      doWrite(newFileText,newVFile,writersToClose,content,streamsToClose);
     }
  else {
       newVFile=vDir.createChildData(this,vFile.getName());
-      Writer writer=newVFile.getWriter(this);
-      writer.write(newFileText);
-      writersToClose.add(writer);
+      doWrite(newFileText,newVFile,writersToClose,content,streamsToClose);
     }
     newVFiles[i]=newVFile;
     newFileTexts[i]=newFileText;
@@ -64,6 +67,9 @@
   }
   for (int i=writersToClose.size() - 1; i >= 0; --i) {
     writersToClose.get(i).close();
+  }
+  for (int i=streamsToClose.size() - 1; i >= 0; --i) {
+    streamsToClose.get(i).close();
   }
   final ContentEntry contentEntry=rootModel.addContentEntry(vDir);
   if (isAddDirToSource())   contentEntry.addSourceFolder(vDir,false);
