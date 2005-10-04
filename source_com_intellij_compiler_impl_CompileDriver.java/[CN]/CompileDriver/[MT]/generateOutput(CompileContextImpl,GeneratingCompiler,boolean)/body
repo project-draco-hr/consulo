@@ -23,6 +23,8 @@
   }
 );
   final List<File> filesToRefresh=new ArrayList<File>();
+  final List<File> generatedFiles=new ArrayList<File>();
+  final List<Module> affectedModules=new ArrayList<Module>();
   try {
     if (pathsToRemove.size() > 0) {
       context.getProgressIndicator().pushState();
@@ -51,10 +53,15 @@
           final VirtualFile outputDir=getGenerationOutputDir(compiler,module);
           final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,items.toArray(new GeneratingCompiler.GenerationItem[items.size()]),outputDir);
           context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
+          if (successfullyGenerated.length > 0) {
+            affectedModules.add(module);
+          }
           for (          final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
             final String fullOutputPath=itemToOutputPathMap.get(item);
             cache.update(fullOutputPath,item.getValidityState());
-            filesToRefresh.add(new File(fullOutputPath));
+            final File file=new File(fullOutputPath);
+            filesToRefresh.add(file);
+            generatedFiles.add(file);
           }
         }
       }
@@ -66,6 +73,22 @@
   finally {
     context.getProgressIndicator().pushState();
     CompilerUtil.refreshIOFiles(filesToRefresh.toArray(new File[filesToRefresh.size()]));
+    if (forceGenerate && generatedFiles.size() > 0) {
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          List<VirtualFile> vFiles=new ArrayList<VirtualFile>(generatedFiles.size());
+          for (          File generatedFile : generatedFiles) {
+            final VirtualFile vFile=LocalFileSystem.getInstance().findFileByIoFile(generatedFile);
+            if (vFile != null) {
+              vFiles.add(vFile);
+            }
+          }
+          final FileSetCompileScope additionalScope=new FileSetCompileScope(vFiles.toArray(new VirtualFile[vFiles.size()]),affectedModules.toArray(new Module[affectedModules.size()]));
+          context.addScope(additionalScope);
+        }
+      }
+);
+    }
     if (cache.isDirty()) {
       context.getProgressIndicator().setText(CompilerBundle.message("progress.saving.caches"));
       cache.save();
