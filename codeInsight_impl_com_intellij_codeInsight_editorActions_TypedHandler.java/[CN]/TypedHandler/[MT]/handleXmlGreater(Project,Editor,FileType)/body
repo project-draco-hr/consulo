@@ -5,13 +5,23 @@
   PsiElement element;
   if (offset < editor.getDocument().getTextLength()) {
     element=file.findElementAt(offset);
-    if (!(element instanceof PsiWhiteSpace))     return;
+    if (!(element instanceof PsiWhiteSpace)) {
+      if (element instanceof XmlToken) {
+        final IElementType tokenType=((XmlToken)element).getTokenType();
+        if (tokenType == XmlTokenType.XML_TAG_END || tokenType == XmlTokenType.XML_EMPTY_ELEMENT_END && element.getTextOffset() == offset - 1) {
+          editor.getCaretModel().moveToOffset(offset + 1);
+          editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+          return true;
+        }
+      }
+      return false;
+    }
     PsiElement parent=element.getParent();
     if (parent instanceof XmlText) {
       final String text=parent.getText();
       final int index=offset - parent.getTextOffset() - 1;
       if (index >= 0 && text.charAt(index) == '/') {
-        return;
+        return false;
       }
       element=parent.getPrevSibling();
     }
@@ -21,29 +31,30 @@
   }
  else {
     element=file.findElementAt(editor.getDocument().getTextLength() - 1);
-    if (element == null)     return;
+    if (element == null)     return false;
     element=element.getParent();
   }
   if (element instanceof XmlAttributeValue) {
     element=element.getParent().getParent();
   }
   while (element instanceof PsiWhiteSpace)   element=element.getPrevSibling();
-  if (element == null)   return;
+  if (element == null)   return false;
   if (!(element instanceof XmlTag)) {
     if (element instanceof XmlTokenImpl && element.getPrevSibling() != null && element.getPrevSibling().getText().equals("<")) {
       editor.getDocument().insertString(offset,"</" + element.getText() + ">");
     }
-    return;
+    return false;
   }
   XmlTag tag=(XmlTag)element;
-  if (XmlUtil.getTokenOfType(tag,XmlTokenType.XML_TAG_END) != null)   return;
-  if (XmlUtil.getTokenOfType(tag,XmlTokenType.XML_EMPTY_ELEMENT_END) != null)   return;
-  if (tag instanceof JspXmlTagBase)   return;
+  if (XmlUtil.getTokenOfType(tag,XmlTokenType.XML_TAG_END) != null)   return false;
+  if (XmlUtil.getTokenOfType(tag,XmlTokenType.XML_EMPTY_ELEMENT_END) != null)   return false;
+  if (tag instanceof JspXmlTagBase)   return false;
   final String name=tag.getName();
-  if (tag instanceof HtmlTag && HtmlUtil.isSingleHtmlTag(name))   return;
-  if ("".equals(name))   return;
+  if (tag instanceof HtmlTag && HtmlUtil.isSingleHtmlTag(name))   return false;
+  if ("".equals(name))   return false;
   int tagOffset=tag.getTextRange().getStartOffset();
   HighlighterIterator iterator=((EditorEx)editor).getHighlighter().createIterator(tagOffset);
-  if (BraceMatchingUtil.matchBrace(editor.getDocument().getCharsSequence(),fileType,iterator,true))   return;
+  if (BraceMatchingUtil.matchBrace(editor.getDocument().getCharsSequence(),fileType,iterator,true))   return false;
   editor.getDocument().insertString(offset,"</" + name + ">");
+  return false;
 }
