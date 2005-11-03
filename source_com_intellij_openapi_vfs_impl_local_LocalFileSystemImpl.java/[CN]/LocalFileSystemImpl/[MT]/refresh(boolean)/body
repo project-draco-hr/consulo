@@ -38,29 +38,57 @@ synchronized (LOCK) {
         requests=normalizeRootsForRefresh();
       }
       for (      final WatchRequest request : requests) {
-        final VirtualFileImpl rootFile=(VirtualFileImpl)request.getRoot();
-        final boolean recursively=request.isToWatchRecursively();
-        PhysicalFile file=rootFile.getPhysicalFile();
-        if (!file.exists()) {
-          final Runnable action=new Runnable(){
-            public void run(){
-              if (!rootFile.isValid())               return;
-              boolean isDirectory=rootFile.isDirectory();
-              fireBeforeFileDeletion(null,rootFile);
+        final String rootPath=request.getRootPath();
+        String runPath=rootPath;
+        final VirtualFileImpl rootFile=(VirtualFileImpl)findFileByPath(runPath);
+        if (rootFile != null) {
+          final PhysicalFile file=rootFile.getPhysicalFile();
+          final boolean recursively=request.isToWatchRecursively();
+          if (!file.exists()) {
+            final Runnable action=new Runnable(){
+              public void run(){
+                if (!rootFile.isValid())                 return;
+                boolean isDirectory=rootFile.isDirectory();
+                fireBeforeFileDeletion(null,rootFile);
 synchronized (LOCK) {
-                final VirtualFileImpl parent=(VirtualFileImpl)rootFile.getParent();
-                if (parent != null)                 parent.removeChild(rootFile);
-                myRootsToWatch.remove(request);
-                updateFileWatcher();
+                  final VirtualFileImpl parent=(VirtualFileImpl)rootFile.getParent();
+                  if (parent != null)                   parent.removeChild(rootFile);
+                  myRootsToWatch.remove(request);
+                  updateFileWatcher();
+                }
+                fireFileDeleted(null,rootFile,rootFile.getName(),isDirectory,null);
               }
-              fireFileDeleted(null,rootFile,rootFile.getName(),isDirectory,null);
             }
-          }
 ;
-          getManager().addEventToFireByRefresh(action,asynchronous,modalityState);
+            getManager().addEventToFireByRefresh(action,asynchronous,modalityState);
+          }
+ else {
+            refresh(rootFile,recursively,false,worker,modalityState,asynchronous,true);
+          }
         }
  else {
-          refresh(rootFile,recursively,false,worker,modalityState,asynchronous,true);
+          final boolean physicalExists=new File(request.getFileSystemRootPath()).exists();
+          if (physicalExists) {
+            final int index=runPath.lastIndexOf('/');
+            while (index >= 0) {
+              String parentPath=runPath.substring(0,index);
+              final VirtualFileImpl vParent=(VirtualFileImpl)findFileByPath(parentPath);
+              if (vParent != null) {
+                final String path=runPath;
+                getManager().addEventToFireByRefresh(new Runnable(){
+                  public void run(){
+                    final VirtualFileImpl newVFile=new VirtualFileImpl(path);
+                    vParent.addChild(newVFile);
+                    newVFile.setParent(vParent);
+                    fireFileCreated(null,newVFile);
+                  }
+                }
+,asynchronous,modalityState);
+                break;
+              }
+              runPath=parentPath;
+            }
+          }
         }
       }
       FileWatcher.resyncedManually();
