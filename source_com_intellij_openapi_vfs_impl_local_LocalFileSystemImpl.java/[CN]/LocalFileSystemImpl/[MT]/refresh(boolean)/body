@@ -1,24 +1,11 @@
 {
-  if (asynchronous) {
-    ApplicationManager.getApplication().assertReadAccessAllowed();
-  }
- else {
+  if (!asynchronous) {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
   }
   final ModalityState modalityState=EventQueue.isDispatchThread() ? ModalityState.current() : ModalityState.NON_MMODAL;
-  final WorkerThread worker;
-  if (asynchronous) {
-    worker=new WorkerThread("Synchronize worker");
-  }
- else {
-    worker=null;
-  }
   final Runnable endTask=new Runnable(){
     public void run(){
-      ProgressIndicator indicator=getManager().getRefreshIndicator();
-      if (indicator != null) {
-        indicator.stop();
-      }
+      getManager().getRefreshIndicator().stop();
       getManager().afterRefreshFinish(asynchronous,modalityState);
     }
   }
@@ -27,12 +14,10 @@
     public void run(){
       getManager().beforeRefreshStart(asynchronous,modalityState,null);
       final ProgressIndicator indicator=getManager().getRefreshIndicator();
-      if (indicator != null) {
-        indicator.start();
-        indicator.setText(VfsBundle.message("file.synchronize.progress"));
-      }
+      indicator.start();
+      indicator.setText(VfsBundle.message("file.synchronize.progress"));
       storeRefreshStatusToFiles();
-      refreshRoots();
+      refreshFSRoots();
       WatchRequest[] requests;
 synchronized (LOCK) {
         requests=normalizeRootsForRefresh();
@@ -40,7 +25,7 @@ synchronized (LOCK) {
       for (      final WatchRequest request : requests) {
         final String rootPath=request.getRootPath();
         String runPath=rootPath;
-        final VirtualFileImpl rootFile=(VirtualFileImpl)findFileByPath(runPath);
+        final VirtualFileImpl rootFile=(VirtualFileImpl)_findFileByPath(runPath,false);
         if (rootFile != null) {
           final PhysicalFile file=rootFile.getPhysicalFile();
           final boolean recursively=request.isToWatchRecursively();
@@ -53,7 +38,6 @@ synchronized (LOCK) {
 synchronized (LOCK) {
                   final VirtualFileImpl parent=(VirtualFileImpl)rootFile.getParent();
                   if (parent != null)                   parent.removeChild(rootFile);
-                  myRootsToWatch.remove(request);
                   updateFileWatcher();
                 }
                 fireFileDeleted(null,rootFile,rootFile.getName(),isDirectory,null);
@@ -63,7 +47,7 @@ synchronized (LOCK) {
             getManager().addEventToFireByRefresh(action,asynchronous,modalityState);
           }
  else {
-            refresh(rootFile,recursively,false,worker,modalityState,asynchronous,true);
+            refresh(rootFile,recursively,false,modalityState,asynchronous,true);
           }
         }
  else {
@@ -72,14 +56,13 @@ synchronized (LOCK) {
             final int index=runPath.lastIndexOf('/');
             while (index >= 0) {
               String parentPath=runPath.substring(0,index);
-              final VirtualFileImpl vParent=(VirtualFileImpl)findFileByPath(parentPath);
+              final VirtualFileImpl vParent=(VirtualFileImpl)_findFileByPath(parentPath,false);
               if (vParent != null) {
                 final String path=runPath;
                 getManager().addEventToFireByRefresh(new Runnable(){
                   public void run(){
                     final VirtualFileImpl newVFile=new VirtualFileImpl(path);
                     vParent.addChild(newVFile);
-                    newVFile.setParent(vParent);
                     fireFileCreated(null,newVFile);
                   }
                 }
@@ -96,22 +79,14 @@ synchronized (LOCK) {
   }
 ;
   if (asynchronous) {
-    Runnable runnable1=new Runnable(){
+    getSynchronizeExecutor().submit(new Runnable(){
       public void run(){
         LOG.info("Executing request:" + this);
-        worker.start();
-        ApplicationManager.getApplication().runReadAction(runnable);
-        worker.dispose(false);
-        try {
-          worker.join();
-        }
- catch (        InterruptedException e) {
-        }
+        runnable.run();
         endTask.run();
       }
     }
-;
-    getSynchronizeQueueAlarm().addRequest(runnable1,0);
+);
   }
  else {
     runnable.run();

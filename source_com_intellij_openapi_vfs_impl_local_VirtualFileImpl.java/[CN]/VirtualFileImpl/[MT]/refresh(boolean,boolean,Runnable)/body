@@ -1,20 +1,10 @@
 {
-  if (asynchronous) {
-    ApplicationManager.getApplication().assertReadAccessAllowed();
-  }
- else {
+  if (!asynchronous) {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
   }
   final ModalityState modalityState=EventQueue.isDispatchThread() ? ModalityState.current() : ModalityState.NON_MMODAL;
   if (LOG.isDebugEnabled()) {
     LOG.debug("VirtualFile.refresh():" + getPresentableUrl() + ", recursive = "+ recursive+ ", modalityState = "+ modalityState);
-  }
-  final WorkerThread worker;
-  if (asynchronous) {
-    worker=new WorkerThread("Synchronize worker");
-  }
- else {
-    worker=null;
   }
   final Runnable runnable=new Runnable(){
     public void run(){
@@ -36,7 +26,7 @@
         ourFileSystem.getManager().addEventToFireByRefresh(runnable,asynchronous,modalityState);
       }
  else {
-        ourFileSystem.refresh(VirtualFileImpl.this,recursive,true,worker,modalityState,asynchronous,false);
+        ourFileSystem.refresh(VirtualFileImpl.this,recursive,true,modalityState,asynchronous,false);
       }
     }
   }
@@ -52,26 +42,15 @@
       public void run(){
         LOG.info("Executing request:" + this);
         final ProgressIndicator indicator=ourFileSystem.getManager().getRefreshIndicator();
-        if (indicator != null) {
-          indicator.start();
-          indicator.setText(VfsBundle.message("file.synchronize.progress"));
-        }
-        worker.start();
+        indicator.start();
+        indicator.setText(VfsBundle.message("file.synchronize.progress"));
         ApplicationManager.getApplication().runReadAction(runnable);
-        worker.dispose(false);
-        try {
-          worker.join();
-        }
- catch (        InterruptedException e) {
-        }
-        if (indicator != null) {
-          indicator.stop();
-        }
+        indicator.stop();
         endTask.run();
       }
     }
 ;
-    ourFileSystem.getSynchronizeQueueAlarm().addRequest(runnable1,0);
+    ourFileSystem.getSynchronizeExecutor().submit(runnable1);
   }
  else {
     runnable.run();
