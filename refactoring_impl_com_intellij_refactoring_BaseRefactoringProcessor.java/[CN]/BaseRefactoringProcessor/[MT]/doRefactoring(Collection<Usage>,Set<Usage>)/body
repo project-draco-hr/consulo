@@ -1,0 +1,50 @@
+{
+  final Set<UsageInfo> usageInfoSet=new HashSet<UsageInfo>();
+  if (usagesSet != null) {
+    usagesSet.removeAll(excludedUsages);
+    for (    final Usage usage : usagesSet) {
+      if (usage instanceof PsiElementUsage) {
+        final PsiElementUsage elementUsage=(PsiElementUsage)usage;
+        final PsiElement element=elementUsage.getElement();
+        if (element != null && element.isWritable()) {
+          usageInfoSet.add(((UsageInfo2UsageAdapter)elementUsage).getUsageInfo());
+        }
+      }
+ else {
+        LOG.error("Unknown usage!");
+      }
+    }
+  }
+  LvcsAction action=LvcsIntegration.checkinFilesBeforeRefactoring(myProject,getCommandName());
+  final UsageInfo[] usages=usageInfoSet.toArray(new UsageInfo[usageInfoSet.size()]);
+  ;
+  try {
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+        RefactoringListenerManagerImpl listenerManager=(RefactoringListenerManagerImpl)RefactoringListenerManager.getInstance(myProject);
+        myTransaction=listenerManager.startTransaction();
+        Set<PsiJavaFile> touchedJavaFiles=getTouchedJavaFiles(usages);
+        performRefactoring(usages);
+        removeRedundantImports(touchedJavaFiles);
+        myTransaction.commit();
+        performPsiSpoilingRefactoring();
+      }
+    }
+);
+  }
+  finally {
+    LvcsIntegration.checkinFilesAfterRefactoring(myProject,action);
+  }
+  if (usages != null) {
+    int count=usages.length;
+    if (count > 0) {
+      WindowManager.getInstance().getStatusBar(myProject).setInfo(RefactoringBundle.message("statusBar.refactoring.result",count));
+    }
+ else {
+      if (!isPreviewUsages(usages)) {
+        WindowManager.getInstance().getStatusBar(myProject).setInfo(RefactoringBundle.message("statusBar.noUsages"));
+      }
+    }
+  }
+}
