@@ -1,0 +1,123 @@
+{
+  if (IGNORE_DEPRECATED && (psiMethod.isDeprecated() || psiMethod.getContainingClass().isDeprecated())) {
+    return null;
+  }
+  PsiDocComment docComment=psiMethod.getDocComment();
+  if (docComment == null) {
+    if (isJavaDocRequired(psiMethod)) {
+      PsiMethod[] superMethods=psiMethod.findSuperMethods();
+      if (superMethods.length > 0)       return null;
+      if (J2EERolesUtil.getEjbRole(psiMethod) instanceof EjbImplMethodRole)       return null;
+      return superMethods.length == 0 ? new ProblemDescriptor[]{createDescriptor(psiMethod.getNameIdentifier(),JavaDocLocalInspection.REQUIRED_JAVADOC_IS_ABSENT)} : null;
+    }
+ else {
+      return null;
+    }
+  }
+  final PsiElement[] descriptionElements=docComment.getDescriptionElements();
+  for (  PsiElement descriptionElement : descriptionElements) {
+    if (descriptionElement instanceof PsiInlineDocTag) {
+      if ("inheritDoc".equals(((PsiInlineDocTag)descriptionElement).getName()))       return null;
+    }
+  }
+  if (docComment.findTagByName("inheritDoc") != null)   return null;
+  PsiDocTag[] tags=docComment.getTags();
+  boolean isReturnRequired=false;
+  boolean isReturnAbsent=true;
+  if (!psiMethod.isConstructor() && PsiType.VOID != psiMethod.getReturnType() && isTagRequired(psiMethod,"return")) {
+    isReturnRequired=true;
+    for (    PsiDocTag tag : tags) {
+      if ("return".equals(tag.getName())) {
+        isReturnAbsent=false;
+        break;
+      }
+    }
+  }
+  ArrayList<PsiParameter> absentParameters=null;
+  if (isTagRequired(psiMethod,"param")) {
+    PsiParameter[] params=psiMethod.getParameterList().getParameters();
+    for (    PsiParameter param : params) {
+      boolean found=false;
+      for (      PsiDocTag tag : tags) {
+        if ("param".equals(tag.getName())) {
+          PsiDocTagValue value=tag.getValueElement();
+          if (value instanceof PsiDocParamRef) {
+            PsiDocParamRef paramRef=(PsiDocParamRef)value;
+            if (paramRef.getReference().isReferenceTo(param)) {
+              found=true;
+              break;
+            }
+          }
+        }
+      }
+      if (!found) {
+        if (absentParameters == null)         absentParameters=new ArrayList<PsiParameter>();
+        absentParameters.add(param);
+      }
+    }
+  }
+  ArrayList<ProblemDescriptor> problems=null;
+  if (isReturnRequired && isReturnAbsent) {
+    problems=new ArrayList<ProblemDescriptor>();
+    problems.add(createDescriptor(psiMethod.getNameIdentifier(),InspectionsBundle.message("inspection.javadoc.problem.descriptor2","<code>@return</code>")));
+  }
+  if (absentParameters != null) {
+    if (problems == null)     problems=new ArrayList<ProblemDescriptor>();
+    for (    PsiParameter psiParameter : absentParameters) {
+      problems.add(createDescriptor(psiMethod.getNameIdentifier(),InspectionsBundle.message("inspection.javadoc.method.problem.descriptor3","<code>@param</code>","<code>" + psiParameter.getName() + "</code>")));
+    }
+  }
+  for (  PsiDocTag tag : tags) {
+    if ("param".equals(tag.getName()) && tag.getDataElements().length < 2) {
+      if (problems == null)       problems=new ArrayList<ProblemDescriptor>();
+      final PsiDocTagValue valueElement=tag.getValueElement();
+      if (valueElement != null) {
+        problems.add(createDescriptor(psiMethod.getNameIdentifier(),InspectionsBundle.message("inspection.javadoc.method.problem.descriptor2","<code>@param " + valueElement.getText() + "</code>")));
+      }
+    }
+  }
+  if (isTagRequired(psiMethod,"@throws") && psiMethod.getThrowsList().getReferencedTypes().length > 0) {
+    boolean found=false;
+    for (    PsiDocTag tag : tags) {
+      if ("throws".equals(tag.getName()) || "exception".equals(tag.getName())) {
+        found=true;
+        break;
+      }
+    }
+    if (!found) {
+      if (problems == null)       problems=new ArrayList<ProblemDescriptor>();
+      problems.add(createDescriptor(psiMethod.getNameIdentifier(),InspectionsBundle.message("inspection.javadoc.problem.descriptor2","<code>@throws</code>")));
+    }
+  }
+  ArrayList<ProblemDescriptor> tagProblems=getTagValuesProblems(psiMethod,tags);
+  if (tagProblems != null) {
+    if (problems == null)     problems=new ArrayList<ProblemDescriptor>();
+    problems.addAll(tagProblems);
+  }
+  problems=checkForPeriodInDoc(docComment,docComment,problems);
+  for (  PsiDocTag tag : tags) {
+    if ("param".equals(tag.getName())) {
+      if (JavaDocLocalInspection.extractTagDescription(tag).length() == 0) {
+        PsiDocTagValue value=tag.getValueElement();
+        if (value instanceof PsiDocParamRef) {
+          PsiDocParamRef paramRef=(PsiDocParamRef)value;
+          PsiParameter[] params=psiMethod.getParameterList().getParameters();
+          for (          PsiParameter param : params) {
+            if (paramRef.getReference().isReferenceTo(param)) {
+              if (problems == null)               problems=new ArrayList<ProblemDescriptor>();
+              problems.add(createDescriptor(psiMethod.getNameIdentifier(),InspectionsBundle.message("inspection.javadoc.method.problem.descriptor","<code>@param</code>","<code>" + param.getName() + "</code>")));
+            }
+          }
+        }
+      }
+    }
+ else     if ("return".equals(tag.getName())) {
+      if (extractTagDescription(tag).length() == 0) {
+        if (problems == null)         problems=new ArrayList<ProblemDescriptor>();
+        problems.add(manager.createProblemDescriptor(tag,InspectionsBundle.message("inspection.javadoc.method.problem.descriptor1","<code>@return</code>"),null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING,true));
+      }
+    }
+  }
+  problems=checkDuplicateTags(tags,problems);
+  return problems == null ? null : problems.toArray(new ProblemDescriptorImpl[problems.size()]);
+}

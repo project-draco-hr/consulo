@@ -1,0 +1,37 @@
+{
+  if (!(referenceElement.getParent() instanceof PsiReferenceList))   return null;
+  PsiReferenceList referenceList=(PsiReferenceList)referenceElement.getParent();
+  if (!(referenceList.getParent() instanceof PsiMethod))   return null;
+  PsiMethod method=(PsiMethod)referenceList.getParent();
+  if (referenceList != method.getThrowsList())   return null;
+  PsiClass aClass=method.getContainingClass();
+  if (aClass == null)   return null;
+  PsiManager manager=referenceElement.getManager();
+  PsiClassType exceptionType=manager.getElementFactory().createType(referenceElement);
+  if (ExceptionUtil.isUncheckedExceptionOrSuperclass(exceptionType))   return null;
+  PsiCodeBlock body=method.getBody();
+  if (body == null)   return null;
+  PsiModifierList modifierList=method.getModifierList();
+  PsiClass containingClass=method.getContainingClass();
+  if (!modifierList.hasModifierProperty(PsiModifier.PRIVATE) && !modifierList.hasModifierProperty(PsiModifier.STATIC) && !modifierList.hasModifierProperty(PsiModifier.FINAL)&& !method.isConstructor()&& !(containingClass instanceof PsiAnonymousClass)&& !(containingClass != null && containingClass.hasModifierProperty(PsiModifier.FINAL))) {
+    return null;
+  }
+  PsiClassType[] types=ExceptionUtil.collectUnhandledExceptions(body,method);
+  Collection<PsiClassType> unhandled=new HashSet<PsiClassType>(Arrays.asList(types));
+  if (method.isConstructor()) {
+    PsiField[] fields=aClass.getFields();
+    for (    final PsiField field : fields) {
+      if (field.hasModifierProperty(PsiModifier.STATIC))       continue;
+      PsiExpression initializer=field.getInitializer();
+      if (initializer == null)       continue;
+      unhandled.addAll(Arrays.asList(ExceptionUtil.collectUnhandledExceptions(initializer,field)));
+    }
+  }
+  for (  PsiClassType unhandledException : unhandled) {
+    if (unhandledException.isAssignableFrom(exceptionType) || exceptionType.isAssignableFrom(unhandledException)) {
+      return null;
+    }
+  }
+  String description=JavaErrorMessages.message("exception.is.never.thrown",HighlightUtil.formatType(exceptionType));
+  return inspectionManager.createProblemDescriptor(referenceElement,description,(LocalQuickFix[])null,ProblemHighlightType.LIKE_UNUSED_SYMBOL);
+}
