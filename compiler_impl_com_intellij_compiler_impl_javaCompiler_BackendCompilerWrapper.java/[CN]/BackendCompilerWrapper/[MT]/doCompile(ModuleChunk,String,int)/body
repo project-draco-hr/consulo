@@ -5,28 +5,24 @@
       return chunk.getFilesToCompile().length == 0 ? Boolean.TRUE : Boolean.FALSE;
     }
   }
-).equals(Boolean.TRUE)) {
+).booleanValue()) {
     return;
-  }
-  final Pair<OutputParser,Process> pair;
-  if (ApplicationManager.getApplication().isUnitTestMode()) {
-    pair=JavacSettings.getInstance(myProject).isTestsUseExternalCompiler() ? runExternalCompiler(chunk,outputDir) : runEmbeddedJavac(chunk,outputDir);
-  }
- else {
-    if (System.getProperty(PROPERTY_IDEA_USE_EMBEDDED_JAVAC) != null && System.getProperty(PROPERTY_IDEA_USE_EMBEDDED_JAVAC).equals("true")) {
-      pair=runEmbeddedJavac(chunk,outputDir);
-    }
- else {
-      pair=runExternalCompiler(chunk,outputDir);
-    }
   }
   int exitValue=0;
   try {
-    Process process=pair.getSecond();
-    final JavaCompilerParsingThread parsingThread=new JavaCompilerParsingThread(process,myCompileContext,pair.getFirst(),this);
-    myClassParsingThread=new ClassParsingThread();
-    myClassParsingThread.start();
-    parsingThread.start();
+    Process process=myCompiler.launchProcess(chunk,outputDir,myCompileContext);
+    final ClassParsingThread classParsingThread=new ClassParsingThread();
+    classParsingThread.start();
+    OutputParser errorParser=myCompiler.createErrorParser(outputDir);
+    CompilerParsingThread errorParsingThread=errorParser == null ? null : new SynchedCompilerParsing(process,myCompileContext,errorParser,classParsingThread,true,errorParser.isTrimLines());
+    if (errorParsingThread != null) {
+      errorParsingThread.start();
+    }
+    OutputParser outputParser=myCompiler.createOutputParser(outputDir);
+    CompilerParsingThread outputParsingThread=outputParser == null ? null : new SynchedCompilerParsing(process,myCompileContext,outputParser,classParsingThread,false,outputParser.isTrimLines());
+    if (outputParsingThread != null) {
+      outputParsingThread.start();
+    }
     try {
       exitValue=process.waitFor();
     }
@@ -34,30 +30,14 @@
       process.destroy();
       exitValue=process.exitValue();
     }
-    try {
-      parsingThread.join();
-    }
- catch (    InterruptedException e) {
-    }
-    myClassParsingThread.stopParsing();
-    try {
-      myClassParsingThread.join();
-    }
- catch (    InterruptedException e) {
-    }
-    final Throwable error=parsingThread.getError();
-    if (error != null) {
-      String message=error.getMessage();
-      if (error instanceof CacheCorruptedException) {
-        myCompileContext.requestRebuildNextTime(message);
-      }
- else {
-        myCompileContext.addMessage(CompilerMessageCategory.ERROR,message,null,-1,-1);
-      }
-    }
+    joinThread(errorParsingThread);
+    joinThread(outputParsingThread);
+    classParsingThread.stopParsing();
+    joinThread(classParsingThread);
+    registerParsingException(outputParsingThread);
+    registerParsingException(errorParsingThread);
   }
   finally {
-    myClassParsingThread=null;
     compileFinished(exitValue,chunk,outputDir);
     myModuleName=null;
   }
