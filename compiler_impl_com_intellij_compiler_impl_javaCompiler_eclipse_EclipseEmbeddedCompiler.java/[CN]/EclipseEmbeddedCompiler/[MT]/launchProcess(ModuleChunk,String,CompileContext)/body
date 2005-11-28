@@ -1,38 +1,61 @@
 {
-  final PipedInputStream errIn=new PipedInputStream();
-  PipedOutputStream errOut=new PipedOutputStream(errIn);
-  final PrintWriter errWriter=new PrintWriter(errOut);
-  final PipedInputStream outIn=new PipedInputStream();
-  PipedOutputStream outOut=new PipedOutputStream(outIn);
-  final PrintWriter outWriter=new PrintWriter(outOut);
+  URL jarUrl=new File(EclipseCompiler.PATH_TO_COMPILER_JAR).toURI().toURL();
+  final ClassLoader classLoader=PluginManager.class.getClassLoader();
+  final Class<? extends ClassLoader> pluginClass=classLoader.getClass();
+  if (!pluginClass.getName().equals(IdeaClassLoader.class.getName()))   return null;
+  ArrayList<URL> urls=null;
+  try {
+    urls=new ArrayList<URL>((ArrayList<URL>)pluginClass.getDeclaredMethod("getUrls").invoke(classLoader));
+  }
+ catch (  IllegalAccessException e) {
+    LOG.error(e);
+  }
+catch (  InvocationTargetException e) {
+    LOG.error(e);
+  }
+catch (  NoSuchMethodException e) {
+    LOG.error(e);
+  }
+  urls.add(jarUrl);
+  ClassLoader myclassLoader=new MyClassLoader(urls.toArray(new URL[urls.size()]),classLoader);
+  try {
+    String name=EclipseCompilerDriver.class.getName();
+    Class<?> aClass=myclassLoader.loadClass(name);
+    myEclipseCompilerDriver=(IEclipseCompilerDriver)aClass.newInstance();
+  }
+ catch (  InstantiationException e) {
+    LOG.error(e);
+  }
+catch (  IllegalAccessException e) {
+    LOG.error(e);
+  }
+catch (  ClassNotFoundException e) {
+    LOG.error(e);
+  }
   final String[] commands=myEclipseExternalCompiler.createStartupCommand(chunk,compileContext,outputDir);
   final String[] modifiedCmds=JavacEmbeddedCompiler.createCommandsForEmbeddedCall(commands,EclipseCompiler.getCompilerClass());
   Process process=new Process(){
     public OutputStream getOutputStream(){
-      throw new UnsupportedOperationException("Not Implemented in: " + getClass().getName());
+      throw new UnsupportedOperationException();
     }
     public InputStream getInputStream(){
-      return outIn;
+      return null;
     }
     public InputStream getErrorStream(){
-      return errIn;
+      return null;
     }
     public void destroy(){
     }
     public int waitFor(){
       try {
-        URL url=new File("C:\\java\\eclipse\\plugins\\org.eclipse.jdt.core_3.1.0.jar").toURI().toURL();
-        URLClassLoader classLoader=new URLClassLoader(new URL[]{url});
-        Class<?> aClass=classLoader.loadClass(EclipseCompiler.getCompilerClass());
-        Constructor<?> constructor=aClass.getDeclaredConstructor(PrintWriter.class,PrintWriter.class,boolean.class);
-        Object compiler=constructor.newInstance(outWriter,errWriter,Boolean.FALSE);
-        Method compileMethod=aClass.getDeclaredMethod("compile",String[].class);
-        compileMethod.setAccessible(true);
-        Object argument=modifiedCmds;
-        Boolean result=(Boolean)compileMethod.invoke(compiler,argument);
-        myExitCode=result.booleanValue() ? 0 : 1;
-        errWriter.println(CompilerParsingThread.TERMINATION_STRING);
-        errWriter.flush();
+        List<String> cmds=new ArrayList<String>(modifiedCmds.length);
+        for (        @NonNls String cmd : modifiedCmds) {
+          if (cmd.equals("-verbose"))           continue;
+          cmds.add(cmd);
+        }
+        String[] finalCmds=cmds.toArray(new String[cmds.size()]);
+        myEclipseCompilerDriver.parseCommandLineAndCompile(finalCmds);
+        myExitCode=0;
         return myExitCode;
       }
  catch (      Exception e) {
