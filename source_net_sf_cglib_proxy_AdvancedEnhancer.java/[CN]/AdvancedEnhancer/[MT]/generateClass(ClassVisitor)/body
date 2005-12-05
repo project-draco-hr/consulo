@@ -1,0 +1,63 @@
+{
+  Class sc=(superclass == null) ? Object.class : superclass;
+  if (TypeUtils.isFinal(sc.getModifiers())) {
+    throw new IllegalArgumentException("Cannot subclass final class " + sc);
+  }
+  List constructors=new ArrayList(Arrays.asList(sc.getDeclaredConstructors()));
+  filterConstructors(sc,constructors);
+  final Set forcePublic=new HashSet();
+  List actualMethods=new ArrayList();
+  List interfaceMethods=new ArrayList();
+  getMethods(sc,interfaces,actualMethods,interfaceMethods,forcePublic);
+  Class aClass=sc;
+  while (!Object.class.equals(aClass)) {
+    for (    final Method method : aClass.getDeclaredMethods()) {
+      if ((method.getModifiers() & (Constants.ACC_ABSTRACT | Constants.ACC_VOLATILE)) == 0) {
+        actualMethods.remove(method);
+      }
+    }
+    aClass=aClass.getSuperclass();
+  }
+  List methods=CollectionUtils.transform(actualMethods,new Transformer(){
+    public Object transform(    Object value){
+      Method method=(Method)value;
+      int modifiers=Constants.ACC_FINAL | (method.getModifiers() & ~Constants.ACC_ABSTRACT & ~Constants.ACC_NATIVE& ~Constants.ACC_SYNCHRONIZED);
+      if (forcePublic.contains(MethodWrapper.create(method))) {
+        modifiers=(modifiers & ~Constants.ACC_PROTECTED) | Constants.ACC_PUBLIC;
+      }
+      return ReflectUtils.getMethodInfo(method,modifiers);
+    }
+  }
+);
+  ClassEmitter e=new ClassEmitter(v);
+  e.begin_class(Constants.V1_2,Constants.ACC_PUBLIC,getClassName(),Type.getType(sc),(useFactory ? TypeUtils.add(TypeUtils.getTypes(interfaces),FACTORY) : TypeUtils.getTypes(interfaces)),Constants.SOURCE_FILE);
+  List constructorInfo=CollectionUtils.transform(constructors,MethodInfoTransformer.getInstance());
+  e.declare_field(Constants.ACC_PRIVATE,BOUND_FIELD,Type.BOOLEAN_TYPE,null,null);
+  if (!interceptDuringConstruction) {
+    e.declare_field(Constants.ACC_PRIVATE,CONSTRUCTED_FIELD,Type.BOOLEAN_TYPE,null,null);
+  }
+  e.declare_field(Constants.PRIVATE_FINAL_STATIC,THREAD_CALLBACKS_FIELD,THREAD_LOCAL,null,null);
+  e.declare_field(Constants.PRIVATE_FINAL_STATIC,STATIC_CALLBACKS_FIELD,CALLBACK_ARRAY,null,null);
+  if (serialVersionUID != null) {
+    e.declare_field(Constants.PRIVATE_FINAL_STATIC,Constants.SUID_FIELD_NAME,Type.LONG_TYPE,serialVersionUID,null);
+  }
+  for (int i=0; i < callbackTypes.length; i++) {
+    e.declare_field(Constants.ACC_PRIVATE,getCallbackField(i),callbackTypes[i],null,null);
+  }
+  emitMethods(e,methods,actualMethods);
+  emitConstructors(e,constructorInfo);
+  emitSetThreadCallbacks(e);
+  emitSetStaticCallbacks(e);
+  emitBindCallbacks(e);
+  if (useFactory) {
+    int[] keys=getCallbackKeys();
+    emitNewInstanceCallbacks(e);
+    emitNewInstanceCallback(e);
+    emitNewInstanceMultiarg(e,constructorInfo);
+    emitGetCallback(e,keys);
+    emitSetCallback(e,keys);
+    emitGetCallbacks(e);
+    emitSetCallbacks(e);
+  }
+  e.end_class();
+}
