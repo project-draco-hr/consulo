@@ -1,0 +1,81 @@
+{
+  CallbackGenerator[] generators=CallbackInfo.getGenerators(callbackTypes);
+  Map<CallbackGenerator,List<MethodInfo>> groups=new HashMap<CallbackGenerator,List<MethodInfo>>();
+  final Map<MethodInfo,Integer> indexes=new HashMap<MethodInfo,Integer>();
+  final Map<MethodInfo,Integer> originalModifiers=new HashMap<MethodInfo,Integer>();
+  final Map positions=CollectionUtils.getIndexMap(methods);
+  Iterator it1=methods.iterator();
+  Iterator<Method> it2=(actualMethods != null) ? actualMethods.iterator() : null;
+  while (it1.hasNext()) {
+    MethodInfo method=(MethodInfo)it1.next();
+    Method actualMethod=(it2 != null) ? it2.next() : null;
+    int index=filter.accept(actualMethod);
+    if (index >= callbackTypes.length) {
+      throw new IllegalArgumentException("Callback filter returned an index that is too large: " + index);
+    }
+    originalModifiers.put(method,(actualMethod != null) ? actualMethod.getModifiers() : method.getModifiers());
+    indexes.put(method,index);
+    List<MethodInfo> group=groups.get(generators[index]);
+    if (group == null) {
+      groups.put(generators[index],group=new ArrayList<MethodInfo>(methods.size()));
+    }
+    group.add(method);
+  }
+  Set<CallbackGenerator> seenGen=new HashSet<CallbackGenerator>();
+  CodeEmitter se=ce.getStaticHook();
+  se.new_instance(THREAD_LOCAL);
+  se.dup();
+  se.invoke_constructor(THREAD_LOCAL,CSTRUCT_NULL);
+  se.putfield(THREAD_CALLBACKS_FIELD);
+  CallbackGenerator.Context context=new CallbackGenerator.Context(){
+    public int getOriginalModifiers(    MethodInfo method){
+      return originalModifiers.get(method);
+    }
+    public int getIndex(    MethodInfo method){
+      return indexes.get(method);
+    }
+    public void emitCallback(    CodeEmitter e,    int index){
+      emitCurrentCallback(e,index);
+    }
+    public Signature getImplSignature(    MethodInfo method){
+      return rename(method.getSignature(),(Integer)positions.get(method));
+    }
+    public CodeEmitter beginMethod(    ClassEmitter ce,    MethodInfo method){
+      CodeEmitter e=EmitUtils.begin_method(ce,method);
+      if (!interceptDuringConstruction && !TypeUtils.isAbstract(method.getModifiers())) {
+        Label constructed=e.make_label();
+        e.load_this();
+        e.getfield(CONSTRUCTED_FIELD);
+        e.if_jump(e.NE,constructed);
+        e.load_this();
+        e.load_args();
+        e.super_invoke();
+        e.return_value();
+        e.mark(constructed);
+      }
+      return e;
+    }
+  }
+;
+  for (int i=0; i < callbackTypes.length; i++) {
+    CallbackGenerator gen=generators[i];
+    if (!seenGen.contains(gen)) {
+      seenGen.add(gen);
+      final List<MethodInfo> fmethods=groups.get(gen);
+      if (fmethods != null) {
+        try {
+          gen.generate(ce,context,fmethods);
+          gen.generateStatic(se,context,fmethods);
+        }
+ catch (        RuntimeException x) {
+          throw x;
+        }
+catch (        Exception x) {
+          throw new CodeGenerationException(x);
+        }
+      }
+    }
+  }
+  se.return_value();
+  se.end_method();
+}
