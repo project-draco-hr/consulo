@@ -1,36 +1,45 @@
 {
+  CompilationResult result;
   try {
-    CompilationResult result=myCompilationResults.take();
-    if (result == EclipseCompilerDriver.END_OF_STREAM)     return false;
-    String file=String.valueOf(result.getFileName());
-    callback.setProgressText(CompilerBundle.message("eclipse.compiler.parsing",file));
-    callback.fileProcessed(file);
-    ClassFile[] classFiles=result.getClassFiles();
-    for (    ClassFile classFile : classFiles) {
-      String filePath=String.valueOf(classFile.fileName());
-      String relativePath=FileUtil.toSystemDependentName(filePath + ".class");
-      String path=FileUtil.toSystemDependentName(outputDir) + File.separatorChar + relativePath;
-      ClassFile.writeToDisk(true,outputDir,relativePath,classFile.getBytes());
-      callback.fileGenerated(path);
-    }
-    IProblem[] problems=result.getProblems();
-    if (problems != null) {
-      for (      IProblem problem : problems) {
-        CompilerMessageCategory category=problem.isError() ? CompilerMessageCategory.ERROR : problem.isWarning() ? CompilerMessageCategory.WARNING : CompilerMessageCategory.INFORMATION;
-        String filePath=String.valueOf(problem.getOriginatingFileName());
-        String url=VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL,FileUtil.toSystemIndependentName(filePath));
-        int lineNumber=problem.getSourceLineNumber();
-        int sourceStart=problem.getSourceStart();
-        int column=getColumn(url,lineNumber,sourceStart,project);
-        callback.message(category,problem.getMessage(),url,lineNumber,column);
-      }
-    }
+    result=myCompilationResults.take();
   }
  catch (  InterruptedException e) {
     LOG.error(e);
+    return true;
   }
-catch (  IOException e) {
-    LOG.error(e);
+  if (result == END_OF_STREAM) {
+synchronized (END_OF_STREAM) {
+      END_OF_STREAM.notify();
+    }
+    return false;
+  }
+  String file=String.valueOf(result.getFileName());
+  callback.setProgressText(CompilerBundle.message("eclipse.compiler.parsing",file));
+  callback.fileProcessed(file);
+  ClassFile[] classFiles=result.getClassFiles();
+  for (  ClassFile classFile : classFiles) {
+    String filePath=String.valueOf(classFile.fileName());
+    String relativePath=FileUtil.toSystemDependentName(filePath + ".class");
+    String path=FileUtil.toSystemDependentName(outputDir) + File.separatorChar + relativePath;
+    try {
+      ClassFile.writeToDisk(true,outputDir,relativePath,classFile.getBytes());
+    }
+ catch (    IOException e) {
+      LOG.error(e);
+    }
+    callback.fileGenerated(path);
+  }
+  IProblem[] problems=result.getProblems();
+  if (problems != null) {
+    for (    IProblem problem : problems) {
+      CompilerMessageCategory category=problem.isError() ? CompilerMessageCategory.ERROR : problem.isWarning() ? CompilerMessageCategory.WARNING : CompilerMessageCategory.INFORMATION;
+      String filePath=String.valueOf(problem.getOriginatingFileName());
+      String url=VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL,FileUtil.toSystemIndependentName(filePath));
+      int lineNumber=problem.getSourceLineNumber();
+      int sourceStart=problem.getSourceStart();
+      int column=getColumn(url,lineNumber,sourceStart,project);
+      callback.message(category,problem.getMessage(),url,lineNumber,column);
+    }
   }
   return true;
 }
