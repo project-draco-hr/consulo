@@ -1,82 +1,12 @@
 {
-  if (file instanceof PsiBinaryFile || file instanceof PsiCompiledElement || file.getVirtualFile() == null) {
+  final Collection<IndexPatternOccurrence> occurrences=IndexPatternSearch.search(file,TodoConfiguration.getInstance()).findAll();
+  if (occurrences.size() == 0) {
     return EMPTY_TODO_ITEMS;
   }
-  int count=myManager.getCacheManager().getTodoCount(file.getVirtualFile());
-  if (count == 0) {
-    return EMPTY_TODO_ITEMS;
+  TodoItem[] items=new TodoItem[occurrences.size()];
+  int index=0;
+  for (  IndexPatternOccurrence occurrence : occurrences) {
+    items[index++]=new TodoItemImpl(occurrence.getFile(),occurrence.getTextRange().getStartOffset(),occurrence.getTextRange().getEndOffset(),mapPattern(occurrence.getPattern()));
   }
-  TIntArrayList commentStarts=new TIntArrayList();
-  TIntArrayList commentEnds=new TIntArrayList();
-  char[] chars=file.textToCharArray();
-  if (file instanceof PsiPlainTextFile) {
-    FileType fType=file.getFileType();
-synchronized (PsiLock.LOCK) {
-      if (fType instanceof CustomFileType) {
-        TokenSet commentTokens=TokenSet.create(CustomHighlighterTokenType.LINE_COMMENT,CustomHighlighterTokenType.MULTI_LINE_COMMENT);
-        Lexer lexer=fType.getHighlighter(myManager.getProject()).getHighlightingLexer();
-        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
-      }
- else {
-        commentStarts.add(0);
-        commentEnds.add(file.getTextLength());
-      }
-    }
-  }
- else {
-synchronized (PsiLock.LOCK) {
-      final Language lang=file.getLanguage();
-      Lexer lexer=lang.getSyntaxHighlighter(file.getProject()).getHighlightingLexer();
-      TokenSet commentTokens=null;
-      if (file instanceof PsiJavaFile) {
-        commentTokens=TokenSet.orSet(ElementType.COMMENT_BIT_SET,XML_COMMENT_BIT_SET,JavaDocTokenType.ALL_JAVADOC_TOKENS,XML_DATA_CHARS);
-      }
- else       if (file instanceof JspFile) {
-        final JspFile jspFile=(JspFile)file;
-        commentTokens=TokenSet.orSet(XML_COMMENT_BIT_SET,ElementType.COMMENT_BIT_SET);
-        final ParserDefinition parserDefinition=jspFile.getBaseLanguage().getParserDefinition();
-        if (parserDefinition != null) {
-          commentTokens=TokenSet.orSet(commentTokens,parserDefinition.getCommentTokens());
-        }
-      }
- else       if (file instanceof XmlFile) {
-        commentTokens=XML_COMMENT_BIT_SET;
-      }
- else {
-        final ParserDefinition parserDefinition=lang.getParserDefinition();
-        if (parserDefinition != null) {
-          commentTokens=parserDefinition.getCommentTokens();
-        }
-      }
-      if (commentTokens == null)       return EMPTY_TODO_ITEMS;
-      findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
-    }
-  }
-  ArrayList<TodoItem> list=new ArrayList<TodoItem>();
-  for (int i=0; i < commentStarts.size(); i++) {
-    int commentStart=commentStarts.get(i);
-    int commentEnd=commentEnds.get(i);
-    TodoPattern[] patterns=TodoConfiguration.getInstance().getTodoPatterns();
-    for (    TodoPattern toDoPattern : patterns) {
-      Pattern pattern=toDoPattern.getPattern();
-      if (pattern != null) {
-        ProgressManager.getInstance().checkCanceled();
-        CharSequence input=new CharArrayCharSequence(chars,commentStart,commentEnd);
-        Matcher matcher=pattern.matcher(input);
-        while (true) {
-          boolean found=matcher.find();
-          if (!found)           break;
-          int start=matcher.start() + commentStart;
-          int end=matcher.end() + commentStart;
-          if (start != end) {
-            if (range == null || range.getStartOffset() <= start && end <= range.getEndOffset()) {
-              list.add(new TodoItemImpl(file,start,end,toDoPattern));
-            }
-          }
-          ProgressManager.getInstance().checkCanceled();
-        }
-      }
-    }
-  }
-  return list.toArray(new TodoItem[list.size()]);
+  return items;
 }
