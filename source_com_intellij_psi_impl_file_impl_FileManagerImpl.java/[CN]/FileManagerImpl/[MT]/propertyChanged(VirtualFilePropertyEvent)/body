@@ -1,0 +1,94 @@
+{
+  if (!myUseRepository) {
+    clearNonRepositoryMaps();
+  }
+  final String propertyName=event.getPropertyName();
+  final VirtualFile vFile=event.getFile();
+  final FileViewProvider fileViewProvider=findViewProvider(vFile);
+  final PsiFile oldPsiFile;
+  if (fileViewProvider != null) {
+    oldPsiFile=((SingleRootFileViewProvider)fileViewProvider).getCachedPsi(fileViewProvider.getBaseLanguage());
+  }
+ else   oldPsiFile=null;
+  final PsiDirectory parentDir=myVFileToPsiDirMap.get(vFile.getParent());
+  if (parentDir == null) {
+    boolean fire=VirtualFile.PROP_NAME.equals(propertyName) && vFile.isDirectory();
+    if (fire) {
+      PsiDirectory psiDir=myVFileToPsiDirMap.get(vFile);
+      fire=psiDir != null;
+    }
+    if (!fire)     return;
+  }
+  ApplicationManager.getApplication().runWriteAction(new PsiExternalChangeAction(){
+    public void run(){
+      PsiTreeChangeEventImpl treeEvent=new PsiTreeChangeEventImpl(myManager);
+      treeEvent.setParent(parentDir);
+      if (VirtualFile.PROP_NAME.equals(propertyName)) {
+        if (vFile.isDirectory()) {
+          PsiDirectory psiDir=myVFileToPsiDirMap.get(vFile);
+          if (psiDir != null) {
+            if (myFileTypeManager.isFileIgnored(vFile.getName())) {
+              removeFilesAndDirsRecursively(vFile);
+              treeEvent.setChild(psiDir);
+              myManager.childRemoved(treeEvent);
+            }
+ else {
+              treeEvent.setElement(psiDir);
+              treeEvent.setPropertyName(PsiTreeChangeEvent.PROP_DIRECTORY_NAME);
+              treeEvent.setOldValue(event.getOldValue());
+              treeEvent.setNewValue(event.getNewValue());
+              myManager.propertyChanged(treeEvent);
+            }
+          }
+ else {
+            PsiDirectory psiDir1=findDirectory(vFile);
+            if (psiDir1 != null) {
+              treeEvent.setChild(psiDir1);
+              myManager.childAdded(treeEvent);
+            }
+          }
+        }
+ else         if (fileViewProvider != null) {
+          final FileViewProvider fileViewProvider=createFileViewProvider(vFile);
+          final PsiFile newPsiFile=fileViewProvider.getPsi(fileViewProvider.getBaseLanguage());
+          if (oldPsiFile != null) {
+            if (newPsiFile == null) {
+              myVFileToPsiFileMap.remove(vFile);
+              treeEvent.setChild(oldPsiFile);
+              myManager.childRemoved(treeEvent);
+            }
+ else             if (!newPsiFile.getClass().equals(oldPsiFile.getClass()) || newPsiFile.getFileType() != myFileTypeManager.getFileTypeByFileName((String)event.getOldValue())) {
+              myVFileToPsiFileMap.put(vFile,fileViewProvider);
+              treeEvent.setOldChild(oldPsiFile);
+              treeEvent.setNewChild(newPsiFile);
+              myManager.childReplaced(treeEvent);
+            }
+ else {
+              treeEvent.setElement(oldPsiFile);
+              treeEvent.setPropertyName(PsiTreeChangeEvent.PROP_FILE_NAME);
+              treeEvent.setOldValue(event.getOldValue());
+              treeEvent.setNewValue(event.getNewValue());
+              myManager.propertyChanged(treeEvent);
+            }
+          }
+ else {
+            if (newPsiFile != null) {
+              myVFileToPsiFileMap.put(vFile,fileViewProvider);
+              treeEvent.setChild(newPsiFile);
+              myManager.childAdded(treeEvent);
+            }
+          }
+        }
+      }
+ else       if (VirtualFile.PROP_WRITABLE.equals(propertyName)) {
+        if (oldPsiFile == null)         return;
+        treeEvent.setElement(oldPsiFile);
+        treeEvent.setPropertyName(PsiTreeChangeEvent.PROP_WRITABLE);
+        treeEvent.setOldValue(event.getOldValue());
+        treeEvent.setNewValue(event.getNewValue());
+        myManager.propertyChanged(treeEvent);
+      }
+    }
+  }
+);
+}
