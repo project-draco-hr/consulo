@@ -1,0 +1,107 @@
+{
+  if (refElement instanceof RefClass) {
+    final PsiClass psiClass=(PsiClass)refElement.getElement();
+    if (psiClass != null) {
+      EjbClassRole role=EjbRolesUtil.getEjbRole(psiClass);
+      if (role != null) {
+        refElement.setFlag(false,CAN_BE_FINAL_MASK);
+      }
+      PsiMethod[] psiMethods=psiClass.getMethods();
+      PsiField[] psiFields=psiClass.getFields();
+      HashSet<PsiVariable> allFields=new HashSet<PsiVariable>();
+      allFields.addAll(Arrays.asList(psiFields));
+      ArrayList<PsiVariable> instanceInitializerInitializedFields=new ArrayList<PsiVariable>();
+      boolean hasInitializers=false;
+      for (      PsiClassInitializer initializer : psiClass.getInitializers()) {
+        PsiCodeBlock body=initializer.getBody();
+        if (body != null) {
+          hasInitializers=true;
+          ControlFlowAnalyzer analyzer=new ControlFlowAnalyzer(body,LocalsOrMyInstanceFieldsControlFlowPolicy.getInstance());
+          ControlFlow flow;
+          try {
+            flow=analyzer.buildControlFlow();
+          }
+ catch (          AnalysisCanceledException e) {
+            flow=ControlFlow.EMPTY;
+          }
+          PsiVariable[] ssaVariables=ControlFlowUtil.getSSAVariables(flow,false);
+          PsiVariable[] writtenVariables=ControlFlowUtil.getWrittenVariables(flow,0,flow.getSize(),false);
+          for (int j=0; j < ssaVariables.length; j++) {
+            PsiVariable psiVariable=writtenVariables[j];
+            if (allFields.contains(psiVariable)) {
+              if (instanceInitializerInitializedFields.contains(psiVariable)) {
+                allFields.remove(psiVariable);
+                instanceInitializerInitializedFields.remove(psiVariable);
+              }
+ else {
+                instanceInitializerInitializedFields.add(psiVariable);
+              }
+            }
+          }
+          for (          PsiVariable psiVariable : writtenVariables) {
+            if (!instanceInitializerInitializedFields.contains(psiVariable)) {
+              allFields.remove(psiVariable);
+            }
+          }
+        }
+      }
+      for (      PsiMethod psiMethod : psiMethods) {
+        if (psiMethod.isConstructor()) {
+          PsiCodeBlock body=psiMethod.getBody();
+          if (body != null) {
+            hasInitializers=true;
+            ControlFlowAnalyzer analyzer=new ControlFlowAnalyzer(body,LocalsOrMyInstanceFieldsControlFlowPolicy.getInstance());
+            ControlFlow flow;
+            try {
+              flow=analyzer.buildControlFlow();
+            }
+ catch (            AnalysisCanceledException e) {
+              flow=ControlFlow.EMPTY;
+            }
+            PsiVariable[] writtenVariables=ControlFlowUtil.getWrittenVariables(flow,0,flow.getSize(),false);
+            for (            PsiVariable psiVariable : writtenVariables) {
+              if (instanceInitializerInitializedFields.contains(psiVariable)) {
+                allFields.remove(psiVariable);
+                instanceInitializerInitializedFields.remove(psiVariable);
+              }
+            }
+            List<PsiMethod> redirectedConstructors=HighlightControlFlowUtil.getRedirectedConstructors(psiMethod);
+            if ((redirectedConstructors == null || redirectedConstructors.isEmpty())) {
+              PsiVariable[] ssaVariables=ControlFlowUtil.getSSAVariables(flow,false);
+              ArrayList<PsiVariable> good=new ArrayList<PsiVariable>(Arrays.asList(ssaVariables));
+              good.addAll(instanceInitializerInitializedFields);
+              allFields.retainAll(good);
+            }
+ else {
+              allFields.removeAll(Arrays.asList(writtenVariables));
+            }
+          }
+        }
+      }
+      for (      PsiField psiField : psiFields) {
+        if ((!hasInitializers || !allFields.contains(psiField)) && psiField.getInitializer() == null) {
+          myManager.getReference(psiField).setFlag(false,CAN_BE_FINAL_MASK);
+        }
+      }
+    }
+  }
+ else   if (refElement instanceof RefMethodImpl) {
+    final RefMethodImpl refMethod=(RefMethodImpl)refElement;
+    final PsiElement element=refMethod.getElement();
+    if (element instanceof PsiMethod) {
+      PsiMethod method=(PsiMethod)element;
+      if (method != null) {
+        EjbClassRole classRole=EjbRolesUtil.getEjbRole(method.getContainingClass());
+        if (classRole != null) {
+          if (!refMethod.getSuperMethods().isEmpty() || refMethod.isLibraryOverride()) {
+            refMethod.setFlag(false,CAN_BE_FINAL_MASK);
+          }
+          EjbMethodRole role=EjbRolesUtil.getEjbRole(method);
+          if (role instanceof EjbDeclMethodRole || role instanceof EjbImplMethodRole) {
+            refMethod.setFlag(false,CAN_BE_FINAL_MASK);
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  myConstructors=new ArrayList<RefMethod>(1);
+  mySubClasses=new HashSet<RefClass>(0);
+  myBases=new HashSet<RefClass>(0);
+  myOverridingMethods=new ArrayList<RefMethod>(2);
+  myInTypeReferences=new HashSet<RefElement>(0);
+  myInstanceReferences=new HashSet<RefElement>(0);
+  myDefaultConstructor=null;
+  final PsiClass psiClass=(PsiClass)getElement();
+  PsiElement psiParent=psiClass.getParent();
+  if (psiParent instanceof PsiFile) {
+    PsiJavaFile psiFile=(PsiJavaFile)psiParent;
+    String packageName=psiFile.getPackageName();
+    if (!"".equals(packageName)) {
+      ((RefPackageImpl)getRefManager().getPackage(packageName)).add(this);
+    }
+ else {
+      ((RefPackageImpl)getRefManager().getRefProject().getDefaultPackage()).add(this);
+    }
+  }
+ else {
+    while (!(psiParent instanceof PsiClass || psiParent instanceof PsiMethod || psiParent instanceof PsiField)) {
+      psiParent=psiParent.getParent();
+    }
+    RefElement refParent=getRefManager().getReference(psiParent);
+    ((RefElementImpl)refParent).add(this);
+  }
+  setAbstract(psiClass.hasModifierProperty(PsiModifier.ABSTRACT));
+  setAnonymous(psiClass instanceof PsiAnonymousClass);
+  setIsLocal(!(isAnonymous() || psiParent instanceof PsiClass || psiParent instanceof PsiFile));
+  setInterface(psiClass.isInterface());
+  initializeSuperReferences(psiClass);
+  PsiMethod[] psiMethods=psiClass.getMethods();
+  PsiField[] psiFields=psiClass.getFields();
+  setUtilityClass(psiMethods.length > 0 || psiFields.length > 0);
+  for (  PsiField psiField : psiFields) {
+    ((RefManagerImpl)getRefManager()).getFieldReference(this,psiField);
+  }
+  if (!isApplet()) {
+    final PsiClass servlet=((RefManagerImpl)getRefManager()).getServlet();
+    setServlet(servlet != null && psiClass.isInheritor(servlet,true));
+  }
+  if (!isApplet() && !isServlet()) {
+    setTestCase(JUnitUtil.isTestCaseClass(psiClass));
+    for (    RefClass refBase : getBaseClasses()) {
+      ((RefClassImpl)refBase).setTestCase(true);
+    }
+  }
+  for (  PsiMethod psiMethod : psiMethods) {
+    RefMethod refMethod=((RefManagerImpl)getRefManager()).getMethodReference(this,psiMethod);
+    if (refMethod != null) {
+      if (psiMethod.isConstructor()) {
+        if (psiMethod.getParameterList().getParameters().length > 0 || !psiMethod.hasModifierProperty(PsiModifier.PRIVATE)) {
+          setUtilityClass(false);
+        }
+        addConstructor(refMethod);
+        if (psiMethod.getParameterList().getParameters().length == 0) {
+          setDefaultConstructor((RefMethodImpl)refMethod);
+        }
+      }
+ else {
+        if (!psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
+          setUtilityClass(false);
+        }
+      }
+    }
+  }
+  if (myConstructors.size() == 0 && !isInterface() && !isAnonymous()) {
+    RefImplicitConstructorImpl refImplicitConstructor=new RefImplicitConstructorImpl(this);
+    setDefaultConstructor(refImplicitConstructor);
+    addConstructor(refImplicitConstructor);
+  }
+  if (isInterface()) {
+    for (int i=0; i < psiFields.length && isUtilityClass(); i++) {
+      PsiField psiField=psiFields[i];
+      if (!psiField.hasModifierProperty(PsiModifier.STATIC)) {
+        setUtilityClass(false);
+      }
+    }
+  }
+  final PsiClass applet=((RefManagerImpl)getRefManager()).getApplet();
+  setApplet(applet != null && psiClass.isInheritor(applet,true));
+  ((RefManagerImpl)getRefManager()).fireNodeInitialized(this);
+}

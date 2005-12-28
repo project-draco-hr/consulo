@@ -1,0 +1,69 @@
+{
+  InspectionTool[] tools=getCurrentProfile().getInspectionTools();
+  final ArrayList<LocalInspectionToolWrapper> localTools=initJobDescriptors(tools,scope);
+  final PsiManager psiManager=PsiManager.getInstance(myProject);
+  final Map<Profile,List<LocalInspectionToolWrapper>> profileToToolsMap=new HashMap<Profile,List<LocalInspectionToolWrapper>>();
+  try {
+    scope.accept(new PsiRecursiveElementVisitor(){
+      public void visitReferenceExpression(      PsiReferenceExpression expression){
+      }
+      @Override public void visitFile(      PsiFile file){
+        List<LocalInspectionToolWrapper> tools=new ArrayList<LocalInspectionToolWrapper>();
+        if (runWithEditorSettings) {
+          final InspectionProfile profile=InspectionProjectProfileManager.getInstance(myProject).getProfile(file);
+          if (profileToToolsMap.containsKey(profile)) {
+            tools=profileToToolsMap.get(profile);
+          }
+ else {
+            final InspectionTool[] localInspectionTools=profile.getInspectionTools();
+            for (            InspectionTool tool : localInspectionTools) {
+              if (tool instanceof LocalInspectionToolWrapper) {
+                tool.initialize(InspectionManagerEx.this);
+                tools.add((LocalInspectionToolWrapper)tool);
+              }
+            }
+            profileToToolsMap.put((Profile)profile,tools);
+          }
+        }
+ else {
+          tools=localTools;
+        }
+        incrementJobDoneAmount(LOCAL_ANALYSIS,file.getVirtualFile().getPresentableUrl());
+        for (        LocalInspectionToolWrapper tool : tools) {
+          tool.processFile(file);
+          psiManager.dropResolveCaches();
+        }
+      }
+    }
+);
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Throwable e) {
+    LOG.error(e);
+  }
+  InspectionProjectProfileManager profileManager=InspectionProjectProfileManager.getInstance(myProject);
+  final Set<String> profiles=scope.getActiveInspectionProfiles();
+  for (  String profile : profiles) {
+    final InspectionProfile inspectionProfile=((InspectionProfile)profileManager.getProfile(profile));
+    tools=inspectionProfile.getInspectionTools();
+    for (    InspectionTool tool : tools) {
+      if (inspectionProfile.isToolEnabled(HighlightDisplayKey.find(tool.getShortName())) && !(tool instanceof LocalInspectionToolWrapper)) {
+        try {
+          tool.initialize(this);
+          tool.runInspection(scope);
+          if (tool.queryExternalUsagesRequests()) {
+            needRepeatSearchRequest.add(tool);
+          }
+        }
+ catch (        ProcessCanceledException e) {
+          throw e;
+        }
+catch (        Throwable e) {
+          LOG.error(e);
+        }
+      }
+    }
+  }
+}
