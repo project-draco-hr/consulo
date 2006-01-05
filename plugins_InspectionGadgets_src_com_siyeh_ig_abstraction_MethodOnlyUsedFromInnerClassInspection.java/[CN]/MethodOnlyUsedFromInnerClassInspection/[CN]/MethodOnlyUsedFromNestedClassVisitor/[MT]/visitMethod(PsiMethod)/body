@@ -5,28 +5,22 @@
   }
   final PsiManager manager=method.getManager();
   final PsiSearchHelper searchHelper=manager.getSearchHelper();
-  final PsiClass containingClass=method.getContainingClass();
-  final LocalSearchScope scope=new LocalSearchScope(containingClass);
-  final PsiReference[] references=searchHelper.findReferences(method,scope,false);
-  if (references.length == 0) {
-    return;
-  }
-  final PsiReference firstReference=references[0];
-  final PsiElement firstElement=firstReference.getElement();
-  final PsiClass firstReferenceClass=ClassUtils.getContainingClass(firstElement);
-  if (firstReferenceClass == null || !PsiTreeUtil.isAncestor(containingClass,firstReferenceClass,true)) {
-    return;
-  }
-  for (int i=1; i < references.length; i++) {
-    final PsiReference reference=references[i];
-    final PsiElement element=reference.getElement();
-    final PsiClass referenceClass=PsiTreeUtil.getParentOfType(element,PsiClass.class);
-    if (!firstReferenceClass.equals(referenceClass)) {
-      return;
+  final PsiClass methodClass=method.getContainingClass();
+  final LocalSearchScope scope=new LocalSearchScope(methodClass);
+  final MethodReferenceFinder processor=new MethodReferenceFinder(methodClass);
+  final ProgressManager progressManager=ProgressManager.getInstance();
+  progressManager.runProcess(new Runnable(){
+    public void run(){
+      searchHelper.processReferences(processor,method,scope,false);
     }
   }
-  if (firstReferenceClass instanceof PsiAnonymousClass) {
-    final PsiClass[] interfaces=firstReferenceClass.getInterfaces();
+,null);
+  if (!processor.isOnlyAccessedFromInnerClass()) {
+    return;
+  }
+  final PsiClass containingClass=processor.getContainingClass();
+  if (containingClass instanceof PsiAnonymousClass) {
+    final PsiClass[] interfaces=containingClass.getInterfaces();
     final PsiClass superClass;
     if (interfaces.length == 1) {
       superClass=interfaces[0];
@@ -34,7 +28,7 @@
       text=superClass.getName();
     }
  else {
-      superClass=firstReferenceClass.getSuperClass();
+      superClass=containingClass.getSuperClass();
       if (superClass == null) {
         return;
       }
@@ -45,7 +39,7 @@
   }
  else {
     anonymousClass=false;
-    text=firstReferenceClass.getName();
+    text=containingClass.getName();
   }
   registerMethodError(method);
 }
