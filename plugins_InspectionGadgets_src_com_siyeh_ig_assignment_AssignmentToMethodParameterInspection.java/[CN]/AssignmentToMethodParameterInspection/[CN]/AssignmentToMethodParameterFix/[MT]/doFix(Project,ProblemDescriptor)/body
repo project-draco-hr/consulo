@@ -1,2 +1,43 @@
 {
+  final PsiReferenceExpression parameterReference=(PsiReferenceExpression)descriptor.getPsiElement();
+  final PsiMethod method=PsiTreeUtil.getParentOfType(parameterReference,PsiMethod.class);
+  if (method == null) {
+    return;
+  }
+  final PsiCodeBlock body=method.getBody();
+  if (body == null) {
+    return;
+  }
+  final PsiManager manager=PsiManager.getInstance(project);
+  final CodeStyleManager codeStyleManager=manager.getCodeStyleManager();
+  final String parameterName=parameterReference.getText();
+  final String variableName=codeStyleManager.suggestUniqueVariableName(parameterName,parameterReference,true);
+  final PsiSearchHelper searchHelper=manager.getSearchHelper();
+  final PsiReference[] references=searchHelper.findReferences(parameterReference.resolve(),parameterReference.getUseScope(),false);
+  if (references.length == 0 || !(references[0] instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression firstReference=(PsiReferenceExpression)references[0];
+  final PsiElement[] children=body.getChildren();
+  final StringBuffer buffer=new StringBuffer();
+  boolean newDeclarationCreated=false;
+  for (int i=1; i < children.length; i++) {
+    newDeclarationCreated|=replaceVariableName(children[i],firstReference,variableName,parameterName,buffer);
+  }
+  final String replacementText;
+  if (newDeclarationCreated) {
+    replacementText="{" + buffer;
+  }
+ else {
+    final PsiType type=parameterReference.getType();
+    if (type == null) {
+      return;
+    }
+    final String className=type.getPresentableText();
+    replacementText='{' + className + ' '+ variableName+ " = "+ parameterName+ ';'+ buffer;
+  }
+  final PsiElementFactory elementFactory=manager.getElementFactory();
+  final PsiCodeBlock block=elementFactory.createCodeBlockFromText(replacementText,null);
+  body.replace(block);
+  codeStyleManager.reformat(method);
 }
