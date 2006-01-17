@@ -1,27 +1,43 @@
 {
   if (condition == null) {
-    return;
+    return false;
   }
   if (condition instanceof PsiInstanceOfExpression) {
     final PsiInstanceOfExpression instanceOfExpression=(PsiInstanceOfExpression)condition;
     final PsiExpression operand=instanceOfExpression.getOperand();
-    checkCondition(operand,context);
+    if (checkCondition(operand,context)) {
+      registerError(operand);
+    }
+    return false;
   }
  else   if (condition instanceof PsiBinaryExpression) {
     final PsiBinaryExpression binaryExpression=(PsiBinaryExpression)condition;
     PsiExpression lhs=binaryExpression.getLOperand();
     PsiExpression rhs=binaryExpression.getROperand();
     if (rhs == null) {
-      return;
+      return false;
     }
     lhs=ParenthesesUtils.stripParentheses(lhs);
     rhs=ParenthesesUtils.stripParentheses(rhs);
     if (ComparisonUtils.isComparison(binaryExpression)) {
-      if (lhs instanceof PsiLiteralExpression) {
-        checkCondition(rhs,context);
+      if (PsiUtil.isConstantExpression(lhs)) {
+        if (checkCondition(rhs,context)) {
+          registerError(rhs);
+        }
+        return false;
       }
- else       if (rhs instanceof PsiLiteralExpression) {
-        checkCondition(lhs,context);
+ else       if (PsiUtil.isConstantExpression(rhs)) {
+        if (checkCondition(lhs,context)) {
+          registerError(lhs);
+        }
+        return false;
+      }
+ else       if (lhs instanceof PsiReferenceExpression && rhs instanceof PsiReferenceExpression) {
+        if (checkCondition(lhs,context) && checkCondition(rhs,context)) {
+          registerError(lhs);
+          registerError(rhs);
+        }
+        return false;
       }
     }
   }
@@ -31,13 +47,13 @@
     if (element instanceof PsiLocalVariable) {
       final PsiLocalVariable variable=(PsiLocalVariable)element;
       if (!VariableAccessUtils.variableIsAssigned(variable,context)) {
-        registerError(condition);
+        return true;
       }
     }
  else     if (element instanceof PsiParameter) {
       final PsiParameter parameter=(PsiParameter)element;
       if (!VariableAccessUtils.variableIsAssigned(parameter,context)) {
-        registerError(condition);
+        return true;
       }
     }
   }
@@ -45,9 +61,13 @@
     final PsiPrefixExpression prefixExpression=(PsiPrefixExpression)condition;
     final PsiJavaToken sign=prefixExpression.getOperationSign();
     final IElementType tokenType=sign.getTokenType();
-    if (JavaTokenType.EXCL.equals(tokenType)) {
+    if (JavaTokenType.EXCL.equals(tokenType) || JavaTokenType.MINUS.equals(tokenType) || JavaTokenType.PLUS.equals(tokenType)) {
       final PsiExpression operand=prefixExpression.getOperand();
-      checkCondition(operand,context);
+      if (checkCondition(operand,context)) {
+        registerError(operand);
+      }
+      return false;
     }
   }
+  return false;
 }
