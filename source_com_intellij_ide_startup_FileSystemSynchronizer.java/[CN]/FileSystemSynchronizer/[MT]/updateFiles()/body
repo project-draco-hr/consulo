@@ -6,13 +6,45 @@
   }
   int totalFiles=myFilesToUpdate.size();
   int count=0;
-  for (Iterator<VirtualFile> iterator=myFilesToUpdate.iterator(); iterator.hasNext(); ) {
-    VirtualFile file=iterator.next();
+  final BlockingQueue<FileContent> contentQueue=new ArrayBlockingQueue<FileContent>(16);
+  final Thread contentLoadingThread=new Thread(new Runnable(){
+    public void run(){
+      try {
+        for (        VirtualFile file : myFilesToUpdate) {
+          FileContent content=new FileContent(file);
+          try {
+            content.getPhysicalBytes();
+          }
+ catch (          IOException e) {
+            content.setEmptyContent();
+          }
+          contentQueue.put(content);
+        }
+        contentQueue.put(new FileContent(null));
+      }
+ catch (      InterruptedException e) {
+        LOG.error(e);
+      }
+    }
+  }
+,"File Content Loading Thread");
+  contentLoadingThread.setPriority(Thread.currentThread().getPriority());
+  contentLoadingThread.start();
+  while (true) {
+    FileContent content=null;
+    try {
+      content=contentQueue.take();
+    }
+ catch (    InterruptedException e) {
+      LOG.error(e);
+    }
+    if (content == null)     break;
+    final VirtualFile file=content.getVirtualFile();
+    if (file == null)     break;
     if (indicator != null) {
       indicator.setFraction(((double)++count) / totalFiles);
       indicator.setText2(file.getPresentableUrl());
     }
-    FileContent content=new FileContent(file);
     for (int i=0; i < myUpdaters.size(); i++) {
       CacheUpdater updater=myUpdaters.get(i);
       if (myUpdateSets[i].remove(file)) {
