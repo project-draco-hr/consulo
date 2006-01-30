@@ -1,0 +1,105 @@
+{
+  HashSet<Instruction>[] constConditions=runner.getConstConditionalExpressions();
+  HashSet<Instruction> trueSet=constConditions[0];
+  HashSet<Instruction> falseSet=constConditions[1];
+  Set<Instruction> npeSet=runner.getNPEInstructions();
+  Set<Instruction> cceSet=runner.getCCEInstructions();
+  Set<Instruction> redundantInstanceofs=runner.getRedundantInstanceofs();
+  ArrayList<Instruction> allProblems=new ArrayList<Instruction>();
+  allProblems.addAll(trueSet);
+  allProblems.addAll(falseSet);
+  allProblems.addAll(npeSet);
+  allProblems.addAll(cceSet);
+  allProblems.addAll(redundantInstanceofs);
+  Collections.sort(allProblems,new Comparator(){
+    public int compare(    Object o1,    Object o2){
+      int i1=((Instruction)o1).getIndex();
+      int i2=((Instruction)o2).getIndex();
+      if (i1 == i2)       return 0;
+      if (i1 > i2)       return 1;
+      return -1;
+    }
+  }
+);
+  HashSet<PsiElement> reportedAnchors=new HashSet<PsiElement>();
+  for (  Instruction instruction : allProblems) {
+    if (instruction instanceof MethodCallInstruction) {
+      MethodCallInstruction mcInstruction=(MethodCallInstruction)instruction;
+      if (mcInstruction.getCallExpression() instanceof PsiMethodCallExpression) {
+        PsiMethodCallExpression callExpression=(PsiMethodCallExpression)mcInstruction.getCallExpression();
+        LocalQuickFix[] fix=createNPEFixes(callExpression.getMethodExpression().getQualifierExpression());
+        holder.registerProblem(mcInstruction.getCallExpression(),InspectionsBundle.message("dataflow.message.npe.method.invocation"),fix);
+      }
+    }
+ else     if (instruction instanceof FieldReferenceInstruction) {
+      FieldReferenceInstruction frInstruction=(FieldReferenceInstruction)instruction;
+      PsiElement elementToAssert=frInstruction.getElementToAssert();
+      PsiExpression expression=frInstruction.getExpression();
+      if (expression instanceof PsiArrayAccessExpression) {
+        LocalQuickFix[] fix=createNPEFixes((PsiExpression)elementToAssert);
+        holder.registerProblem(expression,InspectionsBundle.message("dataflow.message.npe.array.access"),fix);
+      }
+ else {
+        LocalQuickFix[] fix=createNPEFixes((PsiExpression)elementToAssert);
+        holder.registerProblem(expression,InspectionsBundle.message("dataflow.message.npe.field.access"),fix);
+      }
+    }
+ else     if (instruction instanceof TypeCastInstruction) {
+      TypeCastInstruction tcInstruction=(TypeCastInstruction)instruction;
+      PsiTypeCastExpression typeCast=tcInstruction.getCastExpression();
+      holder.registerProblem(typeCast.getCastType(),InspectionsBundle.message("dataflow.message.cce",typeCast.getOperand().getText()));
+    }
+ else     if (instruction instanceof BranchingInstruction) {
+      PsiElement psiAnchor=((BranchingInstruction)instruction).getPsiAnchor();
+      if (instruction instanceof BinopInstruction && ((BinopInstruction)instruction).isInstanceofRedundant()) {
+        if (((BinopInstruction)instruction).canBeNull()) {
+          holder.registerProblem(psiAnchor,InspectionsBundle.message("dataflow.message.redundant.instanceof"),new RedundantInstanceofFix());
+        }
+ else {
+          final LocalQuickFix localQuickFix=createSimplifyBooleanExpressionFix(psiAnchor,true);
+          holder.registerProblem(psiAnchor,InspectionsBundle.message("dataflow.message.constant.condition",Boolean.toString(true)),localQuickFix);
+        }
+      }
+ else       if (psiAnchor instanceof PsiSwitchLabelStatement) {
+        if (falseSet.contains(instruction)) {
+          holder.registerProblem(psiAnchor,InspectionsBundle.message("dataflow.message.unreachable.switch.label"));
+        }
+      }
+ else       if (psiAnchor != null) {
+        if (!reportedAnchors.contains(psiAnchor)) {
+          if (onTheLeftSideOfConditionalAssignemnt(psiAnchor)) {
+            holder.registerProblem(psiAnchor,InspectionsBundle.message("dataflow.message.pointless.assignment.expression",Boolean.toString(trueSet.contains(instruction))));
+          }
+ else {
+            final LocalQuickFix localQuickFix=createSimplifyBooleanExpressionFix(psiAnchor,trueSet.contains(instruction));
+            holder.registerProblem(psiAnchor,InspectionsBundle.message("dataflow.message.constant.condition",Boolean.toString(trueSet.contains(instruction))),localQuickFix);
+          }
+          reportedAnchors.add(psiAnchor);
+        }
+      }
+    }
+  }
+  Set<PsiExpression> exprs=runner.getNullableArguments();
+  for (  PsiExpression expr : exprs) {
+    final String text=isNullLiteralExpression(expr) ? InspectionsBundle.message("dataflow.message.passing.null.argument") : InspectionsBundle.message("dataflow.message.passing.nullable.argument");
+    LocalQuickFix[] fixes=createNPEFixes(expr);
+    holder.registerProblem(expr,text,fixes);
+  }
+  exprs=runner.getNullableAssignments();
+  for (  PsiExpression expr : exprs) {
+    final String text=isNullLiteralExpression(expr) ? InspectionsBundle.message("dataflow.message.assigning.null") : InspectionsBundle.message("dataflow.message.assigning.nullable");
+    holder.registerProblem(expr,text);
+  }
+  final HashSet<PsiReturnStatement> statements=runner.getNullableReturns();
+  for (  PsiReturnStatement statement : statements) {
+    final PsiExpression expr=statement.getReturnValue();
+    if (runner.isInNotNullMethod()) {
+      final String text=isNullLiteralExpression(expr) ? InspectionsBundle.message("dataflow.message.return.null.from.notnull") : InspectionsBundle.message("dataflow.message.return.nullable.from.notnull");
+      holder.registerProblem(expr,text);
+    }
+ else     if (AnnotationUtil.isAnnotatingApplicable(statement)) {
+      final String text=isNullLiteralExpression(expr) ? InspectionsBundle.message("dataflow.message.return.null.from.notnullable") : InspectionsBundle.message("dataflow.message.return.nullable.from.notnullable");
+      holder.registerProblem(expr,text,new AnnotateMethodFix(AnnotationUtil.NULLABLE));
+    }
+  }
+}

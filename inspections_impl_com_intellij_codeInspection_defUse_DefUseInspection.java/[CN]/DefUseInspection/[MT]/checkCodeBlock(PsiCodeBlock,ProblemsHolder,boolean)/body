@@ -1,0 +1,66 @@
+{
+  if (body == null)   return;
+  final Set<PsiVariable> usedVariables=new THashSet<PsiVariable>();
+  List<DefUseUtil.Info> unusedDefs=DefUseUtil.getUnusedDefs(body,usedVariables);
+  if (unusedDefs != null && !unusedDefs.isEmpty()) {
+    Collections.sort(unusedDefs,new Comparator<DefUseUtil.Info>(){
+      public int compare(      DefUseUtil.Info o1,      DefUseUtil.Info o2){
+        int offset1=o1.getContext().getTextOffset();
+        int offset2=o2.getContext().getTextOffset();
+        if (offset1 == offset2)         return 0;
+        if (offset1 < offset2)         return -1;
+        return 1;
+      }
+    }
+);
+    for (    DefUseUtil.Info info : unusedDefs) {
+      PsiElement context=info.getContext();
+      PsiVariable psiVariable=info.getVariable();
+      if (context instanceof PsiDeclarationStatement) {
+        if (!info.isRead()) {
+          if (!isOnTheFly) {
+            holder.registerProblem(psiVariable.getNameIdentifier(),InspectionsBundle.message("inspection.unused.assignment.problem.descriptor1","<code>#ref</code> #loc"),ProblemHighlightType.LIKE_UNUSED_SYMBOL);
+          }
+        }
+ else {
+          if (REPORT_REDUNDANT_INITIALIZER) {
+            holder.registerProblem(psiVariable.getInitializer(),InspectionsBundle.message("inspection.unused.assignment.problem.descriptor2","<code>" + psiVariable.getName() + "</code>","<code>#ref</code> #loc"),ProblemHighlightType.LIKE_UNUSED_SYMBOL,new RemoveInitializerFix());
+          }
+        }
+      }
+ else       if (context instanceof PsiAssignmentExpression && ((PsiAssignmentExpression)context).getOperationSign().getTokenType() == JavaTokenType.EQ) {
+        final PsiAssignmentExpression assignment=(PsiAssignmentExpression)context;
+        holder.registerProblem(assignment.getRExpression(),InspectionsBundle.message("inspection.unused.assignment.problem.descriptor3","<code>#ref</code>",assignment.getLExpression().getText() + " #loc"));
+      }
+ else {
+        if (context instanceof PsiPrefixExpression && REPORT_PREFIX_EXPRESSIONS || context instanceof PsiPostfixExpression && REPORT_POSTFIX_EXPRESSIONS) {
+          holder.registerProblem(context,InspectionsBundle.message("inspection.unused.assignment.problem.descriptor4","<code>#ref</code> #loc"));
+        }
+      }
+    }
+  }
+  body.accept(new PsiRecursiveElementVisitor(){
+    public void visitClass(    PsiClass aClass){
+    }
+    public void visitLocalVariable(    PsiLocalVariable variable){
+      if (!usedVariables.contains(variable) && variable.getInitializer() == null && !isOnTheFly) {
+        holder.registerProblem(variable.getNameIdentifier(),InspectionsBundle.message("inspection.unused.assignment.problem.descriptor5","<code>#ref</code> #loc"),ProblemHighlightType.LIKE_UNUSED_SYMBOL);
+      }
+    }
+    public void visitAssignmentExpression(    PsiAssignmentExpression expression){
+      PsiExpression lExpression=expression.getLExpression();
+      PsiExpression rExpression=expression.getRExpression();
+      if (lExpression instanceof PsiReferenceExpression && rExpression instanceof PsiReferenceExpression) {
+        PsiReferenceExpression lRef=(PsiReferenceExpression)lExpression;
+        PsiReferenceExpression rRef=(PsiReferenceExpression)rExpression;
+        if (lRef.resolve() != rRef.resolve())         return;
+        PsiExpression lQualifier=lRef.getQualifierExpression();
+        PsiExpression rQualifier=rRef.getQualifierExpression();
+        if ((lQualifier == null && rQualifier == null || lQualifier instanceof PsiThisExpression && rQualifier instanceof PsiThisExpression || lQualifier instanceof PsiThisExpression && rQualifier == null || lQualifier == null && rQualifier instanceof PsiThisExpression) && !isOnTheFly) {
+          holder.registerProblem(expression,InspectionsBundle.message("inspection.unused.assignment.problem.descriptor6","<code>#ref</code>"));
+        }
+      }
+    }
+  }
+);
+}
