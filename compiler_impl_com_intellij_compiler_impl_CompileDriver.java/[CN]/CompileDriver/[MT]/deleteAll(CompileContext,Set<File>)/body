@@ -1,13 +1,17 @@
 {
   context.getProgressIndicator().pushState();
   try {
+    final boolean isTestMode=ApplicationManager.getApplication().isUnitTestMode();
     final Compiler[] allCompilers=CompilerManager.getInstance(myProject).getCompilers(Compiler.class);
     context.getProgressIndicator().setText(CompilerBundle.message("progress.clearing.output"));
     for (    final Compiler compiler : allCompilers) {
       if (compiler instanceof GeneratingCompiler) {
         final StateCache<ValidityState> cache=getGeneratingCompilerCache((GeneratingCompiler)compiler);
         if (!myShouldClearOutputDirectory) {
-          deleteUrls(cache.getUrlsIterator());
+          final Iterator<String> urlIterator=cache.getUrlsIterator();
+          while (urlIterator.hasNext()) {
+            new File(VirtualFileManager.extractPath(urlIterator.next())).delete();
+          }
         }
         cache.wipe();
       }
@@ -18,13 +22,34 @@
  else       if (compiler instanceof TranslatingCompiler) {
         final TranslatingCompilerStateCache cache=getTranslatingCompilerCache((TranslatingCompiler)compiler);
         if (!myShouldClearOutputDirectory) {
-          deleteUrls(cache.getOutputUrlsIterator());
+          final Iterator<String> urlIterator=cache.getOutputUrlsIterator();
+          while (urlIterator.hasNext()) {
+            final String outputPath=urlIterator.next();
+            final String sourceUrl=cache.getSourceUrl(outputPath);
+            if (sourceUrl == null || !FileUtil.pathsEqual(outputPath,VirtualFileManager.extractPath(sourceUrl))) {
+              new File(outputPath).delete();
+              if (isTestMode) {
+                CompilerManagerImpl.addDeletedPath(outputPath);
+              }
+            }
+          }
         }
         cache.wipe();
       }
     }
     if (myShouldClearOutputDirectory) {
       clearOutputDirectories(outputDirectories);
+    }
+ else {
+      CompilerUtil.doRefresh(new Runnable(){
+        public void run(){
+          final VirtualFile[] outputDirectories=CompilerPathsEx.getOutputDirectories(ModuleManager.getInstance(myProject).getModules());
+          for (          final VirtualFile outputDirectory : outputDirectories) {
+            outputDirectory.refresh(false,true);
+          }
+        }
+      }
+);
     }
     clearCompilerSystemDirectory(context);
   }
