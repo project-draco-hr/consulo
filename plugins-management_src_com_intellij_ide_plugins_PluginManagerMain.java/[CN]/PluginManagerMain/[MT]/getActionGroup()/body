@@ -1,108 +1,31 @@
 {
   if (actionGroup == null) {
     actionGroup=new DefaultActionGroup();
-    syncAction=new AnAction(IdeBundle.message("action.synchronize.with.plugin.repository"),IdeBundle.message("action.synchronize.with.plugin.repository"),IconLoader.getIcon("/actions/sync.png")){
-      public void update(      AnActionEvent e){
-        Presentation presentation=e.getPresentation();
-        boolean enabled=false;
-        if (tabs.getSelectedIndex() == AVAILABLE_TAB) {
-          enabled=true;
-        }
-        presentation.setEnabled(enabled);
-      }
-      public void actionPerformed(      AnActionEvent e){
-        root=null;
-        pluginInfoUpdate(null);
-        loadAvailablePlugins();
-      }
-    }
-;
-    syncAction.registerCustomShortcutSet(new CustomShortcutSet(KeymapManager.getInstance().getActiveKeymap().getShortcuts("Synchronize")),main);
-    actionGroup.add(syncAction);
-    updatePluginsAction=new AnAction(IdeBundle.message("action.update.installed.plugins"),IdeBundle.message("action.update.installed.plugins"),IconLoader.getIcon("/actions/refresh.png")){
-      public void actionPerformed(      AnActionEvent e){
-        if (availablePluginTable == null) {
-          loadAvailablePlugins();
-        }
-        if (root != null)         do {
-          try {
-            List<PluginNode> updateList=new ArrayList<PluginNode>();
-            checkForUpdate(updateList,root);
-            if (updateList.size() == 0) {
-              Messages.showMessageDialog(main,IdeBundle.message("message.nothing.to.update"),IdeBundle.message("title.plugin.manager"),Messages.getInformationIcon());
-              break;
-            }
- else {
-              Set<PluginNode> pluginsToUpdate=new HashSet<PluginNode>();
-              final IdeaPluginDescriptor[] installedPlugins=PluginManager.getPlugins();
-              for (              PluginNode pluginNode : updateList) {
-                for (                IdeaPluginDescriptor descriptor : installedPlugins) {
-                  if (descriptor.getPluginId().equals(pluginNode.getId())) {
-                    pluginsToUpdate.add(pluginNode);
-                  }
-                }
-              }
-              DialogWrapper dlg=new PluginsToUpdateChooser(pluginsToUpdate);
-              dlg.show();
-              if (dlg.isOK()) {
-                if (downloadPlugins(new ArrayList<PluginNode>(pluginsToUpdate))) {
-                  availablePluginTable.updateUI();
-                  requireShutdown=true;
-                }
-              }
-              break;
-            }
-          }
- catch (          IOException e1) {
-            if (!IOExceptionDialog.showErrorDialog(e1,IdeBundle.message("title.update.installed.plugins"),IdeBundle.message("error.plugins.updating.failed"))) {
-              break;
-            }
- else {
-              LOG.error(e1);
-            }
-          }
-        }
- while (true);
-      }
-    }
-;
-    actionGroup.add(updatePluginsAction);
-    final String downloadMessage=IdeBundle.message("action.download.and.install.plugin");
+    final String installTitle=IdeBundle.message("action.download.and.install.plugin");
     final String updateMessage=IdeBundle.message("action.update.plugin");
-    installPluginAction=new AnAction(downloadMessage,downloadMessage,IconLoader.getIcon("/actions/install.png")){
+    installPluginAction=new AnAction(installTitle,installTitle,IconLoader.getIcon("/actions/install.png")){
       public void update(      AnActionEvent e){
         Presentation presentation=e.getPresentation();
         boolean enabled=false;
-        PluginTable table=tabs.getSelectedIndex() == AVAILABLE_TAB ? availablePluginTable : installedPluginTable;
-        if ((tabs.getSelectedIndex() == AVAILABLE_TAB && availablePluginTable != null) || (tabs.getSelectedIndex() == INSTALLED_TAB && installedPluginTable != null)) {
-          Object pluginObject=table.getSelectedObject();
-          if (pluginObject instanceof PluginNode) {
-            int status=PluginManagerColumnInfo.getRealNodeState((PluginNode)pluginObject);
-            if (status == PluginNode.STATUS_MISSING || status == PluginNode.STATUS_NEWEST || status == PluginNode.STATUS_OUT_OF_DATE || status == PluginNode.STATUS_UNKNOWN) {
-              enabled=true;
-            }
-            presentation.setText(downloadMessage);
-          }
- else           if (pluginObject instanceof IdeaPluginDescriptorImpl) {
-            presentation.setText(updateMessage);
-            presentation.setDescription(updateMessage);
-            enabled=true;
-          }
+        Object pluginObject=installedPluginTable.getSelectedObject();
+        if (pluginObject instanceof PluginNode) {
+          int status=PluginManagerColumnInfo.getRealNodeState((PluginNode)pluginObject);
+          enabled=(status != PluginNode.STATUS_DOWNLOADED);
+          presentation.setText(installTitle);
+        }
+ else         if (pluginObject instanceof IdeaPluginDescriptorImpl) {
+          presentation.setText(updateMessage);
+          presentation.setDescription(updateMessage);
+          enabled=PluginsTableModel.NewVersions2Plugins.containsKey(((IdeaPluginDescriptorImpl)pluginObject).getPluginId());
         }
         presentation.setEnabled(enabled);
       }
       public void actionPerformed(      AnActionEvent e){
         do {
           try {
-            if (root == null) {
-              loadAvailablePlugins();
-            }
-            if (root == null)             return;
-            final boolean isUpdate=tabs.getSelectedIndex() == INSTALLED_TAB;
-            PluginTable pluginTable=isUpdate ? installedPluginTable : availablePluginTable;
-            if (pluginTable == null)             return;
-            final Object selectedObject=pluginTable.getSelectedObject();
-            PluginNode pluginNode;
+            final Object selectedObject=installedPluginTable.getSelectedObject();
+            final boolean isUpdate=(selectedObject instanceof IdeaPluginDescriptorImpl);
+            PluginNode pluginNode=null;
             if (selectedObject instanceof PluginNode) {
               pluginNode=(PluginNode)selectedObject;
             }
@@ -117,7 +40,7 @@
               try {
                 checkForUpdate(toUpdate,root);
                 for (                PluginNode node : toUpdate) {
-                  if (node.getId().equals(pluginDescriptor.getPluginId())) {
+                  if (node.getPluginId().equals(pluginDescriptor.getPluginId())) {
                     smthFoundToUpdate=true;
                   }
                 }
@@ -130,22 +53,17 @@
                 LOG.error(e1);
               }
             }
- else {
-              return;
-            }
-            final String message=isUpdate ? updateMessage : downloadMessage;
+            final String message=isUpdate ? updateMessage : installTitle;
             if (Messages.showYesNoDialog(main,(isUpdate ? IdeBundle.message("prompt.update.plugin",pluginNode.getName()) : IdeBundle.message("prompt.download.and.install.plugin",pluginNode.getName())),message,Messages.getQuestionIcon()) == 0) {
               if (downloadPlugin(pluginNode)) {
                 requireShutdown=true;
-                if (availablePluginTable != null) {
-                  availablePluginTable.updateUI();
-                }
+                installedPluginTable.updateUI();
               }
             }
             break;
           }
  catch (          IOException e1) {
-            if (!IOExceptionDialog.showErrorDialog(e1,downloadMessage,IdeBundle.message("error.plugin.download.failed"))) {
+            if (!IOExceptionDialog.showErrorDialog(e1,installTitle,IdeBundle.message("error.plugin.download.failed"))) {
               break;
             }
  else {
@@ -162,24 +80,18 @@
       public void update(      AnActionEvent e){
         Presentation presentation=e.getPresentation();
         boolean enabled=false;
-        if (installedPluginTable != null && tabs.getSelectedIndex() == INSTALLED_TAB) {
-          IdeaPluginDescriptorImpl pluginDescriptor=(IdeaPluginDescriptorImpl)installedPluginTable.getSelectedObject();
-          if (pluginDescriptor != null && !pluginDescriptor.isDeleted()) {
-            enabled=true;
-          }
+        if (installedPluginTable != null) {
+          Object descr=installedPluginTable.getSelectedObject();
+          enabled=(descr instanceof IdeaPluginDescriptorImpl) && !((IdeaPluginDescriptorImpl)descr).isDeleted();
         }
         presentation.setEnabled(enabled);
       }
       public void actionPerformed(      AnActionEvent e){
         PluginId pluginId=null;
-        if (tabs.getSelectedIndex() == INSTALLED_TAB) {
-          IdeaPluginDescriptorImpl pluginDescriptor=(IdeaPluginDescriptorImpl)installedPluginTable.getSelectedObject();
-          if (pluginDescriptor != null) {
-            if (Messages.showYesNoDialog(main,IdeBundle.message("prompt.uninstall.plugin",pluginDescriptor.getName()),IdeBundle.message("title.plugin.uninstall"),Messages.getQuestionIcon()) == 0) {
-              pluginId=pluginDescriptor.getPluginId();
-              pluginDescriptor.setDeleted(true);
-            }
-          }
+        IdeaPluginDescriptorImpl pluginDescriptor=(IdeaPluginDescriptorImpl)installedPluginTable.getSelectedObject();
+        if (Messages.showYesNoDialog(main,IdeBundle.message("prompt.uninstall.plugin",pluginDescriptor.getName()),IdeBundle.message("title.plugin.uninstall"),Messages.getQuestionIcon()) == 0) {
+          pluginId=pluginDescriptor.getPluginId();
+          pluginDescriptor.setDeleted(true);
         }
         if (pluginId != null) {
           try {
