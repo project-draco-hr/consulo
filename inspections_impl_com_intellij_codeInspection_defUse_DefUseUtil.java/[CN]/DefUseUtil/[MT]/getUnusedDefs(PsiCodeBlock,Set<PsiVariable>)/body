@@ -3,10 +3,9 @@
     return null;
   }
   List<Info> unusedDefs=new ArrayList<Info>();
-  IntArrayList exitPoints=new IntArrayList();
   ControlFlow flow;
   try {
-    flow=new ControlFlowAnalyzer(body,ourPolicy).buildControlFlow();
+    flow=ControlFlowFactory.getControlFlow(body,ourPolicy);
   }
  catch (  AnalysisCanceledException e) {
     return null;
@@ -38,47 +37,46 @@
   boolean[] defsArmed=new boolean[instructions.length];
   for (int i=0; i < defsArmed.length; i++)   defsArmed[i]=false;
   List<InstructionState> queue=new ArrayList<InstructionState>();
-  InstructionState startupState=states[instructions.length];
-  startupState.touch();
-  for (  PsiVariable psiVariable : assignedVariables) {
-    if (psiVariable instanceof PsiField) {
-      startupState.mergeUseArmed(psiVariable);
+  for (int i=states.length - 1; i >= 0; i--) {
+    final InstructionState outerState=states[i];
+    if (outerState.isVisited())     continue;
+    outerState.touch();
+    for (    PsiVariable psiVariable : assignedVariables) {
+      if (psiVariable instanceof PsiField) {
+        outerState.mergeUseArmed(psiVariable);
+      }
     }
-  }
-  ControlFlowUtil.findExitPointsAndStatements(flow,0,flow.getSize() - 1,exitPoints,new ArrayList<PsiStatement>(),ControlFlowUtil.DEFAULT_EXIT_STATEMENTS_CLASSES);
-  if (exitPoints.isEmpty())   return null;
-  for (int i=0; i < exitPoints.size(); i++) {
-    startupState.addBackwardTrace(exitPoints.get(i));
-  }
-  queue.add(startupState);
-  while (!queue.isEmpty()) {
-    ProgressManager.getInstance().checkCanceled();
-    InstructionState state=queue.remove(0);
-    int idx=state.getInstructionIdx();
-    if (idx < instructions.length) {
-      Instruction instruction=instructions[idx];
-      if (instruction instanceof WriteVariableInstruction) {
-        WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
-        PsiVariable psiVariable=writeInstruction.variable;
-        outUsedVariables.add(psiVariable);
-        if (state.mergeUseDisarmed(psiVariable)) {
-          defsArmed[idx]=true;
+    queue.add(outerState);
+    while (!queue.isEmpty()) {
+      ProgressManager.getInstance().checkCanceled();
+      InstructionState state=queue.remove(0);
+      state.markVisited();
+      int idx=state.getInstructionIdx();
+      if (idx < instructions.length) {
+        Instruction instruction=instructions[idx];
+        if (instruction instanceof WriteVariableInstruction) {
+          WriteVariableInstruction writeInstruction=(WriteVariableInstruction)instruction;
+          PsiVariable psiVariable=writeInstruction.variable;
+          outUsedVariables.add(psiVariable);
+          if (state.mergeUseDisarmed(psiVariable)) {
+            defsArmed[idx]=true;
+          }
+        }
+ else         if (instruction instanceof ReadVariableInstruction) {
+          ReadVariableInstruction readInstruction=(ReadVariableInstruction)instruction;
+          state.mergeUseArmed(readInstruction.variable);
+          outUsedVariables.add(readInstruction.variable);
+        }
+ else {
+          state.touch();
         }
       }
- else       if (instruction instanceof ReadVariableInstruction) {
-        ReadVariableInstruction readInstruction=(ReadVariableInstruction)instruction;
-        state.mergeUseArmed(readInstruction.variable);
-        outUsedVariables.add(readInstruction.variable);
-      }
- else {
-        state.touch();
-      }
-    }
-    for (int i=0; i < state.getBackwardTraces().size(); i++) {
-      int prevIdx=state.getBackwardTraces().get(i);
-      if (!state.equals(states[prevIdx])) {
-        states[prevIdx].merge(state);
-        queue.add(states[prevIdx]);
+      for (int j=0; j < state.getBackwardTraces().size(); j++) {
+        int prevIdx=state.getBackwardTraces().get(j);
+        if (!state.equals(states[prevIdx])) {
+          states[prevIdx].merge(state);
+          queue.add(states[prevIdx]);
+        }
       }
     }
   }
