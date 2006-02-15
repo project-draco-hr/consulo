@@ -1,21 +1,56 @@
 {
-  myTabbedPane=new TabbedPaneWrapper();
-  mySplitter=new Splitter(true);
-  mySplitter.setHonorComponentsMinimumSize(true);
-  mySplitter.setFirstComponent(myTabbedPane.getComponent());
-  myStructurePanel=new JPanel(new BorderLayout());
+  myCombo.setRenderer(new DefaultListCellRenderer(){
+    public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean isSelected,    boolean cellHasFocus){
+      if (value == null)       return this;
+      Pair<String,String> ids=(Pair<String,String>)value;
+      String id=ids.first;
+      String subId=ids.second;
+      AbstractProjectViewPane pane=myId2Pane.get(id);
+      super.getListCellRendererComponent(list,value,index,isSelected,cellHasFocus);
+      if (subId == null) {
+        setIconTextGap(4);
+        setText(pane.getTitle());
+        setIcon(pane.getIcon());
+      }
+ else {
+        String presentable=pane.getPresentableSubIdName(subId);
+        if (index == -1) {
+          setIconTextGap(4);
+          setText(pane.getTitle() + ": " + presentable);
+          setIcon(pane.getIcon());
+        }
+ else {
+          setIconTextGap(30);
+          setText(presentable);
+          setIcon(new EmptyIcon(getHeight()));
+        }
+      }
+      return this;
+    }
+  }
+);
   myStructureViewWrapper=new MyStructureViewWrapperImpl();
   myStructureViewWrapper.setFileEditor(null);
-  myStructurePanel.add(myStructureViewWrapper.getComponent());
-  mySplitter.setSecondComponent(myStructurePanel);
-  myPanel.add(mySplitter,BorderLayout.CENTER);
+  myStructureViewPanel.setLayout(new BorderLayout());
+  myStructureViewPanel.add(myStructureViewWrapper.getComponent(),BorderLayout.CENTER);
   myActionGroup=new DefaultActionGroup();
+  myAutoScrollToSourceHandler=new AutoScrollToSourceHandler(){
+    protected boolean isAutoScrollMode(){
+      return isAutoscrollToSource(myCurrentViewId);
+    }
+    protected void setAutoScrollMode(    boolean state){
+      setAutoscrollToSource(state,myCurrentViewId);
+    }
+  }
+;
+  myAutoScrollFromSourceHandler.install();
   createToolbarActions();
-  myToolBar=ActionManager.getInstance().createActionToolbar(ActionPlaces.PROJECT_VIEW_TOOLBAR,myActionGroup,true);
-  JComponent toolbarComponent=myToolBar.getComponent();
-  myPanel.add(toolbarComponent,BorderLayout.NORTH);
-  mySplitter.setProportion(mySplitterProportion);
-  myStructurePanel.setVisible(isShowStructure());
+  final ActionToolbar toolBar=ActionManager.getInstance().createActionToolbar(ActionPlaces.PROJECT_VIEW_TOOLBAR,myActionGroup,true);
+  JComponent toolbarComponent=toolBar.getComponent();
+  myActionGroupPanel.setLayout(new BorderLayout());
+  myActionGroupPanel.add(toolbarComponent,BorderLayout.NORTH);
+  splitterProportions.restoreSplitterProportions(myPanel);
+  myStructureViewPanel.setVisible(isShowStructure());
   ToolWindowManager toolWindowManager=ToolWindowManager.getInstance(myProject);
   ToolWindow toolWindow=toolWindowManager.registerToolWindow(ToolWindowId.PROJECT_VIEW,getComponent(),ToolWindowAnchor.LEFT);
   toolWindow.setIcon(IconLoader.getIcon("/general/toolWindowProject.png"));
@@ -26,20 +61,30 @@
     }
   }
 ;
-  myTabbedPane.addChangeListener(new ChangeListener(){
-    public void stateChanged(    ChangeEvent e){
-      final Collection<AbstractProjectViewPane> panes=myId2Pane.values();
-      for (      AbstractProjectViewPane pane : panes) {
-        if (pane.getComponent() == myTabbedPane.getSelectedComponent()) {
-          changeView(pane.getId());
-          break;
+  myCombo.addActionListener(new ActionListener(){
+    public void actionPerformed(    ActionEvent e){
+      Pair<String,String> ids=(Pair<String,String>)myCombo.getSelectedItem();
+      final String id=ids.first;
+      String subId=ids.second;
+      AbstractProjectViewPane newPane=getProjectViewPaneById(id);
+      newPane.setSubId(subId);
+      String[] subIds=newPane.getSubIds();
+      if (subId == null && subIds != null) {
+        final String firstSubId=subIds[0];
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            changeView(id,firstSubId);
+          }
         }
+);
+        return;
       }
+      showPane(id,subId);
     }
   }
 );
+  GuiUtils.replaceJSplitPaneWithIDEASplitter(myPanel,true);
   ModuleManager.getInstance(myProject).addModuleListener(myModulesListener);
   isInitialized=true;
   doAddUninitializedPanes();
-  changeView(getCurrentViewId());
 }
