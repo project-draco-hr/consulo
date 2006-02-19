@@ -9,25 +9,46 @@
       }
       final List<VcsDirtyScope> scopes=((VcsDirtyScopeManagerImpl)VcsDirtyScopeManager.getInstance(myProject)).retreiveScopes();
       for (      final VcsDirtyScope scope : scopes) {
+        updateProgressText(" Updating: " + scope.getScopeRoot().getPresentableUrl());
+        for (        ChangeList list : getChangeLists()) {
+          if (myDisposed)           return;
+          list.removeChangesInScope(scope);
+        }
+        myUnversionedFilesHolder.cleanScope(scope);
+        scheduleRefresh();
         final AbstractVcs vcs=myVcsManager.getVcsFor(scope.getScopeRoot());
         if (vcs != null) {
           final ChangeProvider changeProvider=vcs.getChangeProvider();
           if (changeProvider != null) {
-            final List<Change> filteredChanges=new ArrayList<Change>();
             changeProvider.getChanges(scope,new ChangelistBuilder(){
               public void processChange(              Change change){
                 if (isUnder(change,scope)) {
-                  filteredChanges.add(change);
+                  try {
+synchronized (myChangeLists) {
+                      for (                      ChangeList list : myChangeLists) {
+                        if (list == myDefaultChangelist)                         continue;
+                        if (list.processChange(change))                         return;
+                      }
+                      myDefaultChangelist.processChange(change);
+                    }
+                  }
+  finally {
+                    scheduleRefresh();
+                  }
                 }
               }
               public void processUnversionedFile(              VirtualFile file){
+                if (scope.belongsTo(PeerFactory.getInstance().getVcsContextFactory().createFilePathOn(file))) {
+                  myUnversionedFilesHolder.addFile(file);
+                  scheduleRefresh();
+                }
               }
             }
 ,null);
-            udpateUI(scope,filteredChanges);
           }
         }
       }
+      updateProgressText("");
     }
     private boolean isUnder(    final Change change,    final VcsDirtyScope scope){
       final ContentRevision before=change.getBeforeRevision();
