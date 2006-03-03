@@ -12,12 +12,11 @@
     if (dfaCond == myFactory.getConstFactory().getFalse())     return false;
     return true;
   }
-  if (!(dfaCond instanceof DfaRelationValue)) {
-    return true;
-  }
+  if (!(dfaCond instanceof DfaRelationValue))   return true;
   DfaRelationValue dfaRelation=(DfaRelationValue)dfaCond;
   DfaValue dfaLeft=dfaRelation.getLeftOperand();
   DfaValue dfaRight=dfaRelation.getRightOperand();
+  if (dfaRight == null || dfaLeft == null)   return false;
   if (dfaLeft instanceof DfaNotNullValue && dfaRight == myFactory.getConstFactory().getNull()) {
     return dfaRelation.isNegated();
   }
@@ -26,9 +25,9 @@
       DfaVariableState varState=getVariableState((DfaVariableValue)dfaLeft);
       DfaVariableValue dfaVar=(DfaVariableValue)dfaLeft;
       if (dfaRelation.isNegated()) {
-        return varState.addNotInstanceofValue((DfaTypeValue)dfaRight) ? true : applyCondition(compareToNull(dfaVar,false));
+        return varState.addNotInstanceofValue((DfaTypeValue)dfaRight) || applyCondition(compareToNull(dfaVar,false));
       }
-      return applyCondition(compareToNull(dfaVar,true)) ? varState.setInstanceofValue((DfaTypeValue)dfaRight) : false;
+      return applyCondition(compareToNull(dfaVar,true)) && varState.setInstanceofValue((DfaTypeValue)dfaRight);
     }
     return true;
   }
@@ -38,18 +37,24 @@
       varState.setNullable(true);
     }
   }
-  if (dfaLeft instanceof DfaUnknownValue || dfaRight instanceof DfaUnknownValue) {
-    return true;
+  if (dfaLeft instanceof DfaUnknownValue || dfaRight instanceof DfaUnknownValue)   return true;
+  boolean result=applyRelation(dfaLeft,dfaRight,dfaRelation.isNegated());
+  if (dfaLeft instanceof DfaVariableValue) {
+    PsiVariable psiVariable=((DfaVariableValue)dfaLeft).getPsiVariable();
+    if (TypeConversionUtil.isPrimitiveWrapper(psiVariable.getType()) && !dfaRelation.isNegated()) {
+      dfaLeft=myFactory.getBoxedFactory().createUnboxed(dfaLeft);
+      dfaRight=myFactory.getBoxedFactory().createUnboxed(dfaRight);
+      if (dfaLeft != null && dfaRight != null) {
+        result&=applyRelation(dfaLeft,dfaRight,dfaRelation.isNegated());
+      }
+    }
+ else     if (TypeConversionUtil.isPrimitiveAndNotNull(psiVariable.getType())) {
+      dfaLeft=myFactory.getBoxedFactory().createBoxed(dfaLeft);
+      dfaRight=myFactory.getBoxedFactory().createBoxed(dfaRight);
+      if (dfaLeft != null && dfaRight != null) {
+        result&=applyRelation(dfaLeft,dfaRight,dfaRelation.isNegated());
+      }
+    }
   }
-  int c1Index=getOrCreateEqClassIndex(dfaLeft);
-  int c2Index=getOrCreateEqClassIndex(dfaRight);
-  if (!dfaRelation.isNegated()) {
-    if (c1Index == c2Index)     return true;
-    if (!unitClasses(c1Index,c2Index))     return false;
-  }
- else {
-    if (c1Index == c2Index)     return false;
-    makeClassesDistinct(c1Index,c2Index);
-  }
-  return true;
+  return result;
 }
