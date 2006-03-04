@@ -13,46 +13,52 @@
 synchronized (myChangeLists) {
           for (          ChangeList list : getChangeLists()) {
             if (myDisposed)             return;
-            list.removeChangesInScope(scope);
+            list.startProcessingChanges(scope);
           }
         }
         final UnversionedFilesHolder workingHolderCopy=myUnversionedFilesHolder.copy();
         workingHolderCopy.cleanScope(scope);
-        final AbstractVcs vcs=myVcsManager.getVcsFor(scope.getScopeRoot());
-        if (vcs != null) {
-          final ChangeProvider changeProvider=vcs.getChangeProvider();
-          if (changeProvider != null) {
-            changeProvider.getChanges(scope,new ChangelistBuilder(){
-              public void processChange(              Change change){
-                if (myDisposed)                 return;
-                if (isUnder(change,scope)) {
-                  try {
+        try {
+          final AbstractVcs vcs=myVcsManager.getVcsFor(scope.getScopeRoot());
+          if (vcs != null) {
+            final ChangeProvider changeProvider=vcs.getChangeProvider();
+            if (changeProvider != null) {
+              changeProvider.getChanges(scope,new ChangelistBuilder(){
+                public void processChange(                Change change){
+                  if (myDisposed)                   return;
+                  if (isUnder(change,scope)) {
+                    try {
 synchronized (myChangeLists) {
-                      for (                      ChangeList list : myChangeLists) {
-                        if (list == myDefaultChangelist)                         continue;
-                        if (list.processChange(change))                         return;
+                        for (                        ChangeList list : myChangeLists) {
+                          if (list == myDefaultChangelist)                           continue;
+                          if (list.processChange(change))                           return;
+                        }
+                        myDefaultChangelist.processChange(change);
                       }
-                      myDefaultChangelist.processChange(change);
+                    }
+  finally {
+                      scheduleRefresh();
                     }
                   }
-  finally {
+                }
+                public void processUnversionedFile(                VirtualFile file){
+                  if (scope.belongsTo(PeerFactory.getInstance().getVcsContextFactory().createFilePathOn(file))) {
+                    workingHolderCopy.addFile(file);
                     scheduleRefresh();
                   }
                 }
               }
-              public void processUnversionedFile(              VirtualFile file){
-                if (scope.belongsTo(PeerFactory.getInstance().getVcsContextFactory().createFilePathOn(file))) {
-                  workingHolderCopy.addFile(file);
-                  scheduleRefresh();
-                }
-              }
-            }
 ,null);
+            }
           }
         }
+  finally {
 synchronized (myChangeLists) {
-          for (          ChangeList list : myChangeLists) {
-            list.doneProcessingChanges();
+            for (            ChangeList list : myChangeLists) {
+              if (list.doneProcessingChanges()) {
+                myListeners.getMulticaster().changeListChanged(list);
+              }
+            }
           }
         }
         myUnversionedFilesHolder=workingHolderCopy;
