@@ -1,0 +1,79 @@
+{
+  if (myDisabled)   return;
+  try {
+    setDisabled(true);
+    final List<ASTNode> astNodes=myReformatElements.remove(key);
+    if (astNodes == null)     return;
+    final CodeStyleSettings styleSettings=CodeStyleSettingsManager.getSettings(myPsiManager.getProject());
+    final PsiDocumentManager documentManager=PsiDocumentManager.getInstance(myPsiManager.getProject());
+    final Document document=key.getDocument();
+    FileType fileType=key.getVirtualFile().getFileType();
+    Helper helper=new Helper(fileType,myPsiManager.getProject());
+    final CodeFormatterFacade codeFormatter=new CodeFormatterFacade(styleSettings,helper);
+    final Comparator<TextRange> rangesComparator=new Comparator<TextRange>(){
+      public int compare(      final TextRange o1,      final TextRange o2){
+        if (o1.equals(o2))         return 0;
+        final int diff=o2.getEndOffset() - o1.getEndOffset();
+        if (diff == 0)         return o2.getStartOffset() - o1.getStartOffset();
+        return diff;
+      }
+    }
+;
+    final TreeMap<TextRange,ReformatAction> rangesToProcess=new TreeMap<TextRange,ReformatAction>(rangesComparator);
+    if (document == null || documentManager.isUncommited(document))     return;
+    for (    final ASTNode node : astNodes) {
+      final FileElement element=TreeUtil.getFileElement((TreeElement)node);
+      if (element != null && ((PsiFile)element.getPsi()).getViewProvider() == key) {
+        if (CodeEditUtil.isNodeGenerated(node))         rangesToProcess.put(node.getTextRange(),ReformatAction.REFORMAT);
+ else         rangesToProcess.put(node.getTextRange(),ReformatAction.REINDENT);
+      }
+    }
+    final PsiFile psiFile=key.getPsi(key.getBaseLanguage());
+    TextRange accumulatedRange=null;
+    ReformatAction accumulatedRangeAction=null;
+    final List<RangeMarker> postIndentReformatRanges=new ArrayList<RangeMarker>();
+    final ListIterator<TextRange> rangesIterator=new ArrayList<TextRange>(rangesToProcess.keySet()).listIterator();
+    while (rangesIterator.hasNext()) {
+      final TextRange textRange=rangesIterator.next();
+      final ReformatAction action=rangesToProcess.get(textRange);
+      if (accumulatedRange == null) {
+        accumulatedRange=textRange;
+        accumulatedRangeAction=action;
+      }
+ else       if (accumulatedRange.getStartOffset() > textRange.getEndOffset() || accumulatedRange.getStartOffset() == textRange.getEndOffset() && accumulatedRangeAction == ReformatAction.REINDENT) {
+        processRange(codeFormatter,psiFile,accumulatedRange,accumulatedRangeAction,postIndentReformatRanges);
+        accumulatedRange=textRange;
+        accumulatedRangeAction=action;
+      }
+ else       if (accumulatedRangeAction == ReformatAction.REFORMAT && action == ReformatAction.REINDENT) {
+        if (accumulatedRange.getStartOffset() < textRange.getStartOffset()) {
+          final TextRange endOfRange=new TextRange(accumulatedRange.getStartOffset(),textRange.getStartOffset());
+          int stepsCounter=0;
+          if (rangesIterator.hasNext()) {
+            TextRange current=rangesIterator.next();
+            while (rangesIterator.hasNext() && current.getEndOffset() > endOfRange.getEndOffset()) {
+              current=rangesIterator.next();
+              stepsCounter++;
+            }
+            rangesIterator.previous();
+          }
+          rangesIterator.add(endOfRange);
+          while (stepsCounter-- >= 0)           rangesIterator.previous();
+          rangesToProcess.put(endOfRange,ReformatAction.REFORMAT);
+        }
+        final TextRange rangeToProcess=new TextRange(textRange.getEndOffset(),accumulatedRange.getEndOffset());
+        processRange(codeFormatter,psiFile,rangeToProcess,ReformatAction.REFORMAT,postIndentReformatRanges);
+        accumulatedRange=textRange;
+        accumulatedRangeAction=ReformatAction.REINDENT;
+      }
+ else {
+        accumulatedRange=new TextRange(Math.min(accumulatedRange.getStartOffset(),textRange.getStartOffset()),Math.max(accumulatedRange.getEndOffset(),textRange.getEndOffset()));
+        if (accumulatedRangeAction == ReformatAction.REINDENT && action == ReformatAction.REFORMAT)         postIndentReformatRanges.add(document.createRangeMarker(textRange.getStartOffset(),textRange.getEndOffset()));
+      }
+    }
+    if (accumulatedRange != null)     processRange(codeFormatter,psiFile,accumulatedRange,accumulatedRangeAction,postIndentReformatRanges);
+  }
+  finally {
+    setDisabled(false);
+  }
+}
