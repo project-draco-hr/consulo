@@ -1,0 +1,60 @@
+{
+  final String testDir=getTestDataPath() + "/" + folderName;
+  final VirtualFile[] sourceDir=new VirtualFile[1];
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      try {
+        VirtualFile projectDir=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(testDir));
+        assertNotNull(projectDir);
+        sourceDir[0]=projectDir.findChild("src");
+        if (sourceDir[0] == null) {
+          sourceDir[0]=projectDir;
+        }
+        VirtualFile ext_src=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(new File(testDir + "/ext_src"));
+        final ModuleRootManager rootManager=ModuleRootManager.getInstance(myModule);
+        final ModifiableRootModel rootModel=rootManager.getModifiableModel();
+        rootModel.clear();
+        final ContentEntry contentEntry=rootModel.addContentEntry(projectDir);
+        contentEntry.addSourceFolder(sourceDir[0],false);
+        if (ext_src != null) {
+          contentEntry.addSourceFolder(ext_src,false);
+        }
+        ProjectJdk jdk;
+        if ("java 1.5".equals(jdkName)) {
+          jdk=JavaSdkImpl.getMockJdk15(jdkName);
+          myPsiManager.setEffectiveLanguageLevel(LanguageLevel.JDK_1_5);
+        }
+ else {
+          jdk=JavaSdkImpl.getMockJdk(jdkName);
+        }
+        rootModel.setJdk(jdk);
+        rootModel.commit();
+      }
+ catch (      Exception e) {
+        LOG.error(e);
+      }
+    }
+  }
+);
+  final Element root=new Element("problems");
+  final Document doc=new Document(root);
+  PsiManager psiManager=PsiManager.getInstance(myProject);
+  AnalysisScope scope=new AnalysisScope(psiManager.findDirectory(sourceDir[0]));
+  InspectionManagerEx inspectionManager=(InspectionManagerEx)InspectionManager.getInstance(myProject);
+  final GlobalInspectionContextImpl globalContext=inspectionManager.createNewGlobalContext(true);
+  globalContext.setCurrentScope(scope);
+  tool.initialize(globalContext);
+  if (tool.isGraphNeeded()) {
+    ((RefManagerImpl)tool.getRefManager()).findAllDeclarations();
+  }
+  tool.runInspection(scope,inspectionManager);
+  tool.queryExternalUsagesRequests(inspectionManager);
+  do {
+    globalContext.processSearchRequests();
+  }
+ while (tool.queryExternalUsagesRequests(inspectionManager));
+  tool.exportResults(root);
+  File file=new File(testDir + "/expected.xml");
+  Document expectedDocument=JDOMUtil.loadDocument(file);
+  compareWithExpected(expectedDocument,doc);
+}
