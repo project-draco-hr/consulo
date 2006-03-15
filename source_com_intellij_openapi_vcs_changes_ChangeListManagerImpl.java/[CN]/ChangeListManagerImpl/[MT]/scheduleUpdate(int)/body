@@ -18,12 +18,17 @@ synchronized (myPendingUpdatesLock) {
         final List<VcsDirtyScope> scopes=((VcsDirtyScopeManagerImpl)VcsDirtyScopeManager.getInstance(myProject)).retreiveScopes();
         for (        final VcsDirtyScope scope : scopes) {
           updateProgressText(VcsBundle.message("changes.update.progress.message",scope.getScopeRoot().getPresentableUrl()));
+          ApplicationManager.getApplication().runReadAction(new Runnable(){
+            public void run(){
 synchronized (myChangeLists) {
-            for (            ChangeList list : getChangeLists()) {
-              if (myDisposed)               return;
-              list.startProcessingChanges(scope);
+                for (                ChangeList list : getChangeLists()) {
+                  if (myDisposed)                   return;
+                  list.startProcessingChanges(scope);
+                }
+              }
             }
           }
+);
           final UnversionedFilesHolder workingHolderCopy=myUnversionedFilesHolder.copy();
           workingHolderCopy.cleanScope(scope);
           try {
@@ -32,22 +37,27 @@ synchronized (myChangeLists) {
               final ChangeProvider changeProvider=vcs.getChangeProvider();
               if (changeProvider != null) {
                 changeProvider.getChanges(scope,new ChangelistBuilder(){
-                  public void processChange(                  Change change){
+                  public void processChange(                  final Change change){
                     if (myDisposed)                     return;
-                    if (isUnder(change,scope)) {
-                      try {
+                    ApplicationManager.getApplication().runReadAction(new Runnable(){
+                      public void run(){
+                        if (isUnder(change,scope)) {
+                          try {
 synchronized (myChangeLists) {
-                          for (                          ChangeList list : myChangeLists) {
-                            if (list == myDefaultChangelist)                             continue;
-                            if (list.processChange(change))                             return;
+                              for (                              ChangeList list : myChangeLists) {
+                                if (list == myDefaultChangelist)                                 continue;
+                                if (list.processChange(change))                                 return;
+                              }
+                              myDefaultChangelist.processChange(change);
+                            }
                           }
-                          myDefaultChangelist.processChange(change);
+  finally {
+                            scheduleRefresh();
+                          }
                         }
                       }
-  finally {
-                        scheduleRefresh();
-                      }
                     }
+);
                   }
                   public void processUnversionedFile(                  VirtualFile file){
                     if (scope.belongsTo(PeerFactory.getInstance().getVcsContextFactory().createFilePathOn(file))) {
