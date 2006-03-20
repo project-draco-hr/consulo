@@ -4,6 +4,17 @@
   String resolvedName;
   if (expression instanceof PsiJavaCodeReferenceElement) {
     PsiElement resolved=((PsiJavaCodeReferenceElement)expression).advancedResolve(true).getElement();
+    if (resolved == null && isSuperMethodCall(expression.getParent())) {
+      PsiExpression qualifier=((PsiReferenceExpression)expression).getQualifierExpression();
+      if (qualifier instanceof PsiReferenceExpression) {
+        resolved=((PsiReferenceExpression)qualifier).resolve();
+        expression=qualifier;
+      }
+ else       if (qualifier instanceof PsiThisExpression) {
+        resolved=PsiTreeUtil.getParentOfType(expression,PsiMethod.class,true,PsiMember.class);
+        expression=qualifier;
+      }
+    }
     if (resolved instanceof PsiField) {
       PsiField referencedField=(PsiField)resolved;
       if (referencedField.hasModifierProperty(PsiModifier.STATIC))       return null;
@@ -13,9 +24,20 @@
  else     if (resolved instanceof PsiMethod) {
       PsiMethod method=(PsiMethod)resolved;
       if (method.hasModifierProperty(PsiModifier.STATIC))       return null;
-      if (PsiKeyword.SUPER.equals(expression.getText()) || PsiKeyword.THIS.equals(expression.getText()))       return null;
-      referencedClass=method.getContainingClass();
-      resolvedName=PsiFormatUtil.formatMethod(method,PsiSubstitutor.EMPTY,PsiFormatUtil.SHOW_CONTAINING_CLASS | PsiFormatUtil.SHOW_NAME,0);
+      PsiElement nameElement=expression instanceof PsiThisExpression ? expression : ((PsiJavaCodeReferenceElement)expression).getReferenceNameElement();
+      String name=nameElement == null ? null : nameElement.getText();
+      if (PsiKeyword.SUPER.equals(name) || PsiKeyword.THIS.equals(name)) {
+        PsiElement qualifier=expression instanceof PsiThisExpression ? expression : ((PsiJavaCodeReferenceElement)expression).getQualifier();
+        if (!(qualifier instanceof PsiExpression))         return null;
+        PsiType type=((PsiExpression)qualifier).getType();
+        if (type == null)         return null;
+        referencedClass=PsiUtil.resolveClassInType(type);
+        resolvedName=qualifier.getText();
+      }
+ else {
+        referencedClass=method.getContainingClass();
+        resolvedName=PsiFormatUtil.formatMethod(method,PsiSubstitutor.EMPTY,PsiFormatUtil.SHOW_CONTAINING_CLASS | PsiFormatUtil.SHOW_NAME,0);
+      }
     }
  else     if (resolved instanceof PsiClass) {
       PsiClass aClass=(PsiClass)resolved;
@@ -36,22 +58,5 @@
  else {
     return null;
   }
-  PsiElement element=expression.getParent();
-  while (element != null) {
-    if (isSuperOrThisMethodCall(element)) {
-      PsiElement parentClass=new PsiMatcherImpl(element).parent(PsiMatcherImpl.hasClass(PsiExpressionStatement.class)).parent(PsiMatcherImpl.hasClass(PsiCodeBlock.class)).parent(PsiMatcherImpl.hasClass(PsiMethod.class)).dot(PsiMatcherImpl.isConstructor(true)).parent(PsiMatcherImpl.hasClass(PsiClass.class)).getElement();
-      if (parentClass == null) {
-        return null;
-      }
-      PsiClass aClass=(PsiClass)parentClass;
-      if (!InheritanceUtil.isInheritorOrSelf(aClass,referencedClass,true))       return null;
-      if (expression instanceof PsiReferenceExpression && !thisOrSuperReference(((PsiReferenceExpression)expression).getQualifierExpression(),aClass)) {
-        return null;
-      }
-      String description=JavaErrorMessages.message("member.referenced.before.constructor.called",resolvedName);
-      return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,expression,description);
-    }
-    element=element.getParent();
-  }
-  return null;
+  return checkReferenceToOurInstanceInsideThisOrSuper(expression,referencedClass,resolvedName);
 }
