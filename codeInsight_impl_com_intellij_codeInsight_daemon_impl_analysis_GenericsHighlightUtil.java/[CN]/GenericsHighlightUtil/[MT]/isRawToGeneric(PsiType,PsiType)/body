@@ -1,0 +1,62 @@
+{
+  if (lType instanceof PsiPrimitiveType || rType instanceof PsiPrimitiveType)   return false;
+  if (lType.equals(rType))   return false;
+  if (lType instanceof PsiArrayType && rType instanceof PsiArrayType) {
+    return isRawToGeneric(((PsiArrayType)lType).getComponentType(),((PsiArrayType)rType).getComponentType());
+  }
+  if (lType instanceof PsiArrayType || rType instanceof PsiArrayType)   return false;
+  if (rType instanceof PsiIntersectionType) {
+    final PsiType[] conjuncts=((PsiIntersectionType)rType).getConjuncts();
+    for (    PsiType type : conjuncts) {
+      if (isRawToGeneric(lType,type))       return true;
+    }
+    return false;
+  }
+  if (lType instanceof PsiCapturedWildcardType || rType instanceof PsiCapturedWildcardType) {
+    return false;
+  }
+  if (lType instanceof PsiWildcardType || rType instanceof PsiWildcardType)   return false;
+  boolean isValidType=lType instanceof PsiClassType && rType instanceof PsiClassType;
+  if (!isValidType) {
+    LOG.error("Invalid types: rType =" + rType + ", lType="+ lType);
+  }
+  PsiClassType.ClassResolveResult lResolveResult=((PsiClassType)lType).resolveGenerics();
+  PsiClassType.ClassResolveResult rResolveResult=((PsiClassType)rType).resolveGenerics();
+  PsiClass lClass=lResolveResult.getElement();
+  PsiClass rClass=rResolveResult.getElement();
+  PsiSubstitutor lSubstitutor=lResolveResult.getSubstitutor();
+  PsiSubstitutor rSubstitutor=rResolveResult.getSubstitutor();
+  if (lClass == null || rClass == null)   return false;
+  if (lClass instanceof PsiTypeParameter || rClass instanceof PsiTypeParameter)   return true;
+  PsiClass base;
+  if (!lClass.getManager().areElementsEquivalent(lClass,rClass)) {
+    if (lClass.isInheritor(rClass,true)) {
+      base=rClass;
+      lSubstitutor=TypeConversionUtil.getSuperClassSubstitutor(rClass,lClass,lSubstitutor);
+    }
+ else     if (rClass.isInheritor(lClass,true)) {
+      base=lClass;
+      rSubstitutor=TypeConversionUtil.getSuperClassSubstitutor(lClass,rClass,rSubstitutor);
+    }
+ else {
+      return false;
+    }
+  }
+ else {
+    base=lClass;
+  }
+  LOG.assertTrue(lSubstitutor != null && rSubstitutor != null);
+  Iterator<PsiTypeParameter> it=PsiUtil.typeParametersIterator(base);
+  while (it.hasNext()) {
+    PsiTypeParameter parameter=it.next();
+    PsiType lTypeArg=lSubstitutor.substitute(parameter);
+    PsiType rTypeArg=rSubstitutor.substitute(parameter);
+    if (lTypeArg == null)     continue;
+    if (rTypeArg == null) {
+      if (!(lTypeArg instanceof PsiWildcardType) || ((PsiWildcardType)lTypeArg).getBound() != null)       return true;
+ else       continue;
+    }
+    if (isUncheckedTypeArgumentConversion(lTypeArg,rTypeArg))     return true;
+  }
+  return false;
+}
