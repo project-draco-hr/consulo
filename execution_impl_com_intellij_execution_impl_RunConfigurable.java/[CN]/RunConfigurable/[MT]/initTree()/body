@@ -1,0 +1,92 @@
+{
+  myTree.setRootVisible(false);
+  myTree.setShowsRootHandles(true);
+  UIUtil.setLineStyleAngled(myTree);
+  TreeToolTipHandler.install(myTree);
+  TreeUtil.installActions(myTree);
+  myTree.addMouseListener(new PopupHandler(){
+    public void invokePopup(    Component comp,    int x,    int y){
+      if (myTree.getPathForLocation(x,y) != null && Arrays.binarySearch(myTree.getSelectionRows(),myTree.getRowForLocation(x,y)) > -1) {
+        final ActionPopupMenu popupMenu=ActionManager.getInstance().createActionPopupMenu(ActionPlaces.UNKNOWN,createActionsGroup());
+        popupMenu.getComponent().show(comp,x,y);
+      }
+    }
+  }
+);
+  myTree.setCellRenderer(new ColoredTreeCellRenderer(){
+    public void customizeCellRenderer(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+      if (value instanceof DefaultMutableTreeNode) {
+        final DefaultMutableTreeNode node=(DefaultMutableTreeNode)value;
+        final Object userObject=node.getUserObject();
+        if (userObject instanceof ConfigurationType) {
+          final ConfigurationType configurationType=(ConfigurationType)userObject;
+          append(configurationType.getDisplayName(),SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+          setIcon(configurationType.getIcon());
+        }
+ else         if (userObject instanceof SingleConfigurationConfigurable) {
+          final SingleConfigurationConfigurable settings=(SingleConfigurationConfigurable)userObject;
+          final RunManager runManager=getRunManager();
+          final RunConfiguration configuration=settings.getConfiguration();
+          append(settings.getNameText(),runManager.isTemporary(configuration) ? SimpleTextAttributes.GRAY_ATTRIBUTES : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+          setIcon(ExecutionUtil.getConfigurationIcon(getProject(),configuration,!settings.isValid()));
+        }
+      }
+    }
+  }
+);
+  final RunManagerEx manager=getRunManager();
+  final ConfigurationType[] factories=getRunManager().getConfigurationFactories();
+  for (  ConfigurationType type : factories) {
+    final DefaultMutableTreeNode typeNode=new DefaultMutableTreeNode(type);
+    myRoot.add(typeNode);
+    final RunnerAndConfigurationSettingsImpl[] configurations=manager.getConfigurationSettings(type);
+    for (    RunnerAndConfigurationSettingsImpl configuration : configurations) {
+      final SingleConfigurationConfigurable<RunConfiguration> configurationConfigurable=SingleConfigurationConfigurable.editSettings(configuration);
+      installUpdateListeners(configurationConfigurable);
+      typeNode.add(new DefaultMutableTreeNode(configurationConfigurable));
+    }
+  }
+  myTree.addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      final TreePath selectionPath=myTree.getSelectionPath();
+      if (selectionPath != null) {
+        DefaultMutableTreeNode node=(DefaultMutableTreeNode)selectionPath.getLastPathComponent();
+        final Object userObject=node.getUserObject();
+        if (userObject instanceof SingleConfigurationConfigurable) {
+          myRightPanel.removeAll();
+          final SingleConfigurationConfigurable configurationConfigurable=((SingleConfigurationConfigurable)userObject);
+          myRightPanel.add(configurationConfigurable.createComponent(),BorderLayout.CENTER);
+          setupDialogBounds();
+        }
+ else         if (userObject instanceof ConfigurationType) {
+          drawPressAddButtonMessage(((ConfigurationType)userObject));
+        }
+      }
+      updateDialog();
+    }
+  }
+);
+  SwingUtilities.invokeLater(new Runnable(){
+    public void run(){
+      myTree.requestFocusInWindow();
+      TreeUtil.selectFirstNode(myTree);
+      final RunnerAndConfigurationSettings settings=manager.getSelectedConfiguration();
+      if (settings == null)       return;
+      final Enumeration enumeration=myRoot.breadthFirstEnumeration();
+      while (enumeration.hasMoreElements()) {
+        final DefaultMutableTreeNode node=(DefaultMutableTreeNode)enumeration.nextElement();
+        final Object userObject=node.getUserObject();
+        if (userObject instanceof SingleConfigurationConfigurable) {
+          final SingleConfigurationConfigurable configurationConfigurable=((SingleConfigurationConfigurable)userObject);
+          if (configurationConfigurable.getConfiguration().getType() == settings.getType() && Comparing.strEqual(configurationConfigurable.getConfiguration().getName(),settings.getName())) {
+            TreeUtil.selectInTree(node,true,myTree);
+            break;
+          }
+        }
+      }
+    }
+  }
+);
+  sortTree();
+  ((DefaultTreeModel)myTree.getModel()).reload();
+}
