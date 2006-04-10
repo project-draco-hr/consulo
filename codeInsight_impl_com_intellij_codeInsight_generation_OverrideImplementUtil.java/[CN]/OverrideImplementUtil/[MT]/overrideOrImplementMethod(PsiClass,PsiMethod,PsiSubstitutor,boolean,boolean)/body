@@ -1,10 +1,17 @@
 {
   if (!method.isValid() || !substitutor.isValid())   return PsiMethod.EMPTY_ARRAY;
-  PsiMethod[] results=EjbUtil.suggestImplementations(method);
-  if (results.length == 0) {
+  List<PsiMethod> results=new ArrayList<PsiMethod>();
+  for (  final MethodImplementor implementor : getImplementors()) {
+    results.addAll(Arrays.asList(implementor.createImplementationPrototypes(aClass,method)));
+  }
+  if (results.isEmpty()) {
     PsiMethod method1=substitutor != PsiSubstitutor.EMPTY ? GenerateMembersUtil.substituteGenericMethod(method,substitutor) : method;
     PsiElementFactory factory=method.getManager().getElementFactory();
     PsiMethod result=(PsiMethod)factory.createClass("Dummy").add(method1);
+    results.add(result);
+  }
+  for (Iterator<PsiMethod> iterator=results.iterator(); iterator.hasNext(); ) {
+    PsiMethod result=iterator.next();
     result.getModifierList().setModifierProperty(PsiModifier.ABSTRACT,aClass.isInterface());
     result.getModifierList().setModifierProperty(PsiModifier.NATIVE,false);
     if (!toCopyJavaDoc) {
@@ -16,7 +23,7 @@
     if (insertAtOverride && !method.isConstructor()) {
       PsiModifierList modifierList=result.getModifierList();
       if (modifierList.findAnnotation("java.lang.Override") == null) {
-        PsiAnnotation annotation=factory.createAnnotationFromText("@java.lang.Override",null);
+        PsiAnnotation annotation=method.getManager().getElementFactory().createAnnotationFromText("@java.lang.Override",null);
         modifierList.addAfter(annotation,null);
       }
     }
@@ -27,11 +34,6 @@
  else {
       result.add(body);
     }
-    results=new PsiMethod[]{result};
-  }
-  List<PsiMethod> list=new ArrayList<PsiMethod>();
-  for (  PsiMethod result : results) {
-    EjbUtil.tuneMethodForEjb(EjbRolesUtil.getEjbRolesUtil().getEjbRole(aClass),method,result);
     setupMethodBody(result,method,aClass);
     CodeStyleManager codeStyleManager=method.getManager().getCodeStyleManager();
     CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(codeStyleManager.getProject());
@@ -40,9 +42,9 @@
     result=(PsiMethod)codeStyleManager.shortenClassReferences(result);
     result=(PsiMethod)codeStyleManager.reformat(result);
     settings.KEEP_LINE_BREAKS=keepBreaks;
-    if (aClass.findMethodBySignature(result,false) == null) {
-      list.add(result);
+    if (aClass.findMethodBySignature(result,false) != null) {
+      iterator.remove();
     }
   }
-  return list.toArray(new PsiMethod[list.size()]);
+  return results.toArray(new PsiMethod[results.size()]);
 }
