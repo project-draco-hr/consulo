@@ -49,28 +49,36 @@ synchronized (LOCK) {
           }
         }
  else {
-          final boolean physicalExists=new File(request.getFileSystemRootPath()).exists();
-          if (physicalExists) {
-            int index=runPath.lastIndexOf('/');
-            while (index >= 0) {
-              String parentPath=runPath.substring(0,index);
-              final VirtualFileImpl vParent=(VirtualFileImpl)_findFileByPath(parentPath,false);
-              if (vParent != null) {
-                final String path=runPath;
-                getManager().addEventToFireByRefresh(new Runnable(){
-                  public void run(){
-                    final VirtualFileImpl newVFile=new VirtualFileImpl(path);
-                    vParent.addChild(newVFile);
-                    fireFileCreated(null,newVFile);
-                  }
+          final String fileSystemPath=request.getFileSystemRootPath();
+          checkFileCreated(fileSystemPath,runPath,asynchronous,modalityState);
+        }
+      }
+      for (      final Map.Entry<String,VirtualFileImpl> entry : myUnaccountedFiles.entrySet()) {
+        final VirtualFileImpl file=entry.getValue();
+        if (file != null) {
+          if (!file.getPhysicalFile().exists()) {
+            final Runnable action=new Runnable(){
+              public void run(){
+                if (!file.isValid())                 return;
+                boolean isDirectory=file.isDirectory();
+                fireBeforeFileDeletion(null,file);
+synchronized (LOCK) {
+                  myUnaccountedFiles.put(entry.getKey(),null);
                 }
-,asynchronous,modalityState);
-                break;
+                fireFileDeleted(null,file,file.getName(),isDirectory,null);
               }
-              runPath=parentPath;
-              index=runPath.lastIndexOf('/');
             }
+;
+            getManager().addEventToFireByRefresh(action,asynchronous,modalityState);
           }
+ else {
+            refresh(file,true,false,modalityState,asynchronous,false);
+          }
+        }
+ else {
+          final String vfsPath=entry.getKey();
+          final String fsPath=vfsPath.replace('/',File.separatorChar);
+          checkFileCreated(fsPath,vfsPath,asynchronous,modalityState);
         }
       }
       FileWatcher.resyncedManually();
