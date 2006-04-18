@@ -1,0 +1,83 @@
+{
+  final Project project=(Project)e.getDataContext().getData(DataConstants.PROJECT);
+  final IdeView view=(IdeView)e.getDataContext().getData(DataConstants.IDE_VIEW);
+  if (project == null || view == null) {
+    return;
+  }
+  final PsiDirectory dir=view.getOrChooseDirectory();
+  if (dir == null)   return;
+  SnapShotClient client=new SnapShotClient();
+  boolean found=false;
+  boolean connected=false;
+  for (  RunConfiguration config : RunManager.getInstance(project).getAllConfigurations()) {
+    if (config instanceof ApplicationConfiguration) {
+      ApplicationConfiguration appConfig=(ApplicationConfiguration)config;
+      if (appConfig.ENABLE_SWING_INSPECTOR && appConfig.getLastSnapShooterPort() > 0) {
+        found=true;
+        try {
+          client.connect(appConfig.getLastSnapShooterPort());
+          connected=true;
+        }
+ catch (        IOException ex) {
+          connected=false;
+        }
+      }
+      if (connected)       break;
+    }
+  }
+  if (!found) {
+    Messages.showMessageDialog(project,"Taking form snapshots is not enabled in any configuration","SnapShooter",Messages.getInformationIcon());
+    return;
+  }
+  if (!connected) {
+    Messages.showMessageDialog(project,"Could not find a running instance with listening SnapShooter","SnapShooter",Messages.getInformationIcon());
+    return;
+  }
+  try {
+    client.suspendSwing();
+  }
+ catch (  IOException e1) {
+    Messages.showMessageDialog(project,"SnapShooter connection failed","SnapShooter",Messages.getInformationIcon());
+    return;
+  }
+  final MyDialog dlg=new MyDialog(project,client,dir);
+  dlg.show();
+  if (dlg.getExitCode() == DialogWrapper.OK_EXIT_CODE) {
+    int id=dlg.getSelectedComponentId();
+    String snapshot=null;
+    try {
+      snapshot=client.createSnapshot(id);
+    }
+ catch (    Exception ex) {
+      Messages.showMessageDialog(project,UIDesignerBundle.message("snapshot.create.error",ex.getMessage()),UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
+    }
+    if (snapshot != null) {
+      final String snapshot1=snapshot;
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+            public void run(){
+              try {
+                PsiFile formFile=dir.getManager().getElementFactory().createFileFromText(dlg.getFormName() + ".form",snapshot1);
+                formFile=(PsiFile)dir.add(formFile);
+                view.selectElement(formFile);
+              }
+ catch (              IncorrectOperationException ex) {
+                Messages.showMessageDialog(project,UIDesignerBundle.message("snapshot.save.error",ex.getMessage()),UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
+              }
+            }
+          }
+,"",null);
+        }
+      }
+);
+    }
+  }
+  try {
+    client.resumeSwing();
+  }
+ catch (  IOException e1) {
+    Messages.showMessageDialog(project,"Swing resume failed","SnapShooter",Messages.getInformationIcon());
+  }
+  client.dispose();
+}
