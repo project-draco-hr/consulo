@@ -6,78 +6,67 @@
   }
   final PsiDirectory dir=view.getOrChooseDirectory();
   if (dir == null)   return;
-  SnapShotClient client=new SnapShotClient();
-  boolean found=false;
+  final SnapShotClient client=new SnapShotClient();
+  List<RunnerAndConfigurationSettingsImpl> appConfigurations=new ArrayList<RunnerAndConfigurationSettingsImpl>();
+  RunnerAndConfigurationSettingsImpl snapshotConfiguration=null;
   boolean connected=false;
-  for (  RunConfiguration config : RunManager.getInstance(project).getAllConfigurations()) {
-    if (config instanceof ApplicationConfiguration) {
-      ApplicationConfiguration appConfig=(ApplicationConfiguration)config;
-      if (appConfig.ENABLE_SWING_INSPECTOR && appConfig.getLastSnapShooterPort() > 0) {
-        found=true;
-        try {
-          client.connect(appConfig.getLastSnapShooterPort());
-          connected=true;
-        }
- catch (        IOException ex) {
-          connected=false;
+  ApplicationConfigurationType cfgType=ApplicationConfigurationType.getInstance();
+  RunnerAndConfigurationSettingsImpl[] racsi=RunManagerEx.getInstanceEx(project).getConfigurationSettings(cfgType);
+  for (  RunnerAndConfigurationSettingsImpl config : racsi) {
+    if (config.getConfiguration() instanceof ApplicationConfiguration) {
+      ApplicationConfiguration appConfig=(ApplicationConfiguration)config.getConfiguration();
+      appConfigurations.add(config);
+      if (appConfig.ENABLE_SWING_INSPECTOR) {
+        snapshotConfiguration=config;
+        if (appConfig.getLastSnapShooterPort() > 0) {
+          try {
+            client.connect(appConfig.getLastSnapShooterPort());
+            connected=true;
+          }
+ catch (          IOException ex) {
+            connected=false;
+          }
         }
       }
       if (connected)       break;
     }
   }
-  if (!found) {
-    Messages.showMessageDialog(project,"Taking form snapshots is not enabled in any configuration","SnapShooter",Messages.getInformationIcon());
-    return;
+  if (snapshotConfiguration == null) {
+    snapshotConfiguration=promptForSnapshotConfiguration(project,appConfigurations);
+    if (snapshotConfiguration == null)     return;
   }
   if (!connected) {
-    Messages.showMessageDialog(project,"Could not find a running instance with listening SnapShooter","SnapShooter",Messages.getInformationIcon());
-    return;
-  }
-  try {
-    client.suspendSwing();
-  }
- catch (  IOException e1) {
-    Messages.showMessageDialog(project,"SnapShooter connection failed","SnapShooter",Messages.getInformationIcon());
-    return;
-  }
-  final MyDialog dlg=new MyDialog(project,client,dir);
-  dlg.show();
-  if (dlg.getExitCode() == DialogWrapper.OK_EXIT_CODE) {
-    int id=dlg.getSelectedComponentId();
-    String snapshot=null;
-    try {
-      snapshot=client.createSnapshot(id);
-    }
- catch (    Exception ex) {
-      Messages.showMessageDialog(project,UIDesignerBundle.message("snapshot.create.error",ex.getMessage()),UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
-    }
-    if (snapshot != null) {
-      final String snapshot1=snapshot;
-      ApplicationManager.getApplication().runWriteAction(new Runnable(){
-        public void run(){
-          CommandProcessor.getInstance().executeCommand(project,new Runnable(){
-            public void run(){
-              try {
-                PsiFile formFile=dir.getManager().getElementFactory().createFileFromText(dlg.getFormName() + ".form",snapshot1);
-                formFile=(PsiFile)dir.add(formFile);
-                view.selectElement(formFile);
-              }
- catch (              IncorrectOperationException ex) {
-                Messages.showMessageDialog(project,UIDesignerBundle.message("snapshot.save.error",ex.getMessage()),UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
-              }
+    int rc=Messages.showYesNoDialog(project,"The application from which snapshots will be taken is not currently running. Would you like to run it?",UIDesignerBundle.message("snapshot.title"),Messages.getQuestionIcon());
+    if (rc == 1)     return;
+    final JavaProgramRunner runner=ExecutionRegistry.getInstance().getDefaultRunner();
+    final ApplicationConfiguration appConfig=(ApplicationConfiguration)snapshotConfiguration.getConfiguration();
+    appConfig.setSnapShooterNotifyRunnable(new Runnable(){
+      public void run(){
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            Messages.showMessageDialog(project,"Please prepare the running application for taking a form snapshot",UIDesignerBundle.message("snapshot.title"),Messages.getInformationIcon());
+            try {
+              client.connect(appConfig.getLastSnapShooterPort());
             }
+ catch (            IOException ex) {
+              Messages.showMessageDialog(project,"Failed to establish form snapshot connection to running application",UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
+              return;
+            }
+            runSnapShooterSession(client,project,dir,view);
           }
-,"",null);
         }
-      }
 );
+      }
+    }
+);
+    try {
+      RunStrategy.getInstance().execute(snapshotConfiguration,runner,e.getDataContext());
+    }
+ catch (    ExecutionException ex) {
+      Messages.showMessageDialog(project,"Failed to prepare run profile: " + ex.getMessage(),UIDesignerBundle.message("snapshot.title"),Messages.getErrorIcon());
     }
   }
-  try {
-    client.resumeSwing();
+ else {
+    runSnapShooterSession(client,project,dir,view);
   }
- catch (  IOException e1) {
-    Messages.showMessageDialog(project,"Swing resume failed","SnapShooter",Messages.getInformationIcon());
-  }
-  client.dispose();
 }
