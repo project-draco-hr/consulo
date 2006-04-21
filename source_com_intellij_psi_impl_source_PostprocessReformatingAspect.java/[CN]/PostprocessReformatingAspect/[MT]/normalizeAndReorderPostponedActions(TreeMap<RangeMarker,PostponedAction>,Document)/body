@@ -1,0 +1,55 @@
+{
+  final List<Pair<RangeMarker,ReformatAction>> freeFormatingActions=new ArrayList<Pair<RangeMarker,ReformatAction>>();
+  final List<Pair<RangeMarker,ReindentAction>> indentActions=new ArrayList<Pair<RangeMarker,ReindentAction>>();
+  final List<Pair<RangeMarker,ReformatAction>> formatingAfterIndentActions=new ArrayList<Pair<RangeMarker,ReformatAction>>();
+  RangeMarker accumulatedRange=null;
+  PostponedAction accumulatedRangeAction=null;
+  Iterator<RangeMarker> rangesIterator=rangesToProcess.keySet().iterator();
+  while (rangesIterator.hasNext()) {
+    final RangeMarker textRange=rangesIterator.next();
+    final PostponedAction action=rangesToProcess.get(textRange);
+    if (accumulatedRange == null) {
+      accumulatedRange=textRange;
+      accumulatedRangeAction=action;
+    }
+ else     if (accumulatedRange.getStartOffset() > textRange.getEndOffset() || (accumulatedRange.getStartOffset() == textRange.getEndOffset() && accumulatedRangeAction instanceof ReindentAction) || (accumulatedRange.getStartOffset() == accumulatedRange.getEndOffset() && accumulatedRangeAction instanceof ReformatWithHeadingWhitespaceAction)) {
+      if (accumulatedRangeAction instanceof ReindentAction)       indentActions.add(new Pair<RangeMarker,ReindentAction>(accumulatedRange,(ReindentAction)accumulatedRangeAction));
+ else       freeFormatingActions.add(new Pair<RangeMarker,ReformatAction>(accumulatedRange,(ReformatAction)accumulatedRangeAction));
+      accumulatedRange=textRange;
+      accumulatedRangeAction=action;
+    }
+ else     if (accumulatedRangeAction instanceof ReformatAction && action instanceof ReindentAction) {
+      if (accumulatedRange.getStartOffset() < textRange.getStartOffset()) {
+        final RangeMarker endOfRange=document.createRangeMarker(accumulatedRange.getStartOffset(),textRange.getStartOffset());
+        rangesToProcess.put(endOfRange,accumulatedRangeAction);
+        rangesIterator=rangesToProcess.keySet().iterator();
+        while (rangesIterator.next() != textRange)         ;
+      }
+      final RangeMarker rangeToProcess=document.createRangeMarker(textRange.getEndOffset(),accumulatedRange.getEndOffset());
+      freeFormatingActions.add(new Pair<RangeMarker,ReformatAction>(rangeToProcess,new ReformatWithHeadingWhitespaceAction()));
+      accumulatedRange=textRange;
+      accumulatedRangeAction=action;
+    }
+ else {
+      accumulatedRange=document.createRangeMarker(Math.min(accumulatedRange.getStartOffset(),textRange.getStartOffset()),Math.max(accumulatedRange.getEndOffset(),textRange.getEndOffset()));
+      if (accumulatedRangeAction instanceof ReindentAction && action instanceof ReformatAction) {
+        formatingAfterIndentActions.add(new Pair<RangeMarker,ReformatAction>(document.createRangeMarker(textRange.getStartOffset(),textRange.getEndOffset()),(ReformatAction)action));
+      }
+ else       if (accumulatedRangeAction instanceof ReformatAction && action instanceof ReformatWithHeadingWhitespaceAction || accumulatedRangeAction instanceof ReformatWithHeadingWhitespaceAction && action instanceof ReformatAction) {
+        accumulatedRangeAction=action;
+      }
+    }
+  }
+  if (accumulatedRange != null) {
+    if (accumulatedRangeAction instanceof ReindentAction)     indentActions.add(new Pair<RangeMarker,ReindentAction>(accumulatedRange,(ReindentAction)accumulatedRangeAction));
+ else     freeFormatingActions.add(new Pair<RangeMarker,ReformatAction>(accumulatedRange,(ReformatAction)accumulatedRangeAction));
+  }
+  final List<Pair<RangeMarker,? extends PostponedAction>> result=new ArrayList<Pair<RangeMarker,? extends PostponedAction>>(rangesToProcess.size());
+  Collections.reverse(freeFormatingActions);
+  Collections.reverse(indentActions);
+  Collections.reverse(formatingAfterIndentActions);
+  result.addAll(freeFormatingActions);
+  result.addAll(indentActions);
+  result.addAll(formatingAfterIndentActions);
+  return result;
+}

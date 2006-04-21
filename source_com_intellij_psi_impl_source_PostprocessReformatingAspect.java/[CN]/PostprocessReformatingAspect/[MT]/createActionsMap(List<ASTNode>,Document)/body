@@ -1,0 +1,45 @@
+{
+  final TreeMap<RangeMarker,PostponedAction> rangesToProcess=new TreeMap<RangeMarker,PostponedAction>(ourRangesComparator);
+  final Set<ASTNode> nodesToProcess=new HashSet<ASTNode>(astNodes);
+  for (  final ASTNode node : astNodes) {
+    nodesToProcess.remove(node);
+    final boolean isGenerated=CodeEditUtil.isNodeGenerated(node);
+    ((TreeElement)node).acceptTree(new RecursiveTreeElementVisitor(){
+      boolean inGeneratedContext=!isGenerated;
+      protected boolean visitNode(      TreeElement current){
+        if (nodesToProcess.contains(current))         return false;
+        if (current.getElementType() == ElementType.REFORMAT_MARKER) {
+          rangesToProcess.put(document.createRangeMarker(current.getTextRange()),new ReformatWithHeadingWhitespaceAction());
+          if (current.getFirstChildNode() != null)           current.getTreeParent().replaceChild(current,current.getFirstChildNode());
+ else           current.getTreeParent().removeChild(current);
+          return false;
+        }
+        final boolean currentNodeGenerated=CodeEditUtil.isNodeGenerated(current);
+        if (currentNodeGenerated && !inGeneratedContext) {
+          rangesToProcess.put(document.createRangeMarker(current.getTextRange()),new ReformatAction());
+          inGeneratedContext=true;
+        }
+        if (!currentNodeGenerated && inGeneratedContext) {
+          if (current.getElementType() == ElementType.WHITE_SPACE)           return false;
+          final int oldIndent=CodeEditUtil.getOldIndentation(current);
+          LOG.assertTrue(oldIndent >= 0,"for not generated items old indentation must be defined");
+          rangesToProcess.put(document.createRangeMarker(current.getTextRange()),new ReindentAction(oldIndent));
+          inGeneratedContext=false;
+        }
+        return true;
+      }
+      public void visitComposite(      CompositeElement composite){
+        boolean oldGeneratedContext=inGeneratedContext;
+        super.visitComposite(composite);
+        inGeneratedContext=oldGeneratedContext;
+      }
+      public void visitLeaf(      LeafElement leaf){
+        boolean oldGeneratedContext=inGeneratedContext;
+        super.visitLeaf(leaf);
+        inGeneratedContext=oldGeneratedContext;
+      }
+    }
+);
+  }
+  return rangesToProcess;
+}

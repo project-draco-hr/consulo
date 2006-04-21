@@ -1,0 +1,130 @@
+{
+  LOG.assertTrue(original.isValid());
+  if (SourceTreeToPsiMap.hasTreeElement(original)) {
+    return copyElement((TreeElement)SourceTreeToPsiMap.psiElementToTree(original),table);
+  }
+ else   if (original instanceof PsiIdentifier) {
+    final String text=original.getText();
+    return createLeafFromText(text,table,manager,original,IDENTIFIER);
+  }
+ else   if (original instanceof PsiKeyword) {
+    final String text=original.getText();
+    return createLeafFromText(text,table,manager,original,((PsiKeyword)original).getTokenType());
+  }
+ else   if (original instanceof PsiReferenceExpression) {
+    TreeElement element=createReferenceExpression(original.getManager(),original.getText(),table);
+    PsiElement refElement=((PsiJavaCodeReferenceElement)original).resolve();
+    if (refElement instanceof PsiClass) {
+      element.putCopyableUserData(REFERENCED_CLASS_KEY,(PsiClass)refElement);
+    }
+    return element;
+  }
+ else   if (original instanceof PsiJavaCodeReferenceElement) {
+    PsiElement refElement=((PsiJavaCodeReferenceElement)original).resolve();
+    final boolean generated=refElement != null && CodeEditUtil.isNodeGenerated(refElement.getNode());
+    if (refElement instanceof PsiClass) {
+      if (refElement instanceof PsiAnonymousClass) {
+        PsiJavaCodeReferenceElement ref=((PsiAnonymousClass)refElement).getBaseClassReference();
+        original=ref;
+        refElement=ref.resolve();
+      }
+      boolean isFQ=false;
+      if (original instanceof PsiJavaCodeReferenceElementImpl) {
+        int kind=((PsiJavaCodeReferenceElementImpl)original).getKind();
+switch (kind) {
+case PsiJavaCodeReferenceElementImpl.CLASS_OR_PACKAGE_NAME_KIND:
+case PsiJavaCodeReferenceElementImpl.CLASS_NAME_KIND:
+case PsiJavaCodeReferenceElementImpl.CLASS_IN_QUALIFIED_NEW_KIND:
+          isFQ=false;
+        break;
+case PsiJavaCodeReferenceElementImpl.CLASS_FQ_NAME_KIND:
+case PsiJavaCodeReferenceElementImpl.CLASS_FQ_OR_PACKAGE_NAME_KIND:
+      isFQ=true;
+    break;
+default :
+  LOG.assertTrue(false);
+}
+}
+String text=isFQ ? ((PsiClass)refElement).getQualifiedName() : original.getText();
+TreeElement element=createReference(original.getManager(),text,table,generated);
+element.putCopyableUserData(REFERENCED_CLASS_KEY,(PsiClass)refElement);
+return element;
+}
+ else {
+return createReference(original.getManager(),original.getText(),table,generated);
+}
+}
+ else if (original instanceof PsiCompiledElement) {
+PsiElement sourceVersion=original.getNavigationElement();
+if (sourceVersion != original) {
+return _copyToElement(sourceVersion,table,manager);
+}
+ASTNode mirror=SourceTreeToPsiMap.psiElementToTree(((PsiCompiledElement)original).getMirror());
+return _copyToElement(SourceTreeToPsiMap.treeElementToPsi(mirror),table,manager);
+}
+ else if (original instanceof PsiTypeElement) {
+final boolean generated=CodeEditUtil.isNodeGenerated(original.getNode());
+PsiTypeElement typeElement=(PsiTypeElement)original;
+PsiType type=typeElement.getType();
+if (type instanceof PsiEllipsisType) {
+TreeElement componentTypeCopy=_copyToElement(new LightTypeElement(original.getManager(),((PsiEllipsisType)type).getComponentType()),table,manager);
+if (componentTypeCopy == null) return null;
+CompositeElement element=Factory.createCompositeElement(TYPE);
+CodeEditUtil.setNodeGenerated(element,generated);
+TreeUtil.addChildren(element,componentTypeCopy);
+TreeUtil.addChildren(element,createLeafFromText("...",table,manager,original,ELLIPSIS));
+return element;
+}
+ else if (type instanceof PsiArrayType) {
+TreeElement componentTypeCopy=_copyToElement(new LightTypeElement(original.getManager(),((PsiArrayType)type).getComponentType()),table,manager);
+if (componentTypeCopy == null) return null;
+CompositeElement element=Factory.createCompositeElement(TYPE);
+CodeEditUtil.setNodeGenerated(element,generated);
+TreeUtil.addChildren(element,componentTypeCopy);
+TreeUtil.addChildren(element,createLeafFromText("[",table,manager,original,LBRACKET));
+TreeUtil.addChildren(element,createLeafFromText("]",table,manager,original,LBRACKET));
+return element;
+}
+ else if (type instanceof PsiPrimitiveType) {
+@NonNls String text=typeElement.getText();
+if (text.equals("null")) return null;
+Lexer lexer=new JavaLexer(LanguageLevel.JDK_1_3);
+lexer.start(text.toCharArray());
+TreeElement keyword=ParseUtil.createTokenElement(lexer,table);
+CodeEditUtil.setNodeGenerated(keyword,generated);
+CompositeElement element=Factory.createCompositeElement(TYPE);
+CodeEditUtil.setNodeGenerated(element,generated);
+TreeUtil.addChildren(element,keyword);
+return element;
+}
+ else if (type instanceof PsiWildcardType) {
+char[] buffer=original.getText().toCharArray();
+final CompositeElement element=DeclarationParsing.parseTypeText(original.getManager(),buffer,0,buffer.length,table);
+if (generated) element.getTreeParent().acceptTree(new GeneratedMarkerVisitor());
+return element;
+}
+ else {
+PsiClassType classType=(PsiClassType)type;
+final PsiJavaCodeReferenceElement ref;
+if (classType instanceof PsiClassReferenceType) {
+ref=((PsiClassReferenceType)type).getReference();
+}
+ else {
+final CompositeElement reference=createReference(original.getManager(),classType.getPresentableText(),table,generated);
+final CompositeElement immediateTypeElement=Factory.createCompositeElement(TYPE);
+CodeEditUtil.setNodeGenerated(immediateTypeElement,generated);
+TreeUtil.addChildren(immediateTypeElement,reference);
+encodeInfoInTypeElement(immediateTypeElement,classType);
+return immediateTypeElement;
+}
+CompositeElement element=Factory.createCompositeElement(TYPE);
+CodeEditUtil.setNodeGenerated(element,generated);
+TreeUtil.addChildren(element,_copyToElement(ref,table,manager));
+return element;
+}
+}
+ else {
+LOG.error("ChangeUtil.copyToElement() unknown element " + original);
+return null;
+}
+}
