@@ -1,14 +1,57 @@
 {
   final DefaultListModel listModel=(DefaultListModel)myList.getModel();
+  final List<Change> sortedChanges=new ArrayList<Change>(changes);
+  Collections.sort(sortedChanges,new Comparator<Change>(){
+    public int compare(    final Change o1,    final Change o2){
+      return ChangesUtil.getFilePath((Change)o1).getName().compareToIgnoreCase(ChangesUtil.getFilePath((Change)o2).getName());
+    }
+  }
+);
   listModel.removeAllElements();
-  for (  Change change : changes) {
+  for (  Change change : sortedChanges) {
     listModel.addElement(change);
   }
   TreeModelBuilder builder=new TreeModelBuilder(myProject,false);
-  myTree.setModel(builder.buildModel(changes));
-  TreeUtil.expandAll(myTree);
-  if (changes.size() > 0) {
-    myList.setSelectedIndex(0);
-    myTree.setSelectionRow(0);
+  final DefaultTreeModel model=builder.buildModel(changes);
+  myTree.setModel(model);
+  SwingUtilities.invokeLater(new Runnable(){
+    public void run(){
+      TreeUtil.expandAll(myTree);
+      int listSelection=0;
+      int count=0;
+      for (      Change change : changes) {
+        if (myIncludedChanges.contains(change)) {
+          listSelection=count;
+          break;
+        }
+        count++;
+      }
+      ChangesBrowserNode root=(ChangesBrowserNode)model.getRoot();
+      Enumeration enumeration=root.depthFirstEnumeration();
+      while (enumeration.hasMoreElements()) {
+        ChangesBrowserNode node=(ChangesBrowserNode)enumeration.nextElement();
+        final NodeState state=getNodeStatus(node);
+        if (state == NodeState.CLEAR) {
+          myTree.collapsePath(new TreePath(node.getPath()));
+        }
+      }
+      enumeration=root.depthFirstEnumeration();
+      int scrollRow=0;
+      while (enumeration.hasMoreElements()) {
+        ChangesBrowserNode node=(ChangesBrowserNode)enumeration.nextElement();
+        final NodeState state=getNodeStatus(node);
+        if (state == NodeState.FULL && node.isLeaf()) {
+          scrollRow=myTree.getRowForPath(new TreePath(node.getPath()));
+          break;
+        }
+      }
+      if (changes.size() > 0) {
+        myList.setSelectedIndex(listSelection);
+        myList.ensureIndexIsVisible(listSelection);
+        myTree.setSelectionRow(scrollRow);
+        TreeUtil.showRowCentered(myTree,scrollRow,false);
+      }
+    }
   }
+);
 }
