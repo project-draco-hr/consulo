@@ -1,2 +1,56 @@
 {
+  DataContext dataContext=event.getDataContext();
+  Project project=(Project)dataContext.getData(DataConstants.PROJECT);
+  String lastFilePath=getLastFilePath(project);
+  String path=lastFilePath != null ? lastFilePath : RecentProjectsManager.getInstance().getLastProjectPath();
+  JFileChooser fileChooser=new JFileChooser(path);
+  FileView fileView=new FileView(){
+    public Icon getIcon(    File f){
+      if (f.isDirectory())       return super.getIcon(f);
+      @NonNls final String name=f.getName();
+      if (name.endsWith(".ipr")) {
+        return Icons.PROJECT_ICON;
+      }
+      FileType fileType=FileTypeManager.getInstance().getFileTypeByFileName(name);
+      return fileType.getIcon();
+    }
+  }
+;
+  fileChooser.setFileView(fileView);
+  fileChooser.setAcceptAllFileFilterUsed(false);
+  fileChooser.setDialogTitle("Open File");
+  fileChooser.addChoosableFileFilter(new FileTypeFilter(StdFileTypes.XML));
+  if (fileChooser.showOpenDialog(WindowManager.getInstance().suggestParentWindow(project)) != JFileChooser.APPROVE_OPTION)   return;
+  File file=fileChooser.getSelectedFile();
+  if (file == null)   return;
+  setLastFilePath(project,file.getParent());
+  if (!file.isDirectory())   return;
+  InspectionManagerEx manager=(InspectionManagerEx)InspectionManager.getInstance(project);
+  final GlobalInspectionContextImpl inspectionContext=manager.createNewGlobalContext(false);
+  OfflineView view=OfflineView.create(project.getName(),project,inspectionContext);
+  final File[] files=file.listFiles();
+  for (  File inspectionFile : files) {
+    Document doc;
+    try {
+      doc=JDOMUtil.loadDocument(inspectionFile);
+      ((ProjectEx)project).getExpandMacroReplacements().substitute(doc.getRootElement(),SystemInfo.isFileSystemCaseSensitive);
+    }
+ catch (    JDOMException e) {
+      Messages.showMessageDialog(project,"Error parsing the results file","Error",Messages.getErrorIcon());
+      return;
+    }
+catch (    IOException e) {
+      Messages.showMessageDialog(project,"Error loading the results file","Error",Messages.getErrorIcon());
+      return;
+    }
+    Element root=doc.getRootElement();
+    List problems=root.getChildren("problem");
+    for (    final Object problemElement : problems) {
+      Element problem=(Element)problemElement;
+      view.addProblem(problem);
+    }
+  }
+  view.init();
+  inspectionContext.getContentManager().addContent(view.getContent());
+  ToolWindowManager.getInstance(project).getToolWindow(ToolWindowId.INSPECTION).activate(null);
 }
