@@ -2,10 +2,38 @@
   if (!(refEntity instanceof RefMethod)) {
     return null;
   }
-  final RefMethod refMethod=(RefMethod)refEntity;
-  final Boolean alwaysConstant=refMethod.getUserData(ALWAYS_CONSTANT);
-  if (alwaysConstant == null || !alwaysConstant) {
+  if (globalContext.isSuppressed(refEntity,getShortName())) {
     return null;
   }
-  return new ProblemDescriptor[]{manager.createProblemDescriptor(refMethod.getElement(),InspectionsBundle.message("method.return.always.constant.problem.descriptor"),(LocalQuickFix[])null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING)};
+  final RefMethod refMethod=(RefMethod)refEntity;
+  final Boolean alreadyProcessed=refMethod.getUserData(ALWAYS_CONSTANT);
+  if (alreadyProcessed != null && alreadyProcessed) {
+    return null;
+  }
+  if (!(refMethod.getElement() instanceof PsiMethod)) {
+    return null;
+  }
+  final PsiMethod method=(PsiMethod)refMethod.getElement();
+  if (method.getBody() == null) {
+    return null;
+  }
+  if (!alwaysReturnsConstant(method)) {
+    return null;
+  }
+  final Set<RefMethod> siblingMethods=MethodInheritanceUtils.calculateSiblingMethods(refMethod);
+  for (  RefMethod siblingMethod : siblingMethods) {
+    final PsiMethod siblingPsiMethod=(PsiMethod)siblingMethod.getElement();
+    if (method.getBody() != null && !alwaysReturnsConstant(siblingPsiMethod)) {
+      return null;
+    }
+  }
+  final List<ProblemDescriptor> out=new ArrayList<ProblemDescriptor>();
+  for (  RefMethod siblingMethod : siblingMethods) {
+    if (!globalContext.isSuppressed(siblingMethod,getShortName())) {
+      final PsiMethod siblingPsiMethod=(PsiMethod)siblingMethod.getElement();
+      out.add(manager.createProblemDescriptor(siblingPsiMethod,InspectionsBundle.message("method.return.always.constant.problem.descriptor"),(LocalQuickFix[])null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+    }
+    siblingMethod.putUserData(ALWAYS_CONSTANT,true);
+  }
+  return out.toArray(new ProblemDescriptor[out.size()]);
 }
