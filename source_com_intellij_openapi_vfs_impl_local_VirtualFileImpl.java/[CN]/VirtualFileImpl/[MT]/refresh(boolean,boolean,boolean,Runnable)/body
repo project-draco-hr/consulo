@@ -1,0 +1,59 @@
+{
+  if (!asynchronous) {
+    ApplicationManager.getApplication().assertWriteAccessAllowed();
+  }
+  final ModalityState modalityState=EventQueue.isDispatchThread() ? ModalityState.current() : ModalityState.NON_MMODAL;
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("VirtualFile.refresh():" + getPresentableUrl() + ", recursive = "+ recursive+ ", modalityState = "+ modalityState);
+  }
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      final ProgressIndicator indicator=ourFileSystem.getManager().getRefreshIndicator();
+      indicator.start();
+      indicator.setText(VfsBundle.message("file.synchronize.progress"));
+      ourFileSystem.getManager().beforeRefreshStart(asynchronous,modalityState,postRunnable);
+      PhysicalFile physicalFile=getPhysicalFile();
+      if (!physicalFile.exists()) {
+        Runnable runnable=new Runnable(){
+          public void run(){
+            if (!isValid())             return;
+            VirtualFileImpl parent=getParent();
+            if (parent != null) {
+              ourFileSystem.fireBeforeFileDeletion(null,VirtualFileImpl.this);
+              parent.removeChild(VirtualFileImpl.this);
+              ourFileSystem.fireFileDeleted(null,VirtualFileImpl.this,myName,myDirectoryFlag,parent);
+            }
+          }
+        }
+;
+        ourFileSystem.getManager().addEventToFireByRefresh(runnable,asynchronous,modalityState);
+      }
+ else {
+        ourFileSystem.refresh(VirtualFileImpl.this,recursive,true,modalityState,asynchronous,false,noFileWatcher);
+      }
+      indicator.stop();
+    }
+  }
+;
+  final Runnable endTask=new Runnable(){
+    public void run(){
+      ourFileSystem.getManager().afterRefreshFinish(asynchronous,modalityState);
+    }
+  }
+;
+  if (asynchronous) {
+    Runnable runnable1=new Runnable(){
+      public void run(){
+        LOG.info("Executing request:" + this);
+        ApplicationManager.getApplication().runReadAction(runnable);
+        endTask.run();
+      }
+    }
+;
+    ourFileSystem.getSynchronizeExecutor().submit(runnable1);
+  }
+ else {
+    runnable.run();
+    endTask.run();
+  }
+}
