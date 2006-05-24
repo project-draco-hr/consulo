@@ -1,52 +1,54 @@
 {
-  ApplicationManager.getApplication().assertIsDispatchThread();
-  if (virtualFile == null)   return;
-  if (myLineStatusTrackers.containsKey(document))   return;
-  final FileStatus status=FileStatusManager.getInstance(myProject).getStatus(virtualFile);
-  if (status == FileStatus.NOT_CHANGED || status == FileStatus.ADDED || status == FileStatus.UNKNOWN)   return;
-  AbstractVcs activeVcs=getVcsFor(virtualFile);
-  if (activeVcs == null)   return;
-  if (!(virtualFile.getFileSystem() instanceof LocalFileSystem))   return;
-  final UpToDateRevisionProvider upToDateRevisionProvider=activeVcs.getUpToDateRevisionProvider();
-  if (upToDateRevisionProvider == null)   return;
-  if (System.getProperty(IGNORE_CHANGEMARKERS_KEY) != null)   return;
-  final Alarm alarm;
-  if (myLineStatusUpdateAlarms.containsKey(document)) {
-    alarm=myLineStatusUpdateAlarms.get(document);
-    alarm.cancelAllRequests();
-  }
+synchronized (TRACKERS_LOCK) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
+    if (virtualFile == null)     return;
+    if (myLineStatusTrackers.containsKey(document))     return;
+    final FileStatus status=FileStatusManager.getInstance(myProject).getStatus(virtualFile);
+    if (status == FileStatus.NOT_CHANGED || status == FileStatus.ADDED || status == FileStatus.UNKNOWN)     return;
+    AbstractVcs activeVcs=getVcsFor(virtualFile);
+    if (activeVcs == null)     return;
+    if (!(virtualFile.getFileSystem() instanceof LocalFileSystem))     return;
+    final UpToDateRevisionProvider upToDateRevisionProvider=activeVcs.getUpToDateRevisionProvider();
+    if (upToDateRevisionProvider == null)     return;
+    if (System.getProperty(IGNORE_CHANGEMARKERS_KEY) != null)     return;
+    final Alarm alarm;
+    if (myLineStatusUpdateAlarms.containsKey(document)) {
+      alarm=myLineStatusUpdateAlarms.get(document);
+      alarm.cancelAllRequests();
+    }
  else {
-    alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
-    myLineStatusUpdateAlarms.put(document,alarm);
-  }
-  final LineStatusTracker tracker=createTrackerForDocument(document);
-  alarm.addRequest(new Runnable(){
-    public void run(){
-      try {
-        alarm.cancelAllRequests();
-        if (!virtualFile.isValid())         return;
-        final String lastUpToDateContent=getBaseVersionContent(virtualFile);
-        if (lastUpToDateContent == null)         return;
-        ApplicationManager.getApplication().invokeLater(new Runnable(){
-          public void run(){
-            if (!myProject.isDisposed()) {
-synchronized (this) {
-                ApplicationManager.getApplication().runWriteAction(new Runnable(){
-                  public void run(){
-                    tracker.initialize(lastUpToDateContent);
+      alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+      myLineStatusUpdateAlarms.put(document,alarm);
+    }
+    final LineStatusTracker tracker=createTrackerForDocument(document);
+    alarm.addRequest(new Runnable(){
+      public void run(){
+        try {
+          alarm.cancelAllRequests();
+          if (!virtualFile.isValid())           return;
+          final String lastUpToDateContent=getBaseVersionContent(virtualFile);
+          if (lastUpToDateContent == null)           return;
+          ApplicationManager.getApplication().invokeLater(new Runnable(){
+            public void run(){
+              if (!myProject.isDisposed()) {
+synchronized (TRACKERS_LOCK) {
+                  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+                    public void run(){
+                      tracker.initialize(lastUpToDateContent);
+                    }
                   }
-                }
 );
+                }
               }
             }
           }
-        }
 );
-      }
+        }
   finally {
-        myLineStatusUpdateAlarms.remove(document);
+          myLineStatusUpdateAlarms.remove(document);
+        }
       }
     }
-  }
 ,10);
+  }
 }
