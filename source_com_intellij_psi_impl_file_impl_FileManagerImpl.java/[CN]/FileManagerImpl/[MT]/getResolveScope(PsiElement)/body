@@ -2,13 +2,14 @@
   final ProgressManager progressManager=ProgressManager.getInstance();
   progressManager.checkCanceled();
   VirtualFile vFile;
+  final Project project=myManager.getProject();
   if (element instanceof PsiDirectory) {
     vFile=((PsiDirectory)element).getVirtualFile();
   }
  else {
     final PsiFile contextFile=ResolveUtil.getContextFile(element);
     if (contextFile == null || contextFile instanceof XmlFile) {
-      return GlobalSearchScope.allScope(myManager.getProject());
+      return GlobalSearchScope.allScope(project);
     }
     vFile=contextFile.getVirtualFile();
     if (vFile == null) {
@@ -19,7 +20,7 @@
     }
   }
   if (vFile == null) {
-    return GlobalSearchScope.allScope(myManager.getProject());
+    return GlobalSearchScope.allScope(project);
   }
   ProjectFileIndex projectFileIndex=myProjectRootManager.getFileIndex();
   Module module=projectFileIndex.getModuleForFile(vFile);
@@ -28,24 +29,18 @@
     return GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module,includeTests);
   }
  else {
-    GlobalSearchScope allInclusiveModuleScope=null;
+    List<Module> modulesLibraryUsedIn=new ArrayList<Module>();
     List<OrderEntry> orderEntries=projectFileIndex.getOrderEntriesForFile(vFile);
     for (    OrderEntry entry : orderEntries) {
       progressManager.checkCanceled();
-      if (entry instanceof LibraryOrderEntry || entry instanceof JdkOrderEntry) {
+      if (entry instanceof JdkOrderEntry) {
+        ((ProjectRootManagerEx)myProjectRootManager).getScopeForJdk((JdkOrderEntry)entry);
+      }
+      if (entry instanceof LibraryOrderEntry) {
         Module ownerModule=entry.getOwnerModule();
-        final GlobalSearchScope moduleScope=GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(ownerModule);
-        if (allInclusiveModuleScope == null) {
-          allInclusiveModuleScope=moduleScope;
-        }
- else {
-          allInclusiveModuleScope=allInclusiveModuleScope.uniteWith(moduleScope);
-        }
+        modulesLibraryUsedIn.add(ownerModule);
       }
     }
-    if (allInclusiveModuleScope == null) {
-      allInclusiveModuleScope=GlobalSearchScope.allScope(myManager.getProject());
-    }
-    return new LibrariesOnlyScope(allInclusiveModuleScope);
+    return ((ProjectRootManagerEx)myProjectRootManager).getScopeForLibraryUsedIn(modulesLibraryUsedIn);
   }
 }
