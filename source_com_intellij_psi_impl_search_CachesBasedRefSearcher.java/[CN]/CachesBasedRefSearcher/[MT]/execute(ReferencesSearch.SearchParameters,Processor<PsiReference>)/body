@@ -1,10 +1,14 @@
 {
   final PsiElement refElement=p.getElementToSearch();
-  boolean ignoreAccessScope=p.isIgnoreAccessScope();
-  SearchScope originalScope=p.getScope();
-  String text;
+  String text=null;
   if (refElement instanceof XmlAttributeValue) {
     text=((XmlAttributeValue)refElement).getValue();
+  }
+ else   if (refElement instanceof PsiFile) {
+    final VirtualFile vFile=((PsiFile)refElement).getVirtualFile();
+    if (vFile != null) {
+      text=vFile.getNameWithoutExtension();
+    }
   }
  else   if (refElement instanceof PsiNamedElement) {
     text=((PsiNamedElement)refElement).getName();
@@ -12,36 +16,14 @@
       final PsiMetaData metaData=((PsiMetaOwner)refElement).getMetaData();
       if (metaData != null)       text=metaData.getName();
     }
- else     if (refElement instanceof PsiFile && PsiUtil.isInJspFile(refElement)) {
-      final VirtualFile virtualFile=(PsiUtil.getJspFile(refElement)).getVirtualFile();
-      text=virtualFile != null ? virtualFile.getNameWithoutExtension() : text;
-    }
-  }
- else {
-    return true;
   }
   if (text == null)   return true;
-  SearchScope searchScope;
-  if (!ignoreAccessScope) {
-    SearchScope accessScope=refElement.getUseScope();
-    searchScope=originalScope.intersectWith(accessScope);
-  }
- else {
-    searchScope=originalScope;
-  }
-  final TextOccurenceProcessor processor1=new TextOccurenceProcessor(){
-    Set<PsiReference> myRefs=new HashSet<PsiReference>();
-    PsiFile myLastFileProcessed=null;
+  SearchScope searchScope=p.getEffectiveSearchScope();
+  final TextOccurenceProcessor processor=new TextOccurenceProcessor(){
     public boolean execute(    PsiElement element,    int offsetInElement){
-      final PsiFile currentfile=element.getContainingFile();
-      if (myLastFileProcessed != currentfile) {
-        myRefs=new HashSet<PsiReference>();
-        myLastFileProcessed=currentfile;
-      }
       final PsiReference[] refs=element.getReferences();
       for (      PsiReference ref : refs) {
         if (ref.getRangeInElement().contains(offsetInElement)) {
-          if (!myRefs.add(ref))           return true;
           if (ref.isReferenceTo(refElement)) {
             return consumer.process(ref);
           }
@@ -52,39 +34,15 @@
   }
 ;
   short searchContext;
-  if (refElement instanceof XmlAttributeValue || refElement instanceof XmlEntityDecl) {
+  if (refElement instanceof XmlEntityDecl) {
     searchContext=UsageSearchContext.IN_PLAIN_TEXT;
   }
  else {
     searchContext=UsageSearchContext.IN_CODE | UsageSearchContext.IN_FOREIGN_LANGUAGES | UsageSearchContext.IN_COMMENTS;
   }
   final PsiSearchHelper helper=PsiManager.getInstance(refElement.getProject()).getSearchHelper();
-  if (!helper.processElementsWithWord(processor1,searchScope,text,searchContext,refElement.getLanguage() == StdLanguages.JAVA)) {
+  if (!helper.processElementsWithWord(processor,searchScope,text,searchContext,refElement.getLanguage() == StdLanguages.JAVA)) {
     return false;
-  }
-  if (refElement instanceof PsiMethod) {
-    PsiMethod method=(PsiMethod)refElement;
-    if (PropertyUtil.isSimplePropertyAccessor(method)) {
-      final String propertyName=PropertyUtil.getPropertyName(method);
-      if (searchScope instanceof GlobalSearchScope) {
-        searchScope=GlobalSearchScope.getScopeRestrictedByFileTypes((GlobalSearchScope)searchScope,StdFileTypes.JSP,StdFileTypes.JSPX,StdFileTypes.XML);
-      }
-      if (!helper.processElementsWithWord(processor1,searchScope,propertyName,UsageSearchContext.IN_FOREIGN_LANGUAGES,false)) {
-        return false;
-      }
-    }
-  }
- else   if (refElement instanceof Property) {
-    final String[] words=StringUtil.getWordsIn(((Property)refElement).getKey()).toArray(ArrayUtil.EMPTY_STRING_ARRAY);
-    final String lastWordInPropertyName=words.length > 0 ? words[words.length - 1] : null;
-    if (lastWordInPropertyName != null) {
-      if (searchScope instanceof GlobalSearchScope) {
-        searchScope=GlobalSearchScope.getScopeRestrictedByFileTypes((GlobalSearchScope)searchScope,StdFileTypes.JSP,StdFileTypes.JSPX);
-      }
-      if (!helper.processElementsWithWord(processor1,searchScope,lastWordInPropertyName,UsageSearchContext.IN_FOREIGN_LANGUAGES,false)) {
-        return false;
-      }
-    }
   }
   return true;
 }
