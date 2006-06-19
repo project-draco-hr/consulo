@@ -11,17 +11,6 @@
     }
     psiElement=psiPackage;
   }
-  boolean isOpenInNewTabEnabled;
-  boolean toOpenInNewTab;
-  Content selectedContent=UsageViewManager.getInstance(myProject).getSelectedContent(true);
-  if (selectedContent != null && selectedContent.isPinned()) {
-    toOpenInNewTab=true;
-    isOpenInNewTabEnabled=false;
-  }
- else {
-    toOpenInNewTab=myToOpenInNewTab;
-    isOpenInNewTabEnabled=(UsageViewManager.getInstance(myProject).getReusableContentsCount() > 0);
-  }
   final String actionString=FindBundle.message("find.super.method.warning.action.verb");
   if (psiElement instanceof PsiMethod) {
     final PsiMethod[] methods=SuperMethodWarningUtil.checkSuperMethods((PsiMethod)psiElement,actionString);
@@ -38,24 +27,9 @@
   if (psiElement == null) {
     return;
   }
-  final FindUsagesDialog dialog=getFindUsagesDialog(psiElement,scopeFile != null,toOpenInNewTab,isOpenInNewTabEnabled);
-  if (dialog == null) {
-    return;
-  }
-  dialog.show();
-  if (!dialog.isOK()) {
-    return;
-  }
-  if (isOpenInNewTabEnabled) {
-    myToOpenInNewTab=toOpenInNewTab=dialog.isShowInSeparateWindow();
-  }
+  final FindUsagesDialog dialog=getFindUsagesDialog(psiElement,scopeFile != null);
+  if (!showDialog(dialog))   return;
   FindUsagesOptions findUsagesOptions=dialog.calcFindUsagesOptions();
-  if (scopeFile != null) {
-    findUsagesOptions=(FindUsagesOptions)findUsagesOptions.clone();
-    findUsagesOptions.isDerivedClasses=false;
-    findUsagesOptions.isDerivedInterfaces=false;
-    findUsagesOptions.isImplementingClasses=false;
-  }
   clearFindingNextUsageInFile();
   LOG.assertTrue(psiElement.isValid());
   if (psiElement instanceof PsiParameter) {
@@ -66,14 +40,7 @@
       if (PsiUtil.canBeOverriden(method)) {
         final PsiClass aClass=method.getContainingClass();
         LOG.assertTrue(aClass != null);
-        final boolean findInInheritors;
-        if (aClass.isInterface() || method.hasModifierProperty(PsiModifier.ABSTRACT)) {
-          findInInheritors=true;
-        }
- else {
-          findInInheritors=Messages.showDialog(psiElement.getProject(),FindBundle.message("find.parameter.usages.in.overriding.methods.prompt",parameter.getName()),FindBundle.message("find.parameter.usages.in.overriding.methods.title"),new String[]{CommonBundle.getYesButtonText(),CommonBundle.getNoButtonText()},0,Messages.getQuestionIcon()) == 0;
-        }
-        if (findInInheritors) {
+        if (aClass.isInterface() || method.hasModifierProperty(PsiModifier.ABSTRACT) || shouldSearchForParameterInOverridingMethods(psiElement,parameter)) {
           elementsToSearch=getParameterElementsToSearch(parameter);
         }
       }
@@ -81,7 +48,7 @@
   }
  else   if (psiElement instanceof PsiField) {
     final PsiField field=(PsiField)psiElement;
-    if (field.getContainingClass() != null && field.getType() != null) {
+    if (field.getContainingClass() != null) {
       final String propertyName=field.getManager().getCodeStyleManager().variableNameToPropertyName(field.getName(),VariableKind.FIELD);
       PsiMethod getter=PropertyUtil.findPropertyGetterWithType(propertyName,field.hasModifierProperty(PsiModifier.STATIC),field.getType(),ContainerUtil.iterate(field.getContainingClass().getMethods()));
       PsiMethod setter=PropertyUtil.findPropertySetterWithType(propertyName,field.hasModifierProperty(PsiModifier.STATIC),field.getType(),ContainerUtil.iterate(field.getContainingClass().getMethods()));
@@ -104,9 +71,13 @@
   }
   final UsageInfoToUsageConverter.TargetElementsDescriptor descriptor=new UsageInfoToUsageConverter.TargetElementsDescriptor(elementsToSearch,secondaryElementsToSearch);
   if (scopeFile == null) {
-    findUsages(descriptor,dialog.isSkipResultsWhenOneUsage(),toOpenInNewTab,findUsagesOptions);
+    findUsages(descriptor,dialog.isSkipResultsWhenOneUsage(),dialog.isShowInSeparateWindow(),findUsagesOptions);
   }
  else {
+    findUsagesOptions=(FindUsagesOptions)findUsagesOptions.clone();
+    findUsagesOptions.isDerivedClasses=false;
+    findUsagesOptions.isDerivedInterfaces=false;
+    findUsagesOptions.isImplementingClasses=false;
     editor.putUserData(KEY_START_USAGE_AGAIN,null);
     findUsagesInEditor(descriptor,scopeFile,FROM_START,findUsagesOptions,editor);
   }
