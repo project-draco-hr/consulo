@@ -16,62 +16,29 @@
     psiClass=null;
   }
   final ArrayList<String> usedBindings=new ArrayList<String>();
-  final HashMap<String,PsiType> className2Type=new HashMap<String,PsiType>();
+  final Set<IButtonGroup> processedGroups=new HashSet<IButtonGroup>();
   FormEditingUtil.iterate(rootContainer,new FormEditingUtil.ComponentVisitor<IComponent>(){
     public boolean visit(    final IComponent component){
       if (progress != null && progress.isCanceled())       return false;
       component.putClientProperty(CLIENT_PROP_BINDING_ERROR,null);
       final String binding=component.getBinding();
-      if (binding == null) {
-        return true;
+      if (psiClass != null && binding != null) {
+        if (validateFieldInClass(component,binding,component.getComponentClassName(),psiClass,editor,module))         return true;
       }
-      if (psiClass != null) {
-        final PsiField[] fields=psiClass.getFields();
-        PsiField field=null;
-        for (int i=fields.length - 1; i >= 0; i--) {
-          if (binding.equals(fields[i].getName())) {
-            field=fields[i];
-            break;
-          }
-        }
-        if (field == null) {
-          final QuickFix[] fixes=editor != null ? new QuickFix[]{new CreateFieldFix(editor,psiClass,component.getComponentClassName(),binding)} : QuickFix.EMPTY_ARRAY;
-          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo(null,UIDesignerBundle.message("error.no.field.in.class",binding,classToBind),HighlightDisplayLevel.ERROR,fixes));
+      if (binding != null) {
+        if (usedBindings.contains(binding)) {
+          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo(null,UIDesignerBundle.message("error.binding.already.exists",binding),HighlightDisplayLevel.ERROR,QuickFix.EMPTY_ARRAY));
           return true;
         }
- else         if (field.hasModifierProperty(PsiModifier.STATIC)) {
-          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo(null,UIDesignerBundle.message("error.cant.bind.to.static",binding),HighlightDisplayLevel.ERROR,QuickFix.EMPTY_ARRAY));
-          return true;
-        }
-        try {
-          final PsiType componentType;
-          final String className=component.getComponentClassName().replace('$','.');
-          if (className2Type.containsKey(className)) {
-            componentType=className2Type.get(className);
-          }
- else {
-            componentType=PsiManager.getInstance(module.getProject()).getElementFactory().createTypeFromText(className,null);
-          }
-          final PsiType fieldType=field.getType();
-          if (componentType != null && !fieldType.isAssignableFrom(componentType)) {
-            final QuickFix[] fixes=editor != null ? new QuickFix[]{new ChangeFieldTypeFix(editor,field,componentType)} : QuickFix.EMPTY_ARRAY;
-            component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo(null,UIDesignerBundle.message("error.bind.incompatible.types",fieldType.getPresentableText(),className),HighlightDisplayLevel.ERROR,fixes));
-            return true;
-          }
-        }
- catch (        IncorrectOperationException e) {
-        }
-        if (component.isCustomCreate() && FormEditingUtil.findCreateComponentsMethod(psiClass) == null) {
-          final QuickFix[] fixes=editor != null ? new QuickFix[]{new GenerateCreateComponentsFix(editor,psiClass)} : QuickFix.EMPTY_ARRAY;
-          component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo("Custom Create",UIDesignerBundle.message("error.no.custom.create.method"),HighlightDisplayLevel.ERROR,fixes));
-          return true;
+        usedBindings.add(binding);
+      }
+      IButtonGroup group=FormEditingUtil.findGroupForComponent(rootContainer,component);
+      if (group != null && !processedGroups.contains(group)) {
+        processedGroups.add(group);
+        if (group.isBound()) {
+          validateFieldInClass(component,group.getName(),ButtonGroup.class.getName(),psiClass,editor,module);
         }
       }
-      if (usedBindings.contains(binding)) {
-        component.putClientProperty(CLIENT_PROP_BINDING_ERROR,new ErrorInfo(null,UIDesignerBundle.message("error.binding.already.exists",binding),HighlightDisplayLevel.ERROR,QuickFix.EMPTY_ARRAY));
-        return true;
-      }
-      usedBindings.add(binding);
       return true;
     }
   }
@@ -120,7 +87,7 @@
               if (rootContainer.isInspectionSuppressed(tool.getShortName(),component.getId()))               continue;
               ErrorInfo[] errorInfos=tool.checkComponent(editor,component);
               if (errorInfos != null) {
-                ArrayList<ErrorInfo> errorList=(ArrayList<ErrorInfo>)component.getClientProperty(CLIENT_PROP_ERROR_ARRAY);
+                ArrayList<ErrorInfo> errorList=getErrorInfos(component);
                 if (errorList == null) {
                   errorList=new ArrayList<ErrorInfo>();
                   component.putClientProperty(CLIENT_PROP_ERROR_ARRAY,errorList);
