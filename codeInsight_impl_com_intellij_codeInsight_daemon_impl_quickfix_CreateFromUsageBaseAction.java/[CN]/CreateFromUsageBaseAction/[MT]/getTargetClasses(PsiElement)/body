@@ -1,41 +1,42 @@
 {
   PsiClass psiClass=null;
   PsiExpression qualifier=null;
+  boolean allowOuterClasses=false;
   if (element instanceof PsiNewExpression) {
-    PsiJavaCodeReferenceElement ref=((PsiNewExpression)element).getClassReference();
-    if (ref instanceof PsiReferenceExpression) {
-      qualifier=((PsiReferenceExpression)ref).getQualifierExpression();
-    }
- else     if (ref != null) {
-      PsiElement refElement=ref.resolve();
-      if (refElement instanceof PsiClass)       psiClass=(PsiClass)refElement;
+    final PsiNewExpression newExpression=(PsiNewExpression)element;
+    qualifier=newExpression.getQualifier();
+    if (qualifier == null) {
+      PsiJavaCodeReferenceElement ref=newExpression.getClassReference();
+      if (ref != null) {
+        PsiElement refElement=ref.resolve();
+        if (refElement instanceof PsiClass)         psiClass=(PsiClass)refElement;
+      }
     }
   }
  else   if (element instanceof PsiReferenceExpression) {
     qualifier=((PsiReferenceExpression)element).getQualifierExpression();
   }
  else   if (element instanceof PsiMethodCallExpression) {
-    qualifier=((PsiMethodCallExpression)element).getMethodExpression().getQualifierExpression();
+    final PsiReferenceExpression methodExpression=((PsiMethodCallExpression)element).getMethodExpression();
+    qualifier=methodExpression.getQualifierExpression();
+    final @NonNls String referenceName=methodExpression.getReferenceName();
+    if (referenceName == null)     return null;
   }
   if (qualifier != null) {
     PsiType type=qualifier.getType();
     if (type instanceof PsiClassType) {
-      psiClass=PsiUtil.resolveClassInType(type);
+      psiClass=((PsiClassType)type).resolve();
     }
- else     if (qualifier instanceof PsiReferenceExpression) {
-      PsiElement refElement=((PsiReferenceExpression)qualifier).resolve();
-      if (refElement instanceof PsiClass) {
-        psiClass=(PsiClass)refElement;
+    if (qualifier instanceof PsiJavaCodeReferenceElement) {
+      final PsiElement resolved=((PsiJavaCodeReferenceElement)qualifier).resolve();
+      if (resolved instanceof PsiClass) {
+        if (psiClass == null)         psiClass=(PsiClass)resolved;
       }
     }
   }
  else   if (psiClass == null) {
     psiClass=PsiTreeUtil.getParentOfType(element,PsiClass.class);
-  }
-  if (!(element instanceof PsiMethodCallExpression)) {
-    while (psiClass instanceof PsiAnonymousClass) {
-      psiClass=PsiTreeUtil.getParentOfType(psiClass,PsiClass.class);
-    }
+    allowOuterClasses=true;
   }
   if (psiClass instanceof PsiTypeParameter) {
     PsiClass[] supers=psiClass.getSupers();
@@ -47,6 +48,16 @@
     return filtered.size() > 0 ? filtered.toArray(new PsiClass[filtered.size()]) : null;
   }
  else {
-    return psiClass != null && psiClass.getManager().isInProject(psiClass) ? new PsiClass[]{psiClass} : null;
+    if (psiClass == null || !psiClass.getManager().isInProject(psiClass)) {
+      return null;
+    }
+    if (!allowOuterClasses || ApplicationManager.getApplication().isUnitTestMode())     return new PsiClass[]{psiClass};
+    List<PsiClass> result=new ArrayList<PsiClass>();
+    while (psiClass != null) {
+      result.add(psiClass);
+      if (psiClass.hasModifierProperty(PsiModifier.STATIC))       break;
+      psiClass=PsiTreeUtil.getParentOfType(psiClass,PsiClass.class);
+    }
+    return result.toArray(new PsiClass[result.size()]);
   }
 }
