@@ -3,17 +3,23 @@
   myCurrentScope=scope;
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
-      performInspectionsWithProgress(scope,runWithEditorSettings,manager);
+      performInspectionsWithProgress(scope,runWithEditorSettings,manager,outputPath);
+      @NonNls final String ext=".xml";
       for (      String toolName : myTools.keySet()) {
         final Element root=new Element(InspectionsBundle.message("inspection.problems"));
         final Document doc=new Document(root);
         final Set<InspectionTool> sameTools=myTools.get(toolName);
         boolean hasProblems=false;
         boolean isLocalTool=false;
+        boolean isDescriptorProvider=false;
         for (        InspectionTool tool : sameTools) {
-          if (tool.hasReportedProblems()) {
-            hasProblems=true;
+          if (tool instanceof DescriptorProviderInspection) {
+            hasProblems=new File(outputPath,toolName + ext).exists();
             isLocalTool=tool instanceof LocalInspectionToolWrapper;
+            isDescriptorProvider=true;
+          }
+ else           if (tool.hasReportedProblems()) {
+            hasProblems=true;
             tool.exportResults(root);
           }
         }
@@ -23,11 +29,15 @@
         OutputStream outStream=null;
         try {
           new File(outputPath).mkdirs();
-          @NonNls final String ext=".xml";
           final File file=new File(outputPath,toolName + ext);
-          outStream=new BufferedOutputStream(new FileOutputStream(file));
-          ((ProjectEx)getProject()).getMacroReplacements().substitute(doc.getRootElement(),SystemInfo.isFileSystemCaseSensitive);
-          JDOMUtil.writeDocument(doc,outStream,"\n");
+          if (isDescriptorProvider) {
+            outStream=descriptorProviderFilePreparations(file,outStream,isLocalToolAttribute,isLocalTool);
+          }
+ else {
+            ((ProjectEx)getProject()).getMacroReplacements().substitute(doc.getRootElement(),SystemInfo.isFileSystemCaseSensitive);
+            outStream=new BufferedOutputStream(new FileOutputStream(file));
+            JDOMUtil.writeDocument(doc,outStream,"\n");
+          }
         }
  catch (        IOException e) {
           LOG.error(e);
