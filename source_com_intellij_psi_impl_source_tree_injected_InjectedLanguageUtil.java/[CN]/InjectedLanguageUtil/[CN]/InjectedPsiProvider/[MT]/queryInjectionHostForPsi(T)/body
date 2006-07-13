@@ -1,0 +1,33 @@
+{
+  final TextRange hostRange=host.getTextRange();
+  PsiFile hostPsiFile=host.getContainingFile();
+  VirtualFile virtualFile=hostPsiFile.getVirtualFile();
+  if (virtualFile == null) {
+    PsiFile originalFile=hostPsiFile.getOriginalFile();
+    if (originalFile != null)     virtualFile=originalFile.getVirtualFile();
+  }
+  if (virtualFile == null)   return null;
+  final VirtualFile hostVirtualFile=virtualFile;
+  final DocumentEx hostDocument=(DocumentEx)hostPsiFile.getViewProvider().getDocument();
+  final PsiManagerImpl psiManager=(PsiManagerImpl)host.getManager();
+  final List<Pair<PsiElement,TextRange>> result=new SmartList<Pair<PsiElement,TextRange>>();
+  InjectedLanguagePlaces placesRegistrar=new InjectedLanguagePlaces(){
+    public void addPlace(    @NotNull Language language,    @NotNull TextRange rangeInsideHost,    @Nullable String prefix,    @Nullable String suffix){
+      TextRange documentWindow=hostRange.cutOut(rangeInsideHost);
+      if (prefix == null)       prefix="";
+      if (suffix == null)       suffix="";
+      DocumentRange documentRange=new DocumentRange(hostDocument,documentWindow,prefix,suffix);
+      String newText=documentRange.getText();
+      VirtualFileDelegate virtualFile=new VirtualFileDelegate(hostVirtualFile,documentRange,language,newText);
+      FileDocumentManagerImpl.registerDocument(documentRange,virtualFile);
+      PsiElement psi=parseInjectedPsiFile(host,rangeInsideHost,language,virtualFile,documentRange,myTextEscaper,prefix,suffix);
+      LOG.assertTrue(psi.getText().equals(documentRange.getText()));
+      result.add(new Pair<PsiElement,TextRange>(psi,rangeInsideHost));
+    }
+  }
+;
+  for (  LanguageInjector injector : psiManager.getLanguageInjectors()) {
+    injector.getLanguagesToInject(host,placesRegistrar);
+  }
+  return result;
+}
