@@ -1,0 +1,56 @@
+{
+  FileDocumentManager.getInstance().saveAllDocuments();
+  LOG.assertTrue(antBuildListener != null);
+  final AntCommandLineBuilder builder=new AntCommandLineBuilder();
+  final BuildProgressWindow progress;
+  final AntBuildMessageView messageView;
+  final GeneralCommandLine commandLine;
+synchronized (builder) {
+    Project project=buildFile.getProject();
+    progress=!buildFile.isRunInBackground() ? new BuildProgressWindow(project) : null;
+    try {
+      builder.setBuildFile(buildFile.getAllOptions(),VfsUtil.virtualToIoFile(buildFile.getVirtualFile()));
+      builder.calculateProperties(dataContext);
+      builder.addTargets(targets);
+      messageView=prepareMessageView(buildMessageViewToReuse,buildFile,targets);
+      commandLine=GeneralCommandLine.createFromJavaParameters(builder.getCommandLine());
+      messageView.setBuildCommandLine(commandLine.getCommandLineString());
+      if (progress != null)       progress.start();
+    }
+ catch (    RunCanceledException e) {
+      e.showMessage(project,AntBundle.message("run.ant.erorr.dialog.title"));
+      antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
+      return;
+    }
+catch (    CantRunException e) {
+      ExecutionUtil.showExecutionErrorMessage(e,AntBundle.message("cant.run.ant.erorr.dialog.title"),project);
+      antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
+      return;
+    }
+catch (    Macro.ExecutionCancelledException e) {
+      antBuildListener.buildFinished(AntBuildListener.ABORTED,0);
+      return;
+    }
+catch (    Throwable e) {
+      antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
+      LOG.error(e);
+      return;
+    }
+  }
+  @NonNls final String threadName="Ant build";
+  Thread thread=new Thread(new Runnable(){
+    public void run(){
+synchronized (builder) {
+        try {
+          runBuild(progress,messageView,buildFile,antBuildListener,commandLine);
+        }
+ catch (        Throwable e) {
+          LOG.error(e);
+          antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
+        }
+      }
+    }
+  }
+,threadName);
+  thread.start();
+}
