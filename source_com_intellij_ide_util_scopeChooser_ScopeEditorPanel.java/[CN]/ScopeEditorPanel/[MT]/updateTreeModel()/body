@@ -1,35 +1,61 @@
 {
-  Runnable updateModel=new Runnable(){
-    public void run(){
-      try {
-        myTreeExpansionMonitor.freeze();
-        TreeModelBuilder.TreeModel model=TreeModelBuilder.createTreeModel(myProject,myIsFirstUpdate,false,myTreeMarker);
-        myIsFirstUpdate=false;
-        if (myErrorMessage == null) {
-          myMatchingCountLabel.setText(IdeBundle.message("label.scope.contains.files",model.getMarkedFileCount(),model.getTotalFileCount()));
-          myMatchingCountLabel.setForeground(new JLabel().getForeground());
-        }
- else {
-          showErrorMessage();
-        }
-        myPackageTree.setModel(model);
-        myTreeExpansionMonitor.restore();
-      }
-  finally {
-        myCanceled=false;
-      }
+  PanelProgressIndicator progress=new PanelProgressIndicator(new Consumer<JComponent>(){
+    public void consume(    final JComponent component){
+      setToComponent(component);
+    }
+  }
+){
+    public boolean isCanceled(){
+      return super.isCanceled() || myCanceled;
+    }
+    public void stop(){
+      super.stop();
+      setToComponent(myMatchingCountLabel);
+    }
+    public String getText(){
+      return null;
+    }
+    public String getText2(){
+      return null;
     }
   }
 ;
-  if (myIsFirstUpdate) {
-    updateModel.run();
-  }
+  progress.setBordersVisible(false);
+  myCurrentProgress=progress;
+  Runnable updateModel=new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          try {
+            myTreeExpansionMonitor.freeze();
+            UIUtil.setEnabled(myPanel,false,true);
+            final TreeModelBuilder.TreeModel model=TreeModelBuilder.createTreeModel(myProject,false,false,myTreeMarker);
+            if (myErrorMessage == null) {
+              myMatchingCountLabel.setText(IdeBundle.message("label.scope.contains.files",model.getMarkedFileCount(),model.getTotalFileCount()));
+              myMatchingCountLabel.setForeground(new JLabel().getForeground());
+            }
  else {
-    ProgressManager.getInstance().runProcess(updateModel,new ProgressIndicatorBase(){
-      public boolean isCanceled(){
-        return myCanceled;
-      }
-    }
+              showErrorMessage();
+            }
+            SwingUtilities.invokeLater(new Runnable(){
+              public void run(){
+                myPackageTree.setModel(model);
+                myTreeExpansionMonitor.restore();
+              }
+            }
 );
+          }
+  finally {
+            myCanceled=false;
+            myCurrentProgress=null;
+            setToComponent(myMatchingCountLabel);
+            UIUtil.setEnabled(myPanel,true,true);
+          }
+        }
+      }
+);
+    }
   }
+;
+  ProgressManager.getInstance().runProcess(updateModel,progress);
 }
