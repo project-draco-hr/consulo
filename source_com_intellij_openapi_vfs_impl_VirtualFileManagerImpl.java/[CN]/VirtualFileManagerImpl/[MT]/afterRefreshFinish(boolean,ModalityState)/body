@@ -2,6 +2,7 @@
   Runnable action=new Runnable(){
     public void run(){
       ApplicationManager.getApplication().assertIsDispatchThread();
+      Runnable postRunnable=myPostRefreshRunnables.pop();
       ApplicationManager.getApplication().runWriteAction(new Runnable(){
         public void run(){
           for (int i=0; i < myRefreshEventsToFire.size(); i++) {
@@ -13,8 +14,13 @@
               LOG.error(e);
             }
           }
-          if (myRefreshCount > 1) {
-            myRefreshCount--;
+          myRefreshCount--;
+          if (!asynchronous)           mySynchronousRefreshCount--;
+          LOG.assertTrue(myRefreshCount >= 0 && mySynchronousRefreshCount >= 0);
+          if (mySynchronousRefreshCount == 0) {
+            myVirtualFileManagerListenerMulticaster.getMulticaster().afterRefreshFinish(asynchronous);
+          }
+          if (myRefreshCount > 0) {
             myRefreshEventsToFire.clear();
           }
  else {
@@ -29,8 +35,6 @@
  else {
               synchronizer=null;
             }
-            myVirtualFileManagerListenerMulticaster.getMulticaster().afterRefreshFinish(asynchronous);
-            myRefreshCount--;
             myRefreshEventsToFire=null;
             if (asynchronous) {
               int filesCount=synchronizer.collectFilesToUpdate();
@@ -50,14 +54,13 @@
                 }
               }
             }
-            for (            final Runnable runnable : myPostRefreshRunnables) {
-              runnable.run();
-            }
-            myPostRefreshRunnables.clear();
           }
         }
       }
 );
+      if (postRunnable != null) {
+        postRunnable.run();
+      }
     }
   }
 ;
