@@ -1,54 +1,25 @@
 {
-  Module module=findModel.getModuleName() == null ? null : ModuleManager.getInstance(project).findModuleByName(findModel.getModuleName());
+  String moduleName=findModel.getModuleName();
+  Module module=moduleName == null ? null : ModuleManager.getInstance(project).findModuleByName(moduleName);
   final FileIndex fileIndex=module == null ? ProjectRootManager.getInstance(project).getFileIndex() : ModuleRootManager.getInstance(module).getFileIndex();
   final Pattern fileMaskRegExp=createFileMaskRegExp(findModel);
   if (psiDirectory == null || (findModel.isWithSubdirectories() && fileIndex.isInContent(psiDirectory.getVirtualFile()))) {
-    if (canOptimizeForFastWordSearch(findModel)) {
-      CacheManager cacheManager=((PsiManagerImpl)PsiManager.getInstance(project)).getCacheManager();
-      GlobalSearchScope scope=psiDirectory == null ? module == null ? GlobalSearchScope.projectScope(project) : moduleContentScope(module) : GlobalSearchScope.directoryScope(psiDirectory,true);
-      List<String> words=StringUtil.getWordsIn(findModel.getStringToFind());
-      if (words.size() != 0) {
-        Collections.sort(words,new Comparator<String>(){
-          public int compare(          final String o1,          final String o2){
-            return o2.length() - o1.length();
-          }
-        }
-);
-        Set<PsiFile> resultFiles=new THashSet<PsiFile>();
-        for (int i=0; i < words.size(); i++) {
-          String word=words.get(i);
-          PsiFile[] files=cacheManager.getFilesWithWord(word,UsageSearchContext.ANY,scope,findModel.isCaseSensitive());
-          final List<PsiFile> psiFiles=Arrays.asList(files);
-          if (i == 0) {
-            resultFiles.addAll(psiFiles);
-          }
- else {
-            resultFiles.retainAll(psiFiles);
-          }
-          filterMaskedFiles(resultFiles,fileMaskRegExp);
-          if (resultFiles.size() == 0)           break;
-        }
-        return resultFiles;
-      }
-    }
+    final Collection<PsiFile> filesForFastWordSearch=getFilesForFastWordSearch(findModel,project,psiDirectory,fileMaskRegExp,module);
+    if (canOptimizeForFastWordSearch(findModel) && filesForFastWordSearch != null)     return filesForFastWordSearch;
 class EnumContentIterator implements ContentIterator {
-      List<VirtualFile> myVirtualFiles=new ArrayList<VirtualFile>();
-      public boolean processFile(      VirtualFile fileOrDir){
-        if (!fileOrDir.isDirectory() && (fileMaskRegExp == null || fileMaskRegExp.matcher(fileOrDir.getName()).matches())) {
-          myVirtualFiles.add(fileOrDir);
+      List<PsiFile> myFiles=new ArrayList<PsiFile>(filesForFastWordSearch == null ? Collections.<PsiFile>emptyList() : filesForFastWordSearch);
+      final PsiManager psiManager=PsiManager.getInstance(project);
+      public boolean processFile(      VirtualFile virtualFile){
+        if (!virtualFile.isDirectory() && (fileMaskRegExp == null || fileMaskRegExp.matcher(virtualFile.getName()).matches())) {
+          final PsiFile psiFile=psiManager.findFile(virtualFile);
+          if (psiFile != null && (filesForFastWordSearch == null || !filesForFastWordSearch.contains(psiFile))) {
+            myFiles.add(psiFile);
+          }
         }
         return true;
       }
-      public Collection<PsiFile> getFiles(){
-        final ArrayList<PsiFile> psiFiles=new ArrayList<PsiFile>(myVirtualFiles.size());
-        final PsiManager manager=PsiManager.getInstance(project);
-        for (        VirtualFile virtualFile : myVirtualFiles) {
-          final PsiFile psiFile=manager.findFile(virtualFile);
-          if (psiFile != null) {
-            psiFiles.add(psiFile);
-          }
-        }
-        return psiFiles;
+      private Collection<PsiFile> getFiles(){
+        return myFiles;
       }
     }
     final EnumContentIterator iterator=new EnumContentIterator();
