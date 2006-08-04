@@ -1,13 +1,13 @@
 {
   final List<VcsException> vcsExceptions=new ArrayList<VcsException>();
+  final List<FilePath> pathsToRefresh=new ArrayList<FilePath>();
   Runnable rollbackAction=new Runnable(){
     public void run(){
-      final List<FilePath> pathsToRefresh=new ArrayList<FilePath>();
       ChangesUtil.processChangesByVcs(myProject,myBrowser.getCurrentIncludedChanges(),new ChangesUtil.PerVcsProcessor<Change>(){
         public void process(        AbstractVcs vcs,        List<Change> changes){
           final ChangeProvider environment=vcs.getChangeProvider();
           if (environment != null) {
-            pathsToRefresh.addAll(getFilePathes(changes));
+            pathsToRefresh.addAll(getFilePaths(changes));
             final List<VcsException> exceptions=environment.rollbackChanges(changes);
             if (exceptions.size() > 0) {
               vcsExceptions.addAll(exceptions);
@@ -16,20 +16,20 @@
         }
       }
 );
-      final LvcsAction lvcsAction=LocalVcs.getInstance(myProject).startAction(VcsBundle.message("changes.action.rollback.text"),"",true);
-      VirtualFileManager.getInstance().refresh(true,new Runnable(){
-        public void run(){
-          lvcsAction.finish();
-          FileStatusManager.getInstance(myProject).fileStatusesChanged();
-          for (          FilePath path : pathsToRefresh) {
-            VcsDirtyScopeManager.getInstance(myProject).fileDirty(path);
-          }
-        }
+      if (!myRefreshSynchronously) {
+        doRefresh(pathsToRefresh,true);
       }
-);
       AbstractVcsHelper.getInstance(myProject).showErrors(vcsExceptions,VcsBundle.message("changes.action.rollback.text"));
     }
   }
 ;
   ProgressManager.getInstance().runProcessWithProgressSynchronously(rollbackAction,VcsBundle.message("changes.action.rollback.text"),true,myProject);
+  if (myRefreshSynchronously) {
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        doRefresh(pathsToRefresh,false);
+      }
+    }
+);
+  }
 }
