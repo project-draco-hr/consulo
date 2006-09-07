@@ -1,4 +1,37 @@
 {
   if (element == null || !element.isValid())   return EMPTY_PROBLEMS_HOLDER;
-  return getDomElementsProblemsHolder(element.getRoot());
+  final DomFileElement<DomElement> fileElement=element.getRoot();
+synchronized (PsiLock.LOCK) {
+    final DomElementsProblemsHolder readyHolder=myReadyHolders.get(fileElement);
+    if (isHighlightingFinished(fileElement)) {
+      return readyHolder;
+    }
+    if (myCalculatingHolders.containsKey(fileElement)) {
+      return readyHolder == null ? EMPTY_PROBLEMS_HOLDER : readyHolder;
+    }
+    myCalculatingHolders.put(fileElement,Boolean.TRUE);
+  }
+  try {
+    final DomElementsProblemsHolderImpl holder=new DomElementsProblemsHolderImpl(fileElement);
+    holder.calculateAllProblems();
+synchronized (PsiLock.LOCK) {
+      final Project project=fileElement.getManager().getProject();
+      final CachedValuesManager cachedValuesManager=PsiManager.getInstance(project).getCachedValuesManager();
+      myReadyHolders.put(fileElement,holder);
+      final CachedValue<Boolean> cachedValue=cachedValuesManager.createCachedValue(new CachedValueProvider<Boolean>(){
+        public Result<Boolean> compute(){
+          return new Result<Boolean>(Boolean.FALSE,fileElement,ProjectRootManager.getInstance(project));
+        }
+      }
+,false);
+      myCachedValues.put(fileElement,cachedValue);
+      cachedValue.getValue();
+    }
+    return holder;
+  }
+  finally {
+synchronized (PsiLock.LOCK) {
+      myCalculatingHolders.remove(fileElement);
+    }
+  }
 }
