@@ -55,50 +55,58 @@
     }
   }
   GlobalInspectionContextImpl globalContext=((InspectionManagerEx)InspectionManager.getInstance(project)).createNewGlobalContext(false);
-  final List<ProblemDescriptor> result=new ArrayList<ProblemDescriptor>();
-  for (  InspectionTool tool : suppressedTools) {
-    String toolId=tool.getShortName();
-    tool.initialize(globalContext);
-    Collection<CommonProblemDescriptor> descriptors;
-    if (tool instanceof LocalInspectionToolWrapper) {
-      LocalInspectionToolWrapper local=(LocalInspectionToolWrapper)tool;
-      if (local.getTool() instanceof UnfairLocalInspectionTool)       continue;
-      local.processFile(psiElement.getContainingFile(),false,manager);
-      descriptors=local.getProblemDescriptors();
-    }
- else     if (tool instanceof GlobalInspectionToolWrapper) {
-      GlobalInspectionToolWrapper global=(GlobalInspectionToolWrapper)tool;
-      global.processFile(new AnalysisScope(psiElement.getContainingFile()),manager,globalContext,false);
-      descriptors=global.getProblemDescriptors();
-    }
+  final RefManagerImpl refManager=((RefManagerImpl)globalContext.getRefManager());
+  refManager.inspectionReadActionStarted();
+  final List<ProblemDescriptor> result;
+  try {
+    result=new ArrayList<ProblemDescriptor>();
+    for (    InspectionTool tool : suppressedTools) {
+      String toolId=tool.getShortName();
+      tool.initialize(globalContext);
+      Collection<CommonProblemDescriptor> descriptors;
+      if (tool instanceof LocalInspectionToolWrapper) {
+        LocalInspectionToolWrapper local=(LocalInspectionToolWrapper)tool;
+        if (local.getTool() instanceof UnfairLocalInspectionTool)         continue;
+        local.processFile(psiElement.getContainingFile(),false,manager);
+        descriptors=local.getProblemDescriptors();
+      }
+ else       if (tool instanceof GlobalInspectionToolWrapper) {
+        GlobalInspectionToolWrapper global=(GlobalInspectionToolWrapper)tool;
+        global.processFile(new AnalysisScope(psiElement.getContainingFile()),manager,globalContext,false);
+        descriptors=global.getProblemDescriptors();
+      }
  else {
-      continue;
-    }
-    for (    PsiElement suppressedScope : suppressedScopes.keySet()) {
-      Collection<String> suppressedIds=suppressedScopes.get(suppressedScope);
-      if (!suppressedIds.contains(toolId))       continue;
-      boolean hasErrorInsideSuppressedScope=false;
-      for (      CommonProblemDescriptor descriptor : descriptors) {
-        if (!(descriptor instanceof ProblemDescriptor))         continue;
-        PsiElement element=((ProblemDescriptor)descriptor).getPsiElement();
-        if (element == null)         continue;
-        PsiElement annotation=InspectionManagerEx.getElementToolSuppressedIn(element,toolId);
-        if (annotation != null && PsiTreeUtil.isAncestor(suppressedScope,annotation,false)) {
-          hasErrorInsideSuppressedScope=true;
-          break;
+        continue;
+      }
+      for (      PsiElement suppressedScope : suppressedScopes.keySet()) {
+        Collection<String> suppressedIds=suppressedScopes.get(suppressedScope);
+        if (!suppressedIds.contains(toolId))         continue;
+        boolean hasErrorInsideSuppressedScope=false;
+        for (        CommonProblemDescriptor descriptor : descriptors) {
+          if (!(descriptor instanceof ProblemDescriptor))           continue;
+          PsiElement element=((ProblemDescriptor)descriptor).getPsiElement();
+          if (element == null)           continue;
+          PsiElement annotation=InspectionManagerEx.getElementToolSuppressedIn(element,toolId);
+          if (annotation != null && PsiTreeUtil.isAncestor(suppressedScope,annotation,false)) {
+            hasErrorInsideSuppressedScope=true;
+            break;
+          }
+        }
+        if (!hasErrorInsideSuppressedScope) {
+          PsiElement element=suppressedScope instanceof PsiComment ? PsiTreeUtil.skipSiblingsForward(suppressedScope,PsiWhiteSpace.class) : suppressedScope.getFirstChild();
+          PsiElement annotation=InspectionManagerEx.getElementToolSuppressedIn(element,toolId);
+          if (annotation != null && annotation.isValid()) {
+            String description=InspectionsBundle.message("inspection.redundant.suppression.description");
+            LocalQuickFix fix=new RemoveSuppressWarningAction(toolId,annotation);
+            ProblemDescriptor descriptor=manager.createProblemDescriptor(annotation,description,fix,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+            result.add(descriptor);
+          }
         }
       }
-      if (!hasErrorInsideSuppressedScope) {
-        PsiElement element=suppressedScope instanceof PsiComment ? PsiTreeUtil.skipSiblingsForward(suppressedScope,PsiWhiteSpace.class) : suppressedScope.getFirstChild();
-        PsiElement annotation=InspectionManagerEx.getElementToolSuppressedIn(element,toolId);
-        if (annotation != null && annotation.isValid()) {
-          String description=InspectionsBundle.message("inspection.redundant.suppression.description");
-          LocalQuickFix fix=new RemoveSuppressWarningAction(toolId,annotation);
-          ProblemDescriptor descriptor=manager.createProblemDescriptor(annotation,description,fix,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
-          result.add(descriptor);
-        }
-      }
     }
+  }
+  finally {
+    refManager.inspectionReadActionFinished();
   }
   return result.toArray(new ProblemDescriptor[result.size()]);
 }
