@@ -1,12 +1,30 @@
 {
   Collection<String> paths=mergedWithConflict.getFiles();
   Map<VirtualFile,List<String>> fileToRevisions=new LinkedHashMap<VirtualFile,List<String>>();
+  final List<VirtualFile> readOnlyFiles=new ArrayList<VirtualFile>();
   for (  final String path : paths) {
     VirtualFile virtualFile=CvsVfsUtil.findFileByIoFile(new File(path));
     if (virtualFile != null) {
       final List<String> allRevisionsForFile=CvsUtil.getAllRevisionsForFile(virtualFile);
-      if (!allRevisionsForFile.isEmpty())       fileToRevisions.put(virtualFile,allRevisionsForFile);
+      if (!allRevisionsForFile.isEmpty()) {
+        fileToRevisions.put(virtualFile,allRevisionsForFile);
+        if (!virtualFile.isWritable()) {
+          readOnlyFiles.add(virtualFile);
+        }
+      }
     }
+  }
+  if (readOnlyFiles.size() > 0) {
+    final CvsHandler editHandler=CommandCvsHandler.createEditHandler(readOnlyFiles.toArray(new VirtualFile[readOnlyFiles.size()]),CvsConfiguration.getInstance(project).RESERVED_EDIT);
+    new CvsOperationExecutor(true,project,ModalityState.current()).performActionSync(editHandler,CvsOperationExecutorCallback.EMPTY);
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        for (        VirtualFile file : readOnlyFiles) {
+          file.refresh(false,false);
+        }
+      }
+    }
+);
   }
   if (!fileToRevisions.isEmpty()) {
     final List<VirtualFile> mergedFiles=new ArrayList<VirtualFile>(fileToRevisions.keySet());
