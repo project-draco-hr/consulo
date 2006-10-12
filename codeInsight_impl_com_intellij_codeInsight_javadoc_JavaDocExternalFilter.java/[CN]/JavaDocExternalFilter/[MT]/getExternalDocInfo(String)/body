@@ -2,79 +2,94 @@
   if (surl == null) {
     return null;
   }
-  Matcher anchorMatcher=ourAnchorsuffix.matcher(surl);
-  String startSection="<!-- ======== START OF CLASS DATA ======== -->";
-  String endSection="SUMMARY ======== -->";
-  boolean isClassDoc=true;
-  if (anchorMatcher.find()) {
-    isClassDoc=false;
-    startSection="<A NAME=\"" + anchorMatcher.group(1).toUpperCase() + "\"";
-    endSection="<A NAME=";
-  }
   final String root=ourAnchorsuffix.matcher(surl).replaceAll("");
-  final Reader stream=getReaderByUrl(surl);
-  if (stream == null) {
-    return null;
-  }
-  BufferedReader buf=new BufferedReader(stream);
-  StringBuffer data=new StringBuffer();
-  data.append("<HTML>\n");
-  try {
-    String read;
-    do {
-      read=buf.readLine();
-    }
- while (read != null && read.toUpperCase().indexOf(startSection) == -1);
-    if (read == null) {
-      return null;
-    }
-    data.append(read);
-    if (isClassDoc) {
-      boolean skip=false;
-      while (((read=buf.readLine()) != null) && !read.toUpperCase().equals("<DL>")) {
-        if (read.toUpperCase().indexOf("</H2>") != -1) {
-          data.append("</H2>\n");
-          skip=true;
-        }
- else         if (!skip)         data.append(read);
+  final StringBuffer data=new StringBuffer();
+  final Runnable process=new Runnable(){
+    public void run(){
+      final Reader stream=getReaderByUrl(surl);
+      if (stream == null) {
+        return;
       }
-      data.append("<DL>\n");
-      StringBuffer classDetails=new StringBuffer();
-      while (((read=buf.readLine()) != null) && !read.toUpperCase().equals("<HR>")) {
-        classDetails.append(read);
-        classDetails.append("\n");
+      Matcher anchorMatcher=ourAnchorsuffix.matcher(surl);
+      @NonNls String startSection="<!-- ======== START OF CLASS DATA ======== -->";
+      @NonNls String endSection="SUMMARY ======== -->";
+      boolean isClassDoc=true;
+      if (anchorMatcher.find()) {
+        isClassDoc=false;
+        startSection="<A NAME=\"" + anchorMatcher.group(1).toUpperCase() + "\"";
+        endSection="<A NAME=";
       }
-      while (((read=buf.readLine()) != null) && !read.toUpperCase().equals("<P>")) {
-        data.append(read);
-        data.append("\n");
-      }
-      data.append(classDetails);
-      data.append("<P>\n");
-    }
-    while (((read=buf.readLine()) != null) && read.indexOf(endSection) == -1) {
-      if (read.toUpperCase().indexOf("<HR>") == -1) {
-        data.append(read);
-        data.append("\n");
-      }
-    }
-    data.append("</HTML>\n");
-  }
- catch (  final IOException e) {
-    showErrorMessage(e);
-  }
- finally {
-    if (buf != null) {
+      final BufferedReader buf=new BufferedReader(stream);
+      data.append(HTML + "\n");
       try {
-        buf.close();
+        String read;
+        do {
+          ProgressManager.getInstance().checkCanceled();
+          read=buf.readLine();
+        }
+ while (read != null && read.toUpperCase().indexOf(startSection) == -1);
+        if (read == null) {
+          data.delete(0,data.length());
+          return;
+        }
+        data.append(read);
+        if (isClassDoc) {
+          boolean skip=false;
+          while (((read=buf.readLine()) != null) && !read.toUpperCase().equals(DL)) {
+            ProgressManager.getInstance().checkCanceled();
+            if (read.toUpperCase().indexOf(H2) != -1) {
+              data.append(H2 + "\n");
+              skip=true;
+            }
+ else             if (!skip)             data.append(read);
+          }
+          data.append(DL + "\n");
+          StringBuffer classDetails=new StringBuffer();
+          while (((read=buf.readLine()) != null) && !read.toUpperCase().equals(HR)) {
+            ProgressManager.getInstance().checkCanceled();
+            classDetails.append(read);
+            classDetails.append("\n");
+          }
+          while (((read=buf.readLine()) != null) && !read.toUpperCase().equals(P)) {
+            ProgressManager.getInstance().checkCanceled();
+            data.append(read);
+            data.append("\n");
+          }
+          data.append(classDetails);
+          data.append(P + "\n");
+        }
+        while (((read=buf.readLine()) != null) && read.indexOf(endSection) == -1) {
+          ProgressManager.getInstance().checkCanceled();
+          if (read.toUpperCase().indexOf(HR) == -1) {
+            data.append(read);
+            data.append("\n");
+          }
+        }
+        data.append(HTML_CLOSE + "\n");
       }
- catch (      IOException e) {
+ catch (      final IOException e) {
         showErrorMessage(e);
       }
+ finally {
+        if (buf != null) {
+          try {
+            buf.close();
+          }
+ catch (          IOException e) {
+            showErrorMessage(e);
+          }
+        }
+      }
     }
   }
-  String docText=correctRefs(root,data.toString());
-  if (LOG.isDebugEnabled()) {
-    LOG.debug("Filtered JavaDoc: " + docText + "\n");
+;
+  final boolean ok=ProgressManager.getInstance().runProcessWithProgressSynchronously(process,"Fetch external javadoc",true,myProject);
+  if (ok) {
+    final String docText=correctRefs(root,data.toString());
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Filtered JavaDoc: " + docText + "\n");
+    }
+    return JavaDocUtil.fixupText(docText);
   }
-  return JavaDocUtil.fixupText(docText);
+  return null;
 }
