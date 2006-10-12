@@ -1,0 +1,160 @@
+{
+  JavaParameters javaParameters=new JavaParameters();
+  javaParameters.getVMParametersList().add("-ea");
+  javaParameters.setMainClass("org.testng.remote.RemoteTestNG");
+  Module module=config.getConfigurationModule().getModule();
+  LanguageLevel effectiveLanguageLevel=module.getEffectiveLanguageLevel();
+  boolean is15=effectiveLanguageLevel != LanguageLevel.JDK_1_4 && effectiveLanguageLevel != LanguageLevel.JDK_1_3;
+  LOGGER.info("Language level is " + effectiveLanguageLevel.toString());
+  LOGGER.info("is15 is " + is15);
+  ClassLoader classLoader=getClass().getClassLoader();
+  try {
+    List<URL> urls=(List<URL>)classLoader.getClass().getMethod("getUrls",new Class[]{}).invoke(classLoader,new Object[0]);
+    for (    URL url : urls) {
+      if (!is15 && url.getFile().endsWith("testng-jdk15.jar")) {
+        File location=new File(PathManager.getPluginsPath(),"testngrunner/testng/testng-jdk14.jar");
+        LOGGER.info("Adding legacy library to classpath: " + location.getPath());
+        javaParameters.getClassPath().add(location.getPath());
+      }
+ else {
+        javaParameters.getClassPath().add(url.getFile());
+      }
+    }
+  }
+ catch (  Exception ex) {
+    LOGGER.error("Unable to determine plugin classpath from classloader " + classLoader,ex);
+    return null;
+  }
+  JavaParametersUtil.configureConfiguration(javaParameters,config);
+  Project project=config.getProject();
+  ProjectJdk jdk=module == null ? ProjectRootManager.getInstance(project).getProjectJdk() : ModuleRootManager.getInstance(module).getJdk();
+  javaParameters.setJdk(jdk);
+  PathUtilEx.addRtJar(javaParameters.getClassPath());
+  if (config.isCoverageEnabled()) {
+    config.appendCoverageArgument(javaParameters);
+  }
+  if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT) {
+    JavaParametersUtil.configureClassPath(javaParameters,project,config.ALTERNATIVE_JRE_PATH_ENABLED ? config.ALTERNATIVE_JRE_PATH : null);
+  }
+ else {
+    JavaParametersUtil.configureModule(config.getConfigurationModule(),javaParameters,JavaParameters.JDK_AND_CLASSES_AND_TESTS,config.ALTERNATIVE_JRE_PATH_ENABLED ? config.ALTERNATIVE_JRE_PATH : null);
+  }
+  calculateServerPort();
+  TestData data=config.getPersistantData();
+  PsiManager psiManager=PsiManager.getInstance(project);
+  javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.PORT_COMMAND_OPT,String.valueOf(port));
+  if (!is15) {
+    javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.DEFAULT_ANNOTATIONS_COMMAND_OPT,"javadoc");
+  }
+  VirtualFile[] sources;
+  if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT || module == null)   sources=ProjectRootManager.getInstance(project).getContentSourceRoots();
+ else   sources=ModuleRootManager.getInstance(module).getSourceRoots();
+  if (sources.length > 0) {
+    StringBuffer sb=new StringBuffer();
+    sb.append("\"");
+    for (    VirtualFile file : sources) {
+      sb.append(file.getPath());
+      sb.append(';');
+    }
+    sb.append("\"");
+    javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.SRC_COMMAND_OPT,sb.toString());
+  }
+  PsiClass[] testClasses=null;
+  PsiMethod[] testMethods=null;
+  if (data.TEST_OBJECT.equals(TestType.PACKAGE.getType())) {
+    final String packageName=data.getPackageName();
+    PsiPackage psiPackage=psiManager.findPackage(packageName);
+    if (psiPackage == null) {
+      throw CantRunException.packageNotFound(packageName);
+    }
+ else {
+      TestClassFilter filter=getFilter(psiPackage);
+      testClasses=getAllTestClasses(filter);
+      if (testClasses.length == 0) {
+        ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the package \"" + packageName + '\"'),"Can't Run " + config.getName(),project);
+        return null;
+      }
+    }
+  }
+ else   if (data.TEST_OBJECT.equals(TestType.CLASS.getType())) {
+    PsiClass psiClass=psiManager.findClass(data.getMainClassName(),data.getScope().getSourceScope(config).getGlobalSearchScope());
+    if (psiClass == null) {
+      ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
+      return null;
+    }
+    testClasses=new PsiClass[]{psiClass};
+  }
+ else   if (data.TEST_OBJECT.equals(TestType.METHOD.getType())) {
+    PsiClass psiClass=psiManager.findClass(data.getMainClassName(),data.getScope().getSourceScope(config).getGlobalSearchScope());
+    if (psiClass == null) {
+      ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
+      return null;
+    }
+    testClasses=new PsiClass[]{psiClass};
+    testMethods=psiClass.findMethodsByName(data.getMethodName(),false);
+  }
+ else   if (data.TEST_OBJECT.equals(TestType.GROUP.getType())) {
+    testClasses=getAllTestClasses(new TestClassFilter(data.getScope().getSourceScope(config).getGlobalSearchScope(),project,true));
+  }
+  if (testClasses != null) {
+    List<String> classNames=new ArrayList<String>(testClasses.length);
+    for (    PsiClass testClass : testClasses) {
+      classNames.add(testClass.getQualifiedName());
+    }
+    Collection<String> methodNames=null;
+    if (testMethods != null) {
+      methodNames=new HashSet<String>(testMethods.length);
+      for (      PsiMethod testMethod : testMethods) {
+        methodNames.add(testMethod.getName());
+      }
+    }
+    Collection<String> groupNames=null;
+    if (TestType.GROUP.getType().equals(data.TEST_OBJECT)) {
+      String groupName=config.getPersistantData().getGroupName();
+      if (groupName != null && groupName.length() > 0) {
+        groupNames=new HashSet<String>(1);
+        groupNames.add(groupName);
+      }
+    }
+    Map<String,String> testParams=convertPropertiesFileToMap(data.PROPERTIES_FILE);
+    testParams.putAll(data.TEST_PROPERTIES);
+    String annotationType=is15 ? TestNG.JDK5_ANNOTATION_TYPE : TestNG.JAVADOC_ANNOTATION_TYPE;
+    LOGGER.info("Using annotationType of " + annotationType);
+    LaunchSuite suite=SuiteGenerator.createCustomizedSuite(project.getName(),null,classNames,methodNames,groupNames,testParams,annotationType,1);
+    File xmlFile=suite.save(new File(PathManager.getSystemPath()));
+    javaParameters.getProgramParametersList().add(xmlFile.getAbsolutePath());
+  }
+ else   if (TestType.SUITE.getType().equals(data.TEST_OBJECT)) {
+    try {
+      Collection<XmlSuite> suites=new Parser(data.getSuiteName()).parse();
+      for (      XmlSuite suite : suites) {
+        Map<String,String> params=suite.getParameters();
+        Map<String,String> testParams=convertPropertiesFileToMap(data.PROPERTIES_FILE);
+        params.putAll(testParams);
+        params.putAll(data.TEST_PROPERTIES);
+        final String fileId=(project.getName() + '_' + suite.getName()+ '_'+ Integer.toHexString(suite.getName().hashCode())+ ".xml").replace(' ','_');
+        final File suiteFile=new File(PathManager.getSystemPath(),fileId);
+        FileWriter fileWriter=new FileWriter(suiteFile);
+        fileWriter.write(suite.toXml());
+        fileWriter.close();
+        javaParameters.getProgramParametersList().add(suiteFile.getAbsolutePath());
+      }
+    }
+ catch (    Exception e) {
+      ExecutionUtil.showExecutionErrorMessage(new CantRunException("Unable to parse suite: " + e.getMessage()),"Can't Run " + config.getName(),project);
+      return null;
+    }
+  }
+  if (runnerSettings.getData() instanceof DebuggingRunnerData) {
+    ParametersList params=javaParameters.getVMParametersList();
+    String hostname="localhost";
+    try {
+      hostname=InetAddress.getLocalHost().getHostName();
+    }
+ catch (    UnknownHostException e) {
+    }
+    params.add("-Xdebug");
+    params.add("-Xrunjdwp:transport=dt_socket,address=" + hostname + ':'+ debugPort+ ",suspend=y,server=n");
+  }
+  return javaParameters;
+}
