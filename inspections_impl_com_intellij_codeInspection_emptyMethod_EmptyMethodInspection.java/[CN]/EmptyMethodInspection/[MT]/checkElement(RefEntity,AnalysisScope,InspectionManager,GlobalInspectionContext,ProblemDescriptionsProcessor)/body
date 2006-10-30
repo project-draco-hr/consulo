@@ -1,0 +1,56 @@
+{
+  if (refEntity instanceof RefMethod) {
+    final RefMethod refMethod=(RefMethod)refEntity;
+    if (!isBodyEmpty(refMethod))     return null;
+    if (refMethod.isConstructor())     return null;
+    if (refMethod.isSyntheticJSP())     return null;
+    for (    RefMethod refSuper : refMethod.getSuperMethods()) {
+      if (checkElement(refSuper,scope,manager,globalContext,processor) != null)       return null;
+    }
+    if (SpecialAnnotationsUtil.isSpecialAnnotationPresent(refMethod.getElement(),STANDARD_EXCLUDE_ANNOS,EXCLUDE_ANNOS))     return null;
+    String message=null;
+    boolean needToDeleteHierarchy=false;
+    if (refMethod.isOnlyCallsSuper()) {
+      RefMethod refSuper=findSuperWithBody(refMethod);
+      if (refSuper == null || RefUtil.getInstance().compareAccess(refMethod.getAccessModifier(),refSuper.getAccessModifier()) <= 0) {
+        message=InspectionsBundle.message("inspection.empty.method.problem.descriptor");
+      }
+    }
+ else     if (refMethod.hasBody() && hasEmptySuperImplementation(refMethod)) {
+      message=InspectionsBundle.message("inspection.empty.method.problem.descriptor1");
+    }
+ else     if (areAllImplementationsEmpty(refMethod)) {
+      if (refMethod.hasBody()) {
+        if (refMethod.getDerivedMethods().size() == 0) {
+          if (refMethod.getSuperMethods().size() == 0) {
+            message=InspectionsBundle.message("inspection.empty.method.problem.descriptor2");
+          }
+        }
+ else {
+          needToDeleteHierarchy=true;
+          message=InspectionsBundle.message("inspection.empty.method.problem.descriptor3");
+        }
+      }
+ else {
+        if (refMethod.getDerivedMethods().size() > 0) {
+          needToDeleteHierarchy=true;
+          message=InspectionsBundle.message("inspection.empty.method.problem.descriptor4");
+        }
+      }
+    }
+    if (message != null) {
+      final ArrayList<LocalQuickFix> fixes=new ArrayList<LocalQuickFix>();
+      fixes.add(getFix(processor,needToDeleteHierarchy));
+      SpecialAnnotationsUtil.createAddToSpecialAnnotationFixes(refMethod.getElement(),new Processor<String>(){
+        public boolean process(        final String qualifiedName){
+          fixes.add(SpecialAnnotationsUtil.createAddToSpecialAnnotationsListQuickFix(QuickFixBundle.message("fix.add.special.annotation.text",qualifiedName),QuickFixBundle.message("fix.add.special.annotation.family"),EXCLUDE_ANNOS,qualifiedName,refMethod.getElement()));
+          return true;
+        }
+      }
+);
+      final ProblemDescriptor descriptor=manager.createProblemDescriptor(refMethod.getElement().getNavigationElement(),message,fixes.toArray(new LocalQuickFix[fixes.size()]),ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+      return new ProblemDescriptor[]{descriptor};
+    }
+  }
+  return null;
+}
