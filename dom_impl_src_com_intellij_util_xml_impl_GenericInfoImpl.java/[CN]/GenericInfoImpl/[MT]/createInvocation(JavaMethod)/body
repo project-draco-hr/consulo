@@ -3,7 +3,7 @@
   final JavaMethodSignature signature=method.getSignature();
   final PropertyAccessor accessor=signature.findAnnotation(PropertyAccessor.class,myClass);
   if (accessor != null) {
-    return createPropertyAccessorInvocation(accessor);
+    return new PropertyAccessorInvocation(DomReflectionUtil.getGetterMethods(accessor.value(),myClass));
   }
   if (myAttributeChildrenMethods.containsKey(signature)) {
     return new GetAttributeChildInvocation(signature);
@@ -11,85 +11,15 @@
   if (myFixedChildrenMethods.containsKey(signature)) {
     return new GetFixedChildInvocation(signature);
   }
-  final Set<String> qnames=myCompositeChildrenMethods.get(signature);
+  final Set<XmlName> qnames=myCompositeChildrenMethods.get(signature);
   if (qnames != null) {
-    return new Invocation(){
-      public Object invoke(      final DomInvocationHandler handler,      final Object[] args) throws Throwable {
-        for (        final String qname : qnames) {
-          handler.checkInitialized(qname);
-        }
-        final XmlTag tag=handler.getXmlTag();
-        if (tag == null)         return Collections.emptyList();
-        final List<DomElement> list=new ArrayList<DomElement>();
-        for (        final XmlTag subTag : tag.getSubTags()) {
-          if (qnames.contains(subTag.getLocalName())) {
-            final DomInvocationHandler element=DomManagerImpl.getCachedElement(subTag);
-            if (element != null) {
-              list.add(element.getProxy());
-            }
-          }
-        }
-        return list;
-      }
-    }
-;
+    return new GetCompositeCollectionInvocation(qnames);
   }
-  final Pair<String,Set<String>> pair=myCompositeCollectionAdditionMethods.get(signature);
+  final Pair<XmlName,Set<XmlName>> pair=myCompositeCollectionAdditionMethods.get(signature);
   if (pair != null) {
-    final Set<String> qnames1=pair.second;
-    final String tagName=pair.first;
-    final Type type=method.getGenericReturnType();
-    return new Invocation(){
-      public Object invoke(      final DomInvocationHandler handler,      final Object[] args) throws Throwable {
-        final VirtualFile virtualFile=handler.getFile().getVirtualFile();
-        if (virtualFile != null && !virtualFile.isWritable()) {
-          VirtualFileManager.getInstance().fireReadOnlyModificationAttempt(virtualFile);
-          return null;
-        }
-        for (        final String qname : qnames1) {
-          handler.checkInitialized(qname);
-        }
-        final XmlTag tag=handler.ensureTagExists();
-        int index=args != null && args.length == 1 ? (Integer)args[0] : Integer.MAX_VALUE;
-        XmlTag lastTag=null;
-        int i=0;
-        final XmlTag[] tags=tag.getSubTags();
-        for (        final XmlTag subTag : tags) {
-          if (i == index)           break;
-          if (qnames1.contains(subTag.getLocalName())) {
-            final DomInvocationHandler element=DomManagerImpl.getCachedElement(subTag);
-            if (element != null) {
-              lastTag=subTag;
-              i++;
-            }
-          }
-        }
-        final DomManagerImpl manager=handler.getManager();
-        final boolean b=manager.setChanging(true);
-        try {
-          final XmlTag emptyTag=tag.getManager().getElementFactory().createTagFromText("<" + tagName + "/>");
-          final XmlTag newTag;
-          if (lastTag == null) {
-            if (tags.length == 0) {
-              newTag=(XmlTag)tag.add(emptyTag);
-            }
- else {
-              newTag=(XmlTag)tag.addBefore(emptyTag,tags[0]);
-            }
-          }
- else {
-            newTag=(XmlTag)tag.addAfter(emptyTag,lastTag);
-          }
-          return new CollectionElementInvocationHandler(type,newTag,handler).getProxy();
-        }
-  finally {
-          manager.setChanging(b);
-        }
-      }
-    }
-;
+    return new AddToCompositeCollectionInvocation(pair.first,pair.second,method.getGenericReturnType());
   }
-  String qname=myCollectionChildrenGetterMethods.get(signature);
+  XmlName qname=myCollectionChildrenGetterMethods.get(signature);
   if (qname != null) {
     return new GetCollectionChildInvocation(qname);
   }
