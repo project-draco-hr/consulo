@@ -1,7 +1,8 @@
 {
   String[] pathNameComponents=myBeforeName.split("/");
   VirtualFile fileToPatch=patchedDir;
-  for (int i=skipTopDirs; i < pathNameComponents.length; i++) {
+  int lastComponentToFind=isNewFile() ? pathNameComponents.length - 1 : pathNameComponents.length;
+  for (int i=skipTopDirs; i < lastComponentToFind; i++) {
     fileToPatch=fileToPatch.findChild(pathNameComponents[i]);
     if (fileToPatch == null) {
       break;
@@ -10,13 +11,24 @@
   if (fileToPatch == null) {
     throw new ApplyPatchException("Cannot find file to patch: " + myBeforeName);
   }
-  CharSequence text=LoadTextUtil.loadText(fileToPatch);
-  List<String> lines=new ArrayList<String>();
-  Collections.addAll(lines,LineTokenizer.tokenize(text,false));
-  for (  PatchHunk hunk : myHunks) {
-    hunk.apply(lines);
+  if (isNewFile()) {
+    VirtualFile newFile=fileToPatch.createChildData(this,pathNameComponents[pathNameComponents.length - 1]);
+    final Document document=FileDocumentManager.getInstance().getDocument(newFile);
+    document.setText(myHunks.get(0).getText());
+    FileDocumentManager.getInstance().saveDocument(document);
   }
-  final Document document=FileDocumentManager.getInstance().getDocument(fileToPatch);
-  document.setText(StringUtil.join(lines,"\n") + "\n");
-  FileDocumentManager.getInstance().saveDocument(document);
+ else   if (isDeletedFile()) {
+    fileToPatch.delete(this);
+  }
+ else {
+    CharSequence text=LoadTextUtil.loadText(fileToPatch);
+    List<String> lines=new ArrayList<String>();
+    Collections.addAll(lines,LineTokenizer.tokenize(text,false));
+    for (    PatchHunk hunk : myHunks) {
+      hunk.apply(lines);
+    }
+    final Document document=FileDocumentManager.getInstance().getDocument(fileToPatch);
+    document.setText(StringUtil.join(lines,"\n") + "\n");
+    FileDocumentManager.getInstance().saveDocument(document);
+  }
 }
