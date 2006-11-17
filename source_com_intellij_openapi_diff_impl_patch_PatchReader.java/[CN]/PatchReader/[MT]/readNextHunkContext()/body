@@ -1,0 +1,72 @@
+{
+  String curLine=myLines[myLineIndex];
+  if (!curLine.startsWith("***************")) {
+    throw new PatchSyntaxException(myLineIndex,"Hunk start expected");
+  }
+  myLineIndex++;
+  Matcher beforeMatcher=ourContextBeforeHunkStartPattern.matcher(myLines[myLineIndex]);
+  if (!beforeMatcher.matches()) {
+    throw new PatchSyntaxException(myLineIndex,"Unknown before hunk start syntax");
+  }
+  myLineIndex++;
+  List<String> beforeLines=readContextDiffLines("---");
+  if (myLineIndex == myLines.length) {
+    throw new PatchSyntaxException(myLineIndex,"Missing after hunk");
+  }
+  Matcher afterMatcher=ourContextAfterHunkStartPattern.matcher(myLines[myLineIndex]);
+  if (!afterMatcher.matches()) {
+    throw new PatchSyntaxException(myLineIndex,"Unknown before hunk start syntax");
+  }
+  myLineIndex++;
+  List<String> afterLines=readContextDiffLines("***");
+  int startLineBefore=Integer.parseInt(beforeMatcher.group(1));
+  int endLineBefore=Integer.parseInt(beforeMatcher.group(2));
+  int startLineAfter=Integer.parseInt(afterMatcher.group(1));
+  int endLineAfter=Integer.parseInt(afterMatcher.group(2));
+  PatchHunk hunk=new PatchHunk(startLineBefore,endLineBefore,startLineAfter,endLineAfter);
+  int beforeLineIndex=0;
+  int afterLineIndex=0;
+  if (beforeLines.size() == 0) {
+    for (    String line : afterLines) {
+      hunk.addLine(parsePatchLine(line,2));
+    }
+  }
+ else   if (afterLines.size() == 0) {
+    for (    String line : beforeLines) {
+      hunk.addLine(parsePatchLine(line,2));
+    }
+  }
+ else {
+    while (beforeLineIndex < beforeLines.size() && afterLineIndex < afterLines.size()) {
+      String beforeLine=beforeLines.get(beforeLineIndex);
+      String afterLine=afterLines.get(afterLineIndex);
+      if (beforeLine.startsWith(" ") && afterLine.startsWith(" ")) {
+        hunk.addLine(new PatchLine(PatchLine.Type.CONTEXT,beforeLine.substring(2)));
+        beforeLineIndex++;
+        afterLineIndex++;
+      }
+ else       if (beforeLine.startsWith("-")) {
+        hunk.addLine(new PatchLine(PatchLine.Type.REMOVE,beforeLine.substring(2)));
+        beforeLineIndex++;
+      }
+ else       if (afterLine.startsWith("+")) {
+        hunk.addLine(new PatchLine(PatchLine.Type.ADD,afterLine.substring(2)));
+        afterLineIndex++;
+      }
+ else       if (beforeLine.startsWith("!") && afterLine.startsWith("!")) {
+        while (beforeLineIndex < beforeLines.size() && beforeLines.get(beforeLineIndex).startsWith("! ")) {
+          hunk.addLine(new PatchLine(PatchLine.Type.REMOVE,beforeLines.get(beforeLineIndex).substring(2)));
+          beforeLineIndex++;
+        }
+        while (afterLineIndex < afterLines.size() && afterLines.get(afterLineIndex).startsWith("! ")) {
+          hunk.addLine(new PatchLine(PatchLine.Type.ADD,afterLines.get(afterLineIndex).substring(2)));
+          afterLineIndex++;
+        }
+      }
+ else {
+        throw new PatchSyntaxException(-1,"Unknown line prefix");
+      }
+    }
+  }
+  return hunk;
+}
