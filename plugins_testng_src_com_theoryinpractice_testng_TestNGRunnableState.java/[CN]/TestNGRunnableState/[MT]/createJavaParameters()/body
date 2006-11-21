@@ -49,23 +49,22 @@
   TestNGDefaultConfigurationComponent testng=project.getComponent(TestNGDefaultConfigurationComponent.class);
   String outputDirectory=testng.getDefaultSettings().getOutputDirectory();
   if (outputDirectory != null && !"".equals(outputDirectory)) {
-    javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.OUTDIR_COMMAND_OPT,"\"" + outputDirectory + "\"");
+    javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.OUTDIR_COMMAND_OPT,'\"' + outputDirectory + '\"');
   }
   VirtualFile[] sources;
   if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT || module == null)   sources=ProjectRootManager.getInstance(project).getContentSourceRoots();
  else   sources=ModuleRootManager.getInstance(module).getSourceRoots();
   if (sources.length > 0) {
     StringBuffer sb=new StringBuffer();
-    sb.append("\"");
+    sb.append('\"');
     for (    VirtualFile file : sources) {
       sb.append(file.getPath());
       sb.append(';');
     }
-    sb.append("\"");
+    sb.append('\"');
     javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.SRC_COMMAND_OPT,sb.toString());
   }
-  PsiClass[] testClasses=null;
-  PsiMethod[] testMethods=null;
+  Map<PsiClass,Collection<PsiMethod>> classes=new HashMap<PsiClass,Collection<PsiMethod>>();
   if (data.TEST_OBJECT.equals(TestType.PACKAGE.getType())) {
     final String packageName=data.getPackageName();
     PsiPackage psiPackage=psiManager.findPackage(packageName);
@@ -74,8 +73,8 @@
     }
  else {
       TestClassFilter filter=getFilter(psiPackage);
-      testClasses=getAllTestClasses(filter);
-      if (testClasses.length == 0) {
+      classes=calculateDependencies(data,true,getAllTestClasses(filter));
+      if (classes.size() == 0) {
         ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the package \"" + packageName + '\"'),"Can't Run " + config.getName(),project);
         return null;
       }
@@ -87,7 +86,7 @@
       ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
       return null;
     }
-    testClasses=new PsiClass[]{psiClass};
+    classes=calculateDependencies(data,true,psiClass);
   }
  else   if (data.TEST_OBJECT.equals(TestType.METHOD.getType())) {
     PsiClass psiClass=psiManager.findClass(data.getMainClassName(),data.getScope().getSourceScope(config).getGlobalSearchScope());
@@ -95,23 +94,23 @@
       ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
       return null;
     }
-    testClasses=new PsiClass[]{psiClass};
-    testMethods=psiClass.findMethodsByName(data.getMethodName(),false);
+    classes=calculateDependencies(data,false,psiClass);
+    classes.put(psiClass,Arrays.asList(psiClass.findMethodsByName(data.getMethodName(),false)));
   }
  else   if (data.TEST_OBJECT.equals(TestType.GROUP.getType())) {
-    testClasses=getAllTestClasses(new TestClassFilter(data.getScope().getSourceScope(config).getGlobalSearchScope(),project,true));
-  }
-  if (testClasses != null) {
-    List<String> classNames=new ArrayList<String>(testClasses.length);
-    for (    PsiClass testClass : testClasses) {
-      classNames.add(testClass.getQualifiedName());
+    PsiClass[] testClasses=getAllTestClasses(new TestClassFilter(data.getScope().getSourceScope(config).getGlobalSearchScope(),project,true));
+    for (    PsiClass c : testClasses) {
+      classes.put(c,new HashSet<PsiMethod>());
     }
-    Collection<String> methodNames=null;
-    if (testMethods != null) {
-      methodNames=new HashSet<String>(testMethods.length);
-      for (      PsiMethod testMethod : testMethods) {
-        methodNames.add(testMethod.getName());
+  }
+  if (classes.size() > 0) {
+    Map<String,Collection<String>> map=new HashMap<String,Collection<String>>();
+    for (    Map.Entry<PsiClass,Collection<PsiMethod>> entry : classes.entrySet()) {
+      Collection<String> methods=new HashSet<String>(entry.getValue().size());
+      for (      PsiMethod method : entry.getValue()) {
+        methods.add(method.getName());
       }
+      map.put(entry.getKey().getQualifiedName(),methods);
     }
     Collection<String> groupNames=null;
     if (TestType.GROUP.getType().equals(data.TEST_OBJECT)) {
@@ -124,7 +123,7 @@
     Map<String,String> testParams=buildTestParameters(project,data);
     String annotationType=is15 ? TestNG.JDK_ANNOTATION_TYPE : TestNG.JAVADOC_ANNOTATION_TYPE;
     LOGGER.info("Using annotationType of " + annotationType);
-    LaunchSuite suite=SuiteGenerator.createCustomizedSuite(project.getName(),null,classNames,methodNames,groupNames,testParams,annotationType,1);
+    LaunchSuite suite=SuiteGenerator.createSuite(project.getName(),null,map,groupNames,testParams,annotationType,1);
     File xmlFile=suite.save(new File(PathManager.getSystemPath()));
     javaParameters.getProgramParametersList().add(xmlFile.getAbsolutePath());
   }
