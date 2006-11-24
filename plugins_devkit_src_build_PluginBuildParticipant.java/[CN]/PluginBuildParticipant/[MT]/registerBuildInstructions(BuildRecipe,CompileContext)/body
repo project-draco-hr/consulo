@@ -1,0 +1,94 @@
+{
+  super.registerBuildInstructions(instructions,context);
+  final ProjectJdk jdk=ModuleRootManager.getInstance(myModule).getJdk();
+  if (jdk == null || !(jdk.getSdkType() instanceof IdeaJdk)) {
+    context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("jdk.type.incorrect",myModule.getName()),null,-1,-1);
+    return;
+  }
+  final Module[] wrongSetDependencies=PluginBuildUtil.getWrongSetDependencies(myModule);
+  if (wrongSetDependencies.length != 0) {
+    boolean realProblems=false;
+    final String pluginId=DescriptorUtil.getPluginId(myModule);
+    for (    Module module : wrongSetDependencies) {
+      if (!PluginModuleType.isOfType(module)) {
+        realProblems=true;
+        context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.non-plugin-module",module.getName(),myModule.getName()),null,-1,-1);
+      }
+ else {
+        final XmlFile pluginXml=PluginModuleType.getPluginXml(module);
+        boolean isDeclared=false;
+        if (pluginXml != null) {
+          final XmlTag rootTag=pluginXml.getDocument().getRootTag();
+          final XmlTag[] dependencies=rootTag != null ? rootTag.findSubTags("depends") : XmlTag.EMPTY;
+          for (          XmlTag dep : dependencies) {
+            if (dep.getValue().getTrimmedText().equals(pluginId)) {
+              isDeclared=true;
+              break;
+            }
+          }
+        }
+        if (!isDeclared) {
+          realProblems=true;
+          context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.not-declared",module.getName(),myModule.getName()),null,-1,-1);
+        }
+      }
+    }
+    if (realProblems)     return;
+  }
+  final PluginModuleBuildProperties moduleBuild=(PluginModuleBuildProperties)ModuleBuildProperties.getInstance(myModule);
+  final String explodedPath=moduleBuild.getExplodedPath();
+  if (explodedPath == null)   return;
+  HashSet<Module> modules=new HashSet<Module>();
+  PluginBuildUtil.getDependencies(myModule,modules);
+  ModuleLink[] containingModules=new ModuleLink[modules.size()];
+  int i=0;
+  final DeploymentUtil makeUtil=DeploymentUtil.getInstance();
+  for (  Module dep : modules) {
+    ModuleLink link=makeUtil.createModuleLink(dep,myModule);
+    containingModules[i++]=link;
+    link.setPackagingMethod(PackagingMethod.COPY_FILES);
+    link.setURI(CLASSES);
+  }
+  makeUtil.addModuleOutputContents(context,instructions,myModule,myModule,CLASSES,explodedPath,null);
+  makeUtil.addJavaModuleOutputs(myModule,containingModules,instructions,context,explodedPath);
+  HashSet<Library> libs=new HashSet<Library>();
+  PluginBuildUtil.getLibraries(myModule,libs);
+  for (  Module module : modules) {
+    PluginBuildUtil.getLibraries(module,libs);
+  }
+  myLibraryLinks=new LibraryLink[libs.size()];
+  i=0;
+  for (  Library library : libs) {
+    LibraryLink link=makeUtil.createLibraryLink(library,myModule);
+    myLibraryLinks[i++]=link;
+    link.setPackagingMethod(PackagingMethod.COPY_FILES);
+    final String singleFileName=link.getSingleFileName();
+    final boolean onlyDirs=link.hasDirectoriesOnly();
+    if (onlyDirs) {
+      link.setURI(CLASSES);
+    }
+ else {
+      if (singleFileName != null) {
+        link.setURI(LIB + singleFileName);
+      }
+ else {
+        link.setURI(LIB);
+      }
+    }
+  }
+  final @NonNls String lib="lib";
+  final VirtualFile libDir=VfsUtil.findRelativeFile(lib,jdk.getHomeDirectory());
+  for (i=0; i < myLibraryLinks.length; i++) {
+    LibraryLink libraryLink=myLibraryLinks[i];
+    VirtualFile[] files=libraryLink.getLibrary().getFiles(OrderRootType.CLASSES);
+    for (    VirtualFile file : files) {
+      if (file.getFileSystem() instanceof JarFileSystem) {
+        file=((JarFileSystem)file.getFileSystem()).getVirtualFileForJar(file);
+      }
+      if (VfsUtil.isAncestor(libDir,file,false)) {
+        context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("dont.add.idea.libs.to.classpath",file.getName()),null,-1,-1);
+      }
+    }
+    makeUtil.addLibraryLink(context,instructions,libraryLink,myModule,explodedPath);
+  }
+}
