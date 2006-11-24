@@ -1,13 +1,14 @@
 {
+  List<FilePatch> result=new ArrayList<FilePatch>();
   for (  Change c : changes) {
     final ContentRevision beforeRevision=c.getBeforeRevision();
     final ContentRevision afterRevision=c.getAfterRevision();
     if (beforeRevision == null) {
-      writeAddedFile(writer,basePath,afterRevision);
+      result.add(buildAddedFile(basePath,afterRevision));
       continue;
     }
     if (afterRevision == null) {
-      writeDeletedFile(writer,basePath,beforeRevision);
+      result.add(buildDeletedFile(basePath,beforeRevision));
       continue;
     }
     final String beforeContent=beforeRevision.getContent();
@@ -18,7 +19,8 @@
     DiffFragment[] step1lineFragments=new DiffCorrection.TrueLineBlocks(ComparisonPolicy.DEFAULT).correctAndNormalize(woFormattingBlocks);
     ArrayList<LineFragment> fragments=new DiffFragmentsProcessor().process(step1lineFragments);
     if (fragments.size() > 1) {
-      writeFileHeading(writer,basePath,beforeRevision,afterRevision);
+      FilePatch patch=buildPatchHeading(basePath,beforeRevision,afterRevision);
+      result.add(patch);
       int lastLine1=0;
       int lastLine2=0;
       while (fragments.size() > 0) {
@@ -34,24 +36,26 @@
           int contextStart2=Math.max(start2 - CONTEXT_LINES,lastLine2);
           int contextEnd1=Math.min(end1 + CONTEXT_LINES,beforeLines.length);
           int contextEnd2=Math.min(end2 + CONTEXT_LINES,afterLines.length);
-          writeDiffFragmentStart(writer,contextStart1,contextEnd1,contextStart2,contextEnd2);
+          PatchHunk hunk=new PatchHunk(contextStart1,contextEnd1,contextStart2,contextEnd2);
+          patch.addHunk(hunk);
           for (          LineFragment fragment : adjacentFragments) {
             for (int i=contextStart1; i < fragment.getStartingLine1(); i++) {
-              writeLine(writer,beforeLines[i],' ');
+              hunk.addLine(new PatchLine(PatchLine.Type.CONTEXT,beforeLines[i]));
             }
             for (int i=fragment.getStartingLine1(); i < fragment.getStartingLine1() + fragment.getModifiedLines1(); i++) {
-              writeLine(writer,beforeLines[i],'-');
+              hunk.addLine(new PatchLine(PatchLine.Type.REMOVE,beforeLines[i]));
             }
             for (int i=fragment.getStartingLine2(); i < fragment.getStartingLine2() + fragment.getModifiedLines2(); i++) {
-              writeLine(writer,afterLines[i],'+');
+              hunk.addLine(new PatchLine(PatchLine.Type.ADD,afterLines[i]));
             }
             contextStart1=fragment.getStartingLine1() + fragment.getModifiedLines1();
           }
           for (int i=contextStart1; i < contextEnd1; i++) {
-            writeLine(writer,beforeLines[i],' ');
+            hunk.addLine(new PatchLine(PatchLine.Type.CONTEXT,beforeLines[i]));
           }
         }
       }
     }
   }
+  return result;
 }
