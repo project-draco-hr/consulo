@@ -1,79 +1,52 @@
 {
   if (!HighlightUtil.shouldInspect(myFile))   return;
   final InspectionManagerEx iManager=(InspectionManagerEx)InspectionManager.getInstance(myProject);
-  final Set<PsiElement> workSet=getWorkSet(myFile,myStartOffset,myEndOffset);
   final InspectionProfileWrapper profile=InspectionProjectProfileManager.getInstance(myProject).getProfileWrapper(myFile);
   final LocalInspectionTool[] tools=profile.getHighlightingLocalInspectionTools();
-  final ProblemsHolder holder=new ProblemsHolder(iManager);
-  final List<Pair<LocalInspectionTool,PsiElementVisitor>> visitors=new ArrayList<Pair<LocalInspectionTool,PsiElementVisitor>>();
-  for (  LocalInspectionTool tool : tools) {
-    final PsiElementVisitor visitor=tool.buildVisitor(holder,true);
-    if (visitor != null) {
-      LOG.assertTrue(!(visitor instanceof PsiRecursiveElementVisitor),"The visitor returned from LocalInspectionTool.buildVisitor() must not be recursive");
-      visitors.add(new Pair<LocalInspectionTool,PsiElementVisitor>(tool,visitor));
+  final PsiElement[] elements=getElementsIntersectingRange(myFile,myStartOffset,myEndOffset);
+  final ProgressManager progressManager=ProgressManager.getInstance();
+  final int chunkSize=Math.max(10,tools.length / Runtime.getRuntime().availableProcessors() / 10);
+  List<Runnable> inspectionChunks=new ArrayList<Runnable>();
+  final ProgressIndicator daemonIndicator=progressManager.getProgressIndicator();
+  for (int v=0; v < tools.length; v+=chunkSize) {
+    final int index=v;
+    Runnable chunk=new Runnable(){
+      public void run(){
+        if (daemonIndicator != null) {
+          ((ProgressManagerImpl)progressManager).progressMe(daemonIndicator);
+        }
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            ProblemsHolder holder=new ProblemsHolder(iManager);
+            try {
+              for (int i=index; i < index + chunkSize && i < tools.length; i++) {
+                LocalInspectionTool tool=tools[i];
+                PsiElementVisitor elementVisitor=tool.buildVisitor(holder,true);
+                for (                PsiElement element : elements) {
+                  element.accept(elementVisitor);
+                }
+                if (holder.hasResults()) {
+                  appendDescriptors(holder.getResults(),tool);
+                }
+              }
+            }
+ catch (            ProcessCanceledException e) {
+            }
+          }
+        }
+);
+      }
     }
+;
+    inspectionChunks.add(chunk);
   }
-  for (  PsiElement element : workSet) {
-    ProgressManager.getInstance().checkCanceled();
-    LocalInspectionTool currentTool=null;
-    try {
-      if (element instanceof PsiMethod) {
-        PsiMethod psiMethod=(PsiMethod)element;
-        for (        LocalInspectionTool tool : tools) {
-          currentTool=tool;
-          if (GlobalInspectionContextImpl.isToCheckMember(psiMethod,currentTool.getID())) {
-            appendDescriptors(currentTool.checkMethod(psiMethod,iManager,true),currentTool);
-          }
-        }
-      }
- else       if (element instanceof PsiClass && !(element instanceof PsiTypeParameter)) {
-        PsiClass psiClass=(PsiClass)element;
-        for (        LocalInspectionTool tool : tools) {
-          currentTool=tool;
-          if (GlobalInspectionContextImpl.isToCheckMember(psiClass,currentTool.getID())) {
-            appendDescriptors(currentTool.checkClass(psiClass,iManager,true),currentTool);
-          }
-        }
-      }
- else       if (element instanceof PsiField) {
-        PsiField psiField=(PsiField)element;
-        for (        LocalInspectionTool tool : tools) {
-          currentTool=tool;
-          if (GlobalInspectionContextImpl.isToCheckMember(psiField,currentTool.getID())) {
-            appendDescriptors(currentTool.checkField(psiField,iManager,true),currentTool);
-          }
-        }
-      }
- else       if (element instanceof PsiFile) {
-        PsiFile psiFile=(PsiFile)element;
-        for (        LocalInspectionTool tool : tools) {
-          currentTool=tool;
-          appendDescriptors(currentTool.checkFile(psiFile,iManager,true),currentTool);
-        }
-      }
-    }
- catch (    ProcessCanceledException e) {
-      throw e;
-    }
-catch (    Exception e) {
-      if (currentTool != null) {
-        LOG.error("Exception happened in local inspection tool: " + currentTool.getDisplayName(),e);
-      }
- else {
-        LOG.error(e);
-      }
-    }
+  try {
+    invokeAll(inspectionChunks);
   }
-  final List<PsiElement> elements=getElementsIntersectingRange(myFile,myStartOffset,myEndOffset);
-  if (!visitors.isEmpty()) {
-    for (int i=0; i < elements.size(); i++) {
-      PsiElement element=elements.get(i);
-      for (int j=0; j < visitors.size(); j++) {
-        Pair<LocalInspectionTool,PsiElementVisitor> visitor=visitors.get(j);
-        element.accept(visitor.getSecond());
-        appendDescriptors(holder.getResults(),visitor.getFirst());
-      }
-    }
+ catch (  ProcessCanceledException e) {
+  }
+catch (  Throwable e) {
+    LOG.error(e);
   }
   inspectInjectedPsi(elements);
 }
