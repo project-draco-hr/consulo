@@ -4,17 +4,18 @@
   final InspectionProfileWrapper profile=InspectionProjectProfileManager.getInstance(myProject).getProfileWrapper(myFile);
   final LocalInspectionTool[] tools=profile.getHighlightingLocalInspectionTools();
   final PsiElement[] elements=getElementsIntersectingRange(myFile,myStartOffset,myEndOffset);
-  final ProgressManager progressManager=ProgressManager.getInstance();
   final int chunkSize=Math.max(10,tools.length / Runtime.getRuntime().availableProcessors() / 10);
   List<Runnable> inspectionChunks=new ArrayList<Runnable>();
-  final ProgressIndicator daemonIndicator=progressManager.getProgressIndicator();
   for (int v=0; v < tools.length; v+=chunkSize) {
     final int index=v;
     Runnable chunk=new Runnable(){
       public void run(){
-        if (daemonIndicator != null) {
-          ((ProgressManagerImpl)progressManager).progressMe(daemonIndicator);
+        if (myProgressIndicator != null) {
+          if (myProgressIndicator.isCanceled())           return;
+          ((ProgressManagerImpl)ProgressManager.getInstance()).progressMe(myProgressIndicator);
         }
+        @NonNls final String myName="LocalInspections from " + index + " to "+ (index + chunkSize);
+        PassExecutorService.info("Started " + myName,myProgressIndicator);
         ApplicationManager.getApplication().runReadAction(new Runnable(){
           public void run(){
             ProblemsHolder holder=new ProblemsHolder(iManager);
@@ -23,7 +24,9 @@
                 LocalInspectionTool tool=tools[i];
                 PsiElementVisitor elementVisitor=tool.buildVisitor(holder,true);
                 for (                PsiElement element : elements) {
-                  progressManager.checkCanceled();
+                  if (myProgressIndicator != null) {
+                    myProgressIndicator.checkCanceled();
+                  }
                   element.accept(elementVisitor);
                 }
                 if (holder.hasResults()) {
@@ -32,10 +35,12 @@
               }
             }
  catch (            ProcessCanceledException e) {
+              PassExecutorService.info("Canceled " + myName,myProgressIndicator);
             }
           }
         }
 );
+        PassExecutorService.info("Finished " + myName,myProgressIndicator);
       }
     }
 ;
