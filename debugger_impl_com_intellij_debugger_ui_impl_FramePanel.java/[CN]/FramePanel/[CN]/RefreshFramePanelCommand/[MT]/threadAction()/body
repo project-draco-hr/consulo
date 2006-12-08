@@ -4,23 +4,54 @@
   if (threadToSelect == null) {
     return;
   }
-  final List<ThreadDescriptorImpl> threadItems=getThreadList();
-  SuspendContextImpl threadContext=SuspendManagerUtil.getSuspendContextForThread(context.getSuspendContext(),threadToSelect);
-  context.getDebugProcess().getManagerThread().invokeLater(new RefreshFramesListCommand(context,threadContext));
-  DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
-    public void run(){
-      try {
-        myThreadsListener.setEnabled(false);
-        myThreadsCombo.removeAllItems();
-        for (        final ThreadDescriptorImpl threadItem : threadItems) {
-          myThreadsCombo.addItem(threadItem);
+  final SuspendContextImpl threadContext=SuspendManagerUtil.getSuspendContextForThread(context.getSuspendContext(),threadToSelect);
+  final ThreadDescriptorImpl currentThreadDescriptor=(ThreadDescriptorImpl)myThreadsCombo.getSelectedItem();
+  final ThreadReferenceProxyImpl currentThread=currentThreadDescriptor != null ? currentThreadDescriptor.getThreadReference() : null;
+  if (myRefreshOnly && threadToSelect.equals(currentThread)) {
+    context.getDebugProcess().getManagerThread().invokeLater(new UpdateFramesListCommand(context,threadContext));
+  }
+ else {
+    context.getDebugProcess().getManagerThread().invokeLater(new RebuildFramesListCommand(context,threadContext));
+  }
+  if (myRefreshOnly) {
+    final DefaultComboBoxModel model=(DefaultComboBoxModel)myThreadsCombo.getModel();
+    final int size=model.getSize();
+    final EvaluationContextImpl evaluationContext=context.createEvaluationContext();
+    for (int idx=0; idx < size; idx++) {
+      final ThreadDescriptorImpl descriptor=(ThreadDescriptorImpl)model.getElementAt(idx);
+      descriptor.setContext(evaluationContext);
+      descriptor.updateRepresentation(evaluationContext,DescriptorLabelListener.DUMMY_LISTENER);
+    }
+    DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+      public void run(){
+        try {
+          myThreadsListener.setEnabled(false);
+          selectThread(threadToSelect);
         }
-        selectThread(threadToSelect);
-      }
   finally {
-        myThreadsListener.setEnabled(true);
+          myThreadsListener.setEnabled(true);
+        }
       }
     }
-  }
 );
+  }
+ else {
+    final List<ThreadDescriptorImpl> threadItems=createThreadDescriptorsList();
+    DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+      public void run(){
+        try {
+          myThreadsListener.setEnabled(false);
+          myThreadsCombo.removeAllItems();
+          for (          final ThreadDescriptorImpl threadItem : threadItems) {
+            myThreadsCombo.addItem(threadItem);
+          }
+          selectThread(threadToSelect);
+        }
+  finally {
+          myThreadsListener.setEnabled(true);
+        }
+      }
+    }
+);
+  }
 }
