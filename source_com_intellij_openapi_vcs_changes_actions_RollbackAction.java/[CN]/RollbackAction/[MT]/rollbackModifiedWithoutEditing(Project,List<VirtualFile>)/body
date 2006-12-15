@@ -1,0 +1,40 @@
+{
+  String message=(modifiedWithoutEditing.size() == 1) ? VcsBundle.message("rollback.modified.without.editing.confirm.single",modifiedWithoutEditing.get(0).getPresentableUrl()) : VcsBundle.message("rollback.modified.without.editing.confirm.multiple",modifiedWithoutEditing.size());
+  int rc=Messages.showYesNoDialog(project,message,VcsBundle.message("changes.action.rollback.title"),Messages.getQuestionIcon());
+  if (rc != 0) {
+    return;
+  }
+  final List<VcsException> exceptions=new ArrayList<VcsException>();
+  EditAction.editFiles(project,modifiedWithoutEditing,exceptions);
+  if (exceptions.size() == 0) {
+    final ChangeListManager changeListManager=ChangeListManager.getInstance(project);
+    changeListManager.ensureUpToDate(true);
+    List<Change> changesToRollback=new ArrayList<Change>();
+    for (    VirtualFile virtualFile : modifiedWithoutEditing) {
+      final Change change=changeListManager.getChange(virtualFile);
+      if (change != null) {
+        changesToRollback.add(change);
+      }
+    }
+    if (changesToRollback.size() > 0) {
+      ChangesUtil.processChangesByVcs(project,changesToRollback,new ChangesUtil.PerVcsProcessor<Change>(){
+        public void process(        final AbstractVcs vcs,        final List<Change> items){
+          final CheckinEnvironment checkinEnvironment=vcs.getCheckinEnvironment();
+          if (checkinEnvironment != null) {
+            checkinEnvironment.rollbackChanges(items);
+          }
+        }
+      }
+);
+      VirtualFileManager.getInstance().refresh(true,new Runnable(){
+        public void run(){
+          for (          VirtualFile virtualFile : modifiedWithoutEditing) {
+            VcsDirtyScopeManager.getInstance(project).fileDirty(virtualFile);
+            FileStatusManager.getInstance(project).fileStatusChanged(virtualFile);
+          }
+        }
+      }
+);
+    }
+  }
+}

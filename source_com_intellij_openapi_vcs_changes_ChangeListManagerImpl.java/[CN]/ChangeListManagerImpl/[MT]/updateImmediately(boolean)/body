@@ -7,19 +7,23 @@ synchronized (myPendingUpdatesLock) {
     final VcsDirtyScopeManagerImpl dirtyScopeManager=((VcsDirtyScopeManagerImpl)VcsDirtyScopeManager.getInstance(myProject));
     final boolean wasEverythingDirty=dirtyScopeManager.isEverythingDirty();
     final List<VcsDirtyScope> scopes=dirtyScopeManager.retreiveScopes();
-    final UnversionedFilesHolder unversionedHolder;
+    final VirtualFileHolder unversionedHolder;
+    final VirtualFileHolder modifiedWithoutEditingHolder;
     final DeletedFilesHolder deletedHolder;
     if (updateUnversionedFiles) {
       unversionedHolder=myUnversionedFilesHolder.copy();
       deletedHolder=myDeletedFilesHolder.copy();
+      modifiedWithoutEditingHolder=myModifiedWithoutEditingHolder.copy();
       if (wasEverythingDirty) {
         unversionedHolder.cleanAll();
         deletedHolder.cleanAll();
+        modifiedWithoutEditingHolder.cleanAll();
       }
     }
  else {
       unversionedHolder=myUnversionedFilesHolder;
       deletedHolder=myDeletedFilesHolder;
+      modifiedWithoutEditingHolder=myModifiedWithoutEditingHolder;
     }
     for (    final VcsDirtyScope scope : scopes) {
       final AbstractVcs vcs=scope.getVcs();
@@ -40,6 +44,7 @@ synchronized (myChangeLists) {
       if (updateUnversionedFiles && !wasEverythingDirty) {
         unversionedHolder.cleanScope(scope);
         deletedHolder.cleanScope(scope);
+        modifiedWithoutEditingHolder.cleanScope(scope);
       }
       try {
         final ChangeProvider changeProvider=vcs.getChangeProvider();
@@ -96,7 +101,13 @@ synchronized (myChangeLists) {
               }
             }
             public void processModifiedWithoutEditing(            VirtualFile file){
+              if (file == null || !updateUnversionedFiles)               return;
               if (myDisposed)               throw new DisposedException();
+              if (FileTypeManager.getInstance().isFileIgnored(file.getName()))               return;
+              if (scope.belongsTo(PeerFactory.getInstance().getVcsContextFactory().createFilePathOn(file))) {
+                modifiedWithoutEditingHolder.addFile(file);
+                ChangesViewManager.getInstance(myProject).scheduleRefresh();
+              }
             }
             public boolean isUpdatingUnversionedFiles(){
               return updateUnversionedFiles;
@@ -124,6 +135,7 @@ synchronized (myChangeLists) {
       if (updateUnversionedFiles) {
         myUnversionedFilesHolder=unversionedHolder;
         myDeletedFilesHolder=deletedHolder;
+        myModifiedWithoutEditingHolder=modifiedWithoutEditingHolder;
       }
       myListeners.getMulticaster().changeListUpdateDone();
     }
