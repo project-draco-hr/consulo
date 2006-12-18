@@ -1,44 +1,38 @@
 {
-synchronized (PsiLock.LOCK) {
-    if (myProcessed)     return;
-    myProcessed=true;
-  }
-  PsiScopesUtil.walkChildrenScopes(this,new BaseScopeProcessor(){
-    public boolean execute(    PsiElement element,    PsiSubstitutor substitutor){
-synchronized (PsiLock.LOCK) {
+  Set<String> set1=myClassesSet;
+  Set<String> set2=myVariablesSet;
+  boolean wasConflict=myConflict;
+  if (set1 == null || set2 == null) {
+    final Set<String> localsSet=new THashSet<String>();
+    final Set<String> classesSet=new THashSet<String>();
+    final Ref<Boolean> conflict=new Ref<Boolean>(Boolean.FALSE);
+    PsiScopesUtil.walkChildrenScopes(this,new BaseScopeProcessor(){
+      public boolean execute(      PsiElement element,      PsiSubstitutor substitutor){
         if (element instanceof PsiLocalVariable) {
           final PsiLocalVariable variable=(PsiLocalVariable)element;
           final String name=variable.getName();
-          Set<String> localsSet=myVariablesSet;
-          if (localsSet != null && localsSet.contains(name)) {
-            myConflict=true;
-            myVariablesSet=null;
-            myClassesSet=null;
-          }
- else {
-            if (localsSet == null)             localsSet=new HashSet<String>();
-            localsSet.add(name);
-            myVariablesSet=localsSet;
+          if (!localsSet.add(name)) {
+            conflict.set(Boolean.TRUE);
+            localsSet.clear();
+            classesSet.clear();
           }
         }
  else         if (element instanceof PsiClass) {
           final PsiClass psiClass=(PsiClass)element;
           final String name=psiClass.getName();
-          Set<String> classesSet=myClassesSet;
-          if (classesSet != null && classesSet.contains(name)) {
-            myConflict=true;
-            myVariablesSet=null;
-            myClassesSet=null;
-          }
- else {
-            if (classesSet == null)             classesSet=new HashSet<String>();
-            classesSet.add(name);
-            myClassesSet=classesSet;
+          if (!classesSet.add(name)) {
+            conflict.set(Boolean.TRUE);
+            localsSet.clear();
+            classesSet.clear();
           }
         }
-        return !myConflict;
+        return !conflict.get();
       }
     }
-  }
 ,PsiSubstitutor.EMPTY,this,this);
+    myClassesSet=set1=classesSet;
+    myVariablesSet=set2=localsSet;
+    myConflict=wasConflict=conflict.get();
+  }
+  return wasConflict ? null : Pair.create(set1,set2);
 }
