@@ -1,0 +1,104 @@
+{
+  if (!CommonRefactoringUtil.checkReadOnlyStatus(project,local))   return;
+  final HighlightManager highlightManager=HighlightManager.getInstance(project);
+  final String localName=local.getName();
+  final PsiCodeBlock containerBlock=PsiTreeUtil.getParentOfType(local,PsiCodeBlock.class);
+  LOG.assertTrue(containerBlock != null);
+  final PsiExpression defToInline=getDefToInline(local,refExpr,containerBlock);
+  if (defToInline == null) {
+    String message=RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("variable.has.no.initializer",localName));
+    CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  final Collection<PsiReference> refs=ReferencesSearch.search(local,GlobalSearchScope.projectScope(project),false).findAll();
+  if (refs.isEmpty()) {
+    LOG.assertTrue(refExpr == null);
+    String message=RefactoringBundle.message("variable.is.never.used",localName);
+    CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  final PsiElement[] refsToInline=DefUseUtil.getRefs(containerBlock,local,defToInline);
+  if (refsToInline.length == 0) {
+    LOG.assertTrue(refExpr == null || PsiUtil.isAccessedForWriting(refExpr));
+    String message=RefactoringBundle.message("variable.is.never.used.before.modification",localName);
+    CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    return;
+  }
+  EditorColorsManager manager=EditorColorsManager.getInstance();
+  final TextAttributes attributes=manager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+  if (refExpr != null && PsiUtil.isAccessedForReading(refExpr) && !Arrays.asList(refsToInline).contains(refExpr)) {
+    final PsiElement[] defs=DefUseUtil.getDefs(containerBlock,local,refExpr);
+    LOG.assertTrue(defs.length > 0);
+    highlightManager.addOccurrenceHighlights(editor,defs,attributes,true,null);
+    String message=RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("variable.is.accessed.for.writing",localName));
+    CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+    WindowManager.getInstance().getStatusBar(project).setInfo(RefactoringBundle.message("press.escape.to.remove.the.highlighting"));
+    return;
+  }
+  PsiFile workingFile=local.getContainingFile();
+  for (  PsiElement ref : refsToInline) {
+    final PsiFile otherFile=ref.getContainingFile();
+    if (!otherFile.equals(workingFile)) {
+      String message=RefactoringBundle.message("variable.is.referenced.in.multiple.files",localName);
+      CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+      return;
+    }
+  }
+  for (  final PsiElement ref : refsToInline) {
+    final PsiElement[] defs=DefUseUtil.getDefs(containerBlock,local,ref);
+    if (defs.length != 1 || !isSameDefinition(defs[0],defToInline)) {
+      highlightManager.addOccurrenceHighlights(editor,defs,attributes,true,null);
+      String message=RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("variable.is.accessed.for.writing.and.used.with.inlined",localName));
+      CommonRefactoringUtil.showErrorMessage(REFACTORING_NAME,message,HelpID.INLINE_VARIABLE,project);
+      WindowManager.getInstance().getStatusBar(project).setInfo(RefactoringBundle.message("press.escape.to.remove.the.highlighting"));
+      return;
+    }
+  }
+  if (editor != null && !ApplicationManager.getApplication().isUnitTestMode()) {
+    highlightManager.addOccurrenceHighlights(editor,refsToInline,attributes,true,null);
+    int occurrencesCount=refsToInline.length;
+    String occurencesString=RefactoringBundle.message("occurences.string",occurrencesCount);
+    final String promptKey=isInliningVariableInitializer(defToInline) ? "inline.local.variable.prompt" : "inline.local.variable.definition.prompt";
+    final String question=RefactoringBundle.message(promptKey,localName) + " " + occurencesString;
+    RefactoringMessageDialog dialog=new RefactoringMessageDialog(REFACTORING_NAME,question,HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
+    dialog.show();
+    if (!dialog.isOK()) {
+      WindowManager.getInstance().getStatusBar(project).setInfo(RefactoringBundle.message("press.escape.to.remove.the.highlighting"));
+      return;
+    }
+  }
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      try {
+        PsiExpression[] exprs=new PsiExpression[refsToInline.length];
+        for (int idx=0; idx < refsToInline.length; idx++) {
+          PsiJavaCodeReferenceElement refElement=(PsiJavaCodeReferenceElement)refsToInline[idx];
+          exprs[idx]=InlineUtil.inlineVariable(local,defToInline,refElement);
+        }
+        if (!isInliningVariableInitializer(defToInline)) {
+          defToInline.getParent().delete();
+        }
+ else {
+          defToInline.delete();
+        }
+        if (ReferencesSearch.search(local).findFirst() == null) {
+          new RemoveUnusedVariableFix(local).invoke(project,editor,local.getContainingFile());
+        }
+        if (editor != null && !ApplicationManager.getApplication().isUnitTestMode()) {
+          highlightManager.addOccurrenceHighlights(editor,exprs,attributes,true,null);
+          WindowManager.getInstance().getStatusBar(project).setInfo(RefactoringBundle.message("press.escape.to.remove.the.highlighting"));
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+;
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(runnable);
+    }
+  }
+,RefactoringBundle.message("inline.local.command",localName),null);
+}
