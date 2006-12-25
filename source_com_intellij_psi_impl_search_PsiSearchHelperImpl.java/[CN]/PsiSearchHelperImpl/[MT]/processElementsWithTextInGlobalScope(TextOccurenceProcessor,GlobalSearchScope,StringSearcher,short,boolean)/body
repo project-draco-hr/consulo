@@ -9,8 +9,13 @@
     String[] words=StringUtil.getWordsIn(searcher.getPattern()).toArray(ArrayUtil.EMPTY_STRING_ARRAY);
     if (words.length == 0)     return true;
     Set<PsiFile> fileSet=new THashSet<PsiFile>();
-    for (    String word : words) {
-      List<PsiFile> psiFiles=Arrays.asList(myManager.getCacheManager().getFilesWithWord(word,searchContext,scope,caseSensitively));
+    for (    final String word : words) {
+      List<PsiFile> psiFiles=ApplicationManager.getApplication().runReadAction(new Computable<List<PsiFile>>(){
+        public List<PsiFile> compute(){
+          return Arrays.asList(myManager.getCacheManager().getFilesWithWord(word,searchContext,scope,caseSensitively));
+        }
+      }
+);
       if (fileSet.isEmpty()) {
         fileSet.addAll(psiFiles);
       }
@@ -24,9 +29,7 @@
       progress.setText(PsiBundle.message("psi.search.for.word.progress",searcher.getPattern()));
     }
     if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      int poolSize=Runtime.getRuntime().availableProcessors();
-      final int chunkSize=Math.max(10,files.length / poolSize / 20);
-      ThreadPoolExecutor executor=new ThreadPoolExecutor(poolSize,Integer.MAX_VALUE,60,TimeUnit.SECONDS,new LinkedBlockingQueue<Runnable>());
+      final int chunkSize=Math.max(10,files.length / POOL_SIZE / 20);
       ArrayList<Callable<Boolean>> callables=new ArrayList<Callable<Boolean>>(files.length / chunkSize);
       final AtomicInteger counter=new AtomicInteger(0);
       for (int v=0; v < files.length; v+=chunkSize) {
@@ -36,18 +39,17 @@
             final Ref<Boolean> result=new Ref<Boolean>(Boolean.TRUE);
             ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(new Runnable(){
               public void run(){
-                ApplicationManager.getApplication().runReadAction(new Runnable(){
-                  public void run(){
-                    for (int i=index; i < index + chunkSize && i < files.length; i++) {
+                for (int i=index; i < index + chunkSize && i < files.length; i++) {
+                  final PsiFile file=files[i];
+                  ApplicationManager.getApplication().runReadAction(new Runnable(){
+                    public void run(){
                       try {
                         ProgressManager.getInstance().checkCanceled();
-                        PsiFile file=files[i];
                         PsiElement[] psiRoots=file.getPsiRoots();
                         Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
                         for (                        PsiElement psiRoot : psiRoots) {
                           ProgressManager.getInstance().checkCanceled();
-                          if (processed.contains(psiRoot))                           continue;
-                          processed.add(psiRoot);
+                          if (!processed.add(psiRoot))                           continue;
                           if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher)) {
                             result.set(Boolean.FALSE);
                             return;
@@ -61,12 +63,12 @@
                       }
  catch (                      ProcessCanceledException e) {
                         result.set(Boolean.FALSE);
-                        return;
                       }
                     }
                   }
-                }
 );
+                  if (!result.get())                   return;
+                }
               }
             }
 ,progress);
@@ -77,7 +79,7 @@
         callables.add(runnable);
       }
       try {
-        List<Future<Boolean>> futures=executor.invokeAll(callables);
+        List<Future<Boolean>> futures=ConcurrencyUtil.invokeAll(callables,myThreadPoolExecutor);
         boolean canceled=false;
         for (        Future<Boolean> future : futures) {
           if (canceled) {
@@ -89,14 +91,8 @@
         }
         return !canceled;
       }
- catch (      InterruptedException e) {
-        LOG.error(e);
-      }
-catch (      ExecutionException e) {
-        LOG.error(e.getCause());
-      }
- finally {
-        executor.shutdownNow();
+ catch (      Throwable throwable) {
+        LOG.error(throwable);
       }
     }
  else {
@@ -107,8 +103,7 @@ catch (      ExecutionException e) {
         PsiElement[] psiRoots=file.getPsiRoots();
         Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
         for (        PsiElement psiRoot : psiRoots) {
-          if (processed.contains(psiRoot))           continue;
-          processed.add(psiRoot);
+          if (!processed.add(psiRoot))           continue;
           if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher)) {
             return false;
           }
