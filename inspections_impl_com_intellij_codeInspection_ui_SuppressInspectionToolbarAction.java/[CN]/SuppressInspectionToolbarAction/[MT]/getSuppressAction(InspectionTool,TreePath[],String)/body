@@ -1,10 +1,11 @@
 {
-  final InspectionManagerEx managerEx=(InspectionManagerEx)InspectionManagerEx.getInstance(myView.getProject());
+  final Project project=myView.getProject();
+  final InspectionManagerEx managerEx=(InspectionManagerEx)InspectionManagerEx.getInstance(project);
   return new AnAction(InspectionsBundle.message("inspection.quickfix.suppress",tool.getDisplayName())){
     public void actionPerformed(    AnActionEvent e){
       ApplicationManager.getApplication().invokeLater(new Runnable(){
         public void run(){
-          CommandProcessor.getInstance().executeCommand(myView.getProject(),new Runnable(){
+          CommandProcessor.getInstance().executeCommand(project,new Runnable(){
             public void run(){
               final CustomSuppressableInspectionTool suppresableTool=extractSuppressableTool(tool);
               for (              TreePath treePath : selectionPaths) {
@@ -13,18 +14,7 @@
                   for (                  final ProblemDescriptor descriptor : myView.getTree().getSelectedDescriptors()) {
                     final IntentionAction[] actions=suppresableTool.getSuppressActions(descriptor);
                     if (actions.length > 0) {
-                      ApplicationManager.getApplication().runWriteAction(new Runnable(){
-                        public void run(){
-                          PsiDocumentManager.getInstance(myView.getProject()).commitAllDocuments();
-                          try {
-                            actions[0].invoke(myView.getProject(),null,descriptor.getPsiElement().getContainingFile());
-                          }
- catch (                          IncorrectOperationException e1) {
-                            LOG.error(e1);
-                          }
-                        }
-                      }
-);
+                      if (!suppress(descriptor.getPsiElement(),actions[0],tool,project))                       break;
                     }
                   }
                 }
@@ -33,34 +23,11 @@
                   for (                  final RefElement refElement : elementsToSuppress) {
                     final PsiElement element=refElement.getElement();
                     final IntentionAction action=getCorrectIntentionAction(tool,id,null,element);
-                    ApplicationManager.getApplication().runWriteAction(new Runnable(){
-                      public void run(){
-                        PsiDocumentManager.getInstance(myView.getProject()).commitAllDocuments();
-                        try {
-                          action.invoke(myView.getProject(),null,refElement.getElement().getContainingFile());
-                        }
- catch (                        IncorrectOperationException e1) {
-                          LOG.error(e1);
-                        }
-                      }
-                    }
-);
+                    if (!suppress(element,action,tool,project))                     break;
                   }
                 }
-                final List<RefEntity> elementsToIgnore=new ArrayList<RefEntity>();
-                InspectionResultsView.traverseRefElements(node,elementsToIgnore);
-                for (                RefEntity element : elementsToIgnore) {
-                  if (element instanceof RefElement) {
-                    final Set<GlobalInspectionContextImpl> globalInspectionContexts=managerEx.getRunningContexts();
-                    for (                    GlobalInspectionContextImpl context : globalInspectionContexts) {
-                      context.ignoreElement(tool,((RefElement)element).getElement());
-                      context.refreshViews();
-                    }
-                  }
-                  tool.ignoreElement(element);
-                }
+                refreshViews(managerEx);
               }
-              myView.updateView(false);
             }
           }
 ,InspectionsBundle.message("inspection.quickfix.suppress"),null);
@@ -70,11 +37,12 @@
     }
     public void update(    AnActionEvent e){
       e.getPresentation().setEnabled(true);
+      final Project project=myView.getProject();
       final CustomSuppressableInspectionTool suppresableTool=extractSuppressableTool(tool);
       if (suppresableTool != null) {
         for (        ProblemDescriptor descriptor : myView.getTree().getSelectedDescriptors()) {
           for (          IntentionAction action : suppresableTool.getSuppressActions(descriptor)) {
-            if (action.isAvailable(myView.getProject(),null,descriptor.getPsiElement().getContainingFile())) {
+            if (action.isAvailable(project,null,descriptor.getPsiElement().getContainingFile())) {
               e.getPresentation().setEnabled(true);
               return;
             }
@@ -90,7 +58,7 @@
           if (element == null || !element.isValid())           continue;
           final PsiFile file=element.getContainingFile();
           final IntentionAction action=getCorrectIntentionAction(tool,id,null,element);
-          if (action.isAvailable(myView.getProject(),null,file)) {
+          if (action.isAvailable(project,null,file)) {
             e.getPresentation().setEnabled(true);
             return;
           }
