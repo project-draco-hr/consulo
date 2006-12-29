@@ -1,0 +1,45 @@
+{
+  PsiReferenceExpression methodExpression=((PsiMethodCallExpression)call).getMethodExpression();
+  final JavaResolveResult result=methodExpression.advancedResolve(false);
+  final PsiMethod method=(PsiMethod)result.getElement();
+  if (method == null)   return null;
+  PsiManager manager=call.getManager();
+  final LanguageLevel languageLevel=PsiUtil.getLanguageLevel(call);
+  if (languageLevel.compareTo(LanguageLevel.JDK_1_5) >= 0) {
+    if (GET_CLASS_METHOD.equals(method.getName()) && "java.lang.Object".equals(method.getContainingClass().getQualifiedName())) {
+      PsiExpression qualifier=methodExpression.getQualifierExpression();
+      PsiType qualifierType=null;
+      if (qualifier != null) {
+        qualifierType=TypeConversionUtil.erasure(qualifier.getType());
+      }
+ else {
+        ASTNode parent=call.getNode().getTreeParent();
+        while (parent != null && parent.getElementType() != CLASS)         parent=parent.getTreeParent();
+        if (parent != null) {
+          qualifierType=manager.getElementFactory().createType((PsiClass)parent.getPsi());
+        }
+      }
+      if (qualifierType != null) {
+        PsiClass javaLangClass=manager.findClass("java.lang.Class",call.getResolveScope());
+        if (javaLangClass != null && javaLangClass.getTypeParameters().length == 1) {
+          Map<PsiTypeParameter,PsiType> map=new HashMap<PsiTypeParameter,PsiType>();
+          map.put(javaLangClass.getTypeParameters()[0],PsiWildcardType.createExtends(manager,qualifierType));
+          PsiSubstitutor substitutor=manager.getElementFactory().createSubstitutor(map);
+          return manager.getElementFactory().createType(javaLangClass,substitutor,languageLevel);
+        }
+      }
+    }
+  }
+  PsiType ret=method.getReturnType();
+  if (ret == null)   return null;
+  if (ret instanceof PsiClassType) {
+    ret=((PsiClassType)ret).setLanguageLevel(languageLevel);
+  }
+  if (languageLevel.compareTo(LanguageLevel.JDK_1_5) >= 0) {
+    final PsiSubstitutor substitutor=result.getSubstitutor();
+    if (PsiUtil.isRawSubstitutor(method,substitutor))     return TypeConversionUtil.erasure(ret);
+    PsiType substitutedReturnType=substitutor.substituteAndCapture(ret);
+    return PsiImplUtil.normalizeWildcardTypeByPosition(substitutedReturnType,call);
+  }
+  return TypeConversionUtil.erasure(ret);
+}
