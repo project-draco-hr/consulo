@@ -1,13 +1,15 @@
 {
   PsiJavaCodeReferenceElement reference=(PsiJavaCodeReferenceElement)element;
-  while (reference.getParent() instanceof PsiJavaCodeReferenceElement) {
-    reference=(PsiJavaCodeReferenceElement)reference.getParent();
+  PsiElement target=reference.resolve();
+  if (!(target instanceof PsiClass)) {
+    while (reference.getParent() instanceof PsiJavaCodeReferenceElement) {
+      reference=(PsiJavaCodeReferenceElement)reference.getParent();
+      target=reference.resolve();
+      if (target instanceof PsiClass) {
+        break;
+      }
+    }
   }
-  final PsiJavaFile javaFile=PsiTreeUtil.getParentOfType(reference,PsiJavaFile.class);
-  if (javaFile == null) {
-    return;
-  }
-  final PsiElement target=reference.resolve();
   if (!(target instanceof PsiClass)) {
     return;
   }
@@ -16,25 +18,31 @@
   if (qualifiedName == null) {
     return;
   }
-  if (!ImportUtils.nameCanBeImported(qualifiedName,javaFile)) {
+  final PsiJavaFile file=PsiTreeUtil.getParentOfType(reference,PsiJavaFile.class);
+  if (file == null) {
     return;
   }
-  final PsiImportList importList=javaFile.getImportList();
+  if (!ImportUtils.nameCanBeImported(qualifiedName,file)) {
+    return;
+  }
+  final PsiImportList importList=file.getImportList();
   if (importList == null) {
     return;
   }
   @NonNls final String packageName=ClassUtil.extractPackageName(qualifiedName);
-  if (packageName.equals("java.lang")) {
-    if (ImportUtils.hasOnDemandImportConflict(qualifiedName,javaFile)) {
+  final String filePackageName=file.getPackageName();
+  if (packageName.equals("java.lang") || packageName.equals(filePackageName)) {
+    if (ImportUtils.hasOnDemandImportConflict(qualifiedName,file)) {
       addImport(importList,aClass);
     }
   }
- else   if (importList.findSingleClassImportStatement(qualifiedName) == null) {
+ else   if (importList.findSingleClassImportStatement(qualifiedName) == null && importList.findOnDemandImportStatement(packageName) == null) {
     addImport(importList,aClass);
   }
-  final PsiElement qualifier=reference.getQualifier();
-  if (qualifier == null) {
-    return;
-  }
-  qualifier.delete();
+  final String fullyQualifiedText=reference.getText();
+  final QualificationRemover qualificationRemover=new QualificationRemover(fullyQualifiedText);
+  file.accept(qualificationRemover);
+  final Collection<PsiJavaCodeReferenceElement> shortenedElements=qualificationRemover.getShortenedElements();
+  HighlightUtil.highlightElements(shortenedElements);
+  showStatusMessage(file.getProject(),shortenedElements.size());
 }
