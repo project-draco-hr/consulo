@@ -29,7 +29,7 @@
     if (progress != null) {
       progress.setText(PsiBundle.message("psi.search.for.word.progress",searcher.getPattern()));
     }
-    if (!application.isUnitTestMode() && !application.isWriteAccessAllowed()) {
+    if (!application.isUnitTestMode() && !application.isWriteAccessAllowed() && POOL_SIZE > 1) {
       final int chunkSize=Math.max(10,files.length / POOL_SIZE / 20);
       ArrayList<Callable<Boolean>> callables=new ArrayList<Callable<Boolean>>(files.length / chunkSize);
       final AtomicInteger counter=new AtomicInteger(0);
@@ -42,10 +42,10 @@
               public void run(){
                 for (int i=index; i < index + chunkSize && i < files.length; i++) {
                   final PsiFile file=files[i];
+                  files[i]=null;
                   application.runReadAction(new Runnable(){
                     public void run(){
                       try {
-                        ProgressManager.getInstance().checkCanceled();
                         PsiElement[] psiRoots=file.getPsiRoots();
                         Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
                         for (                        PsiElement psiRoot : psiRoots) {
@@ -81,16 +81,11 @@
       }
       try {
         List<Future<Boolean>> futures=ConcurrencyUtil.invokeAll(callables,myThreadPoolExecutor);
-        boolean canceled=false;
+        boolean success=true;
         for (        Future<Boolean> future : futures) {
-          if (canceled) {
-            future.cancel(false);
-          }
- else {
-            canceled=!future.get();
-          }
+          if (!(success&=future.get()))           break;
         }
-        return !canceled;
+        return success;
       }
  catch (      Throwable throwable) {
         LOG.error(throwable);
