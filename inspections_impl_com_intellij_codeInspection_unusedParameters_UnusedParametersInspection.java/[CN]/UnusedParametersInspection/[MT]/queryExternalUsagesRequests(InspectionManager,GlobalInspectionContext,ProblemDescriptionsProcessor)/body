@@ -1,0 +1,52 @@
+{
+  for (  SmartRefElementPointer entryPoint : EntryPointsManager.getInstance(globalContext.getProject()).getEntryPoints()) {
+    final RefElement refElement=entryPoint.getRefElement();
+    if (refElement != null) {
+      processor.ignoreElement(refElement);
+    }
+  }
+  final PsiSearchHelper helper=PsiManager.getInstance(globalContext.getProject()).getSearchHelper();
+  final AnalysisScope scope=globalContext.getRefManager().getScope();
+  globalContext.getRefManager().iterate(new RefVisitor(){
+    public void visitElement(    RefEntity refEntity){
+      if (refEntity instanceof RefMethod) {
+        RefMethod refMethod=(RefMethod)refEntity;
+        final PsiModifierListOwner element=refMethod.getElement();
+        if (element instanceof PsiMethod) {
+          PsiMethod psiMethod=(PsiMethod)element;
+          if (!refMethod.isStatic() && !refMethod.isConstructor() && !PsiModifier.PRIVATE.equals(refMethod.getAccessModifier())) {
+            final ArrayList<RefParameter> unusedParameters=getUnusedParameters(refMethod);
+            if (unusedParameters.isEmpty())             return;
+            PsiMethod[] derived=helper.findOverridingMethods(psiMethod,psiMethod.getUseScope(),true);
+            for (            final RefParameter refParameter : unusedParameters) {
+              if (refMethod.isAbstract() && derived.length == 0) {
+                refParameter.parameterReferenced(false);
+                processor.ignoreElement(refParameter);
+              }
+ else {
+                int idx=refParameter.getIndex();
+                final boolean[] found=new boolean[]{false};
+                for (int i=0; i < derived.length && !found[0]; i++) {
+                  if (!scope.contains(derived[i])) {
+                    PsiParameter psiParameter=derived[i].getParameterList().getParameters()[idx];
+                    helper.processReferences(new PsiReferenceProcessor(){
+                      public boolean execute(                      PsiReference element){
+                        refParameter.parameterReferenced(false);
+                        processor.ignoreElement(refParameter);
+                        found[0]=true;
+                        return false;
+                      }
+                    }
+,psiParameter,helper.getUseScope(psiParameter),false);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+);
+  return false;
+}
