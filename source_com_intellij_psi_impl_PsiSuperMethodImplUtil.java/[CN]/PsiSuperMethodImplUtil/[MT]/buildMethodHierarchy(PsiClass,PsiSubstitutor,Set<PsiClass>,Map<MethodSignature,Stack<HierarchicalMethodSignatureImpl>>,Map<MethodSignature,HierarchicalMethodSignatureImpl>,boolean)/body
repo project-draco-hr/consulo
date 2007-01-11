@@ -2,27 +2,34 @@
   if (visited.contains(aClass))   return;
   visited.add(aClass);
   final PsiMethod[] methods=aClass.getMethods();
-  Map<MethodSignature,HierarchicalMethodSignatureImpl> toRestore=new THashMap<MethodSignature,HierarchicalMethodSignatureImpl>();
   for (  PsiMethod method : methods) {
     if (!includePrivates && method.hasModifierProperty(PsiModifier.PRIVATE))     continue;
     final MethodSignatureBackedByPsiMethod signature=MethodSignatureBackedByPsiMethod.create(method,substitutor);
     final HierarchicalMethodSignatureImpl signatureHierarchical=new HierarchicalMethodSignatureImpl(signature);
-    final HierarchicalMethodSignatureImpl existing=signatures.get(signature);
-    if (existing != null) {
-      final PsiMethod hisMethod=existing.getMethod();
-      final PsiClass hisClass=hisMethod.getContainingClass();
-      if (!hisMethod.isConstructor() && !aClass.equals(hisClass) && !(hisClass.isInterface() && "java.lang.Object".equals(aClass.getQualifiedName()) && !method.hasModifierProperty(PsiModifier.PUBLIC))) {
-        existing.addSuperSignature(signatureHierarchical);
-        toRestore.put(signature,existing);
+    Stack<HierarchicalMethodSignatureImpl> stack=signatures.get(signature);
+    if (stack != null) {
+      boolean isNewSignature=true;
+      for (      final HierarchicalMethodSignatureImpl existing : stack) {
+        final PsiMethod hisMethod=existing.getMethod();
+        final PsiClass hisClass=hisMethod.getContainingClass();
+        if (!hisMethod.isConstructor() && !aClass.equals(hisClass) && !(hisClass.isInterface() && "java.lang.Object".equals(aClass.getQualifiedName()) && !method.hasModifierProperty(PsiModifier.PUBLIC))) {
+          if (MethodSignatureUtil.isSubsignature(signature,existing)) {
+            existing.addSuperSignature(signatureHierarchical);
+            isNewSignature=false;
+            break;
+          }
+        }
       }
- else {
+      if (isNewSignature) {
         result.put(signature,signatureHierarchical);
       }
     }
  else {
       result.put(signature,signatureHierarchical);
+      stack=new Stack<HierarchicalMethodSignatureImpl>();
+      signatures.put(signature,stack);
     }
-    signatures.put(signature,signatureHierarchical);
+    stack.push(signatureHierarchical);
   }
   final PsiClassType[] superTypes=aClass.getSuperTypes();
   for (  final PsiClassType superType : superTypes) {
@@ -32,5 +39,4 @@
     PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(superClass,superTypeResolveResult.getSubstitutor(),substitutor);
     buildMethodHierarchy(superClass,finalSubstitutor,visited,signatures,result,false);
   }
-  signatures.putAll(toRestore);
 }
