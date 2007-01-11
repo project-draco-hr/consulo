@@ -4,21 +4,25 @@
     int offset=CharArrayUtil.shiftBackwardUntil(chars,myOffset - 1,LINE_SEPARATOR) - 1;
     offset=CharArrayUtil.shiftBackwardUntil(chars,offset,LINE_SEPARATOR) + 1;
     int lineStart=CharArrayUtil.shiftForward(chars,offset," \t");
-    boolean isInsideJava=PsiUtil.getLanguageAtOffset(myFile,offset) == StdLanguages.JAVA;
-    boolean docStart=isInsideJava && CharArrayUtil.regionMatches(chars,lineStart,DOC_COMMENT_PREFIX);
-    boolean cStyleStart=isInsideJava && CharArrayUtil.regionMatches(chars,lineStart,CSTYLE_COMMENT_PREFIX);
-    boolean docAsterisk=isInsideJava && CharArrayUtil.regionMatches(chars,lineStart,DOC_COMMENT_ASTERISK_STRING);
-    boolean slashSlash=isInsideJava && CharArrayUtil.regionMatches(chars,lineStart,"//") && chars.charAt(CharArrayUtil.shiftForward(chars,myOffset," \t")) != '\n';
+    final Commenter langCommenter=PsiUtil.getLanguageAtOffset(myFile,offset).getCommenter();
+    final boolean isInsideJavalikeCode=langCommenter instanceof CodeDocumentationAwareCommenter;
+    final CodeDocumentationAwareCommenter commenter=isInsideJavalikeCode ? (CodeDocumentationAwareCommenter)langCommenter : null;
+    boolean docStart=isInsideJavalikeCode && commenter.getDocumentationCommentPrefix() != null && CharArrayUtil.regionMatches(chars,lineStart,commenter.getDocumentationCommentPrefix());
+    boolean cStyleStart=isInsideJavalikeCode && commenter.getBlockCommentPrefix() != null && CharArrayUtil.regionMatches(chars,lineStart,commenter.getBlockCommentPrefix());
+    boolean docAsterisk=isInsideJavalikeCode && commenter.getDocumentationCommentLinePrefix() != null && CharArrayUtil.regionMatches(chars,lineStart,commenter.getDocumentationCommentLinePrefix());
+    boolean slashSlash=isInsideJavalikeCode && commenter.getLineCommentPrefix() != null && CharArrayUtil.regionMatches(chars,lineStart,commenter.getLineCommentPrefix()) && chars.charAt(CharArrayUtil.shiftForward(chars,myOffset," \t")) != '\n';
     if (docStart) {
       PsiElement element=myFile.findElementAt(lineStart);
-      if (element.getText().equals(DOC_COMMENT_PREFIX) && element.getParent() instanceof PsiDocComment) {
-        PsiDocComment comment=(PsiDocComment)element.getParent();
+      final String text=element.getText();
+      final PsiElement parent=element.getParent();
+      if ((text.equals(commenter.getDocumentationCommentPrefix()) && parent instanceof PsiDocComment) || (text.startsWith(commenter.getDocumentationCommentPrefix()) && element instanceof PsiComment)) {
+        PsiComment comment=parent instanceof PsiDocComment ? (PsiDocComment)parent : (PsiComment)element;
         int commentEnd=comment.getTextRange().getEndOffset();
         if (myOffset >= commentEnd) {
           docStart=false;
         }
  else {
-          if (isCommentComplete(comment)) {
+          if (isCommentComplete(comment,commenter)) {
             if (myOffset >= commentEnd) {
               docAsterisk=false;
               docStart=false;
@@ -29,7 +33,7 @@
             }
           }
  else {
-            generateJavadoc();
+            generateJavadoc(commenter);
           }
         }
       }
@@ -39,14 +43,14 @@
     }
  else     if (cStyleStart) {
       PsiElement element=myFile.findElementAt(lineStart);
-      if (element instanceof PsiComment && ((PsiComment)element).getTokenType() == JavaTokenType.C_STYLE_COMMENT) {
+      if (element instanceof PsiComment && commenter.getBlockCommentTokenType() == ((PsiComment)element).getTokenType()) {
         final PsiComment comment=(PsiComment)element;
         int commentEnd=comment.getTextRange().getEndOffset();
         if (myOffset >= commentEnd) {
           docStart=false;
         }
  else {
-          if (isCommentComplete(comment)) {
+          if (isCommentComplete(comment,commenter)) {
             if (myOffset >= commentEnd) {
               docAsterisk=false;
               docStart=false;
@@ -57,9 +61,10 @@
             }
           }
  else {
-            myDocument.insertString(myOffset," " + DOC_COMMENT_SUFFIX);
+            final int currentEndOfLine=CharArrayUtil.shiftForwardUntil(chars,myOffset,"\n");
+            myDocument.insertString(currentEndOfLine," " + commenter.getBlockCommentSuffix());
             int lstart=CharArrayUtil.shiftBackwardUntil(chars,myOffset,"\n");
-            myDocument.insertString(myOffset,chars.subSequence(lstart,myOffset));
+            myDocument.insertString(currentEndOfLine,chars.subSequence(lstart,myOffset));
           }
         }
       }
@@ -68,7 +73,7 @@
       }
     }
     if (docAsterisk) {
-      docAsterisk=insertDocAsterisk(lineStart,docAsterisk);
+      docAsterisk=insertDocAsterisk(lineStart,docAsterisk,commenter);
     }
     if (CodeInsightSettings.getInstance().SMART_INDENT_ON_ENTER || myForceIndent || docStart|| docAsterisk|| slashSlash) {
       myOffset=CodeStyleManager.getInstance(getProject()).adjustLineIndent(myFile,myOffset);
@@ -86,7 +91,7 @@
       }
     }
     if ((docAsterisk || slashSlash) && !docStart) {
-      myCaretAdvance=slashSlash ? 2 : 1;
+      myCaretAdvance=slashSlash ? commenter.getLineCommentPrefix().length() : 1;
     }
   }
  catch (  IncorrectOperationException e) {
