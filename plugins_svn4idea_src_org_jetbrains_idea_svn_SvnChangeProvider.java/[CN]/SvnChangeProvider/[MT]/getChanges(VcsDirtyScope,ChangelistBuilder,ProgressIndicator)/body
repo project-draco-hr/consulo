@@ -1,11 +1,50 @@
 {
   try {
     final SVNStatusClient client=myVcs.createStatusClient();
+    final List<SvnChangedFile> copiedFiles=new ArrayList<SvnChangedFile>();
+    final List<SvnChangedFile> deletedFiles=new ArrayList<SvnChangedFile>();
     for (    FilePath path : dirtyScope.getRecursivelyDirtyDirectories()) {
-      processFile(path,client,builder,true);
+      processFile(path,client,builder,copiedFiles,deletedFiles,true);
     }
     for (    FilePath path : dirtyScope.getDirtyFiles()) {
-      processFile(path,client,builder,false);
+      processFile(path,client,builder,copiedFiles,deletedFiles,false);
+    }
+    for (    SvnChangedFile copiedFile : copiedFiles) {
+      boolean foundRename=false;
+      final SVNStatus copiedStatus=copiedFile.getStatus();
+      for (Iterator<SvnChangedFile> iterator=deletedFiles.iterator(); iterator.hasNext(); ) {
+        SvnChangedFile deletedFile=iterator.next();
+        final SVNStatus deletedStatus=deletedFile.getStatus();
+        if (copiedStatus.getCopyFromURL().equals(deletedStatus.getURL().toString())) {
+          builder.processChange(new Change(new SvnUpToDateRevision(deletedFile.getFilePath(),deletedStatus.getRevision()),CurrentContentRevision.create(copiedFile.getFilePath())));
+          iterator.remove();
+          foundRename=true;
+          break;
+        }
+      }
+      if (!foundRename) {
+        File wcPath=guessWorkingCopyPath(copiedStatus.getFile(),copiedStatus.getURL(),copiedStatus.getCopyFromURL());
+        SVNStatus status;
+        try {
+          status=client.doStatus(wcPath,false);
+        }
+ catch (        SVNException ex) {
+          status=null;
+        }
+        if (status != null && status.getContentsStatus() == SVNStatusType.STATUS_DELETED) {
+          final FilePath filePath=myFactory.createFilePathOnDeleted(wcPath,false);
+          final SvnUpToDateRevision beforeRevision=new SvnUpToDateRevision(filePath,status.getRevision());
+          final ContentRevision afterRevision=CurrentContentRevision.create(copiedFile.getFilePath());
+          builder.processChange(new Change(beforeRevision,afterRevision));
+          foundRename=true;
+        }
+      }
+      if (!foundRename) {
+        processStatus(copiedFile.getFilePath(),copiedStatus,builder);
+      }
+    }
+    for (    SvnChangedFile deletedFile : deletedFiles) {
+      processStatus(deletedFile.getFilePath(),deletedFile.getStatus(),builder);
     }
   }
  catch (  SVNException e) {
