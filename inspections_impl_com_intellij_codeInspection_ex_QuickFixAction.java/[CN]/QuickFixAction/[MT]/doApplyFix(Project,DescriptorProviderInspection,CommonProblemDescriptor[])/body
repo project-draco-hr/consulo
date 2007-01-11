@@ -1,0 +1,57 @@
+{
+  final Set<VirtualFile> readOnlyFiles=new THashSet<VirtualFile>();
+  for (  CommonProblemDescriptor descriptor : descriptors) {
+    final PsiElement psiElement=descriptor instanceof ProblemDescriptor ? ((ProblemDescriptor)descriptor).getPsiElement() : null;
+    if (psiElement != null && !psiElement.isWritable()) {
+      readOnlyFiles.add(psiElement.getContainingFile().getVirtualFile());
+    }
+  }
+  if (!readOnlyFiles.isEmpty()) {
+    final ReadonlyStatusHandler.OperationStatus operationStatus=ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(readOnlyFiles.toArray(new VirtualFile[readOnlyFiles.size()]));
+    if (operationStatus.hasReadonlyFiles())     return;
+  }
+  final RefManagerImpl refManager=((RefManagerImpl)tool.getContext().getRefManager());
+  final boolean initial=refManager.isInProcess();
+  refManager.inspectionReadActionFinished();
+  try {
+    final Set<PsiElement> ignoredElements=new HashSet<PsiElement>();
+    CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+      public void run(){
+        CommandProcessor.getInstance().markCurrentCommandAsComplex(project);
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            final PsiModificationTracker tracker=PsiManager.getInstance(project).getModificationTracker();
+            for (            CommonProblemDescriptor descriptor : descriptors) {
+              final QuickFix[] fixes=descriptor.getFixes();
+              if (fixes != null) {
+                for (                QuickFix fix : fixes) {
+                  if (fix != null) {
+                    final QuickFixAction quickFixAction=QuickFixAction.this;
+                    if (quickFixAction instanceof LocalQuickFixWrapper && !((LocalQuickFixWrapper)quickFixAction).getFix().getClass().isInstance(fix)) {
+                      continue;
+                    }
+                    final long startCount=tracker.getModificationCount();
+                    fix.applyFix(project,descriptor);
+                    if (startCount != tracker.getModificationCount()) {
+                      DaemonCodeAnalyzer.getInstance(project).restart();
+                      tool.ignoreProblem(descriptor,fix);
+                      if (descriptor instanceof ProblemDescriptor) {
+                        ignoredElements.add(((ProblemDescriptor)descriptor).getPsiElement());
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+);
+      }
+    }
+,getTemplatePresentation().getText(),null);
+    refreshViews(project,ignoredElements,tool);
+  }
+  finally {
+    if (initial)     refManager.inspectionReadActionStarted();
+  }
+}
