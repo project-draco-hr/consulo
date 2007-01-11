@@ -1,5 +1,5 @@
 {
-  PsiMethod method=p.getMethod();
+  final PsiMethod method=p.getMethod();
   SearchScope searchScope=p.getScope();
   PsiManager psiManager=PsiManager.getInstance(method.getProject());
   final boolean isStrictSignatureSearch=p.isStrictSignatureSearch();
@@ -11,19 +11,30 @@
   }
   PsiClass parentClass=method.getContainingClass();
   if (isStrictSignatureSearch && (parentClass == null || parentClass instanceof PsiAnonymousClass || parentClass.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.STATIC) || method.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.PRIVATE))) {
-    return ReferencesSearch.search(method,searchScope,false).forEach(consumer);
+    return ReferencesSearch.search(method,searchScope,false).forEach(new ReadActionProcessor<PsiReference>(){
+      public boolean processInReadAction(      final PsiReference psiReference){
+        return consumer.process(psiReference);
+      }
+    }
+);
   }
   final String text=method.getName();
   final PsiMethod[] methods=isStrictSignatureSearch ? new PsiMethod[]{method} : getOverloads(method);
-  SearchScope accessScope=methods[0].getUseScope();
-  for (int i=1; i < methods.length; i++) {
-    PsiMethod method1=methods[i];
-    SearchScope someScope=PsiSearchScopeUtil.scopesUnion(accessScope,method1.getUseScope());
-    accessScope=someScope == null ? accessScope : someScope;
+  SearchScope accessScope=ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>(){
+    public SearchScope compute(){
+      SearchScope accessScope=methods[0].getUseScope();
+      for (int i=1; i < methods.length; i++) {
+        PsiMethod method1=methods[i];
+        SearchScope someScope=PsiSearchScopeUtil.scopesUnion(accessScope,method1.getUseScope());
+        accessScope=someScope == null ? accessScope : someScope;
+      }
+      return accessScope;
+    }
   }
-  final PsiClass aClass=method.getContainingClass();
+);
   final TextOccurenceProcessor processor1=new TextOccurenceProcessor(){
     public boolean execute(    PsiElement element,    int offsetInElement){
+      final PsiClass aClass=method.getContainingClass();
       final PsiReference[] refs=element.getReferences();
       for (      PsiReference ref : refs) {
         if (ref.getRangeInElement().contains(offsetInElement)) {

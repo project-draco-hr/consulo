@@ -1,30 +1,44 @@
 {
   final PsiClass aClass=p.getClassToProcess();
   PsiManagerImpl psiManager=(PsiManagerImpl)PsiManager.getInstance(aClass.getProject());
-  RepositoryManager repositoryManager=psiManager.getRepositoryManager();
-  RepositoryElementsManager repositoryElementsManager=psiManager.getRepositoryElementsManager();
-  RepositoryIndex repositoryIndex=repositoryManager.getIndex();
-  final SearchScope useScope=aClass.getUseScope();
-  final VirtualFileFilter rootFilter;
-  if (useScope instanceof GlobalSearchScope) {
-    rootFilter=repositoryIndex.rootFilterBySearchScope((GlobalSearchScope)useScope);
+  final SearchScope useScope=ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>(){
+    public SearchScope compute(){
+      return aClass.getUseScope();
+    }
   }
- else {
-    rootFilter=null;
-  }
+);
   if ("java.lang.Object".equals(aClass.getQualifiedName())) {
     return psiManager.getSearchHelper().processAllClasses(new PsiElementProcessor<PsiClass>(){
       public boolean execute(      final PsiClass psiClass){
-        PsiReferenceList extendsList=psiClass.getExtendsList();
         return consumer.process(psiClass);
       }
     }
 ,useScope);
   }
  else {
-    long[] candidateIds=repositoryIndex.getNameOccurrencesInExtendsLists(aClass.getName(),rootFilter);
-    for (    long candidateId : candidateIds) {
-      PsiClass candidate=(PsiClass)repositoryElementsManager.findOrCreatePsiElementById(candidateId);
+    final RepositoryManager repositoryManager=psiManager.getRepositoryManager();
+    final RepositoryElementsManager repositoryElementsManager=psiManager.getRepositoryElementsManager();
+    long[] candidateIds=ApplicationManager.getApplication().runReadAction(new Computable<long[]>(){
+      public long[] compute(){
+        RepositoryIndex repositoryIndex=repositoryManager.getIndex();
+        final VirtualFileFilter rootFilter;
+        if (useScope instanceof GlobalSearchScope) {
+          rootFilter=repositoryIndex.rootFilterBySearchScope((GlobalSearchScope)useScope);
+        }
+ else {
+          rootFilter=null;
+        }
+        return repositoryIndex.getNameOccurrencesInExtendsLists(aClass.getName(),rootFilter);
+      }
+    }
+);
+    for (    final long candidateId : candidateIds) {
+      PsiClass candidate=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>(){
+        public PsiClass compute(){
+          return (PsiClass)repositoryElementsManager.findOrCreatePsiElementById(candidateId);
+        }
+      }
+);
       LOG.assertTrue(candidate.isValid());
       if (!consumer.process(candidate)) {
         return false;
