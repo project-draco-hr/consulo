@@ -1,0 +1,49 @@
+{
+  if (visited.contains(aClass))   return;
+  visited.add(aClass);
+  final PsiMethod[] methods=aClass.getMethods();
+  for (  PsiMethod method : methods) {
+    if (!includePrivates && method.hasModifierProperty(PsiModifier.PRIVATE))     continue;
+    final MethodSignatureBackedByPsiMethod signature=MethodSignatureBackedByPsiMethod.create(method,substitutor);
+    final HierarchicalMethodSignatureImpl signatureHierarchical=new HierarchicalMethodSignatureImpl(signature);
+    Stack<HierarchicalMethodSignatureImpl> stack=processing.get(signature);
+    if (stack != null && !stack.isEmpty()) {
+      processStack(stack,aClass,method,signature,signatureHierarchical,result);
+    }
+ else {
+      stack=processed.get(signature);
+      if (stack != null) {
+        processStack(stack,aClass,method,signature,signatureHierarchical,result);
+      }
+ else {
+        result.put(signature,signatureHierarchical);
+        stack=new Stack<HierarchicalMethodSignatureImpl>();
+        processing.put(signature,stack);
+      }
+    }
+    stack.push(signatureHierarchical);
+  }
+  final PsiClassType[] superTypes=aClass.getSuperTypes();
+  for (  final PsiClassType superType : superTypes) {
+    final PsiClassType.ClassResolveResult superTypeResolveResult=superType.resolveGenerics();
+    PsiClass superClass=superTypeResolveResult.getElement();
+    if (superClass == null)     continue;
+    PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(superClass,superTypeResolveResult.getSubstitutor(),substitutor);
+    buildMethodHierarchy(superClass,finalSubstitutor,visited,processing,processed,result,false);
+  }
+  for (  final Map.Entry<MethodSignature,Stack<HierarchicalMethodSignatureImpl>> entry : processing.entrySet()) {
+    final MethodSignature keySignature=entry.getKey();
+    final Stack<HierarchicalMethodSignatureImpl> processingStack=entry.getValue();
+    if (!processingStack.isEmpty() && aClass.equals(processingStack.peek().getMethod().getContainingClass())) {
+      Stack<HierarchicalMethodSignatureImpl> processedStack=processed.get(keySignature);
+      if (processedStack == null) {
+        processedStack=new Stack<HierarchicalMethodSignatureImpl>();
+        processed.put(keySignature,processedStack);
+      }
+      while (!processingStack.isEmpty() && aClass.equals(processingStack.peek().getMethod().getContainingClass())) {
+        final HierarchicalMethodSignatureImpl signature=processingStack.pop();
+        processedStack.push(signature);
+      }
+    }
+  }
+}
