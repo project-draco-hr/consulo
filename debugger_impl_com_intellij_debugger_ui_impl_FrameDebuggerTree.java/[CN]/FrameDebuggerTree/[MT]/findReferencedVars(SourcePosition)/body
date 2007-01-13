@@ -1,0 +1,50 @@
+{
+  final PsiFile file=position.getFile();
+  final Document doc=FileDocumentManager.getInstance().getDocument(file.getVirtualFile());
+  final int line=position.getLine();
+  final int startOffset=doc.getLineStartOffset(Math.max(0,line - 1));
+  final TextRange lineRange=new TextRange(startOffset,doc.getLineEndOffset(line));
+  final int offset=CharArrayUtil.shiftForward(doc.getCharsSequence(),startOffset," \t");
+  PsiElement element=file.findElementAt(offset);
+  if (element != null) {
+    do {
+      final PsiElement parent=element.getParent();
+      if (parent == null || (parent.getTextOffset() < lineRange.getStartOffset())) {
+        break;
+      }
+      element=parent;
+    }
+ while (true);
+    final Set<String> vars=new HashSet<String>();
+    final Set<TextWithImports> expressions=new HashSet<TextWithImports>();
+    final PsiRecursiveElementVisitor variablesCollector=new PsiRecursiveElementVisitor(){
+      public void visitReferenceElement(      final PsiJavaCodeReferenceElement reference){
+        final PsiElement psiElement=reference.resolve();
+        if (psiElement instanceof PsiVariable) {
+          final PsiVariable var=(PsiVariable)psiElement;
+          if (var instanceof PsiField && reference instanceof PsiReferenceExpression && !hasMethodCall(reference)) {
+            expressions.add(new TextWithImportsImpl((PsiReferenceExpression)reference));
+          }
+ else {
+            vars.add(var.getName());
+          }
+        }
+        super.visitReferenceElement(reference);
+      }
+      public void visitLocalVariable(      final PsiLocalVariable variable){
+        vars.add(variable.getName());
+        super.visitLocalVariable(variable);
+      }
+    }
+;
+    element.accept(variablesCollector);
+    for (PsiElement sibling=element.getNextSibling(); sibling != null; sibling=sibling.getNextSibling()) {
+      if (!lineRange.intersects(sibling.getTextRange())) {
+        break;
+      }
+      sibling.accept(variablesCollector);
+    }
+    return new Pair<Set<String>,Set<TextWithImports>>(vars,expressions);
+  }
+  return new Pair<Set<String>,Set<TextWithImports>>(Collections.<String>emptySet(),Collections.<TextWithImports>emptySet());
+}
