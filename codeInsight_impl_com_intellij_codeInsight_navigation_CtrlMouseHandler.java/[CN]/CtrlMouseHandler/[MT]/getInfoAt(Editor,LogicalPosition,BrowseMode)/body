@@ -1,0 +1,62 @@
+{
+  Document document=editor.getDocument();
+  PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(document);
+  if (file == null)   return null;
+  PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+  final int offset=editor.logicalPositionToOffset(pos);
+  int selStart=editor.getSelectionModel().getSelectionStart();
+  int selEnd=editor.getSelectionModel().getSelectionEnd();
+  if (offset >= selStart && offset < selEnd)   return null;
+  PsiElement targetElement=null;
+  if (browseMode == BrowseMode.TypeDeclaration) {
+    targetElement=GotoTypeDeclarationAction.findSymbolType(editor,offset);
+  }
+ else   if (browseMode == BrowseMode.Declaration) {
+    PsiReference ref=TargetElementUtil.findReference(editor,offset);
+    if (ref != null) {
+      PsiElement resolvedElement=resolve(ref);
+      if (resolvedElement != null) {
+        return new InfoSingle(ref,resolvedElement);
+      }
+    }
+    targetElement=GotoDeclarationAction.findTargetElement(myProject,editor,offset);
+  }
+ else   if (browseMode == BrowseMode.Implementation) {
+    final PsiElement element=TargetElementUtil.findTargetElement(editor,GotoImplementationHandler.FLAGS,offset);
+    PsiElement[] targetElements=new GotoImplementationHandler(){
+      @NotNull protected PsiElement[] searchDefinitions(      final PsiElement element){
+        final List<PsiElement> found=new ArrayList<PsiElement>(2);
+        DefinitionsSearch.search(element).forEach(new Processor<PsiElement>(){
+          public boolean process(          final PsiElement psiElement){
+            found.add(psiElement);
+            return found.size() != 2;
+          }
+        }
+);
+        return found.toArray(PsiElement.EMPTY_ARRAY);
+      }
+    }
+.searchImplementations(editor,file,element,offset);
+    if (targetElements.length > 1) {
+      PsiElement elementAtPointer=findElementAtPointer(file,offset);
+      if (elementAtPointer != null) {
+        return new InfoMultiple(elementAtPointer);
+      }
+      return null;
+    }
+    if (targetElements.length == 1) {
+      Navigatable descriptor=EditSourceUtil.getDescriptor(targetElements[0]);
+      if (descriptor == null || !descriptor.canNavigate()) {
+        return null;
+      }
+      targetElement=targetElements[0];
+    }
+  }
+  if (targetElement != null && targetElement.isPhysical()) {
+    PsiElement elementAtPointer=findElementAtPointer(file,offset);
+    if (elementAtPointer != null) {
+      return new InfoSingle(elementAtPointer,targetElement);
+    }
+  }
+  return null;
+}
