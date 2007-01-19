@@ -1,0 +1,62 @@
+{
+  List<FilePatch> remainingPatches=new ArrayList<FilePatch>();
+  try {
+    List<FilePatch> patches=loadPatches(changeList.PATH);
+    if (changes != null) {
+      final Iterator<FilePatch> iterator=patches.iterator();
+      while (iterator.hasNext()) {
+        FilePatch patch=iterator.next();
+        if (!needUnshelve(patch,changes)) {
+          remainingPatches.add(patch);
+          iterator.remove();
+        }
+      }
+    }
+    List<VirtualFile> filesToMakeWritable=new ArrayList<VirtualFile>();
+    VirtualFile baseDir=myProject.getBaseDir();
+    if (!ApplyPatchAction.prepareFiles(myProject,patches,baseDir,0,filesToMakeWritable)) {
+      return;
+    }
+    List<ShelvedBinaryFile> binaryFilesToUnshelve=getBinaryFilesToUnshelve(changeList,binaryFiles);
+    for (    ShelvedBinaryFile file : binaryFilesToUnshelve) {
+      if (file.BEFORE_PATH != null) {
+        final String beforePath=file.BEFORE_PATH == null ? null : file.BEFORE_PATH.replace(File.separatorChar,'/');
+        final String afterPath=file.AFTER_PATH == null ? null : file.AFTER_PATH.replace(File.separatorChar,'/');
+        final boolean isNewFile=beforePath == null;
+        VirtualFile patchTarget=FilePatch.findPatchTarget(myProject.getBaseDir(),beforePath,afterPath,0,isNewFile,true,true);
+        if (patchTarget != null) {
+          filesToMakeWritable.add(patchTarget);
+        }
+      }
+    }
+    final VirtualFile[] fileArray=filesToMakeWritable.toArray(new VirtualFile[filesToMakeWritable.size()]);
+    final ReadonlyStatusHandler.OperationStatus readonlyStatus=ReadonlyStatusHandler.getInstance(myProject).ensureFilesWritable(fileArray);
+    if (readonlyStatus.hasReadonlyFiles()) {
+      return;
+    }
+    if (ApplyPatchAction.applyFilePatches(myProject,patches,baseDir,0,true,true) == ApplyPatchStatus.FAILURE) {
+      return;
+    }
+    for (    ShelvedBinaryFile file : binaryFilesToUnshelve) {
+      boolean success=unshelveBinaryFile(file);
+      if (!success) {
+        break;
+      }
+      changeList.getBinaryFiles().remove(file);
+    }
+  }
+ catch (  IOException e) {
+    LOG.error(e);
+    return;
+  }
+catch (  PatchSyntaxException e) {
+    LOG.error(e);
+    return;
+  }
+  if (remainingPatches.size() == 0 && changeList.getBinaryFiles().size() == 0) {
+    deleteChangeList(changeList);
+  }
+ else {
+    saveRemainingPatches(changeList,remainingPatches);
+  }
+}
