@@ -1,26 +1,57 @@
 {
   final Project project=event.getData(DataKeys.PROJECT);
+  LOG.assertTrue(project != null);
   final VirtualFile[] virtualFiles=FileChooser.chooseFiles(project,BrowseFilesListener.SINGLE_DIRECTORY_DESCRIPTOR);
   if (virtualFiles == null || virtualFiles.length == 0)   return;
   if (!virtualFiles[0].isDirectory())   return;
   final Map<String,Map<String,Set<OfflineProblemDescriptor>>> resMap=new HashMap<String,Map<String,Set<OfflineProblemDescriptor>>>();
-  final VirtualFile[] files=virtualFiles[0].getChildren();
-  String profileName=null;
-  try {
-    for (    VirtualFile inspectionFile : files) {
-      if (inspectionFile.isDirectory())       continue;
-      final String shortName=inspectionFile.getNameWithoutExtension();
-      if (shortName.equals(InspectionApplication.DESCRIPTIONS)) {
-        profileName=OfflineViewParseUtil.parseProfileName(LoadTextUtil.loadText(inspectionFile).toString());
+  final String[] profileName=new String[1];
+  final Runnable process=new Runnable(){
+    public void run(){
+      final VirtualFile[] files=virtualFiles[0].getChildren();
+      try {
+        for (        final VirtualFile inspectionFile : files) {
+          if (inspectionFile.isDirectory())           continue;
+          final String shortName=inspectionFile.getNameWithoutExtension();
+          if (shortName.equals(InspectionApplication.DESCRIPTIONS)) {
+            profileName[0]=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+              @Nullable public String compute(){
+                return OfflineViewParseUtil.parseProfileName(LoadTextUtil.loadText(inspectionFile).toString());
+              }
+            }
+);
+          }
+ else           if (inspectionFile.getFileType() instanceof XmlFileType) {
+            resMap.put(shortName,ApplicationManager.getApplication().runReadAction(new Computable<Map<String,Set<OfflineProblemDescriptor>>>(){
+              public Map<String,Set<OfflineProblemDescriptor>> compute(){
+                return OfflineViewParseUtil.parse(LoadTextUtil.loadText(inspectionFile).toString());
+              }
+            }
+));
+          }
+        }
       }
- else       if (inspectionFile.getFileType() instanceof XmlFileType) {
-        resMap.put(shortName,OfflineViewParseUtil.parse(LoadTextUtil.loadText(inspectionFile).toString()));
+ catch (      final Exception e) {
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            Messages.showInfoMessage(e.getMessage(),InspectionsBundle.message("offline.view.parse.exception.title"));
+          }
+        }
+);
+        throw new ProcessCanceledException();
       }
     }
   }
- catch (  Exception e) {
-    Messages.showInfoMessage(e.getMessage(),InspectionsBundle.message("offline.view.parse.exception.title"));
-    return;
+;
+  ProgressManager.getInstance().runProcessWithProgressAsynchronously(project,InspectionsBundle.message("parsing.inspections.dump.progress.title"),process,new Runnable(){
+    public void run(){
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          showOfflineView(project,profileName[0],resMap);
+        }
+      }
+);
+    }
   }
-  showOfflineView(project,profileName,resMap);
+,null);
 }
