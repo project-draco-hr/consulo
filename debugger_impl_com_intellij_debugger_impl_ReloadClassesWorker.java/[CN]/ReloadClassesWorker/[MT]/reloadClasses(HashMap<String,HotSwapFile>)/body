@@ -3,47 +3,61 @@
     myProgress.addMessage(myDebuggerSession,MessageCategory.INFORMATION,DebuggerBundle.message("status.hotswap.loaded.classes.up.to.date"));
     return;
   }
-  VirtualMachineProxyImpl virtualMachineProxy=getDebugProcess().getVirtualMachineProxy();
-  if (virtualMachineProxy == null)   return;
+  final VirtualMachineProxyImpl virtualMachineProxy=getDebugProcess().getVirtualMachineProxy();
+  if (virtualMachineProxy == null) {
+    return;
+  }
   virtualMachineProxy.suspend();
   final Project project=getDebugProcess().getProject();
   try {
-    Map<ThreadReferenceProxyImpl,PsiMethod[]> methodsOnTheStack=getMethodsOnTheStack();
-    Map redefineMap=new HashMap();
-    int classN=0;
-    for (Iterator iterator=modifiedClasses.keySet().iterator(); iterator.hasNext(); ) {
-      classN++;
-      String qualifiedName=(String)iterator.next();
+    final Map<ReferenceType,byte[]> redefineMap=new java.util.HashMap<ReferenceType,byte[]>();
+    int processedClassesCount=0;
+    final IOException[] _ex=new IOException[]{null};
+    for (    final String qualifiedName : modifiedClasses.keySet()) {
+      processedClassesCount++;
       if (qualifiedName != null) {
         myProgress.setText(qualifiedName);
-        myProgress.setFraction(classN / (double)modifiedClasses.size());
+        myProgress.setFraction(processedClassesCount / (double)modifiedClasses.size());
       }
+      _ex[0]=null;
       final HotSwapFile fileDescr=modifiedClasses.get(qualifiedName);
-      byte[] buffer=(byte[])ApplicationManager.getApplication().runReadAction(new Computable(){
-        public Object compute(){
-          return loadFile(fileDescr.file);
+      final byte[] buffer=ApplicationManager.getApplication().runReadAction(new Computable<byte[]>(){
+        public byte[] compute(){
+          try {
+            return fileDescr.file.contentsToByteArray();
+          }
+ catch (          IOException e) {
+            _ex[0]=e;
+            return null;
+          }
         }
       }
 );
-      redefineMap.clear();
-      List classes=virtualMachineProxy.classesByName(qualifiedName);
-      for (Iterator i=classes.iterator(); i.hasNext(); ) {
-        ReferenceType reference=(ReferenceType)i.next();
-        if (buffer == null) {
-          myProgress.addMessage(myDebuggerSession,MessageCategory.ERROR,DebuggerBundle.message("error.io.error"));
+      if (buffer != null) {
+        final List<ReferenceType> classes=virtualMachineProxy.classesByName(qualifiedName);
+        for (        final ReferenceType reference : classes) {
+          redefineMap.put(reference,buffer);
         }
-        redefineMap.put(reference,buffer);
       }
-      getDebugProcess().getVirtualMachineProxy().redefineClasses(redefineMap);
+ else {
+        reportProblem(qualifiedName,_ex[0]);
+      }
+      if (redefineMap.size() >= CLASSES_CHUNK_SIZE) {
+        try {
+          virtualMachineProxy.redefineClasses(redefineMap);
+        }
+  finally {
+          redefineMap.clear();
+        }
+      }
+    }
+    if (redefineMap.size() > 0) {
+      virtualMachineProxy.redefineClasses(redefineMap);
     }
     myProgress.setFraction(1);
     myProgress.addMessage(myDebuggerSession,MessageCategory.INFORMATION,DebuggerBundle.message("status.classes.reloaded",modifiedClasses.size()));
     if (LOG.isDebugEnabled()) {
       LOG.debug("classes reloaded");
-    }
-    reportObsoleteFrames(methodsOnTheStack);
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("obsolete frames reported");
     }
   }
  catch (  Throwable e) {
