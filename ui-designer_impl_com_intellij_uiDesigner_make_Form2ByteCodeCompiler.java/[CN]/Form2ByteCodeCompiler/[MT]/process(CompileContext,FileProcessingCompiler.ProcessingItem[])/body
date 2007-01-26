@@ -1,60 +1,65 @@
 {
   final ArrayList<FileProcessingCompiler.ProcessingItem> compiledItems=new ArrayList<FileProcessingCompiler.ProcessingItem>();
-  ApplicationManager.getApplication().runReadAction(new Runnable(){
-    public void run(){
-      context.getProgressIndicator().setText(UIDesignerBundle.message("progress.compiling.ui.forms"));
-      final HashMap<Module,ArrayList<MyInstrumentationItem>> module2itemsList=sortByModules(items);
-      int formsProcessed=0;
-      for (      final Module module : module2itemsList.keySet()) {
-        final String classPath=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.FULL_CLASSPATH_RECURSIVE).getPathsString();
-        final ClassLoader loader=createClassLoader(classPath);
-        if (GuiDesignerConfiguration.getInstance(myProject).COPY_FORMS_RUNTIME_TO_OUTPUT) {
-          final String moduleOutputPath=CompilerPaths.getModuleOutputPath(module,false);
-          try {
-            if (moduleOutputPath != null) {
-              CopyResourcesUtil.copyFormsRuntime(moduleOutputPath,false);
-            }
-            final String testsOutputPath=CompilerPaths.getModuleOutputPath(module,true);
-            if (testsOutputPath != null && !testsOutputPath.equals(moduleOutputPath)) {
-              CopyResourcesUtil.copyFormsRuntime(testsOutputPath,false);
-            }
-          }
- catch (          IOException e) {
-            addMessage(context,UIDesignerBundle.message("error.cannot.copy.gui.designer.form.runtime",module.getName(),e.toString()),null,CompilerMessageCategory.ERROR);
-          }
+  context.getProgressIndicator().setText(UIDesignerBundle.message("progress.compiling.ui.forms"));
+  final HashMap<Module,ArrayList<MyInstrumentationItem>> module2itemsList=sortByModules(items);
+  int formsProcessed=0;
+  for (  final Module module : module2itemsList.keySet()) {
+    final String classPath=ProjectRootsTraversing.collectRoots(module,ProjectRootsTraversing.FULL_CLASSPATH_RECURSIVE).getPathsString();
+    final ClassLoader loader=createClassLoader(classPath);
+    if (GuiDesignerConfiguration.getInstance(myProject).COPY_FORMS_RUNTIME_TO_OUTPUT) {
+      final String moduleOutputPath=CompilerPaths.getModuleOutputPath(module,false);
+      try {
+        if (moduleOutputPath != null) {
+          CopyResourcesUtil.copyFormsRuntime(moduleOutputPath,false);
         }
-        final ArrayList<MyInstrumentationItem> list=module2itemsList.get(module);
-        for (        final MyInstrumentationItem item : list) {
-          context.getProgressIndicator().setFraction((double)(++formsProcessed) / ((double)items.length));
-          final VirtualFile formFile=item.getFormFile();
-          final Document doc=FileDocumentManager.getInstance().getDocument(formFile);
-          final LwRootContainer rootContainer;
-          try {
-            rootContainer=Utils.getRootContainer(doc.getText(),new CompiledClassPropertiesProvider(loader));
-          }
- catch (          Exception e) {
-            addMessage(context,UIDesignerBundle.message("error.cannot.process.form.file",e),formFile,CompilerMessageCategory.ERROR);
-            continue;
-          }
-          final File classFile=VfsUtil.virtualToIoFile(item.getFile());
-          LOG.assertTrue(classFile.exists(),classFile.getPath());
-          final AsmCodeGenerator codeGenerator=new AsmCodeGenerator(rootContainer,loader,new PsiNestedFormLoader(module),false);
+        final String testsOutputPath=CompilerPaths.getModuleOutputPath(module,true);
+        if (testsOutputPath != null && !testsOutputPath.equals(moduleOutputPath)) {
+          CopyResourcesUtil.copyFormsRuntime(testsOutputPath,false);
+        }
+      }
+ catch (      IOException e) {
+        addMessage(context,UIDesignerBundle.message("error.cannot.copy.gui.designer.form.runtime",module.getName(),e.toString()),null,CompilerMessageCategory.ERROR);
+      }
+    }
+    final ArrayList<MyInstrumentationItem> list=module2itemsList.get(module);
+    for (    final MyInstrumentationItem item : list) {
+      context.getProgressIndicator().setFraction((double)(++formsProcessed) / ((double)items.length));
+      final VirtualFile formFile=item.getFormFile();
+      final Document doc=ApplicationManager.getApplication().runReadAction(new Computable<Document>(){
+        public Document compute(){
+          return FileDocumentManager.getInstance().getDocument(formFile);
+        }
+      }
+);
+      final LwRootContainer rootContainer;
+      try {
+        rootContainer=Utils.getRootContainer(doc.getText(),new CompiledClassPropertiesProvider(loader));
+      }
+ catch (      Exception e) {
+        addMessage(context,UIDesignerBundle.message("error.cannot.process.form.file",e),formFile,CompilerMessageCategory.ERROR);
+        continue;
+      }
+      final File classFile=VfsUtil.virtualToIoFile(item.getFile());
+      LOG.assertTrue(classFile.exists(),classFile.getPath());
+      final AsmCodeGenerator codeGenerator=new AsmCodeGenerator(rootContainer,loader,new PsiNestedFormLoader(module),false);
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
           codeGenerator.patchFile(classFile);
-          final FormErrorInfo[] errors=codeGenerator.getErrors();
-          final FormErrorInfo[] warnings=codeGenerator.getWarnings();
-          for (          FormErrorInfo warning : warnings) {
-            addMessage(context,warning,formFile,CompilerMessageCategory.WARNING);
-          }
-          for (          FormErrorInfo error : errors) {
-            addMessage(context,error,formFile,CompilerMessageCategory.ERROR);
-          }
-          if (errors.length == 0) {
-            compiledItems.add(item);
-          }
         }
+      }
+);
+      final FormErrorInfo[] errors=codeGenerator.getErrors();
+      final FormErrorInfo[] warnings=codeGenerator.getWarnings();
+      for (      FormErrorInfo warning : warnings) {
+        addMessage(context,warning,formFile,CompilerMessageCategory.WARNING);
+      }
+      for (      FormErrorInfo error : errors) {
+        addMessage(context,error,formFile,CompilerMessageCategory.ERROR);
+      }
+      if (errors.length == 0) {
+        compiledItems.add(item);
       }
     }
   }
-);
   return compiledItems.toArray(new FileProcessingCompiler.ProcessingItem[compiledItems.size()]);
 }
