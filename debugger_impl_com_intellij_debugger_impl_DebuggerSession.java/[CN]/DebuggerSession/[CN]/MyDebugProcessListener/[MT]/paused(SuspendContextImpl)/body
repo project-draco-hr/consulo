@@ -1,0 +1,80 @@
+{
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("paused");
+  }
+  ThreadReferenceProxyImpl currentThread=suspendContext.getThread();
+  final StackFrameContext positionContext;
+  if (currentThread == null) {
+    LOG.assertTrue(suspendContext.getSuspendPolicy() == EventRequest.SUSPEND_ALL);
+    SuspendContextImpl oldContext=getProcess().getSuspendManager().getPausedContext();
+    if (oldContext != null) {
+      currentThread=oldContext.getThread();
+    }
+    if (currentThread == null) {
+      for (      final ThreadReferenceProxyImpl threadReferenceProxy : getProcess().getVirtualMachineProxy().allThreads()) {
+        currentThread=threadReferenceProxy;
+        if (currentThread.status() == ThreadReference.THREAD_STATUS_RUNNING) {
+          break;
+        }
+      }
+    }
+    StackFrameProxyImpl proxy=null;
+    if (currentThread != null) {
+      while (!currentThread.isSuspended()) {
+        try {
+          Thread.sleep(10);
+        }
+ catch (        InterruptedException e) {
+        }
+        if (currentThread.isCollected()) {
+          break;
+        }
+      }
+      try {
+        proxy=(currentThread.frameCount() > 0) ? currentThread.frame(0) : null;
+      }
+ catch (      EvaluateException e) {
+        proxy=null;
+        LOG.error(e);
+      }
+    }
+    positionContext=new SimpleStackFrameContext(proxy,myDebugProcess);
+  }
+ else {
+    positionContext=suspendContext;
+  }
+  SourcePosition position=PsiDocumentManager.getInstance(getProject()).commitAndRunReadAction(new Computable<SourcePosition>(){
+    public @Nullable SourcePosition compute(){
+      return ContextUtil.getSourcePosition(positionContext);
+    }
+  }
+);
+  if (position != null) {
+    List<Pair<Breakpoint,Event>> eventDescriptors=DebuggerUtilsEx.getEventDescriptors(suspendContext);
+    RequestManagerImpl requestsManager=suspendContext.getDebugProcess().getRequestsManager();
+    for (    Pair<Breakpoint,Event> eventDescriptor : eventDescriptors) {
+      Breakpoint breakpoint=eventDescriptor.getFirst();
+      if (breakpoint instanceof LineBreakpoint) {
+        final SourcePosition breakpointPosition=((BreakpointWithHighlighter)breakpoint).getSourcePosition();
+        if (breakpointPosition == null) {
+          requestsManager.deleteRequest(breakpoint);
+          requestsManager.setInvalid(breakpoint,DebuggerBundle.message("error.invalid.breakpoint.source.changed"));
+          breakpoint.updateUI();
+        }
+ else         if (breakpointPosition.getLine() != position.getLine()) {
+          position=breakpointPosition;
+          requestsManager.setInvalid(breakpoint,"Was unable to locate source for the breakpoint in the classpath");
+          breakpoint.updateUI();
+        }
+      }
+    }
+  }
+  final DebuggerContextImpl debuggerContext=DebuggerContextImpl.createDebuggerContext(DebuggerSession.this,suspendContext,currentThread,null);
+  debuggerContext.setPositionCache(position);
+  DebuggerInvocationUtil.invokeLater(getProject(),new Runnable(){
+    public void run(){
+      getContextManager().setState(debuggerContext,STATE_PAUSED,EVENT_PAUSE,null);
+    }
+  }
+);
+}
