@@ -1,2 +1,122 @@
 {
+  @NonNls final String referenceName=reference.getReferenceName();
+  if (referenceName == null)   return;
+  Project project=reference.getProject();
+  final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+  PsiFile containingFile=reference.getContainingFile();
+  if (containingFile == null)   return;
+  VirtualFile classVFile=containingFile.getVirtualFile();
+  if (classVFile == null)   return;
+  final Module currentModule=fileIndex.getModuleForFile(classVFile);
+  if (currentModule == null)   return;
+  if ("TestCase".equals(referenceName) || isAnnotation(reference) && isJunitAnnotationName(referenceName)) {
+    QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+      @NotNull public String getText(){
+        return QuickFixBundle.message("orderEntry.fix.add.junit.jar.to.classpath");
+      }
+      @NotNull public String getFamilyName(){
+        return getText();
+      }
+      public boolean isAvailable(      Project project,      Editor editor,      PsiFile file){
+        return !project.isDisposed() && !currentModule.isDisposed();
+      }
+      public void invoke(      Project project,      Editor editor,      PsiFile file) throws IncorrectOperationException {
+        boolean isJunit4=!referenceName.equals("TestCase");
+        addBundledJarToRoots(project,editor,currentModule,reference,isJunit4 ? "org.junit." + referenceName : "junit.framework.TestCase",PathManager.getLibPath() + "/" + (isJunit4 ? "junit-4.0" : "junit")+ ".jar");
+      }
+    }
+);
+    return;
+  }
+  if (isAnnotation(reference) && AnnotationUtil.isJetbrainsAnnotation(referenceName)) {
+    QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+      @NotNull public String getText(){
+        return QuickFixBundle.message("orderEntry.fix.add.annotations.jar.to.classpath");
+      }
+      @NotNull public String getFamilyName(){
+        return getText();
+      }
+      public boolean isAvailable(      Project project,      Editor editor,      PsiFile file){
+        return !project.isDisposed() && !currentModule.isDisposed();
+      }
+      public void invoke(      Project project,      Editor editor,      PsiFile file) throws IncorrectOperationException {
+        LocateLibraryDialog dialog=new LocateLibraryDialog(currentModule,PathManager.getLibPath(),"annotations.jar",QuickFixBundle.message("add.library.annotations.description"));
+        dialog.show();
+        if (dialog.isOK()) {
+          addBundledJarToRoots(project,editor,currentModule,reference,"org.jetbrains.annotations." + referenceName,dialog.getResultingLibraryPath());
+        }
+      }
+    }
+);
+    return;
+  }
+  Set<Object> librariesToAdd=new THashSet<Object>();
+  PsiClass[] classes=reference.getManager().getShortNamesCache().getClassesByName(referenceName,GlobalSearchScope.allScope(project));
+  for (  final PsiClass aClass : classes) {
+    if (!aClass.getManager().getResolveHelper().isAccessible(aClass,reference,aClass))     continue;
+    PsiFile psiFile=aClass.getContainingFile();
+    if (psiFile == null)     continue;
+    VirtualFile virtualFile=psiFile.getVirtualFile();
+    if (virtualFile == null)     continue;
+    final Module classModule=fileIndex.getModuleForFile(virtualFile);
+    if (classModule != null && classModule != currentModule && !ModuleRootManager.getInstance(currentModule).isDependsOn(classModule)) {
+      QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+        @NotNull public String getText(){
+          return QuickFixBundle.message("orderEntry.fix.add.dependency.on.module",classModule.getName());
+        }
+        @NotNull public String getFamilyName(){
+          return QuickFixBundle.message("orderEntry.fix.family.add.module.dependency");
+        }
+        public boolean isAvailable(        Project project,        Editor editor,        PsiFile file){
+          return !project.isDisposed() && !classModule.isDisposed() && !currentModule.isDisposed();
+        }
+        public void invoke(        final Project project,        final Editor editor,        PsiFile file) throws IncorrectOperationException {
+          final Runnable doit=new Runnable(){
+            public void run(){
+              ModifiableRootModel model=ModuleRootManager.getInstance(currentModule).getModifiableModel();
+              model.addModuleOrderEntry(classModule);
+              model.commit();
+              new AddImportAction(project,reference,editor,aClass).execute();
+            }
+          }
+;
+          final Pair<Module,Module> circularModules=ModulesConfigurator.addingDependencyFormsCircularity(currentModule,classModule);
+          if (circularModules == null) {
+            doit.run();
+          }
+ else {
+            showCircularWarningAndContinue(project,circularModules,classModule,doit);
+          }
+        }
+      }
+);
+    }
+    for (    OrderEntry orderEntry : fileIndex.getOrderEntriesForFile(virtualFile)) {
+      if (orderEntry instanceof LibraryOrderEntry) {
+        final LibraryOrderEntry libraryEntry=(LibraryOrderEntry)orderEntry;
+        final Library library=libraryEntry.getLibrary();
+        if (library == null)         continue;
+        VirtualFile[] files=library.getFiles(OrderRootType.CLASSES);
+        if (files.length == 0)         continue;
+        final VirtualFile jar=files[0];
+        if (jar == null || libraryEntry.isModuleLevel() && !librariesToAdd.add(jar) || !librariesToAdd.add(library))         continue;
+        QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+          @NotNull public String getText(){
+            return QuickFixBundle.message("orderEntry.fix.add.library.to.classpath",libraryEntry.getPresentableName());
+          }
+          @NotNull public String getFamilyName(){
+            return QuickFixBundle.message("orderEntry.fix.family.add.library.to.classpath");
+          }
+          public boolean isAvailable(          Project project,          Editor editor,          PsiFile file){
+            return !project.isDisposed() && !currentModule.isDisposed() && libraryEntry.isValid();
+          }
+          public void invoke(          Project project,          Editor editor,          PsiFile file) throws IncorrectOperationException {
+            addLibraryToRoots(libraryEntry,currentModule);
+            new AddImportAction(project,reference,editor,aClass).execute();
+          }
+        }
+);
+      }
+    }
+  }
 }
