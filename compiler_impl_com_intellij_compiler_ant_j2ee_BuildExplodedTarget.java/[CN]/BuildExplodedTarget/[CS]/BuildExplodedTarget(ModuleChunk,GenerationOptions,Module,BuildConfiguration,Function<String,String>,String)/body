@@ -1,0 +1,57 @@
+{
+  super(explodedBuildTarget.fun(chunk.getName()),null,description,null);
+  final Module module=chunk.getModules()[0];
+  final File moduleBaseDir=chunk.getBaseDir();
+  final ArrayList<Tag> tags=new ArrayList<Tag>();
+  BuildRecipe buildRecipe=DeploymentUtil.getInstance().getModuleItems(moduleToBuild);
+  buildRecipe.visitInstructions(new BuildInstructionVisitor(){
+    public boolean visitFileCopyInstruction(    FileCopyInstruction instruction) throws RuntimeException {
+      if (instruction.isExternalDependencyInstruction())       return true;
+      final File sourceFile=instruction.getFile();
+      final String outputRelativePath="/" + instruction.getOutputRelativePath();
+      final String sourceLocation=GenerationUtils.toRelativePath(sourceFile.getPath(),moduleBaseDir,BuildProperties.getModuleBasedirProperty(instruction.getModule()),genOptions,!module.isSavePathsRelative());
+      final Copy copy;
+      if (instruction.isDirectory()) {
+        copy=new Copy(BuildProperties.propertyRef(getExplodedBuildPathProperty()) + outputRelativePath);
+        final FileSet fileSet=new FileSet(sourceLocation);
+        copy.add(fileSet);
+      }
+ else {
+        copy=new Copy(sourceLocation,BuildProperties.propertyRef(getExplodedBuildPathProperty()) + outputRelativePath);
+      }
+      tags.add(copy);
+      return true;
+    }
+    public boolean visitJarAndCopyBuildInstruction(    JarAndCopyBuildInstruction instruction) throws RuntimeException {
+      if (instruction.isExternalDependencyInstruction())       return true;
+      final String outputRelativePath=instruction.getOutputRelativePath();
+      final String destFile=BuildProperties.propertyRef(getExplodedBuildPathProperty()) + outputRelativePath;
+      final @NonNls String jarDirProperty="jar.dir";
+      tags.add(new Dirname(jarDirProperty,destFile));
+      tags.add(new Mkdir(BuildProperties.propertyRef(jarDirProperty)));
+      tags.add(generateJarTag(instruction,destFile,moduleBaseDir,genOptions));
+      return true;
+    }
+    public boolean visitJ2EEModuleBuildInstruction(    JavaeeModuleBuildInstruction instruction) throws RuntimeException {
+      if (instruction.isExternalDependencyInstruction())       return true;
+      final String outputRelativePath="/" + instruction.getOutputRelativePath();
+      final String outputPath=BuildProperties.propertyRef(getExplodedBuildPathProperty()) + outputRelativePath;
+      final String moduleName=instruction.getModule().getName();
+      final Tag tag;
+      if (instruction.getBuildProperties().isExplodedEnabled()) {
+        tag=new Copy(outputPath);
+        tag.add(new FileSet(BuildProperties.propertyRef(getExplodedBuildPathProperty(moduleName))));
+      }
+ else {
+        tag=new AntCall(explodedBuildTarget.fun(moduleName));
+        tag.add(new Param(getExplodedBuildPathProperty(),outputPath));
+      }
+      tags.add(tag);
+      return true;
+    }
+  }
+,true);
+  for (  Tag tag : tags) {
+    add(tag);
+  }
+}
