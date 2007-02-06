@@ -1,21 +1,27 @@
 {
-  super.registerBuildInstructions(instructions,context);
-  final ProjectJdk jdk=IdeaJdk.findIdeaJdk(ModuleRootManager.getInstance(myModule).getJdk());
-  if (jdk == null) {
-    context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("jdk.type.incorrect",myModule.getName()),null,-1,-1);
+  if (module.getModuleType() != PluginModuleType.getInstance()) {
     return;
   }
-  final Module[] wrongSetDependencies=PluginBuildUtil.getWrongSetDependencies(myModule);
+  ProjectJdk jdk=IdeaJdk.findIdeaJdk(ModuleRootManager.getInstance(module).getJdk());
+  if (jdk != null && IdeaJdk.isFromIDEAProject(jdk.getHomePath())) {
+    return;
+  }
+  super.registerBuildInstructions(module,instructions,context);
+  if (jdk == null) {
+    context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("jdk.type.incorrect",module.getName()),null,-1,-1);
+    return;
+  }
+  final Module[] wrongSetDependencies=PluginBuildUtil.getWrongSetDependencies(module);
   if (wrongSetDependencies.length != 0) {
     boolean realProblems=false;
-    final String pluginId=DescriptorUtil.getPluginId(myModule);
-    for (    Module module : wrongSetDependencies) {
-      if (!PluginModuleType.isOfType(module)) {
+    final String pluginId=DescriptorUtil.getPluginId(module);
+    for (    Module dependency : wrongSetDependencies) {
+      if (!PluginModuleType.isOfType(dependency)) {
         realProblems=true;
-        context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.non-plugin-module",module.getName(),myModule.getName()),null,-1,-1);
+        context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.non-plugin-module",dependency.getName(),module.getName()),null,-1,-1);
       }
  else {
-        final XmlFile pluginXml=PluginModuleType.getPluginXml(module);
+        final XmlFile pluginXml=PluginModuleType.getPluginXml(dependency);
         boolean isDeclared=false;
         if (pluginXml != null) {
           final XmlTag rootTag=pluginXml.getDocument().getRootTag();
@@ -29,38 +35,38 @@
         }
         if (!isDeclared) {
           realProblems=true;
-          context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.not-declared",module.getName(),myModule.getName()),null,-1,-1);
+          context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("incorrect.dependency.not-declared",dependency.getName(),module.getName()),null,-1,-1);
         }
       }
     }
     if (realProblems)     return;
   }
-  final PluginModuleBuildProperties moduleBuild=(PluginModuleBuildProperties)ModuleBuildProperties.getInstance(myModule);
+  final PluginBuildConfiguration moduleBuild=PluginBuildConfiguration.getInstance(module);
   final String explodedPath=moduleBuild.getExplodedPath();
   if (explodedPath == null)   return;
   HashSet<Module> modules=new HashSet<Module>();
-  PluginBuildUtil.getDependencies(myModule,modules);
+  PluginBuildUtil.getDependencies(module,modules);
   ModuleLink[] containingModules=new ModuleLink[modules.size()];
   int i=0;
   final DeploymentUtil makeUtil=DeploymentUtil.getInstance();
   for (  Module dep : modules) {
-    ModuleLink link=makeUtil.createModuleLink(dep,myModule);
+    ModuleLink link=makeUtil.createModuleLink(dep,module);
     containingModules[i++]=link;
     link.setPackagingMethod(PackagingMethod.COPY_FILES);
     link.setURI(CLASSES);
   }
-  makeUtil.addModuleOutputContents(context,instructions,myModule,myModule,CLASSES,explodedPath,null);
-  makeUtil.addJavaModuleOutputs(myModule,containingModules,instructions,context,explodedPath);
+  makeUtil.addModuleOutputContents(context,instructions,module,module,CLASSES,explodedPath,null);
+  makeUtil.addJavaModuleOutputs(module,containingModules,instructions,context,explodedPath);
   HashSet<Library> libs=new HashSet<Library>();
-  PluginBuildUtil.getLibraries(myModule,libs);
-  for (  Module module : modules) {
-    PluginBuildUtil.getLibraries(module,libs);
+  PluginBuildUtil.getLibraries(module,libs);
+  for (  Module dependentModule : modules) {
+    PluginBuildUtil.getLibraries(dependentModule,libs);
   }
-  myLibraryLinks=new LibraryLink[libs.size()];
+  final LibraryLink[] libraryLinks=new LibraryLink[libs.size()];
   i=0;
   for (  Library library : libs) {
-    LibraryLink link=makeUtil.createLibraryLink(library,myModule);
-    myLibraryLinks[i++]=link;
+    LibraryLink link=makeUtil.createLibraryLink(library,module);
+    libraryLinks[i++]=link;
     link.setPackagingMethod(PackagingMethod.COPY_FILES);
     final String singleFileName=link.getSingleFileName();
     final boolean onlyDirs=link.hasDirectoriesOnly();
@@ -77,8 +83,8 @@
     }
   }
   final VirtualFile libDir=VfsUtil.findRelativeFile(LIB_DIRECTORY,jdk.getHomeDirectory());
-  for (i=0; i < myLibraryLinks.length; i++) {
-    LibraryLink libraryLink=myLibraryLinks[i];
+  for (i=0; i < libraryLinks.length; i++) {
+    LibraryLink libraryLink=libraryLinks[i];
     VirtualFile[] files=libraryLink.getLibrary().getFiles(OrderRootType.CLASSES);
     for (    VirtualFile file : files) {
       if (file.getFileSystem() instanceof JarFileSystem) {
@@ -88,6 +94,6 @@
         context.addMessage(CompilerMessageCategory.ERROR,DevKitBundle.message("dont.add.idea.libs.to.classpath",file.getName()),null,-1,-1);
       }
     }
-    makeUtil.addLibraryLink(context,instructions,libraryLink,myModule,explodedPath);
+    makeUtil.addLibraryLink(context,instructions,libraryLink,module,explodedPath);
   }
 }
