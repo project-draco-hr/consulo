@@ -3,12 +3,16 @@
   final int chunkSize=Math.max(10,tools.length / Runtime.getRuntime().availableProcessors() / 10);
   List<Callable<Boolean>> inspectionChunks=new ArrayList<Callable<Boolean>>();
   setProgressLimit(1L * tools.length * elements.length);
+  final AtomicBoolean canceled=new AtomicBoolean(false);
   for (int v=0; v < tools.length; v+=chunkSize) {
     final int index=v;
     Callable<Boolean> chunk=new Callable<Boolean>(){
       public Boolean call() throws Exception {
         if (progress != null) {
-          if (progress.isCanceled())           return false;
+          if (progress.isCanceled()) {
+            canceled.set(true);
+            return false;
+          }
         }
         final ProgressManager progressManager=ProgressManager.getInstance();
         ((ProgressManagerImpl)progressManager).executeProcessUnderProgress(new Runnable(){
@@ -17,13 +21,15 @@
             PassExecutorService.log(progress,"Started ",name);
             ProblemsHolder holder=new ProblemsHolder(iManager);
             try {
-              for (int i=index; i < index + chunkSize && i < tools.length; i++) {
+              NextTool:               for (int i=index; i < index + chunkSize && i < tools.length; i++) {
+                if (canceled.get())                 break;
                 LocalInspectionTool tool=tools[i];
                 PsiElementVisitor elementVisitor=tool.buildVisitor(holder,isOnTheFly);
                 if (elementVisitor == null) {
                   LOG.error("Tool " + tool + " must not return null from the buildVisitor() method");
                 }
                 for (                PsiElement element : elements) {
+                  if (canceled.get())                   break NextTool;
                   progressManager.checkCanceled();
                   element.accept(elementVisitor);
                 }
@@ -35,6 +41,7 @@
             }
  catch (            ProcessCanceledException e) {
               PassExecutorService.log(progress,"Canceled ",name);
+              canceled.set(true);
             }
             PassExecutorService.log(progress,"Finished ",name);
           }
