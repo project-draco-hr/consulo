@@ -1,62 +1,52 @@
 {
   final PsiElement[] elements=getElementsIntersectingRange(myFile,myStartOffset,myEndOffset);
-  final int chunkSize=Math.max(10,tools.length / Runtime.getRuntime().availableProcessors() / 10);
-  List<Callable<Boolean>> inspectionChunks=new ArrayList<Callable<Boolean>>();
-  setProgressLimit(1L * tools.length * elements.length);
-  final AtomicBoolean canceled=new AtomicBoolean(false);
-  for (int v=0; v < tools.length; v+=chunkSize) {
-    final int index=v;
-    Callable<Boolean> chunk=new Callable<Boolean>(){
-      public Boolean call() throws Exception {
+  final Job<?> job=JobScheduler.getInstance().createJob("Inspection tools",Job.DEFAULT_PRIORITY - 1);
+  for (  final LocalInspectionTool tool : tools) {
+    job.addTask(new Runnable(){
+      public void run(){
         if (progress != null) {
           if (progress.isCanceled()) {
-            canceled.set(true);
-            return false;
+            job.cancel();
+            return;
           }
         }
         final ProgressManager progressManager=ProgressManager.getInstance();
         ((ProgressManagerImpl)progressManager).executeProcessUnderProgress(new Runnable(){
           public void run(){
-            @NonNls final String name="LocalInspections from " + index + " to "+ (index + chunkSize);
-            PassExecutorService.log(progress,"Started ",name);
+            ApplicationManager.getApplication().assertReadAccessAllowed();
             ProblemsHolder holder=new ProblemsHolder(iManager);
             try {
-              NextTool:               for (int i=index; i < index + chunkSize && i < tools.length; i++) {
-                if (canceled.get())                 break;
-                LocalInspectionTool tool=tools[i];
-                PsiElementVisitor elementVisitor=tool.buildVisitor(holder,isOnTheFly);
-                if (elementVisitor == null) {
-                  LOG.error("Tool " + tool + " must not return null from the buildVisitor() method");
-                }
-                for (                PsiElement element : elements) {
-                  if (canceled.get())                   break NextTool;
-                  progressManager.checkCanceled();
-                  element.accept(elementVisitor);
-                }
-                advanceProgress(elements.length);
-                if (holder.hasResults()) {
-                  appendDescriptors(holder.getResults(),tool);
-                }
+              progressManager.checkCanceled();
+              PsiElementVisitor elementVisitor=tool.buildVisitor(holder,isOnTheFly);
+              if (elementVisitor == null) {
+                LOG.error("Tool " + tool + " must not return null from the buildVisitor() method");
+              }
+              for (              PsiElement element : elements) {
+                progressManager.checkCanceled();
+                element.accept(elementVisitor);
+              }
+              advanceProgress(elements.length);
+              if (holder.hasResults()) {
+                appendDescriptors(holder.getResults(),tool);
               }
             }
  catch (            ProcessCanceledException e) {
-              PassExecutorService.log(progress,"Canceled ",name);
-              canceled.set(true);
+              job.cancel();
             }
-            PassExecutorService.log(progress,"Finished ",name);
           }
         }
 ,progress);
-        return true;
       }
     }
-;
-    inspectionChunks.add(chunk);
+);
   }
+  setProgressLimit(1L * tools.length * elements.length);
   try {
-    ApplicationManagerEx.getApplicationEx().invokeAllUnderReadAction(inspectionChunks,myExecutorService);
+    job.scheduleAndWaitForResults();
+    if (job.isCanceled())     return;
   }
  catch (  ProcessCanceledException e) {
+    return;
   }
 catch (  Throwable e) {
     LOG.error(e);
