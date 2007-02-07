@@ -29,90 +29,58 @@
     if (progress != null) {
       progress.setText(PsiBundle.message("psi.search.for.word.progress",searcher.getPattern()));
     }
-    if (!application.isUnitTestMode() && !application.isWriteAccessAllowed() && POOL_SIZE > 0) {
-      final AtomicInteger counter=new AtomicInteger(0);
-      final AtomicBoolean canceled=new AtomicBoolean(false);
-      final Job<?> processFilesJob=JobScheduler.getInstance().createJob("Process usages in files",Job.DEFAULT_PRIORITY);
-      for (      final PsiFile file : files) {
-        processFilesJob.addTask(new Runnable(){
-          public void run(){
-            ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(new Runnable(){
-              public void run(){
-                ApplicationManager.getApplication().runReadAction(new Runnable(){
-                  public void run(){
-                    try {
-                      PsiElement[] psiRoots=file.getPsiRoots();
-                      Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
-                      for (                      PsiElement psiRoot : psiRoots) {
-                        ProgressManager.getInstance().checkCanceled();
-                        if (!processed.add(psiRoot))                         continue;
-                        if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher)) {
-                          processFilesJob.cancel();
-                          return;
-                        }
+    final AtomicInteger counter=new AtomicInteger(0);
+    final AtomicBoolean canceled=new AtomicBoolean(false);
+    final Job<?> processFilesJob=JobScheduler.getInstance().createJob("Process usages in files",Job.DEFAULT_PRIORITY);
+    for (    final PsiFile file : files) {
+      processFilesJob.addTask(new Runnable(){
+        public void run(){
+          ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(new Runnable(){
+            public void run(){
+              ApplicationManager.getApplication().runReadAction(new Runnable(){
+                public void run(){
+                  try {
+                    PsiElement[] psiRoots=file.getPsiRoots();
+                    Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
+                    for (                    PsiElement psiRoot : psiRoots) {
+                      ProgressManager.getInstance().checkCanceled();
+                      if (!processed.add(psiRoot))                       continue;
+                      if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher)) {
+                        processFilesJob.cancel();
+                        return;
                       }
-                      if (progress != null) {
-                        double fraction=(double)counter.incrementAndGet() / files.length;
-                        progress.setFraction(fraction);
-                      }
-                      myManager.dropResolveCaches();
                     }
- catch (                    ProcessCanceledException e) {
-                      processFilesJob.cancel();
-                      canceled.set(true);
+                    if (progress != null) {
+                      double fraction=(double)counter.incrementAndGet() / files.length;
+                      progress.setFraction(fraction);
                     }
+                    myManager.dropResolveCaches();
+                  }
+ catch (                  ProcessCanceledException e) {
+                    processFilesJob.cancel();
+                    canceled.set(true);
                   }
                 }
-);
               }
+);
             }
+          }
 ,progress);
-          }
         }
+      }
 );
-      }
-      try {
-        processFilesJob.scheduleAndWaitForResults();
-      }
- catch (      Throwable throwable) {
-        LOG.error(throwable);
-        return false;
-      }
-      if (canceled.get()) {
-        throw new ProcessCanceledException();
-      }
-      return !processFilesJob.isCanceled();
     }
- else {
-      for (int i=0; i < files.length; i++) {
-        ProgressManager.getInstance().checkCanceled();
-        final PsiFile file=files[i];
-        files[i]=null;
-        PsiElement[] psiRoots=ApplicationManager.getApplication().runReadAction(new Computable<PsiElement[]>(){
-          public PsiElement[] compute(){
-            return file.getPsiRoots();
-          }
-        }
-);
-        Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
-        for (        final PsiElement psiRoot : psiRoots) {
-          if (!processed.add(psiRoot))           continue;
-          if (!ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
-            public Boolean compute(){
-              return LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher);
-            }
-          }
-)) {
-            return false;
-          }
-        }
-        if (progress != null) {
-          double fraction=(double)i / files.length;
-          progress.setFraction(fraction);
-        }
-        myManager.dropResolveCaches();
-      }
+    try {
+      processFilesJob.scheduleAndWaitForResults();
     }
+ catch (    Throwable throwable) {
+      LOG.error(throwable);
+      return false;
+    }
+    if (canceled.get()) {
+      throw new ProcessCanceledException();
+    }
+    return !processFilesJob.isCanceled();
   }
   finally {
     if (progress != null) {
@@ -120,5 +88,4 @@
     }
     myManager.finishBatchFilesProcessingMode();
   }
-  return true;
 }
