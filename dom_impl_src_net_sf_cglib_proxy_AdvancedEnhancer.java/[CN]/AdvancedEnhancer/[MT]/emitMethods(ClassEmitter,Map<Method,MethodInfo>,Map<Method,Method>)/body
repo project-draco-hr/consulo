@@ -1,27 +1,32 @@
 {
   CallbackGenerator[] generators=CallbackInfo.getGenerators(callbackTypes);
+  Map<MethodInfo,MethodInfo> covariantInfoMap=new HashMap<MethodInfo,MethodInfo>();
+  for (  Method method : methodMap.keySet()) {
+    final Method delegate=covariantMethods.get(method);
+    if (delegate != null) {
+      covariantInfoMap.put(methodMap.get(method),ReflectUtils.getMethodInfo(delegate,delegate.getModifiers()));
+    }
+  }
+  BridgeMethodGenerator bridgeMethodGenerator=new BridgeMethodGenerator(covariantInfoMap);
   Map<CallbackGenerator,List<MethodInfo>> groups=new HashMap<CallbackGenerator,List<MethodInfo>>();
   final Map<MethodInfo,Integer> indexes=new HashMap<MethodInfo,Integer>();
   final Map<MethodInfo,Integer> originalModifiers=new HashMap<MethodInfo,Integer>();
-  final Map positions=CollectionUtils.getIndexMap(methods);
-  Iterator it1=methods.iterator();
-  Iterator<Method> it2=(actualMethods != null) ? actualMethods.iterator() : null;
-  while (it1.hasNext()) {
-    MethodInfo method=(MethodInfo)it1.next();
-    Method actualMethod=(it2 != null) ? it2.next() : null;
+  final Map positions=CollectionUtils.getIndexMap(new ArrayList<MethodInfo>(methodMap.values()));
+  for (  Method actualMethod : methodMap.keySet()) {
+    MethodInfo method=methodMap.get(actualMethod);
     int index=filter.accept(actualMethod);
     if (index >= callbackTypes.length) {
       throw new IllegalArgumentException("Callback filter returned an index that is too large: " + index);
     }
     originalModifiers.put(method,(actualMethod != null) ? actualMethod.getModifiers() : method.getModifiers());
     indexes.put(method,index);
-    List<MethodInfo> group=groups.get(generators[index]);
+    final CallbackGenerator generator=covariantMethods.containsKey(actualMethod) ? bridgeMethodGenerator : generators[index];
+    List<MethodInfo> group=groups.get(generator);
     if (group == null) {
-      groups.put(generators[index],group=new ArrayList<MethodInfo>(methods.size()));
+      groups.put(generator,group=new ArrayList<MethodInfo>(methodMap.size()));
     }
     group.add(method);
   }
-  Set<CallbackGenerator> seenGen=new HashSet<CallbackGenerator>();
   CodeEmitter se=ce.getStaticHook();
   se.new_instance(THREAD_LOCAL);
   se.dup();
@@ -57,8 +62,9 @@
     }
   }
 ;
-  for (int i=0; i < callbackTypes.length; i++) {
-    CallbackGenerator gen=generators[i];
+  Set<CallbackGenerator> seenGen=new HashSet<CallbackGenerator>();
+  for (int i=0; i < callbackTypes.length + 1; i++) {
+    CallbackGenerator gen=i == callbackTypes.length ? bridgeMethodGenerator : generators[i];
     if (!seenGen.contains(gen)) {
       seenGen.add(gen);
       final List<MethodInfo> fmethods=groups.get(gen);

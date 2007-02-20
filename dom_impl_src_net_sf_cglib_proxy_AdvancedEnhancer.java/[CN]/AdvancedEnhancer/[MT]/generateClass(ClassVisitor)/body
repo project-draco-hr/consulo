@@ -7,34 +7,23 @@
   filterConstructors(sc,constructors);
   final Set forcePublic=new HashSet();
   List<Method> actualMethods=new ArrayList<Method>();
+  final Map<Method,Method> covariantMethods=new HashMap<Method,Method>();
   getMethods(sc,interfaces,actualMethods,new ArrayList<Method>(),forcePublic);
   final Set<JavaMethodSignature> finalMethods=new HashSet<JavaMethodSignature>();
-  Class aClass=sc;
-  while (!Object.class.equals(aClass)) {
+  for (Class aClass=sc; aClass != null; aClass=aClass.getSuperclass()) {
+    if (myInterceptObjectMethodsFlag && Object.class.equals(aClass))     continue;
     for (    final Method method : aClass.getDeclaredMethods()) {
       final int modifiers=method.getModifiers();
       final JavaMethodSignature signature=JavaMethodSignature.getSignature(method);
       if ((modifiers & Constants.ACC_FINAL) != 0) {
         finalMethods.add(signature);
-        actualMethods.remove(method);
+        removeAllCovariantMethods(actualMethods,method,covariantMethods);
       }
  else       if ((modifiers & Constants.ACC_ABSTRACT) == 0 && !(myAdditionalMethods.contains(signature)) || finalMethods.contains(signature)) {
-        actualMethods.remove(method);
+        removeAllCovariantMethods(actualMethods,method,covariantMethods);
       }
     }
-    aClass=aClass.getSuperclass();
   }
-  List methods=CollectionUtils.transform(actualMethods,new Transformer(){
-    public Object transform(    Object value){
-      Method method=(Method)value;
-      int modifiers=Constants.ACC_FINAL | (method.getModifiers() & ~Constants.ACC_ABSTRACT & ~Constants.ACC_NATIVE& ~Constants.ACC_SYNCHRONIZED);
-      if (forcePublic.contains(MethodWrapper.create(method))) {
-        modifiers=(modifiers & ~Constants.ACC_PROTECTED) | Constants.ACC_PUBLIC;
-      }
-      return ReflectUtils.getMethodInfo(method,modifiers);
-    }
-  }
-);
   ClassEmitter e=new ClassEmitter(v);
   e.begin_class(Constants.V1_2,Constants.ACC_PUBLIC,getClassName(),Type.getType(sc),(useFactory ? TypeUtils.add(TypeUtils.getTypes(interfaces),FACTORY) : TypeUtils.getTypes(interfaces)),Constants.SOURCE_FILE);
   List constructorInfo=CollectionUtils.transform(constructors,MethodInfoTransformer.getInstance());
@@ -50,7 +39,18 @@
   for (int i=0; i < callbackTypes.length; i++) {
     e.declare_field(Constants.ACC_PRIVATE,getCallbackField(i),callbackTypes[i],null,null);
   }
-  emitMethods(e,methods,actualMethods);
+  final Map<Method,MethodInfo> methodInfoMap=new HashMap<Method,MethodInfo>();
+  for (  Method method : actualMethods) {
+    int modifiers=Constants.ACC_FINAL | (method.getModifiers() & ~Constants.ACC_ABSTRACT & ~Constants.ACC_NATIVE& ~Constants.ACC_SYNCHRONIZED);
+    if (forcePublic.contains(MethodWrapper.create(method))) {
+      modifiers=(modifiers & ~Constants.ACC_PROTECTED) | Constants.ACC_PUBLIC;
+    }
+    if (covariantMethods.containsKey(method)) {
+      modifiers=modifiers | Constants.ACC_BRIDGE;
+    }
+    methodInfoMap.put(method,ReflectUtils.getMethodInfo(method,modifiers));
+  }
+  emitMethods(e,methodInfoMap,covariantMethods);
   emitConstructors(e,constructorInfo);
   emitSetThreadCallbacks(e);
   emitSetStaticCallbacks(e);
