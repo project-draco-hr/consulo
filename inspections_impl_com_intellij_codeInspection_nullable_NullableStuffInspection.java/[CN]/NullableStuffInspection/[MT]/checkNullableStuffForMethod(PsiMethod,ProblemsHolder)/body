@@ -17,8 +17,8 @@
     }
     if (REPORT_NOT_ANNOTATED_METHOD_OVERRIDES_NOTNULL && !isDeclaredNullable && !isDeclaredNotNull&& AnnotationUtil.isNotNull(superMethod)) {
       holder.registerProblem(method.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.method.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,new AnnotateMethodFix(AnnotationUtil.NOT_NULL){
-        protected int askUserWhetherToAnnotateBaseMethod(        final PsiMethod method,        final PsiMethod superMethod,        final Project project){
-          return NullableStuffInspection.this.askUserWhetherToAnnotateBaseMethod(method,superMethod,project);
+        protected int annotateBaseMethod(        final PsiMethod method,        final PsiMethod superMethod,        final Project project){
+          return NullableStuffInspection.this.annotateBaseMethod(method,superMethod,project);
         }
       }
 );
@@ -36,6 +36,40 @@
         }
         if (REPORT_NOT_ANNOTATED_PARAMETER_OVERRIDES_NOTNULL && !AnnotationUtil.isAnnotated(parameter,AnnotationUtil.NOT_NULL,false) && !AnnotationUtil.isAnnotated(parameter,AnnotationUtil.NULLABLE,false)&& AnnotationUtil.isAnnotated(superParameter,AnnotationUtil.NOT_NULL,false)) {
           holder.registerProblem(parameter.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.parameter.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,new AnnotateQuickFix(parameter,AnnotationUtil.NOT_NULL));
+        }
+      }
+    }
+  }
+  if (REPORT_ANNOTATION_NOT_PROPAGATED_TO_OVERRIDERS) {
+    boolean[] parameterAnnotated=new boolean[parameters.length];
+    boolean[] parameterQuickFixSuggested=new boolean[parameters.length];
+    boolean hasAnnotatedParameter=false;
+    for (int i=0; i < parameters.length; i++) {
+      PsiParameter parameter=parameters[i];
+      parameterAnnotated[i]=AnnotationUtil.isAnnotated(parameter,AnnotationUtil.NOT_NULL,false);
+      hasAnnotatedParameter|=parameterAnnotated[i];
+    }
+    if (hasAnnotatedParameter || isDeclaredNotNull) {
+      PsiManager manager=method.getManager();
+      PsiMethod[] overridings=manager.getSearchHelper().findOverridingMethods(method,GlobalSearchScope.allScope(manager.getProject()),true);
+      boolean methodQuickFixSuggested=false;
+      for (      PsiMethod overriding : overridings) {
+        if (!methodQuickFixSuggested && isDeclaredNotNull && !AnnotationUtil.isAnnotated(overriding,AnnotationUtil.NOT_NULL,false)) {
+          PsiAnnotation annotation=AnnotationUtil.findAnnotation(method,AnnotationUtil.NOT_NULL);
+          holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.methods.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,ANNOTATE_OVERRIDDEN_METHODS_FIX);
+          methodQuickFixSuggested=true;
+        }
+        if (hasAnnotatedParameter) {
+          PsiParameter[] psiParameters=overriding.getParameterList().getParameters();
+          for (int i=0; i < psiParameters.length; i++) {
+            if (parameterQuickFixSuggested[i])             continue;
+            PsiParameter parameter=psiParameters[i];
+            if (parameterAnnotated[i] && !AnnotationUtil.isAnnotated(parameter,AnnotationUtil.NOT_NULL,false)) {
+              PsiAnnotation annotation=AnnotationUtil.findAnnotation(parameters[i],AnnotationUtil.NOT_NULL);
+              holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.method.parameters.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,ANNOTATE_OVERRIDDEN_METHODS_PARAMS_FIX);
+              parameterQuickFixSuggested[i]=true;
+            }
+          }
         }
       }
     }
