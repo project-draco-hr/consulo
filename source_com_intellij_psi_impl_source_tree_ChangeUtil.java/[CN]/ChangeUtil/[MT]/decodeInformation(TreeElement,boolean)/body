@@ -1,0 +1,68 @@
+{
+  if (element instanceof CompositeElement) {
+    ChameleonTransforming.transformChildren(element);
+    TreeElement child=element.getFirstChildNode();
+    while (child != null) {
+      child=decodeInformation(child,shallDecodeEscapedTexts);
+      child=child.getTreeNext();
+    }
+    if (element.getElementType() == JavaElementType.JAVA_CODE_REFERENCE || element.getElementType() == JavaElementType.REFERENCE_EXPRESSION) {
+      PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)SourceTreeToPsiMap.treeElementToPsi(element);
+      final PsiClass refClass=element.getCopyableUserData(REFERENCED_CLASS_KEY);
+      if (refClass != null) {
+        element.putCopyableUserData(REFERENCED_CLASS_KEY,null);
+        PsiManager manager=refClass.getManager();
+        CodeStyleManagerEx codeStyleManager=(CodeStyleManagerEx)manager.getCodeStyleManager();
+        PsiElement refElement1=ref.resolve();
+        try {
+          if (refClass != refElement1 && !manager.areElementsEquivalent(refClass,refElement1)) {
+            if (((CompositeElement)element).findChildByRole(ChildRole.QUALIFIER) == null) {
+              ref=(PsiJavaCodeReferenceElement)ref.bindToElement(refClass);
+            }
+          }
+ else {
+            ref=(PsiJavaCodeReferenceElement)codeStyleManager.shortenClassReferences(ref,CodeStyleManagerEx.DO_NOT_ADD_IMPORTS);
+          }
+          element=(TreeElement)SourceTreeToPsiMap.psiElementToTree(ref);
+        }
+ catch (        IncorrectOperationException e) {
+          ((PsiImportHolder)ref.getContainingFile()).importClass(refClass);
+        }
+      }
+    }
+ else     if (element.getElementType() == JavaElementType.MODIFIER_LIST) {
+      if (element.getUserData(INTERFACE_MODIFIERS_FLAG_KEY) != null) {
+        element.putUserData(INTERFACE_MODIFIERS_FLAG_KEY,null);
+        try {
+          PsiModifierList modifierList=(PsiModifierList)SourceTreeToPsiMap.treeElementToPsi(element);
+          if (element.getTreeParent().getElementType() == JavaElementType.FIELD) {
+            modifierList.setModifierProperty(PsiModifier.PUBLIC,true);
+            modifierList.setModifierProperty(PsiModifier.STATIC,true);
+            modifierList.setModifierProperty(PsiModifier.FINAL,true);
+          }
+ else           if (element.getTreeParent().getElementType() == JavaElementType.METHOD) {
+            modifierList.setModifierProperty(PsiModifier.PUBLIC,true);
+            modifierList.setModifierProperty(PsiModifier.ABSTRACT,true);
+          }
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
+        }
+      }
+    }
+  }
+ else   if (shallDecodeEscapedTexts && element instanceof LeafElement && !(element instanceof OuterLanguageElement)) {
+    if (!isInCData(element)) {
+      final String original=element.getText();
+      final String escaped=XmlUtil.escape(original);
+      if (!Comparing.equal(original,escaped) && element.getCopyableUserData(ALREADY_ESCAPED) == null) {
+        final LeafElement copy=(LeafElement)element.copyElement();
+        copy.setText(escaped);
+        element.getTreeParent().replaceChild(element,copy);
+        copy.putCopyableUserData(ALREADY_ESCAPED,Boolean.TRUE);
+        return copy;
+      }
+    }
+  }
+  return element;
+}
