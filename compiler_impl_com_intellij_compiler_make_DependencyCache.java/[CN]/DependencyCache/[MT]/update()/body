@@ -1,41 +1,55 @@
 {
-  if (myToUpdate.size() == 0) {
+  if (myToUpdate.isEmpty()) {
     return;
   }
   final int[] namesToUpdate=myToUpdate.toArray();
   final Cache cache=getCache();
   final Cache newCache=getNewClassesCache();
   final DependencyCacheNavigator navigator=getCacheNavigator();
+  final Job<Object> cleanJob=JobScheduler.getInstance().createJob("cleaning stuff",Job.DEFAULT_PRIORITY);
+  final CacheCorruptedException[] exception=new CacheCorruptedException[]{null};
   for (  final int qName : namesToUpdate) {
     final int oldClassId=cache.getClassId(qName);
     if (oldClassId == Cache.UNKNOWN) {
       continue;
     }
-    final int[] referencedClasses=cache.getReferencedClasses(oldClassId);
-    for (    int referencedClassQName : referencedClasses) {
-      final int referencedClassDeclarationId=cache.getClassDeclarationId(referencedClassQName);
-      if (referencedClassDeclarationId == Cache.UNKNOWN) {
-        continue;
-      }
-      cache.removeClassReferencer(referencedClassDeclarationId,qName);
-      final int[] fieldIds=cache.getFieldIds(referencedClassDeclarationId);
-      for (      int fieldId : fieldIds) {
-        cache.removeFieldReferencer(fieldId,qName);
-      }
-      final int[] methodIds=cache.getMethodIds(referencedClassDeclarationId);
-      for (      int methodId : methodIds) {
-        cache.removeMethodReferencer(methodId,qName);
-      }
-    }
-    navigator.walkSuperClasses(qName,new ClassInfoProcessor(){
-      public boolean process(      int classQName) throws CacheCorruptedException {
-        final int classId=cache.getClassId(classQName);
-        cache.removeSubclass(classId,qName);
-        return true;
-      }
-    }
+    Runnable runnable=new Runnable(){
+      public void run(){
+        try {
+          final int[] referencedClasses=cache.getReferencedClasses(oldClassId);
+          for (          int referencedClassQName : referencedClasses) {
+            final int referencedClassDeclarationId=cache.getClassDeclarationId(referencedClassQName);
+            if (referencedClassDeclarationId == Cache.UNKNOWN) {
+              continue;
+            }
+            cache.removeClassReferencer(referencedClassDeclarationId,qName);
+            final int[] fieldIds=cache.getFieldIds(referencedClassDeclarationId);
+            for (            int fieldId : fieldIds) {
+              cache.removeFieldReferencer(fieldId,qName);
+            }
+            final int[] methodIds=cache.getMethodIds(referencedClassDeclarationId);
+            for (            int methodId : methodIds) {
+              cache.removeMethodReferencer(methodId,qName);
+            }
+          }
+          navigator.walkSuperClasses(qName,new ClassInfoProcessor(){
+            public boolean process(            int classQName) throws CacheCorruptedException {
+              final int classId=cache.getClassId(classQName);
+              cache.removeSubclass(classId,qName);
+              return true;
+            }
+          }
 );
+        }
+ catch (        CacheCorruptedException e) {
+          exception[0]=e;
+        }
+      }
+    }
+;
+    cleanJob.addTask(runnable);
   }
+  scheduleNow(cleanJob,exception);
   for (  final int qName : namesToUpdate) {
     final int newInfoId=newCache.getClassId(qName);
     if (newInfoId == Cache.UNKNOWN) {
@@ -44,101 +58,87 @@
     cache.importClassInfo(newCache,qName);
   }
   final SymbolTable symbolTable=getSymbolTable();
-  final WorkerArray workers=new WorkerArray(3);
-  try {
-    final CountDownLatch forwardDependenciesBuildTask=new CountDownLatch(namesToUpdate.length);
-    final CacheCorruptedException[] exception=new CacheCorruptedException[]{null};
-    for (    final int qName : namesToUpdate) {
-      final int newClassId=newCache.getClassId(qName);
-      if (newClassId == Cache.UNKNOWN) {
-        forwardDependenciesBuildTask.countDown();
-        continue;
-      }
-      workers.submit(new Runnable(){
-        public void run(){
-          try {
-            if (exception[0] != null) {
-              return;
-            }
-            buildForwardDependencies(qName,newCache.getReferences(newClassId));
-            boolean isRemote=false;
-            final int classId=cache.getClassId(qName);
-            final int[] superInterfaces=cache.getSuperInterfaces(classId);
-            if (superInterfaces.length > 0) {
-              final int remoteInterfaceName=symbolTable.getId(REMOTE_INTERFACE_NAME);
-              for (              int superInterface : superInterfaces) {
-                if (isRemoteInterface(cache,superInterface,remoteInterfaceName)) {
-                  isRemote=true;
-                  break;
-                }
+  final Job<Object> forwardJob=JobScheduler.getInstance().createJob("building forward deps",Job.DEFAULT_PRIORITY);
+  for (  final int qName : namesToUpdate) {
+    final int newClassId=newCache.getClassId(qName);
+    if (newClassId == Cache.UNKNOWN) {
+      continue;
+    }
+    forwardJob.addTask(new Runnable(){
+      public void run(){
+        try {
+          if (exception[0] != null) {
+            return;
+          }
+          buildForwardDependencies(qName,newCache.getReferences(newClassId));
+          boolean isRemote=false;
+          final int classId=cache.getClassId(qName);
+          final int[] superInterfaces=cache.getSuperInterfaces(classId);
+          if (superInterfaces.length > 0) {
+            final int remoteInterfaceName=symbolTable.getId(REMOTE_INTERFACE_NAME);
+            for (            int superInterface : superInterfaces) {
+              if (isRemoteInterface(cache,superInterface,remoteInterfaceName)) {
+                isRemote=true;
+                break;
               }
             }
-            final boolean wasRemote=cache.isRemote(classId);
-            if (wasRemote && !isRemote) {
+          }
+          final boolean wasRemote=cache.isRemote(classId);
+          if (wasRemote && !isRemote) {
 synchronized (myPreviouslyRemoteClasses) {
-                myPreviouslyRemoteClasses.add(qName);
-              }
-            }
-            cache.setRemote(classId,isRemote);
-          }
- catch (          CacheCorruptedException e) {
-            if (exception[0] == null) {
-              exception[0]=e;
+              myPreviouslyRemoteClasses.add(qName);
             }
           }
- finally {
-            forwardDependenciesBuildTask.countDown();
+          cache.setRemote(classId,isRemote);
+        }
+ catch (        CacheCorruptedException e) {
+          if (exception[0] == null) {
+            exception[0]=e;
+            forwardJob.cancel();
           }
         }
       }
+    }
 );
-    }
-    try {
-      forwardDependenciesBuildTask.await();
-    }
- catch (    InterruptedException e) {
-    }
-    if (exception[0] != null) {
-      throw exception[0];
-    }
-    final CountDownLatch subclassDependenciesBuildtask=new CountDownLatch(namesToUpdate.length);
-    for (    final int qName : namesToUpdate) {
-      final int classId=cache.getClassId(qName);
-      workers.submit(new Runnable(){
-        public void run(){
-          try {
-            if (exception[0] != null) {
-              return;
-            }
-            buildSubclassDependencies(qName,classId);
+  }
+  scheduleNow(forwardJob,exception);
+  final Job<Object> subclassJob=JobScheduler.getInstance().createJob("building subclass deps",Job.DEFAULT_PRIORITY);
+  for (  final int qName : namesToUpdate) {
+    final int classId=cache.getClassId(qName);
+    subclassJob.addTask(new Runnable(){
+      public void run(){
+        try {
+          if (exception[0] != null) {
+            return;
           }
- catch (          CacheCorruptedException e) {
-            if (exception[0] == null) {
-              exception[0]=e;
-            }
-          }
- finally {
-            subclassDependenciesBuildtask.countDown();
+          buildSubclassDependencies(getCache(),qName,classId);
+        }
+ catch (        CacheCorruptedException e) {
+          if (exception[0] == null) {
+            exception[0]=e;
+            subclassJob.cancel();
           }
         }
       }
+    }
 );
-    }
-    try {
-      subclassDependenciesBuildtask.await();
-    }
- catch (    InterruptedException ignored) {
-    }
-    if (exception[0] != null) {
-      throw exception[0];
+  }
+  Runnable runnable=new Runnable(){
+    public void run(){
+      final int[] classesToRemove=myClassesWithSourceRemoved.toArray();
+      for (      final int qName : classesToRemove) {
+        try {
+          cache.removeClass(qName);
+        }
+ catch (        CacheCorruptedException e) {
+          exception[0]=e;
+          subclassJob.cancel();
+        }
+      }
     }
   }
-  finally {
-    workers.stop();
-  }
-  final int[] classesToRemove=myClassesWithSourceRemoved.toArray();
-  for (  final int qName : classesToRemove) {
-    cache.removeClass(qName);
-  }
+;
+  subclassJob.addTask(runnable);
+  scheduleNow(subclassJob,exception);
   myToUpdate=new TIntHashSet();
 }
