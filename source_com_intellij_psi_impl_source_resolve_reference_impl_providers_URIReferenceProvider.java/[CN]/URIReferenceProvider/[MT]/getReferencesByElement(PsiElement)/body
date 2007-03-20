@@ -2,8 +2,30 @@
   final String text=element.getText();
   String s=StringUtil.stripQuotesAroundValue(text);
   final PsiElement parent=element.getParent();
-  if (s.startsWith("http://") || s.startsWith("urn:") || (parent instanceof XmlAttribute && ((XmlAttribute)parent).isNamespaceDeclaration())) {
-    if (!s.startsWith(JspManager.TAG_DIR_NS_PREFIX))     return getUrlReference(element);
+  if (parent instanceof XmlAttribute && "xsi:schemaLocation".equals(((XmlAttribute)parent).getName())) {
+    final List<PsiReference> refs=new ArrayList<PsiReference>(2);
+    final StringTokenizer tokenizer=new StringTokenizer(s);
+    while (tokenizer.hasMoreElements()) {
+      final String namespace=tokenizer.nextToken();
+      int offset=text.indexOf(namespace);
+      refs.add(new URLReference(element,new TextRange(offset,offset + namespace.length()),true));
+      if (!tokenizer.hasMoreElements())       break;
+      String url=tokenizer.nextToken();
+      offset=text.indexOf(url);
+      if (isUrlText(url))       refs.add(new DependentNSReference(element,new TextRange(offset,offset + url.length()),refs.get(refs.size() - 1)));
+ else {
+        for (        PsiReference r : new FileReferenceSet(url,element,offset,this,false).getAllReferences()) {
+          refs.add(r);
+        }
+      }
+    }
+    return refs.toArray(new PsiReference[refs.size()]);
+  }
+  if (isUrlText(s) || (parent instanceof XmlAttribute && ((XmlAttribute)parent).isNamespaceDeclaration())) {
+    if (!s.startsWith(JspManager.TAG_DIR_NS_PREFIX)) {
+      final boolean namespaceSoftRef=(parent instanceof XmlAttribute && "namespace".equals(((XmlAttribute)parent).getName())) && ((XmlAttribute)parent).getParent().getAttributeValue("schemaLocation") != null;
+      return getUrlReference(element,namespaceSoftRef);
+    }
  else {
       final int offset=text.indexOf(s);
       s=s.substring(JspManager.TAG_DIR_NS_PREFIX.length());
