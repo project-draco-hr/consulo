@@ -1,2 +1,88 @@
 {
+  if (left == right)   return true;
+  if (isNullType(right)) {
+    return !(left instanceof PsiPrimitiveType) || isNullType(left);
+  }
+  if (left instanceof PsiIntersectionType) {
+    PsiType[] conjuncts=((PsiIntersectionType)left).getConjuncts();
+    for (    PsiType conjunct : conjuncts) {
+      if (!isAssignable(conjunct,right,allowUncheckedConversion))       return false;
+    }
+    return true;
+  }
+ else   if (right instanceof PsiIntersectionType) {
+    PsiType[] conjuncts=((PsiIntersectionType)right).getConjuncts();
+    for (    PsiType conjunct : conjuncts) {
+      if (isAssignable(left,conjunct,allowUncheckedConversion))       return true;
+    }
+    return false;
+  }
+  if (left instanceof PsiCapturedWildcardType) {
+    return left.equals(right) || isAssignable(((PsiCapturedWildcardType)left).getLowerBound(),right,allowUncheckedConversion);
+  }
+ else   if (right instanceof PsiCapturedWildcardType) {
+    return isAssignable(left,((PsiCapturedWildcardType)right).getUpperBound(),allowUncheckedConversion);
+  }
+  if (left instanceof PsiWildcardType) {
+    return isAssignableToWildcard((PsiWildcardType)left,right);
+  }
+ else   if (right instanceof PsiWildcardType) {
+    return isAssignableFromWildcard(left,(PsiWildcardType)right);
+  }
+  if (right instanceof PsiArrayType) {
+    if (!(left instanceof PsiArrayType)) {
+      if (left instanceof PsiPrimitiveType || PsiUtil.resolveClassInType(left) == null)       return false;
+      PsiClass lClass=PsiUtil.resolveClassInType(left);
+      if (lClass == null)       return false;
+      if (lClass.isInterface()) {
+        final String qualifiedName=lClass.getQualifiedName();
+        return "java.io.Serializable".equals(qualifiedName) || "java.lang.Cloneable".equals(qualifiedName);
+      }
+ else {
+        return left.equalsToText("java.lang.Object");
+      }
+    }
+    PsiType lCompType=((PsiArrayType)left).getComponentType();
+    PsiType rCompType=((PsiArrayType)right).getComponentType();
+    if (lCompType instanceof PsiPrimitiveType) {
+      return lCompType == rCompType;
+    }
+ else {
+      return !(rCompType instanceof PsiPrimitiveType) && isAssignable(lCompType,rCompType,allowUncheckedConversion);
+    }
+  }
+ else {
+    if (left instanceof PsiArrayType)     return false;
+    if (right instanceof PsiPrimitiveType) {
+      if (!(left instanceof PsiPrimitiveType)) {
+        return left instanceof PsiClassType && isBoxable((PsiClassType)left,(PsiPrimitiveType)right);
+      }
+      int leftTypeIndex=TYPE_TO_RANK_MAP.get(left) - 1;
+      if (leftTypeIndex < 0)       return false;
+      int rightTypeIndex=TYPE_TO_RANK_MAP.get(right) - 1;
+      if (rightTypeIndex < 0)       return false;
+      return IS_ASSIGNABLE_BIT_SET[rightTypeIndex][leftTypeIndex];
+    }
+ else {
+      if (!(right instanceof PsiClassType)) {
+        LOG.error(right.toString());
+      }
+      if (left instanceof PsiPrimitiveType) {
+        return isUnboxable((PsiPrimitiveType)left,(PsiClassType)right);
+      }
+      final PsiClassType.ClassResolveResult leftResult=PsiUtil.resolveGenericsClassInType(left);
+      final PsiClassType.ClassResolveResult rightResult=PsiUtil.resolveGenericsClassInType(right);
+      if (leftResult.getElement() == null || rightResult.getElement() == null) {
+        if (leftResult.getElement() != rightResult.getElement())         return false;
+        String lText=left.getPresentableText();
+        String rText=right.getPresentableText();
+        if (lText.equals(rText))         return true;
+        if (lText.length() > rText.length() && lText.endsWith(rText) && lText.charAt(lText.length() - rText.length() - 1) == '.') {
+          return true;
+        }
+        return rText.length() > lText.length() && rText.endsWith(lText) && rText.charAt(rText.length() - lText.length() - 1) == '.';
+      }
+      return isClassAssignable(leftResult,rightResult,allowUncheckedConversion);
+    }
+  }
 }
