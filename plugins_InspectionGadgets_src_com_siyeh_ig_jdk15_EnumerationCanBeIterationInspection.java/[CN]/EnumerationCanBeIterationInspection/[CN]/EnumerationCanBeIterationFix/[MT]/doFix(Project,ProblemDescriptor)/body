@@ -20,46 +20,89 @@
       return;
     }
     variable=(PsiVariable)target;
-    if (!(variable instanceof PsiLocalVariable)) {
-      deleteEnumerationVariable=false;
-    }
+    deleteEnumerationVariable=false;
   }
  else {
     return;
   }
   final String variableName=createVariableName(element);
-  final Query<PsiReference> query=ReferencesSearch.search(variable,variable.getUseScope());
-  final int elementOffset=element.getTextOffset();
-  boolean checkReassignment=false;
-  for (  PsiReference reference : query) {
-    final PsiElement referenceElement=reference.getElement();
-    final PsiElement referenceParent=referenceElement.getParent();
-    if (referenceParent instanceof PsiMethodCallExpression) {
-      if (elementOffset < referenceParent.getTextOffset()) {
-      }
-    }
-  }
   @NonNls final String methodName=methodExpression.getReferenceName();
   final PsiExpression qualifier=methodExpression.getQualifierExpression();
   final PsiManager manager=element.getManager();
   final PsiElementFactory factory=manager.getElementFactory();
+  final PsiStatement statement=PsiTreeUtil.getParentOfType(element,PsiStatement.class);
+  if (statement == null) {
+    return;
+  }
+  final PsiElement statementParent=statement.getParent();
+  final String qualifierText;
+  if (qualifier == null) {
+    qualifierText="";
+  }
+ else {
+    qualifierText=qualifier.getText() + '.';
+  }
+  final String newStatementText;
   if ("elements".equals(methodName)) {
     if (TypeUtils.expressionHasTypeOrSubtype(qualifier,"java.util.Vector")) {
-      final String qualifierText;
-      if (qualifier == null) {
-        qualifierText="";
-      }
- else {
-        qualifierText=qualifier.getText() + '.';
-      }
-      final PsiStatement newStatement=factory.createStatementFromText("Iterator " + variableName + ' '+ qualifierText+ "iterator()",element);
-      element.replace(newStatement);
+      newStatementText="Iterator " + variableName + ' '+ qualifierText+ ITERATOR_TEXT;
     }
  else     if (TypeUtils.expressionHasTypeOrSubtype(qualifier,"java.util.Hashtable")) {
+      newStatementText="Iterator " + variableName + +' '+ qualifierText+ VALUES_ITERATOR_TEXT;
+    }
+ else {
+      return;
     }
   }
  else   if ("keys".equals(methodName)) {
     if (TypeUtils.expressionHasTypeOrSubtype(qualifier,"java.util.Hashtable")) {
+      newStatementText="Iterator " + variableName + ' '+ qualifierText+ KEY_SET_ITERATOR_TEXT;
+    }
+ else {
+      return;
+    }
+  }
+ else {
+    return;
+  }
+  final PsiStatement newStatement=factory.createStatementFromText(newStatementText,element);
+  statementParent.addAfter(statement,newStatement);
+  final Query<PsiReference> query=ReferencesSearch.search(variable);
+  for (  PsiReference reference : query) {
+    final PsiElement referenceElement=reference.getElement();
+    if (!(referenceElement instanceof PsiReferenceExpression)) {
+      deleteEnumerationVariable=false;
+      continue;
+    }
+    final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)referenceElement;
+    final PsiElement referenceParent=referenceExpression.getParent();
+    if (!(referenceParent instanceof PsiReferenceExpression)) {
+      deleteEnumerationVariable=false;
+      continue;
+    }
+    final PsiElement referenceGrandParent=referenceParent.getParent();
+    if (!(referenceGrandParent instanceof PsiMethodCallExpression)) {
+      deleteEnumerationVariable=false;
+      continue;
+    }
+    final PsiMethodCallExpression callExpression=(PsiMethodCallExpression)referenceGrandParent;
+    final PsiReferenceExpression foundReferenceExpression=callExpression.getMethodExpression();
+    final String foundName=foundReferenceExpression.getReferenceName();
+    final String newExpressionText;
+    if ("hasMoreElements".equals(foundName)) {
+      newExpressionText=variableName + ".hasNext()";
+    }
+ else     if ("nextElement".equals(foundName)) {
+      newExpressionText=variableName + ".next()";
+    }
+ else {
+      deleteEnumerationVariable=false;
+      continue;
+    }
+    final PsiExpression newExpression=factory.createExpressionFromText(newExpressionText,callExpression);
+    callExpression.replace(newExpression);
+    if (deleteEnumerationVariable) {
+      variable.delete();
     }
   }
 }
