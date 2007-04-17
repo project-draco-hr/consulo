@@ -1,0 +1,82 @@
+{
+  if (methodCandidates.length == 0) {
+    return ExpectedTypeInfo.EMPTY;
+  }
+  int count=-1;
+  PsiExpression[] args=argumentList.getExpressions();
+  for (int i=0; i < args.length; i++) {
+    if (args[i].equals(argument)) {
+      count=i;
+      break;
+    }
+  }
+  LOG.assertTrue(count >= 0);
+  List<ExpectedTypeInfo> array=new ArrayList<ExpectedTypeInfo>();
+  MethodsLoop:   for (  CandidateInfo candidateInfo : methodCandidates) {
+    PsiMethod method=(PsiMethod)candidateInfo.getElement();
+    PsiSubstitutor substitutor;
+    if (candidateInfo instanceof MethodCandidateInfo) {
+      substitutor=((MethodCandidateInfo)candidateInfo).inferTypeArguments(forCompletion);
+    }
+ else {
+      substitutor=candidateInfo.getSubstitutor();
+    }
+    PsiParameter[] parameters=method.getParameterList().getParameters();
+    if (!forCompletion && parameters.length != args.length)     continue;
+    if (parameters.length <= count && !method.isVarArgs())     continue;
+    for (int j=0; j < count; j++) {
+      PsiType paramType=getParameterType(parameters[Math.min(parameters.length - 1,j)],substitutor);
+      PsiType argType=args[j].getType();
+      if (argType != null && !paramType.isAssignableFrom(argType))       continue MethodsLoop;
+    }
+    PsiParameter parameter=parameters[Math.min(parameters.length - 1,count)];
+    final PsiType parameterType=getParameterType(parameter,substitutor);
+    TailType tailType;
+    if (count >= parameters.length) {
+      tailType=TailType.NONE;
+    }
+ else     if (count == parameters.length - 1) {
+      PsiType returnType=method.getReturnType();
+      tailType=(returnType == null || returnType == PsiType.VOID) && isArgumentOfTopLevelExpression(argument) ? TailType.CALL_RPARENTH_SEMICOLON : TailType.CALL_RPARENTH;
+    }
+ else {
+      tailType=TailType.COMMA;
+    }
+    ExpectedTypeInfoImpl info=createInfoImpl(parameterType,ExpectedTypeInfo.TYPE_OR_SUBTYPE,parameterType,tailType);
+    String propertyName=getPropertyName(parameter);
+    if (propertyName != null)     info.expectedName=propertyName;
+    array.add(info);
+    if (count == parameters.length - 1 && parameter.isVarArgs()) {
+      final PsiArrayType arrayType=parameterType.createArrayType();
+      ExpectedTypeInfoImpl info1=createInfoImpl(arrayType,ExpectedTypeInfo.TYPE_OR_SUBTYPE,arrayType,tailType);
+      info1.expectedName=propertyName;
+      array.add(info1);
+    }
+  }
+  if (forCompletion && array.size() == 0) {
+    for (    CandidateInfo candidate : methodCandidates) {
+      PsiMethod method=(PsiMethod)candidate.getElement();
+      PsiSubstitutor substitutor=candidate.getSubstitutor();
+      PsiParameter[] parms=method.getParameterList().getParameters();
+      if (parms.length <= count)       continue;
+      PsiParameter parm=parms[count];
+      PsiType parmType=getParameterType(parm,substitutor);
+      TailType tailType;
+      if (count >= parms.length) {
+        tailType=TailType.NONE;
+      }
+ else       if (count == parms.length - 1) {
+        PsiType returnType=method.getReturnType();
+        if (returnType != null)         returnType=substitutor.substitute(returnType);
+        tailType=(returnType == PsiType.VOID) ? TailType.CALL_RPARENTH_SEMICOLON : TailType.CALL_RPARENTH;
+      }
+ else {
+        tailType=TailType.COMMA;
+      }
+      ExpectedTypeInfoImpl info=createInfoImpl(parmType,ExpectedTypeInfo.TYPE_OR_SUBTYPE,parmType,tailType);
+      info.expectedName=getPropertyName(parm);
+      array.add(info);
+    }
+  }
+  return array.toArray(new ExpectedTypeInfo[array.size()]);
+}
