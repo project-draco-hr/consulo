@@ -1,0 +1,47 @@
+{
+  List<CommittedChangeList> result=new ArrayList<CommittedChangeList>(changes.size());
+  boolean wasEmpty=isEmpty();
+  RandomAccessFile stream=new RandomAccessFile(myPath,"rw");
+  RandomAccessFile indexStream=new RandomAccessFile(myIndexPath,"rw");
+  try {
+    if (wasEmpty) {
+      stream.writeInt(VERSION);
+      stream.writeLong(0L);
+    }
+    stream.seek(stream.length());
+    IndexEntry[] entries=readLastIndexEntries(indexStream,1);
+    Collections.sort(changes,new Comparator<CommittedChangeList>(){
+      public int compare(      final CommittedChangeList o1,      final CommittedChangeList o2){
+        return o1.getCommitDate().compareTo(o2.getCommitDate());
+      }
+    }
+);
+    for (    CommittedChangeList list : changes) {
+      boolean duplicate=false;
+      for (      IndexEntry entry : entries) {
+        if (list.getCommitDate().getTime() == entry.date && list.getNumber() == entry.number) {
+          duplicate=true;
+          break;
+        }
+      }
+      if (duplicate)       continue;
+      result.add(list);
+      long position=stream.getFilePointer();
+      myChangesProvider.writeChangeList(stream,list);
+      if (list.getCommitDate().getTime() > myLastCachedDate.getTime()) {
+        myLastCachedDate=new Date(list.getCommitDate().getTime());
+      }
+      indexStream.writeLong(list.getNumber());
+      indexStream.writeLong(list.getCommitDate().getTime());
+      indexStream.writeLong(position);
+    }
+    stream.seek(4);
+    stream.writeLong(myLastCachedDate.getTime());
+    myHeaderLoaded=true;
+  }
+  finally {
+    stream.close();
+    indexStream.close();
+  }
+  return result;
+}
