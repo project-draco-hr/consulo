@@ -1,3 +1,55 @@
 {
-  return getCommittedChanges(((DefaultRepositoryLocation)location).getURL(),maxCount,settings);
+  final SvnRepositoryLocation svnLocation=(SvnRepositoryLocation)location;
+  final ArrayList<SvnChangeList> result=new ArrayList<SvnChangeList>();
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  if (progress != null) {
+    progress.setText(SvnBundle.message("progress.text.changes.collecting.changes"));
+    progress.setText2(SvnBundle.message("progress.text2.changes.establishing.connection",location));
+  }
+  try {
+    SVNLogClient logger=SvnVcs.getInstance(myProject).createLogClient();
+    final SVNRepository repository=SvnVcs.getInstance(myProject).createRepository(svnLocation.getURL());
+    final String author=settings.getUserFilter();
+    final Date dateFrom=settings.getDateAfterFilter();
+    final Long changeFrom=settings.getChangeAfterFilter();
+    final Date dateTo=settings.getDateBeforeFilter();
+    final Long changeTo=settings.getChangeBeforeFilter();
+    final SVNRevision revisionBefore;
+    if (dateTo != null) {
+      revisionBefore=SVNRevision.create(dateTo);
+    }
+ else     if (changeTo != null) {
+      revisionBefore=SVNRevision.create(changeTo.longValue());
+    }
+ else {
+      revisionBefore=SVNRevision.HEAD;
+    }
+    final SVNRevision revisionAfter;
+    if (dateFrom != null) {
+      revisionAfter=SVNRevision.create(dateFrom);
+    }
+ else     if (changeFrom != null) {
+      revisionAfter=SVNRevision.create(changeFrom.longValue());
+    }
+ else {
+      revisionAfter=SVNRevision.create(1);
+    }
+    logger.doLog(SVNURL.parseURIEncoded(svnLocation.getURL()),new String[]{""},revisionBefore,revisionBefore,revisionAfter,false,true,maxCount,new ISVNLogEntryHandler(){
+      public void handleLogEntry(      SVNLogEntry logEntry){
+        if (progress != null) {
+          progress.setText2(SvnBundle.message("progress.text2.processing.revision",logEntry.getRevision()));
+          progress.checkCanceled();
+        }
+        if (author == null || author.equalsIgnoreCase(logEntry.getAuthor())) {
+          result.add(new SvnChangeList(SvnVcs.getInstance(myProject),svnLocation,logEntry,repository));
+        }
+      }
+    }
+);
+    settings.filterChanges(result);
+    return result;
+  }
+ catch (  SVNException e) {
+    throw new VcsException(e);
+  }
 }
