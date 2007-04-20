@@ -2,7 +2,7 @@
   if (location == null)   return null;
   final ReferenceType refType=location.declaringType();
   if (refType == null)   return null;
-  final String originalQName=refType.name();
+  final String originalQName=refType.name().replace('/','.');
   int dollar=originalQName.indexOf('$');
   final String qName=dollar >= 0 ? originalQName.substring(0,dollar) : originalQName;
   final GlobalSearchScope searchScope=myDebugProcess.getSession().getSearchScope();
@@ -10,9 +10,35 @@
   for (  Module module : modules) {
     GroovyModuleCachesManager manager=GroovyModuleCachesManager.getInstance(module);
     GrTypeDefinition typeDefinition=manager.getModuleFilesCache().getClassByName(qName);
-    if (typeDefinition != null) {
+    if (typeDefinition != null && searchScope.contains(typeDefinition.getContainingFile().getVirtualFile())) {
       return typeDefinition.getContainingFile();
     }
   }
-  return null;
+  DirectoryIndex directoryIndex=DirectoryIndex.getInstance(project);
+  int dotIndex=qName.lastIndexOf(".");
+  String packageName=dotIndex > 0 ? qName.substring(0,dotIndex) : "";
+  Query<VirtualFile> query=directoryIndex.getDirectoriesByPackageName(packageName,true);
+  String fileNameWithoutExtension=dotIndex > 0 ? qName.substring(dotIndex + 1) : qName;
+  final Set<String> fileNames=new HashSet<String>();
+  for (  final String extention : GroovyLoader.GROOVY_EXTENTIONS) {
+    fileNames.add(fileNameWithoutExtension + "." + extention);
+  }
+  final Ref<PsiFile> result=new Ref<PsiFile>();
+  query.forEach(new Processor<VirtualFile>(){
+    public boolean process(    VirtualFile vDir){
+      for (      final String fileName : fileNames) {
+        VirtualFile vFile=vDir.findChild(fileName);
+        if (vFile != null) {
+          PsiFile psiFile=PsiManager.getInstance(project).findFile(vFile);
+          if (psiFile instanceof GroovyFile) {
+            result.set(psiFile);
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+  }
+);
+  return result.get();
 }
