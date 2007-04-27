@@ -7,33 +7,13 @@
   if (!visibleArea.contains(xy))   return;
   final Editor injectedEditor=InjectedLanguageUtil.getEditorForInjectedLanguage(myEditor,myFile);
   final PsiFile injectedFile=injectedEditor instanceof EditorDelegate ? ((EditorDelegate)injectedEditor).getInjectedFile() : myFile;
-  final PsiElement injectedElement=injectedFile.findElementAt(injectedEditor.getCaretModel().getOffset());
-  LOG.assertTrue(injectedElement == null || injectedElement.isValid(),injectedElement);
   List<HighlightInfo.IntentionActionDescriptor> intentionsToShow=new ArrayList<HighlightInfo.IntentionActionDescriptor>();
-  List<HighlightInfo.IntentionActionDescriptor> fixesToShow=new ArrayList<HighlightInfo.IntentionActionDescriptor>();
-  int offset=myEditor.getCaretModel().getOffset();
-  HighlightInfo infoAtCursor=codeAnalyzer.findHighlightByOffset(myEditor.getDocument(),offset,true);
-  for (  IntentionAction action : myIntentionActions) {
-    if (action instanceof IntentionActionComposite) {
-      if (action instanceof QuickFixAction) {
-        List<HighlightInfo.IntentionActionDescriptor> availableActions=((IntentionActionComposite)action).getAvailableActions(myEditor,myFile,myPassIdToShowIntentionsFor);
-        if (infoAtCursor == null || infoAtCursor.getSeverity() == HighlightSeverity.ERROR) {
-          fixesToShow.addAll(availableActions);
-        }
- else {
-          intentionsToShow.addAll(availableActions);
-        }
-      }
-    }
- else     if (action instanceof PsiElementBaseIntentionAction && ((PsiElementBaseIntentionAction)action).isAvailable(myProject,injectedEditor,injectedElement) || action.isAvailable(myProject,injectedEditor,injectedFile)) {
-      List<IntentionAction> enableDisableIntentionAction=new ArrayList<IntentionAction>();
-      enableDisableIntentionAction.add(new IntentionHintComponent.EnableDisableIntentionAction(action));
-      intentionsToShow.add(new HighlightInfo.IntentionActionDescriptor(action,enableDisableIntentionAction,null));
-    }
-  }
-  if (!intentionsToShow.isEmpty() || !fixesToShow.isEmpty()) {
+  List<HighlightInfo.IntentionActionDescriptor> errorFixesToShow=new ArrayList<HighlightInfo.IntentionActionDescriptor>();
+  List<HighlightInfo.IntentionActionDescriptor> inspectionFixesToShow=new ArrayList<HighlightInfo.IntentionActionDescriptor>();
+  getActionsToShow(injectedEditor,injectedFile,intentionsToShow,errorFixesToShow,inspectionFixesToShow,myIntentionActions,myPassIdToShowIntentionsFor);
+  if (!intentionsToShow.isEmpty() || !errorFixesToShow.isEmpty() || !inspectionFixesToShow.isEmpty()) {
     boolean showBulb=false;
-    for (    HighlightInfo.IntentionActionDescriptor action : fixesToShow) {
+    for (    HighlightInfo.IntentionActionDescriptor action : ContainerUtil.concat(errorFixesToShow,inspectionFixesToShow)) {
       if (IntentionManagerSettings.getInstance().isShowLightBulb(action.getAction())) {
         showBulb=true;
         break;
@@ -51,13 +31,13 @@
     if (showBulb) {
       IntentionHintComponent hintComponent=codeAnalyzer.getLastIntentionHint();
       if (hintComponent != null) {
-        if (hintComponent.updateActions(fixesToShow,intentionsToShow)) {
+        if (hintComponent.updateActions(intentionsToShow,errorFixesToShow,inspectionFixesToShow)) {
           return;
         }
         codeAnalyzer.setLastIntentionHint(null);
       }
       if (!HintManager.getInstance().hasShownHintsThatWillHideByOtherHint()) {
-        hintComponent=IntentionHintComponent.showIntentionHint(myProject,injectedFile,injectedEditor,intentionsToShow,fixesToShow,false);
+        hintComponent=IntentionHintComponent.showIntentionHint(myProject,injectedFile,injectedEditor,intentionsToShow,errorFixesToShow,inspectionFixesToShow,false);
         codeAnalyzer.setLastIntentionHint(hintComponent);
       }
     }
