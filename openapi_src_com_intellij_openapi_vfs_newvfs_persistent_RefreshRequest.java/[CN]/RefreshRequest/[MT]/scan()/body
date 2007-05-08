@@ -1,0 +1,48 @@
+{
+  while (!myRefreshQueue.isEmpty()) {
+    final VFileImpl file=(VFileImpl)myRefreshQueue.pop();
+    if (file.isDirectory()) {
+      final boolean syncDir=myVFS.areChildrenLoaded(file);
+      if (syncDir) {
+        Set<String> currentNames=new HashSet<String>(Arrays.asList(myVFS.list(file)));
+        Set<String> uptodateNames=new HashSet<String>(Arrays.asList(myVFS.getDelegate().list(file)));
+        Set<String> newNames=new HashSet<String>(uptodateNames);
+        newNames.removeAll(currentNames);
+        Set<String> deletedNames=new HashSet<String>(currentNames);
+        deletedNames.removeAll(uptodateNames);
+        for (        String name : deletedNames) {
+          scheduleDeletion(file.findChild(name));
+        }
+        for (        String name : newNames) {
+          boolean isDirectory=new VFileImpl(name,file,myVFS.getDelegate(),0).isDirectory();
+          scheduleCreation(file,name,isDirectory);
+        }
+        for (        VirtualFile child : file.getChildren()) {
+          if (!deletedNames.contains(child.getName()) && child.getFileSystem() == myVFS) {
+            final boolean currentIsDirectory=child.isDirectory();
+            final boolean uptodateisDirectory=myVFS.getDelegate().isDirectory(child);
+            if (currentIsDirectory != uptodateisDirectory) {
+              scheduleDeletion(child);
+              scheduleCreation(file,child.getName(),uptodateisDirectory);
+            }
+ else             if ((myIsRecursive || !currentIsDirectory)) {
+              myRefreshQueue.push(child);
+            }
+          }
+        }
+      }
+    }
+ else {
+      long currentTimestamp=myVFS.getTimeStamp(file);
+      long updtodateTimestamp=myVFS.getDelegate().getTimeStamp(file);
+      if (currentTimestamp != updtodateTimestamp) {
+        scheduleUpdateContent(file,currentTimestamp,updtodateTimestamp);
+      }
+      boolean currentReadOnly=!myVFS.isWritable(file);
+      boolean uptodateReadOnly=!myVFS.getDelegate().isWritable(file);
+      if (currentReadOnly != uptodateReadOnly) {
+        scheduleReadOnlyAttributeChange(file,currentReadOnly,uptodateReadOnly);
+      }
+    }
+  }
+}
