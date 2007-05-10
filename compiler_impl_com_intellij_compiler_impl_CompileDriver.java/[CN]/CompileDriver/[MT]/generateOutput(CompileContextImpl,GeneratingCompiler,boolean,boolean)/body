@@ -1,0 +1,105 @@
+{
+  final GeneratingCompiler.GenerationItem[] allItems=compiler.getGenerationItems(context);
+  final List<GeneratingCompiler.GenerationItem> toGenerate=new ArrayList<GeneratingCompiler.GenerationItem>();
+  final StateCache<ValidityState> cache=getGeneratingCompilerCache(compiler);
+  final Set<String> pathsToRemove=new HashSet<String>(Arrays.asList(cache.getUrls()));
+  final Map<GeneratingCompiler.GenerationItem,String> itemToOutputPathMap=new HashMap<GeneratingCompiler.GenerationItem,String>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      for (      final GeneratingCompiler.GenerationItem item : allItems) {
+        final Module itemModule=item.getModule();
+        final String outputDirPath=getGenerationOutputPath(compiler,itemModule);
+        final String outputPath=outputDirPath + "/" + item.getPath();
+        itemToOutputPathMap.put(item,outputPath);
+        final ValidityState savedState=cache.getState(outputPath);
+        if (forceGenerate || savedState == null || !savedState.equalsTo(item.getValidityState())) {
+          toGenerate.add(item);
+        }
+ else {
+          pathsToRemove.remove(outputPath);
+        }
+      }
+    }
+  }
+);
+  if (onlyCheckStatus) {
+    if ((toGenerate.isEmpty() && pathsToRemove.isEmpty())) {
+      return false;
+    }
+    throw new ExitException(ExitStatus.CANCELLED);
+  }
+  final List<File> filesToRefresh=new ArrayList<File>();
+  final List<File> generatedFiles=new ArrayList<File>();
+  final List<Module> affectedModules=new ArrayList<Module>();
+  try {
+    if (!pathsToRemove.isEmpty()) {
+      context.getProgressIndicator().pushState();
+      context.getProgressIndicator().setText(CompilerBundle.message("progress.synchronizing.output.directory"));
+      for (      final String path : pathsToRemove) {
+        final File file=new File(path);
+        final boolean deleted=file.delete();
+        if (deleted) {
+          cache.remove(path);
+          filesToRefresh.add(file);
+        }
+      }
+      context.getProgressIndicator().popState();
+    }
+    Map<Module,Set<GeneratingCompiler.GenerationItem>> moduleToItemMap=buildModuleToGenerationItemMap(toGenerate.toArray(new GeneratingCompiler.GenerationItem[toGenerate.size()]));
+    List<Module> modules=new ArrayList<Module>(moduleToItemMap.size());
+    for (    final Module module : moduleToItemMap.keySet()) {
+      modules.add(module);
+    }
+    ModuleCompilerUtil.sortModules(myProject,modules);
+    for (    final Module module : modules) {
+      context.getProgressIndicator().pushState();
+      try {
+        final Set<GeneratingCompiler.GenerationItem> items=moduleToItemMap.get(module);
+        if (items != null && !items.isEmpty()) {
+          final VirtualFile outputDir=getGenerationOutputDir(compiler,module);
+          final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,items.toArray(new GeneratingCompiler.GenerationItem[items.size()]),outputDir);
+          context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
+          if (successfullyGenerated.length > 0) {
+            affectedModules.add(module);
+          }
+          for (          final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
+            final String fullOutputPath=itemToOutputPathMap.get(item);
+            cache.update(fullOutputPath,item.getValidityState());
+            final File file=new File(fullOutputPath);
+            filesToRefresh.add(file);
+            generatedFiles.add(file);
+          }
+        }
+      }
+  finally {
+        context.getProgressIndicator().popState();
+      }
+    }
+  }
+  finally {
+    context.getProgressIndicator().pushState();
+    CompilerUtil.refreshIOFiles(filesToRefresh);
+    if (forceGenerate && !generatedFiles.isEmpty()) {
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          List<VirtualFile> vFiles=new ArrayList<VirtualFile>(generatedFiles.size());
+          for (          File generatedFile : generatedFiles) {
+            final VirtualFile vFile=LocalFileSystem.getInstance().findFileByIoFile(generatedFile);
+            if (vFile != null) {
+              vFiles.add(vFile);
+            }
+          }
+          final FileSetCompileScope additionalScope=new FileSetCompileScope(vFiles.toArray(new VirtualFile[vFiles.size()]),affectedModules.toArray(new Module[affectedModules.size()]));
+          context.addScope(additionalScope);
+        }
+      }
+);
+    }
+    if (cache.isDirty()) {
+      context.getProgressIndicator().setText(CompilerBundle.message("progress.saving.caches"));
+      cache.save();
+    }
+    context.getProgressIndicator().popState();
+  }
+  return !toGenerate.isEmpty() || !filesToRefresh.isEmpty();
+}
