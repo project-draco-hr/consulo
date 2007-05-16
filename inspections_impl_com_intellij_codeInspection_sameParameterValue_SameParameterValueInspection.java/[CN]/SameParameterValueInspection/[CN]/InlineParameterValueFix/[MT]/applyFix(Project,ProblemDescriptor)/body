@@ -1,0 +1,46 @@
+{
+  final PsiParameter parameter=PsiTreeUtil.getParentOfType(descriptor.getPsiElement(),PsiParameter.class,false);
+  LOG.assertTrue(parameter != null);
+  if (!CommonRefactoringUtil.checkReadOnlyStatus(project,parameter))   return;
+  final PsiExpression defToInline;
+  try {
+    defToInline=PsiManager.getInstance(project).getElementFactory().createExpressionFromText(myValue,parameter);
+  }
+ catch (  IncorrectOperationException e) {
+    return;
+  }
+  final PsiMethod method=PsiTreeUtil.getParentOfType(parameter,PsiMethod.class);
+  LOG.assertTrue(method != null);
+  final Collection<PsiReference> refsToInline=ReferencesSearch.search(parameter).findAll();
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      try {
+        PsiExpression[] exprs=new PsiExpression[refsToInline.size()];
+        int idx=0;
+        for (        PsiReference reference : refsToInline) {
+          PsiJavaCodeReferenceElement refElement=(PsiJavaCodeReferenceElement)reference;
+          exprs[idx++]=InlineUtil.inlineVariable(parameter,defToInline,refElement);
+        }
+        for (        final PsiExpression expr : exprs) {
+          InlineUtil.tryToInlineArrayCreationForVarargs(expr);
+        }
+        final List<ParameterInfo> psiParameters=new ArrayList<ParameterInfo>();
+        final PsiParameter[] parameters=method.getParameterList().getParameters();
+        int paramIdx=0;
+        final String paramName=parameter.getName();
+        for (        PsiParameter param : parameters) {
+          if (!Comparing.strEqual(paramName,param.getName())) {
+            psiParameters.add(new ParameterInfo(paramIdx,param.getName(),param.getType()));
+          }
+          paramIdx++;
+        }
+        new ChangeSignatureProcessor(project,method,false,null,method.getName(),method.getReturnType(),psiParameters.toArray(new ParameterInfo[psiParameters.size()])).run();
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+;
+  ApplicationManager.getApplication().runWriteAction(runnable);
+}
