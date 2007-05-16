@@ -1,0 +1,43 @@
+{
+  final PsiParameter[] parameters=method.getParameterList().getParameters();
+  if (parameters.length == 0)   return new TIntArrayList();
+  PsiSearchHelper helper=method.getManager().getSearchHelper();
+  PsiMethod[] overridingMethods=helper.findOverridingMethods(method,method.getUseScope(),true);
+  final PsiMethod[] allMethods=ArrayUtil.append(overridingMethods,method);
+  final TIntHashSet suspects=new TIntHashSet();
+  expr.accept(new PsiRecursiveElementVisitor(){
+    public void visitReferenceExpression(    final PsiReferenceExpression expression){
+      super.visitReferenceExpression(expression);
+      PsiElement resolved=expression.resolve();
+      if (resolved instanceof PsiParameter) {
+        int i=ArrayUtil.find(parameters,resolved);
+        if (i != -1) {
+          suspects.add(i);
+        }
+      }
+    }
+  }
+);
+  final TIntIterator iterator=suspects.iterator();
+  while (iterator.hasNext()) {
+    final int paramNum=iterator.next();
+    for (    PsiMethod psiMethod : allMethods) {
+      PsiParameter[] psiParameters=psiMethod.getParameterList().getParameters();
+      if (paramNum >= psiParameters.length)       continue;
+      PsiParameter parameter=psiParameters[paramNum];
+      if (!ReferencesSearch.search(parameter,parameter.getResolveScope(),false).forEach(new Processor<PsiReference>(){
+        public boolean process(        final PsiReference reference){
+          PsiElement element=reference.getElement();
+          boolean stillCanBeRemoved=element != null && (PsiTreeUtil.isAncestor(expr,element,false) || PsiUtil.isInsideJavadocComment(element));
+          if (!stillCanBeRemoved) {
+            iterator.remove();
+            return false;
+          }
+          return true;
+        }
+      }
+))       break;
+    }
+  }
+  return new TIntArrayList(suspects.toArray());
+}
