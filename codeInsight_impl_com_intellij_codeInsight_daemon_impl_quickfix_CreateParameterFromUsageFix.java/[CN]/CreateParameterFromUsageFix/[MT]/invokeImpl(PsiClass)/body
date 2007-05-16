@@ -1,40 +1,25 @@
 {
-  if (CreateFromUsageUtils.isValidReference(myReferenceExpression,true)) {
-    return;
-  }
+  if (CreateFromUsageUtils.isValidReference(myReferenceExpression,true))   return;
   PsiManager psiManager=myReferenceExpression.getManager();
   Project project=psiManager.getProject();
-  PsiElementFactory factory=psiManager.getElementFactory();
   PsiType[] expectedTypes=CreateFromUsageUtils.guessType(myReferenceExpression,false);
   PsiType type=expectedTypes[0];
   String varName=myReferenceExpression.getReferenceName();
   PsiMethod method=PsiTreeUtil.getParentOfType(myReferenceExpression,PsiMethod.class);
   LOG.assertTrue(method != null);
-  PsiParameter param;
-  try {
-    param=factory.createParameter(varName,type);
-    final PsiReferenceExpression[] expressionOccurences=CreateFromUsageUtils.collectExpressions(myReferenceExpression,PsiMethod.class);
-    param.getModifierList().setModifierProperty(PsiModifier.FINAL,CodeStyleSettingsManager.getSettings(project).GENERATE_FINAL_PARAMETERS && !CreateFromUsageUtils.isAccessedForWriting(expressionOccurences));
-    PsiParameter[] parameters=method.getParameterList().getParameters();
-    if (parameters.length > 0 && parameters[parameters.length - 1].isVarArgs()) {
-      param=(PsiParameter)method.getParameterList().addBefore(param,parameters[parameters.length - 1]);
-    }
+  method=SuperMethodWarningUtil.checkSuperMethod(method,RefactoringBundle.message("to.refactor"));
+  if (method == null)   return;
+  List<ParameterInfo> parameterInfos=new ArrayList<ParameterInfo>(Arrays.asList(ParameterInfo.fromMethod(method)));
+  ParameterInfo parameterInfo=new ParameterInfo(-1,varName,type,PsiTypesUtil.getDefaultValueOfType(type),true);
+  parameterInfos.add(parameterInfo);
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    ParameterInfo[] array=parameterInfos.toArray(new ParameterInfo[parameterInfos.size()]);
+    ChangeSignatureProcessor processor=new ChangeSignatureProcessor(project,method,false,PsiUtil.getAccessModifier(PsiUtil.getAccessLevel(method.getModifierList())),method.getName(),method.getReturnType(),array);
+    processor.run();
+  }
  else {
-      param=(PsiParameter)method.getParameterList().add(param);
-    }
+    ChangeSignatureDialog dialog=new ChangeSignatureDialog(project,method,false,myReferenceExpression);
+    dialog.setParameterInfos(parameterInfos);
+    dialog.show();
   }
- catch (  IncorrectOperationException e) {
-    LOG.error(e);
-    return;
-  }
-  TemplateBuilder builder=new TemplateBuilder(method);
-  builder.replaceElement(param.getTypeElement(),new TypeExpression(project,expectedTypes));
-  builder.setEndVariableAfter(method.getParameterList());
-  method=CodeInsightUtil.forcePsiPostprocessAndRestoreElement(method);
-  Template template=builder.buildTemplate();
-  TextRange range=method.getTextRange();
-  final PsiFile psiFile=method.getContainingFile();
-  Editor editor=positionCursor(project,psiFile,method);
-  editor.getDocument().deleteString(range.getStartOffset(),range.getEndOffset());
-  TemplateManager.getInstance(project).startTemplate(editor,template);
 }
