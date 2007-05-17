@@ -1,23 +1,32 @@
 {
-  ActionManagerEx actionManager=ActionManagerEx.getInstanceEx();
-  final String[] oldIds=actionManager.getActionIds(AntConfiguration.getActionIdPrefix(getProject()));
-  for (  String oldId : oldIds) {
-    actionManager.unregisterAction(oldId);
-  }
-  final Set<String> registeredIds=StringSetSpinAllocator.alloc();
-  try {
-    for (    final AntBuildFile buildFile : getBuildFiles()) {
-      final AntBuildModelBase model=(AntBuildModelBase)buildFile.getModel();
-      String defaultTargetActionId=model.getDefaultTargetActionId();
-      if (defaultTargetActionId != null && !registeredIds.contains(defaultTargetActionId)) {
-        registeredIds.add(defaultTargetActionId);
-        actionManager.registerAction(defaultTargetActionId,new TargetAction(buildFile,TargetAction.DEFAULT_TARGET_NAME,new String[]{TargetAction.DEFAULT_TARGET_NAME},null));
-      }
-      registerTargetActions(model.getFilteredTargets(),registeredIds,actionManager,buildFile);
-      registerTargetActions(getMetaTargets(buildFile),registeredIds,actionManager,buildFile);
+  final List<Pair<String,AnAction>> actionList=new ArrayList<Pair<String,AnAction>>();
+  for (  final AntBuildFile buildFile : getBuildFiles()) {
+    final AntBuildModelBase model=(AntBuildModelBase)buildFile.getModel();
+    String defaultTargetActionId=model.getDefaultTargetActionId();
+    if (defaultTargetActionId != null) {
+      final TargetAction action=new TargetAction(buildFile,TargetAction.DEFAULT_TARGET_NAME,new String[]{TargetAction.DEFAULT_TARGET_NAME},null);
+      actionList.add(new Pair<String,AnAction>(defaultTargetActionId,action));
     }
+    collectTargetActions(model.getFilteredTargets(),actionList,buildFile);
+    collectTargetActions(getMetaTargets(buildFile),actionList,buildFile);
   }
+synchronized (this) {
+    ActionManagerEx actionManager=ActionManagerEx.getInstanceEx();
+    final String[] oldIds=actionManager.getActionIds(AntConfiguration.getActionIdPrefix(getProject()));
+    for (    String oldId : oldIds) {
+      actionManager.unregisterAction(oldId);
+    }
+    final Set<String> registeredIds=StringSetSpinAllocator.alloc();
+    try {
+      for (      Pair<String,AnAction> pair : actionList) {
+        if (!registeredIds.contains(pair.first)) {
+          registeredIds.add(pair.first);
+          actionManager.registerAction(pair.first,pair.second);
+        }
+      }
+    }
   finally {
-    StringSetSpinAllocator.dispose(registeredIds);
+      StringSetSpinAllocator.dispose(registeredIds);
+    }
   }
 }
