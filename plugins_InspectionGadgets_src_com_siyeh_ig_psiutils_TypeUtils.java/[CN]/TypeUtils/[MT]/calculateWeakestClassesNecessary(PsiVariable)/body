@@ -1,42 +1,39 @@
 {
   final PsiType variableType=variable.getType();
   if (!(variableType instanceof PsiClassType)) {
-    return null;
+    return Collections.EMPTY_LIST;
   }
   final PsiClassType variableClassType=(PsiClassType)variableType;
   final PsiClass variableClass=variableClassType.resolve();
   if (variableClass == null) {
-    return null;
+    return Collections.EMPTY_LIST;
   }
   final PsiManager manager=variable.getManager();
   final GlobalSearchScope scope=variable.getResolveScope();
-  final Set<PsiClass> weakestTypeClasses=new HashSet();
+  Set<PsiClass> weakestTypeClasses=new HashSet();
   final PsiClass javaLangObjectClass=manager.findClass("java.lang.Object",scope);
   if (variableClass.equals(javaLangObjectClass)) {
-    return null;
+    return Collections.EMPTY_LIST;
   }
   weakestTypeClasses.add(javaLangObjectClass);
   final Query<PsiReference> query=ReferencesSearch.search(variable);
   for (  PsiReference reference : query) {
-    if (weakestTypeClasses.contains(variableClass)) {
-      return null;
-    }
     final PsiElement referenceElement=reference.getElement();
     final PsiElement referenceParent=referenceElement.getParent();
     final PsiElement referenceGrandParent=referenceParent.getParent();
     if (referenceParent instanceof PsiExpressionList) {
       if (!(referenceGrandParent instanceof PsiMethodCallExpression)) {
-        return null;
+        return Collections.EMPTY_LIST;
       }
       final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)referenceGrandParent;
       final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
       final PsiElement methodElement=methodExpression.resolve();
       if (!(methodElement instanceof PsiMethod)) {
-        return null;
+        return Collections.EMPTY_LIST;
       }
       final PsiMethod method=(PsiMethod)methodElement;
       if (!(referenceElement instanceof PsiExpression)) {
-        return null;
+        return Collections.EMPTY_LIST;
       }
       final PsiExpression expression=(PsiExpression)referenceElement;
       final PsiExpressionList expressionList=(PsiExpressionList)referenceParent;
@@ -46,26 +43,32 @@
       final PsiParameter parameter=parameters[index];
       final PsiType type=parameter.getType();
       if (!(type instanceof PsiClassType)) {
-        return null;
+        return Collections.EMPTY_LIST;
       }
       final PsiClassType classType=(PsiClassType)type;
       final PsiClass aClass=classType.resolve();
       if (aClass == null) {
-        return null;
+        return Collections.EMPTY_LIST;
       }
       checkClass(weakestTypeClasses,aClass);
     }
  else     if (referenceGrandParent instanceof PsiMethodCallExpression) {
       final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)referenceGrandParent;
       final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
-      final PsiElement methodElement=methodExpression.resolve();
-      if (!(methodElement instanceof PsiMethod)) {
-        return null;
+      final PsiElement target=methodExpression.resolve();
+      if (!(target instanceof PsiMethod)) {
+        return Collections.EMPTY_LIST;
       }
-      final PsiMethod method=(PsiMethod)methodElement;
+      final PsiMethod method=(PsiMethod)target;
       final PsiMethod[] superMethods=method.findDeepestSuperMethods();
-      for (      PsiMethod superMethod : superMethods) {
-        final PsiClass containingClass=superMethod.getContainingClass();
+      if (superMethods.length > 0) {
+        for (        PsiMethod superMethod : superMethods) {
+          final PsiClass containingClass=superMethod.getContainingClass();
+          checkClass(weakestTypeClasses,containingClass);
+        }
+      }
+ else {
+        final PsiClass containingClass=method.getContainingClass();
         checkClass(weakestTypeClasses,containingClass);
       }
     }
@@ -76,7 +79,7 @@
       if (referenceElement.equals(lhs) && rhs != null) {
         final PsiType type=rhs.getType();
         if (!(type instanceof PsiClassType)) {
-          return null;
+          return Collections.EMPTY_LIST;
         }
         final PsiClassType classType=(PsiClassType)type;
         final PsiClass aClass=classType.resolve();
@@ -85,13 +88,17 @@
  else       if (referenceElement.equals(rhs)) {
         final PsiType type=lhs.getType();
         if (!(type instanceof PsiClassType)) {
-          return null;
+          return Collections.EMPTY_LIST;
         }
         final PsiClassType classType=(PsiClassType)type;
         final PsiClass aClass=classType.resolve();
         checkClass(weakestTypeClasses,aClass);
       }
     }
+    if (weakestTypeClasses.contains(variableClass)) {
+      return Collections.EMPTY_LIST;
+    }
   }
+  weakestTypeClasses=filterVisibleClasses(weakestTypeClasses,variable);
   return Collections.unmodifiableCollection(weakestTypeClasses);
 }
