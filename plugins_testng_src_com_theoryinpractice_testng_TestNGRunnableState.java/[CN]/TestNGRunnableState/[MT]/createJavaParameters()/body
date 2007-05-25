@@ -9,7 +9,7 @@
   LOGGER.info("Language level is " + effectiveLanguageLevel.toString());
   LOGGER.info("is15 is " + is15);
   javaParameters.getClassPath().add(new File(PathManager.getPreinstalledPluginsPath(),"testng/lib/testng.jar").getPath());
-  javaParameters.getClassPath().add(new File(PathManager.getPreinstalledPluginsPath(),is15 ? "testng/lib/testng-jdk15.jar" : "testng/lib-jdk14/testng-jdk14.jar").getPath());
+  javaParameters.getClassPath().add(is15 ? PathUtil.getJarPathForClass(AfterClass.class) : PathUtil.getJarPathForClass(Queue.class));
   JavaParametersUtil.configureConfiguration(javaParameters,config);
   Project project=config.getProject();
   ProjectJdk jdk=module == null ? ProjectRootManager.getInstance(project).getProjectJdk() : ModuleRootManager.getInstance(module).getJdk();
@@ -34,7 +34,6 @@
   }
   calculateServerPort();
   TestData data=config.getPersistantData();
-  PsiManager psiManager=PsiManager.getInstance(project);
   javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.PORT_COMMAND_OPT,String.valueOf(port));
   if (!is15) {
     javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.ANNOTATIONS_COMMAND_OPT,"javadoc");
@@ -43,8 +42,12 @@
     javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.OUTDIR_COMMAND_OPT,data.getOutputDirectory());
   }
   VirtualFile[] sources;
-  if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT || module == null)   sources=ProjectRootManager.getInstance(project).getContentSourceRoots();
- else   sources=ModuleRootManager.getInstance(module).getSourceRoots();
+  if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT || module == null) {
+    sources=ProjectRootManager.getInstance(project).getContentSourceRoots();
+  }
+ else {
+    sources=ModuleRootManager.getInstance(module).getSourceRoots();
+  }
   if (sources.length > 0) {
     StringBuffer sb=new StringBuffer();
     for (int i=0; i < sources.length; i++) {
@@ -57,44 +60,7 @@
     javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.SRC_COMMAND_OPT,sb.toString());
   }
   Map<PsiClass,Collection<PsiMethod>> classes=new HashMap<PsiClass,Collection<PsiMethod>>();
-  if (data.TEST_OBJECT.equals(TestType.PACKAGE.getType())) {
-    final String packageName=data.getPackageName();
-    PsiPackage psiPackage=psiManager.findPackage(packageName);
-    if (psiPackage == null) {
-      throw CantRunException.packageNotFound(packageName);
-    }
- else {
-      TestClassFilter filter=getFilter(psiPackage);
-      classes=calculateDependencies(data,true,getAllTestClasses(filter));
-      if (classes.size() == 0) {
-        ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the package \"" + packageName + '\"'),"Can't Run " + config.getName(),project);
-        return null;
-      }
-    }
-  }
- else   if (data.TEST_OBJECT.equals(TestType.CLASS.getType())) {
-    PsiClass psiClass=psiManager.findClass(data.getMainClassName(),data.getScope().getSourceScope(config).getGlobalSearchScope());
-    if (psiClass == null) {
-      ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
-      return null;
-    }
-    classes=calculateDependencies(data,true,psiClass);
-  }
- else   if (data.TEST_OBJECT.equals(TestType.METHOD.getType())) {
-    PsiClass psiClass=psiManager.findClass(data.getMainClassName(),data.getScope().getSourceScope(config).getGlobalSearchScope());
-    if (psiClass == null) {
-      ExecutionUtil.showExecutionErrorMessage(new CantRunException("No tests found in the class \"" + data.getMainClassName() + '\"'),"Can't Run " + config.getName(),project);
-      return null;
-    }
-    classes=calculateDependencies(data,false,psiClass);
-    classes.put(psiClass,Arrays.asList(psiClass.findMethodsByName(data.getMethodName(),false)));
-  }
- else   if (data.TEST_OBJECT.equals(TestType.GROUP.getType())) {
-    PsiClass[] testClasses=getAllTestClasses(new TestClassFilter(data.getScope().getSourceScope(config).getGlobalSearchScope(),project,true));
-    for (    PsiClass c : testClasses) {
-      classes.put(c,new HashSet<PsiMethod>());
-    }
-  }
+  if (!fillTestObjects(classes,project))   return null;
   if (classes.size() > 0) {
     Map<String,Collection<String>> map=new HashMap<String,Collection<String>>();
     for (    Map.Entry<PsiClass,Collection<PsiMethod>> entry : classes.entrySet()) {
@@ -112,7 +78,7 @@
         groupNames.add(groupName);
       }
     }
-    Map<String,String> testParams=buildTestParameters(project,data);
+    Map<String,String> testParams=buildTestParameters(data);
     String annotationType=is15 ? TestNG.JDK_ANNOTATION_TYPE : TestNG.JAVADOC_ANNOTATION_TYPE;
     LOGGER.info("Using annotationType of " + annotationType);
     LaunchSuite suite=SuiteGenerator.createSuite(project.getName(),null,map,groupNames,testParams,annotationType,1);
@@ -124,7 +90,7 @@
       Collection<XmlSuite> suites=new Parser(data.getSuiteName()).parse();
       for (      XmlSuite suite : suites) {
         Map<String,String> params=suite.getParameters();
-        params.putAll(buildTestParameters(project,data));
+        params.putAll(buildTestParameters(data));
         final String fileId=(project.getName() + '_' + suite.getName()+ '_'+ Integer.toHexString(suite.getName().hashCode())+ ".xml").replace(' ','_');
         final File suiteFile=new File(PathManager.getSystemPath(),fileId);
         FileWriter fileWriter=new FileWriter(suiteFile);
