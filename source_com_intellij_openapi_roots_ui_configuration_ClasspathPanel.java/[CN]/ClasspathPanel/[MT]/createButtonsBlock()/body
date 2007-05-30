@@ -1,11 +1,13 @@
 {
   final JButton addButton=new JButton(ProjectBundle.message("button.add"));
   final JButton removeButton=new JButton(ProjectBundle.message("button.remove"));
+  final JButton editButton=new JButton(ProjectBundle.message("button.edit"));
   final JButton upButton=new JButton(ProjectBundle.message("button.move.up"));
   final JButton downButton=new JButton(ProjectBundle.message("button.move.down"));
   final JPanel panel=new JPanel(new GridBagLayout());
   panel.add(addButton,new GridBagConstraints(0,GridBagConstraints.RELATIVE,1,1,1.0,0.0,GridBagConstraints.NORTHWEST,GridBagConstraints.HORIZONTAL,new Insets(2,2,0,0),0,0));
   panel.add(removeButton,new GridBagConstraints(0,GridBagConstraints.RELATIVE,1,1,1.0,0.0,GridBagConstraints.NORTHWEST,GridBagConstraints.HORIZONTAL,new Insets(2,2,0,0),0,0));
+  panel.add(editButton,new GridBagConstraints(0,GridBagConstraints.RELATIVE,1,1,1.0,0.0,GridBagConstraints.NORTHWEST,GridBagConstraints.HORIZONTAL,new Insets(2,2,0,0),0,0));
   panel.add(upButton,new GridBagConstraints(0,GridBagConstraints.RELATIVE,1,1,1.0,0.0,GridBagConstraints.NORTHWEST,GridBagConstraints.HORIZONTAL,new Insets(2,2,0,0),0,0));
   panel.add(downButton,new GridBagConstraints(0,GridBagConstraints.RELATIVE,1,1,1.0,1.0,GridBagConstraints.NORTHWEST,GridBagConstraints.HORIZONTAL,new Insets(2,2,0,0),0,0));
   myEntryTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
@@ -28,6 +30,7 @@
       upButton.setEnabled(minRow > 0 && minRow < myEntryTable.getRowCount());
       downButton.setEnabled(maxRow >= 0 && maxRow < myEntryTable.getRowCount() - 1);
       removeButton.setEnabled(removeButtonEnabled);
+      editButton.setEnabled(selectedRows.length == 1 && myModel.getItemAt(selectedRows[0]) instanceof LibItem);
     }
   }
 );
@@ -81,8 +84,6 @@
       if (removedRows.size() == 0) {
         return;
       }
-      final LibraryTable moduleLibraryTable=myRootModel.getModuleLibraryTable();
-      LibraryTable.ModifiableModel modifiableModel=null;
       for (      final Object removedRow : removedRows) {
         final TableItem item=(TableItem)((Object[])removedRow)[MyTableModel.ITEM_COLUMN];
         final OrderEntry orderEntry=item.getEntry();
@@ -94,25 +95,59 @@
         final ProjectRootConfigurable rootConfigurable=ProjectRootConfigurable.getInstance(project);
         if (orderEntry instanceof LibraryOrderEntry) {
           final LibraryOrderEntry libEntry=(LibraryOrderEntry)orderEntry;
-          if (libEntry.isValid() && moduleLibraryTable.getTableLevel().equals(libEntry.getLibraryLevel())) {
-            if (modifiableModel == null) {
-              modifiableModel=moduleLibraryTable.getModifiableModel();
-            }
-            modifiableModel.removeLibrary(libEntry.getLibrary());
-            rootConfigurable.deleteLibraryNode(libEntry);
-            continue;
-          }
           rootConfigurable.clearCaches(module,libEntry);
         }
         rootConfigurable.clearCaches(module);
         myRootModel.removeOrderEntry(orderEntry);
       }
-      if (modifiableModel != null) {
-        modifiableModel.commit();
-      }
       final int[] selectedRows=myEntryTable.getSelectedRows();
       myModel.fireTableDataChanged();
       TableUtil.selectRows(myEntryTable,selectedRows);
+    }
+  }
+);
+  editButton.addActionListener(new ActionListener(){
+    public void actionPerformed(    final ActionEvent e){
+      final int row=myEntryTable.getSelectedRow();
+      final TableItem item=myModel.getItemAt(row);
+      if (!(item instanceof LibItem)) {
+        return;
+      }
+      final LibraryOrderEntry libraryOrderEntry=((LibItem)item).getEntry();
+      if (libraryOrderEntry == null) {
+        return;
+      }
+      final Library library=libraryOrderEntry.getLibrary();
+      if (library == null) {
+        return;
+      }
+      final LibraryTableModifiableModelProvider provider;
+      final LibraryTable table=library.getTable();
+      if (table == null) {
+        final LibraryTable moduleLibraryTable=myRootModel.getModuleLibraryTable();
+        provider=new LibraryTableModifiableModelProvider(){
+          public LibraryTable.ModifiableModel getModifiableModel(){
+            return moduleLibraryTable.getModifiableModel();
+          }
+          public String getTableLevel(){
+            return moduleLibraryTable.getTableLevel();
+          }
+          public LibraryTablePresentation getLibraryTablePresentation(){
+            return moduleLibraryTable.getPresentation();
+          }
+          public boolean isLibraryTableEditable(){
+            return false;
+          }
+        }
+;
+      }
+ else {
+        provider=ProjectRootConfigurable.getInstance(myProject).createModifiableModelProvider(table.getTableLevel(),false);
+      }
+      final LibraryTableEditor editor=LibraryTableEditor.editLibrary(provider,library);
+      editor.openDialog(ClasspathPanel.this,Collections.singletonList(library),true);
+      myEntryTable.repaint();
+      ProjectRootConfigurable.getInstance(myProject).getTree().repaint();
     }
   }
 );

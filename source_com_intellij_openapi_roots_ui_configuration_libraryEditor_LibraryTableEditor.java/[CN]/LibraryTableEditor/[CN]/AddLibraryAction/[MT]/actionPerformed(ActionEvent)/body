@@ -1,41 +1,45 @@
 {
-  final Module contextModule=(Module)DataManager.getInstance().getDataContext(myAddLibraryButton).getData(DataConstants.MODULE_CONTEXT);
-  myFileChooserDescriptor.setContextModule(contextModule);
-  final VirtualFile[] files;
-  final String name;
-  if (myEditingModuleLibraries) {
-    final Pair<String,VirtualFile[]> pair=new LibraryFileChooser(myFileChooserDescriptor,myParent,false,LibraryTableEditor.this).chooseNameAndFiles();
-    files=filterAlreadyAdded(null,pair.getSecond(),OrderRootType.CLASSES);
-    name=null;
-  }
- else {
-    final Pair<String,VirtualFile[]> pair=new LibraryFileChooser(myFileChooserDescriptor,myParent,true,LibraryTableEditor.this).chooseNameAndFiles();
-    files=pair.getSecond();
-    name=pair.getFirst();
-  }
-  if (files == null || files.length == 0) {
-    return;
-  }
-  ApplicationManager.getApplication().runWriteAction(new Runnable(){
-    public void run(){
-      if (myEditingModuleLibraries) {
-        final Module module=contextModule != null ? contextModule : (Module)DataManager.getInstance().getDataContext().getData(DataConstants.MODULE_CONTEXT);
-        for (        VirtualFile file : files) {
-          final Library library=myTableModifiableModel.createLibrary(null);
-          getLibraryEditor(library).addRoot(file,OrderRootType.CLASSES);
-          commitLibrary(library,file.getName(),module);
-        }
+  final String initial=suggestNewLibraryName(myTableModifiableModel);
+  final String prompt=ProjectBundle.message("library.name.prompt");
+  final String title=myAddLibraryButton.getText();
+  final Icon icon=Messages.getQuestionIcon();
+  final String libraryName=Messages.showInputDialog(myTreePanel,prompt,title,icon,initial,new InputValidator(){
+    public boolean checkInput(    final String inputString){
+      return true;
+    }
+    public boolean canClose(    final String inputString){
+      if (inputString.length() == 0) {
+        Messages.showErrorDialog(ProjectBundle.message("library.name.not.specified.error"),ProjectBundle.message("library.name.not.specified.title"));
+        return false;
       }
- else {
-        final Library library=myTableModifiableModel.createLibrary(name);
-        final LibraryEditor libraryEditor=getLibraryEditor(library);
-        for (        VirtualFile file : files) {
-          libraryEditor.addRoot(file,OrderRootType.CLASSES);
-        }
-        commitLibrary(library,null,null);
+      if (libraryAlreadyExists(myTableModifiableModel,inputString)) {
+        Messages.showErrorDialog(ProjectBundle.message("library.name.already.exists.error",inputString),ProjectBundle.message("library.name.already.exists.title"));
+        return false;
       }
+      return true;
     }
   }
 );
+  final Library library=myTableModifiableModel.createLibrary(libraryName);
+  selectLibrary(library,true);
+  if (myProject != null) {
+    final ProjectRootConfigurable rootConfigurable=ProjectRootConfigurable.getInstance(myProject);
+    final LibraryEditor libraryEditor=getLibraryEditor(library);
+    if (libraryEditor.hasChanges()) {
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          libraryEditor.commit();
+        }
+      }
+);
+    }
+    final DefaultMutableTreeNode libraryNode=rootConfigurable.createLibraryNode(library,null,null);
+    if (myNeedSelection) {
+      rootConfigurable.selectNodeInTree(libraryNode);
+      if (!myEditingModuleLibraries) {
+        appendLibraryToModules(rootConfigurable,library);
+      }
+    }
+  }
   librariesChanged(true);
 }
