@@ -12,20 +12,84 @@
     showErrorMessage(message,project);
     return false;
   }
-  PsiElement tempContainer=GroovyRefactoringUtil.getEnclosingContainer(expr);
-  if (tempContainer == null) {
+  final PsiElement eclosingContainer=GroovyRefactoringUtil.getEnclosingContainer(expr);
+  if (eclosingContainer == null || !(eclosingContainer instanceof GroovyPsiElement)) {
     return tempContainerNotFound(project);
   }
+  final GroovyPsiElement tempContainer=((GroovyPsiElement)eclosingContainer);
   if (!isAppropriateContainer(tempContainer)) {
     String message=RefactoringBundle.getCannotRefactorMessage(GroovyRefactoringBundle.message("refactoring.is.not.supported.in.the.current.context",REFACTORING_NAME));
     showErrorMessage(message,project);
     return false;
   }
   if (!CommonRefactoringUtil.checkReadOnlyStatus(project,file))   return false;
-  PsiElement[] occurences=GroovyRefactoringUtil.getExpressionOccurences(expr,tempContainer);
+  final PsiElement[] occurences=GroovyRefactoringUtil.getExpressionOccurences(expr,tempContainer);
   GroovyIntroduceVariableSettings settings=getSettings(project,editor,expr,expr.getType(),occurences,false,null);
   if (!settings.isOK()) {
     return false;
   }
-  return false;
+  final String varName=settings.getEnteredName();
+  PsiType varType=settings.getSelectedType();
+  final boolean isFinal=settings.isDeclareFinal();
+  final boolean replaceAllOccurences=settings.isReplaceAllOccurrences();
+  final GrVariableDeclaration varDecl=factory.createVariableDeclaration(varName,GroovyRefactoringUtil.getUnparenthesizedExpr(expr),varType,isFinal);
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      try {
+        sortOccurences(occurences);
+        if (occurences.length == 0 || !(occurences[0] instanceof GrExpression)) {
+          throw new IncorrectOperationException("Wrong expression occurence");
+        }
+        GrExpression firstOccurence;
+        if (replaceAllOccurences) {
+          firstOccurence=((GrExpression)occurences[0]);
+        }
+ else {
+          firstOccurence=expr;
+        }
+        boolean alreadyDefined=replaceAloneExpression(firstOccurence,tempContainer,varDecl);
+        if (!alreadyDefined) {
+          PsiElement anchorElement=calculatePositionToInsertBefore(tempContainer,expr,occurences,replaceAllOccurences);
+          tempContainer.addBefore(varDecl,anchorElement);
+          tempContainer.addBefore(factory.createNewLine(),anchorElement);
+        }
+        GrReferenceExpression refExpr=factory.createReferenceExpressionFromText(varName);
+        if (replaceAllOccurences) {
+          ArrayList<PsiElement> replaced=new ArrayList<PsiElement>();
+          for (          PsiElement occurence : occurences) {
+            if (!(alreadyDefined && firstOccurence.equals(occurence))) {
+              if (occurence instanceof GrExpression) {
+                GroovyPsiElement element=(GrExpression)occurence;
+                replaced.add(element.replace(refExpr));
+                refExpr=factory.createReferenceExpressionFromText(varName);
+              }
+ else {
+                throw new IncorrectOperationException("Expression occurence to be replaced is not instance of GroovyPsiElement");
+              }
+            }
+          }
+          if (editor != null) {
+            final PsiElement[] replacedOccurences=replaced.toArray(new PsiElement[replaced.size()]);
+            highlightReplacedOccurences(project,editor,replacedOccurences);
+          }
+        }
+ else {
+          if (!alreadyDefined) {
+            expr.replace(refExpr);
+          }
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+;
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(runnable);
+    }
+  }
+,REFACTORING_NAME,null);
+  return true;
 }
