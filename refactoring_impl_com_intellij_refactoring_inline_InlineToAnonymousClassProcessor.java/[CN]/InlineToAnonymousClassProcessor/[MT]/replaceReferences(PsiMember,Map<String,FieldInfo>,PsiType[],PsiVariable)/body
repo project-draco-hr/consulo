@@ -1,18 +1,30 @@
 {
   final PsiElementFactory factory=myClass.getManager().getElementFactory();
-  final Map<PsiReferenceExpression,PsiVariable> referencesToReplace=new HashMap<PsiReferenceExpression,PsiVariable>();
+  final Map<PsiReferenceExpression,PsiExpression> referencesToReplace=new HashMap<PsiReferenceExpression,PsiExpression>();
   final Map<PsiTypeElement,PsiTypeElement> typesToReplace=new HashMap<PsiTypeElement,PsiTypeElement>();
   method.accept(new PsiRecursiveElementVisitor(){
     public void visitReferenceExpression(    final PsiReferenceExpression expression){
       super.visitReferenceExpression(expression);
       final PsiElement element=expression.resolve();
       if (element instanceof PsiField) {
-        PsiField field=(PsiField)element;
-        if (field.getContainingClass() == method.getContainingClass()) {
-          FieldInfo info=fieldMap.get(field.getName());
-          if (info != null && info.replaceWithLocal) {
-            referencesToReplace.put(expression,info.localVar);
+        try {
+          PsiField field=(PsiField)element;
+          if (field.getContainingClass() == method.getContainingClass()) {
+            FieldInfo info=fieldMap.get(field.getName());
+            if (info != null && info.replaceWithLocal) {
+              final PsiExpression localRefExpr=factory.createExpressionFromText(info.localVar.getName(),method);
+              referencesToReplace.put(expression,localRefExpr);
+            }
           }
+ else           if (myClass.getContainingClass() != null && field.getContainingClass() == myClass.getContainingClass() && outerClassLocal != null) {
+            PsiReferenceExpression expr=(PsiReferenceExpression)expression.copy();
+            PsiExpression qualifier=factory.createExpressionFromText(outerClassLocal.getName(),field.getContainingClass());
+            expr.setQualifierExpression(qualifier);
+            referencesToReplace.put(expression,expr);
+          }
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
         }
       }
     }
@@ -34,9 +46,8 @@
     }
   }
 );
-  for (  Map.Entry<PsiReferenceExpression,PsiVariable> e : referencesToReplace.entrySet()) {
-    final PsiExpression expression=factory.createExpressionFromText(e.getValue().getName(),method);
-    e.getKey().replace(expression);
+  for (  Map.Entry<PsiReferenceExpression,PsiExpression> e : referencesToReplace.entrySet()) {
+    e.getKey().replace(e.getValue());
   }
   for (  Map.Entry<PsiTypeElement,PsiTypeElement> e : typesToReplace.entrySet()) {
     e.getKey().replace(e.getValue());
