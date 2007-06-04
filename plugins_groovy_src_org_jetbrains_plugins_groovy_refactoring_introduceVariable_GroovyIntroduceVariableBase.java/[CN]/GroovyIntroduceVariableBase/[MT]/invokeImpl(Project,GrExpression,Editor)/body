@@ -35,6 +35,7 @@
   final boolean isFinal=settings.isDeclareFinal();
   final boolean replaceAllOccurences=settings.isReplaceAllOccurrences();
   final GrVariableDeclaration varDecl=factory.createVariableDeclaration(varName,GroovyRefactoringUtil.getUnparenthesizedExpr(selectedExpr),varType,isFinal);
+  final PsiElement[] positionElement=new PsiElement[]{null};
   final Runnable runnable=new Runnable(){
     public void run(){
       try {
@@ -49,9 +50,9 @@
  else {
           firstOccurence=selectedExpr;
         }
-        boolean alreadyDefined=replaceAloneExpression(firstOccurence,tempContainer,varDecl);
+        boolean alreadyDefined=replaceAloneExpression(firstOccurence,tempContainer,varDecl,positionElement);
         if (!alreadyDefined) {
-          insertVariableDefinition(tempContainer,selectedExpr,occurences,replaceAllOccurences,varDecl,factory);
+          insertVariableDefinition(tempContainer,selectedExpr,occurences,replaceAllOccurences,varDecl,factory,positionElement);
         }
         GrReferenceExpression refExpr=factory.createReferenceExpressionFromText(varName);
         if (replaceAllOccurences) {
@@ -60,7 +61,15 @@
             if (!(alreadyDefined && firstOccurence.equals(occurence))) {
               if (occurence instanceof GrExpression) {
                 GrExpression element=(GrExpression)occurence;
-                replaced.add(element.replaceWithExpresssion(refExpr));
+                if (element instanceof GrClosableBlock && element.getParent() instanceof GrMethodCall) {
+                  replaced.add(((GrMethodCall)element.getParent()).replaceClosureArgument(((GrClosableBlock)element),refExpr));
+                }
+ else {
+                  replaced.add(element.replaceWithExpression(refExpr));
+                }
+                if (occurence.equals(selectedExpr)) {
+                  positionElement[0]=replaced.get(replaced.size() - 1);
+                }
                 refExpr=factory.createReferenceExpressionFromText(varName);
               }
  else {
@@ -75,8 +84,16 @@
         }
  else {
           if (!alreadyDefined) {
-            selectedExpr.replaceWithExpresssion(refExpr);
+            if (selectedExpr instanceof GrClosableBlock && selectedExpr.getParent() instanceof GrMethodCall) {
+              positionElement[0]=((GrMethodCall)selectedExpr.getParent()).replaceClosureArgument(((GrClosableBlock)selectedExpr),refExpr);
+            }
+ else {
+              positionElement[0]=selectedExpr.replaceWithExpression(refExpr);
+            }
           }
+        }
+        if (editor != null && positionElement[0] != null) {
+          editor.getCaretModel().moveToOffset(positionElement[0].getTextRange().getEndOffset());
         }
       }
  catch (      IncorrectOperationException e) {
