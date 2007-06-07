@@ -1,5 +1,11 @@
 {
   if (context == null || !context.isValid())   return ArrayUtil.EMPTY_OBJECT_ARRAY;
+  String prefix=context.getText().substring(0,completionContext.startOffset - context.getTextRange().getStartOffset());
+  final int i=prefix.lastIndexOf('.');
+  String packagePrefix="";
+  if (i > 0) {
+    packagePrefix=prefix.substring(0,i);
+  }
   final PsiManager manager=context.getManager();
   final Set<PsiClass> classesSet=new THashSet<PsiClass>(new TObjectHashingStrategy<PsiClass>(){
     public int computeHashCode(    final PsiClass object){
@@ -21,14 +27,12 @@
   }
   for (  final String name : names) {
     if (!completionContext.prefixMatches(name))     continue;
-    final PsiClass[] classesByName=cache.getClassesByName(name,scope);
-    for (    PsiClass psiClass : classesByName) {
-      if (lookingForAnnotations && !psiClass.isAnnotationType()) {
-        continue;
-      }
-      if (CompletionUtil.isInExcludedPackage(psiClass)) {
-        continue;
-      }
+    for (    PsiClass psiClass : cache.getClassesByName(name,scope)) {
+      if (lookingForAnnotations && !psiClass.isAnnotationType())       continue;
+      if (CompletionUtil.isInExcludedPackage(psiClass))       continue;
+      final String qualifiedName=psiClass.getQualifiedName();
+      if (qualifiedName == null || !qualifiedName.startsWith(packagePrefix))       continue;
+      if (!myFilter.isAcceptable(psiClass,context))       continue;
       classesSet.add(psiClass);
     }
   }
@@ -49,5 +53,14 @@
     }
   }
 );
-  return classesList.toArray(PsiClass.EMPTY_ARRAY);
+  return ContainerUtil.map2Array(classesList,SimpleLookupItem.class,new NotNullFunction<PsiClass,SimpleLookupItem>(){
+    @NotNull public SimpleLookupItem fun(    final PsiClass psiClass){
+      final SimpleLookupItem item=new SimpleLookupItem(psiClass);
+      if (context instanceof XmlElement) {
+        item.setInsertHandler(INSERT_HANDLER);
+      }
+      return item;
+    }
+  }
+);
 }
