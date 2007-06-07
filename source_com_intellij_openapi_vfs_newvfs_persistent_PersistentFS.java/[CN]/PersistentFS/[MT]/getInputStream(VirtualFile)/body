@@ -1,0 +1,42 @@
+{
+  InputStream contentStream=FILE_CONTENT.readAttribute(file);
+  if (contentStream == null || checkFlag(file,MUST_RELOAD_CONTENT)) {
+    if (contentStream != null)     contentStream.close();
+    setFlag(file,MUST_RELOAD_CONTENT,false);
+    final NewVirtualFileSystem delegate=getDelegate(file);
+    final int len=(int)delegate.getLength(file);
+    final InputStream nativeStream=delegate.getInputStream(file);
+    ReplicatorInputStream result=new ReplicatorInputStream(nativeStream,new BufferedOutputStream(FILE_CONTENT.writeAttribute(file))){
+      public void close() throws IOException {
+        super.close();
+        myRecords.setLength(getFileId(file),len);
+        if (getBytesRead() != len) {
+          setFlag(file,MUST_RELOAD_CONTENT,true);
+        }
+      }
+    }
+;
+    if (len < LOAD_THROUGH_BUFFER_THRESHOULD) {
+      try {
+        return new ByteArrayInputStream(FileUtil.loadBytes(result,len));
+      }
+  finally {
+        result.close();
+      }
+    }
+    return result;
+  }
+ else {
+    final int len=myRecords.getLength(getFileId(file));
+    final BufferedInputStream stream=new BufferedInputStream(new LimitedInputStream(contentStream,len));
+    if (len < LOAD_THROUGH_BUFFER_THRESHOULD) {
+      try {
+        return new ByteArrayInputStream(FileUtil.loadBytes(stream,len));
+      }
+  finally {
+        stream.close();
+      }
+    }
+    return stream;
+  }
+}

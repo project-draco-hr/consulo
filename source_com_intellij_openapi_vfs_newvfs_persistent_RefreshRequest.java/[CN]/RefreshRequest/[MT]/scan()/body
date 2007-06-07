@@ -1,0 +1,68 @@
+{
+  final NewVirtualFile root=(NewVirtualFile)myRefreshQueue.peek();
+  final NewVirtualFileSystem delegate=root.getFileSystem();
+  if (root.isDirty() && !delegate.exists(root)) {
+    scheduleDeletion(root);
+    root.markClean();
+  }
+ else {
+    final PersistentFS persistence=(PersistentFS)ManagingFS.getInstance();
+    while (!myRefreshQueue.isEmpty()) {
+      final VFileImpl file=(VFileImpl)myRefreshQueue.pop();
+      if (!file.isDirty())       continue;
+      if (file.isDirectory()) {
+        final boolean fullSync=file.allChildrenLoaded();
+        if (fullSync) {
+          Set<String> currentNames=new HashSet<String>(Arrays.asList(persistence.list(file)));
+          Set<String> uptodateNames=new HashSet<String>(Arrays.asList(delegate.list(file)));
+          Set<String> newNames=new HashSet<String>(uptodateNames);
+          newNames.removeAll(currentNames);
+          Set<String> deletedNames=new HashSet<String>(currentNames);
+          deletedNames.removeAll(uptodateNames);
+          for (          String name : deletedNames) {
+            scheduleDeletion(file.findChild(name));
+          }
+          for (          String name : newNames) {
+            boolean isDirectory=delegate.isDirectory(new VFileImpl(name,file,delegate,0));
+            scheduleCreation(file,name,isDirectory);
+          }
+          for (          VirtualFile child : file.getChildren()) {
+            if (!deletedNames.contains(child.getName())) {
+              scheduleChildRefresh(file,child,delegate);
+            }
+          }
+        }
+ else {
+          for (          VirtualFile child : file.getCachedChildren()) {
+            if (delegate.exists(child)) {
+              scheduleChildRefresh(file,child,delegate);
+            }
+ else {
+              scheduleDeletion(child);
+            }
+          }
+          final List<String> names=file.getSuspicousNames();
+          for (          String name : names) {
+            final VFileImpl fake=new VFileImpl(name,file,delegate,0);
+            if (delegate.exists(fake)) {
+              scheduleCreation(file,name,delegate.isDirectory(fake));
+            }
+          }
+        }
+      }
+ else {
+        long currentTimestamp=persistence.getTimeStamp(file);
+        long updtodateTimestamp=delegate.getTimeStamp(file);
+        if (currentTimestamp != updtodateTimestamp) {
+          scheduleUpdateContent(file);
+        }
+        boolean currentWritable=persistence.isWritable(file);
+        boolean uptodateWritable=delegate.isWritable(file);
+        if (currentWritable != uptodateWritable) {
+          scheduleWritableAttributeChange(file,currentWritable,uptodateWritable);
+        }
+      }
+      file.markClean();
+    }
+  }
+}
