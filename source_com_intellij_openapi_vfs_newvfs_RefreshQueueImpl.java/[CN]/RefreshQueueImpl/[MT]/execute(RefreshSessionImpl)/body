@@ -1,35 +1,21 @@
 {
   if (session.isAsynchronous()) {
-    myQueue.submit(new Runnable(){
-      public void run(){
-        try {
-          myRefreshIndicator.start();
-          try {
-            session.scan();
-          }
-  finally {
-            myRefreshIndicator.stop();
-          }
-        }
-  finally {
-          ApplicationManager.getApplication().invokeLater(new Runnable(){
-            public void run(){
-              ApplicationManager.getApplication().runWriteAction(new Runnable(){
-                public void run(){
-                  session.fireEvents();
-                }
-              }
-);
-            }
-          }
-,ModalityState.NON_MODAL);
-        }
-      }
-    }
-);
+    queueSession(session,ModalityState.NON_MODAL);
   }
  else {
-    session.scan();
-    session.fireEvents();
+    final Application app=ApplicationManager.getApplication();
+    boolean isEDT=app.isDispatchThread();
+    if (isEDT) {
+      session.scan();
+      session.fireEvents();
+    }
+ else {
+      if (app.isReadAccessAllowed()) {
+        LOG.error("Do not call synchronous refresh from inside read action except for event dispatch thread. This will eventually cause deadlock if there are events to fire");
+        return;
+      }
+      queueSession(session,ModalityState.defaultModalityState());
+      session.waitFor();
+    }
   }
 }
