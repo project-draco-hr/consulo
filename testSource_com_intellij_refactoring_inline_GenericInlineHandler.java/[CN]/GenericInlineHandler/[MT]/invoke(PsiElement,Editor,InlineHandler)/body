@@ -1,0 +1,44 @@
+{
+  final PsiReference invocationReference=TargetElementUtil.findReference(editor);
+  final InlineHandler.Settings settings=languageSpecific.prepareInlineElement(element,editor,invocationReference != null);
+  if (settings == null)   return;
+  final Collection<PsiReference> allReferences=settings.isOnlyOneReferenceToInline() ? Collections.singleton(invocationReference) : ReferencesSearch.search(element).findAll();
+  final Map<Language,InlineHandler.Inliner> inliners=new HashMap<Language,InlineHandler.Inliner>();
+  final Set<String> conflicts=new HashSet<String>();
+  for (  PsiReference ref : allReferences) {
+    final Language language=ref.getElement().getLanguage();
+    if (inliners.containsKey(language))     continue;
+    final InlineHandler inlineHandler=language.getRefactoringSupportProvider().getInlineHandler();
+    if (inlineHandler == null) {
+      conflicts.add("Cannot inline reference from " + language.getID());
+    }
+ else {
+      final InlineHandler.Inliner inliner=inlineHandler.createInliner(element);
+      if (inliner == null) {
+        conflicts.add("Cannot inline reference from " + language.getID());
+      }
+ else {
+        inliners.put(language,inliner);
+      }
+    }
+  }
+  for (  PsiReference reference : allReferences) {
+    collectConflicts(reference,element,inliners,conflicts);
+  }
+  if (!conflicts.isEmpty()) {
+    final ConflictsDialog conflictsDialog=new ConflictsDialog(element.getProject(),conflicts);
+    conflictsDialog.show();
+    if (!conflictsDialog.isOK())     return;
+  }
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      for (      PsiReference reference : allReferences) {
+        inlineReference(reference,element,inliners);
+      }
+      if (!settings.isOnlyOneReferenceToInline()) {
+        languageSpecific.removeDefinition(element);
+      }
+    }
+  }
+);
+}
