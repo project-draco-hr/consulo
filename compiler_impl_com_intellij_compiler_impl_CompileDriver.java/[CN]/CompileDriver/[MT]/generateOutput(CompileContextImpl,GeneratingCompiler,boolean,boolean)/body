@@ -8,7 +8,7 @@
     public void run(){
       for (      final GeneratingCompiler.GenerationItem item : allItems) {
         final Module itemModule=item.getModule();
-        final String outputDirPath=getGenerationOutputPath(compiler,itemModule);
+        final String outputDirPath=getGenerationOutputPath(compiler,itemModule,item.isTestSource());
         final String outputPath=outputDirPath + "/" + item.getPath();
         itemToOutputPathMap.put(item,outputPath);
         final ValidityState savedState=cache.getState(outputPath);
@@ -64,18 +64,27 @@
       try {
         final Set<GeneratingCompiler.GenerationItem> items=moduleToItemMap.get(module);
         if (items != null && !items.isEmpty()) {
-          final VirtualFile outputDir=getGenerationOutputDir(compiler,module);
-          final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,items.toArray(new GeneratingCompiler.GenerationItem[items.size()]),outputDir);
-          context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
-          if (successfullyGenerated.length > 0) {
-            affectedModules.add(module);
+          final GeneratingCompiler.GenerationItem[][] productionAndTestItems=splitGenerationItems(items);
+          boolean moduleAffected=false;
+          for (          GeneratingCompiler.GenerationItem[] _items : productionAndTestItems) {
+            if (_items.length > 0) {
+              final VirtualFile outputDir=getGenerationOutputDir(compiler,module,_items[0].isTestSource());
+              final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,_items,outputDir);
+              context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
+              if (successfullyGenerated.length > 0) {
+                moduleAffected=true;
+              }
+              for (              final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
+                final String fullOutputPath=itemToOutputPathMap.get(item);
+                cache.update(fullOutputPath,item.getValidityState());
+                final File file=new File(fullOutputPath);
+                filesToRefresh.add(file);
+                generatedFiles.add(file);
+              }
+            }
           }
-          for (          final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
-            final String fullOutputPath=itemToOutputPathMap.get(item);
-            cache.update(fullOutputPath,item.getValidityState());
-            final File file=new File(fullOutputPath);
-            filesToRefresh.add(file);
-            generatedFiles.add(file);
+          if (moduleAffected) {
+            affectedModules.add(module);
           }
         }
       }
