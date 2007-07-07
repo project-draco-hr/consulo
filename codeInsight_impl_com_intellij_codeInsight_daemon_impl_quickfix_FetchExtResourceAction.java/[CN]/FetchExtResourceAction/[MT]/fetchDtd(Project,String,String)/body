@@ -38,19 +38,26 @@
             VirtualFile virtualFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(resPath.replace(File.separatorChar,'/'));
             Set<String> linksToProcess=new HashSet<String>();
             Set<String> processedLinks=new HashSet<String>();
+            Map<String,String> baseUrls=new HashMap<String,String>();
             VirtualFile contextFile=virtualFile;
             linksToProcess.addAll(extractEmbeddedFileReferences(virtualFile,null,psiManager));
             while (!linksToProcess.isEmpty()) {
               String s=linksToProcess.iterator().next();
               linksToProcess.remove(s);
               processedLinks.add(s);
-              if (s.startsWith(HTTP_PROTOCOL)) {
-                continue;
+              final boolean absoluteUrl=s.startsWith(HTTP_PROTOCOL);
+              String resourceUrl;
+              if (absoluteUrl) {
+                resourceUrl=s;
               }
-              String resourceUrl=url.substring(0,url.lastIndexOf('/') + 1) + s;
+ else {
+                String baseUrl=baseUrls.get(s);
+                if (baseUrl == null)                 baseUrl=url;
+                resourceUrl=baseUrl.substring(0,baseUrl.lastIndexOf('/') + 1) + s;
+              }
               String resourcePath;
               try {
-                resourcePath=fetchOneFile(indicator,resourceUrl,project,extResourcesPath,s);
+                resourcePath=fetchOneFile(indicator,resourceUrl,project,extResourcesPath,s.substring(s.lastIndexOf('/') + 1));
               }
  catch (              IOException e) {
                 nestedException[0]=new FetchingResourceIOException(e,resourceUrl);
@@ -58,8 +65,13 @@
               }
               virtualFile=LocalFileSystem.getInstance().refreshAndFindFileByPath(resourcePath.replace(File.separatorChar,'/'));
               downloadedResources.add(resourcePath);
+              if (absoluteUrl) {
+                ExternalResourceManagerImpl.getInstance().addResource(s,resourcePath);
+                resourceUrls.add(s);
+              }
               final List<String> newLinks=extractEmbeddedFileReferences(virtualFile,contextFile,psiManager);
               for (              String u : newLinks) {
+                baseUrls.put(u,resourceUrl);
                 if (!processedLinks.contains(u))                 linksToProcess.add(u);
               }
             }
