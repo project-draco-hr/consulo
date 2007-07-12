@@ -2,27 +2,36 @@
   final XmlFile containingFile=XmlUtil.getContainingFile(this);
   final XmlProlog prolog=getProlog();
   final XmlDoctype doctype=(prolog != null) ? prolog.getDoctype() : null;
+  boolean dtdUriFromDocTypeIsNamespace=false;
   if (XmlUtil.HTML_URI.equals(namespace)) {
     XmlNSDescriptor nsDescriptor=(doctype != null) ? getNsDescriptorFormDocType(doctype,containingFile) : null;
     if (nsDescriptor == null)     nsDescriptor=getDefaultNSDescriptor(XmlUtil.XHTML_URI,false);
-    final XmlNSDescriptor htmlDescriptor=new HtmlNSDescriptorImpl(nsDescriptor);
-    return htmlDescriptor;
+    return new HtmlNSDescriptorImpl(nsDescriptor);
   }
- else   if (namespace != null && namespace != XmlUtil.EMPTY_URI && (doctype == null || !namespace.equals(doctype.getDtdUri()))) {
-    boolean documentIsSchemaThatDefinesNs=namespace.equals(XmlUtil.getTargetSchemaNsFromTag(getRootTag()));
-    final XmlFile xmlFile=documentIsSchemaThatDefinesNs ? containingFile : XmlUtil.findXmlFile(containingFile,ExternalResourceManager.getInstance().getResourceLocation(namespace));
-    if (xmlFile != null) {
-      final XmlNSDescriptor descriptor=(XmlNSDescriptor)xmlFile.getDocument().getMetaData();
-      return descriptor;
+ else   if (namespace != null && namespace != XmlUtil.EMPTY_URI) {
+    if (doctype == null || !namespace.equals(doctype.getDtdUri())) {
+      boolean documentIsSchemaThatDefinesNs=namespace.equals(XmlUtil.getTargetSchemaNsFromTag(getRootTag()));
+      final XmlFile xmlFile=documentIsSchemaThatDefinesNs ? containingFile : XmlUtil.findXmlFile(containingFile,ExternalResourceManager.getInstance().getResourceLocation(namespace));
+      if (xmlFile != null) {
+        return (XmlNSDescriptor)xmlFile.getDocument().getMetaData();
+      }
+    }
+ else {
+      dtdUriFromDocTypeIsNamespace=true;
     }
   }
-  if (strict)   return null;
+  if (strict && !dtdUriFromDocTypeIsNamespace)   return null;
   if (doctype != null) {
-    final XmlNSDescriptor descr=getNsDescriptorFormDocType(doctype,containingFile);
+    XmlNSDescriptor descr=getNsDescriptorFormDocType(doctype,containingFile);
     if (descr != null) {
+      final String prefix=containingFile.getDocument().getRootTag().getPrefixByNamespace(XmlUtil.FACELETS_URI);
+      if (containingFile instanceof JspFile || prefix != null) {
+        descr=new HtmlNSDescriptorImpl(descr,true,containingFile.getFileType() == StdFileTypes.JSP);
+      }
       return descr;
     }
   }
+  if (strict)   return null;
   try {
     final PsiFile fileFromText=getManager().getElementFactory().createFileFromText(containingFile.getName() + ".dtd",XmlUtil.generateDocumentDTD(this));
     if (fileFromText instanceof XmlFile) {
