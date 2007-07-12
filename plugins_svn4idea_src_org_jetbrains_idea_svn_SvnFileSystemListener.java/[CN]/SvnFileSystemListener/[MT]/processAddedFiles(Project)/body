@@ -1,6 +1,7 @@
 {
   SvnVcs vcs=SvnVcs.getInstance(project);
   List<VirtualFile> addedVFiles=new ArrayList<VirtualFile>();
+  Map<VirtualFile,File> copyFromMap=new HashMap<VirtualFile,File>();
   for (Iterator<AddedFileInfo> it=myAddedFiles.iterator(); it.hasNext(); ) {
     AddedFileInfo addedFileInfo=it.next();
     if (addedFileInfo.myProject == project) {
@@ -12,6 +13,7 @@
           boolean isIgnored=ChangeListManager.getInstance(addedFileInfo.myProject).isIgnoredFile(addedFile);
           if (!isIgnored) {
             addedVFiles.add(addedFile);
+            copyFromMap.put(addedFile,addedFileInfo.myCopyFrom);
           }
         }
       }
@@ -28,12 +30,34 @@
       filesToProcess=vcsHelper.selectFilesToProcess(addedVFiles,SvnBundle.message("confirmation.title.add.multiple.files"),null,SvnBundle.message("confirmation.title.add.file"),SvnBundle.message("confirmation.text.add.file"),vcs.getAddConfirmation());
     }
     if (filesToProcess != null) {
-      List<VcsException> exceptions=new ArrayList<VcsException>();
+      final List<VcsException> exceptions=new ArrayList<VcsException>();
       SVNWCClient wcClient=vcs.createWCClient();
+      final SVNCopyClient copyClient=vcs.createCopyClient();
       for (      VirtualFile file : filesToProcess) {
-        File ioFile=new File(file.getPath());
+        final File ioFile=new File(file.getPath());
         try {
-          wcClient.doAdd(ioFile,false,false,false,false);
+          final File copyFrom=copyFromMap.get(file);
+          if (copyFrom != null) {
+            try {
+              new ActionWithTempFile(ioFile){
+                protected void executeInternal() throws VcsException {
+                  try {
+                    copyClient.doCopy(copyFrom,SVNRevision.WORKING,ioFile,false,false);
+                  }
+ catch (                  SVNException e) {
+                    throw new VcsException(e);
+                  }
+                }
+              }
+.execute();
+            }
+ catch (            VcsException e) {
+              exceptions.add(e);
+            }
+          }
+ else {
+            wcClient.doAdd(ioFile,false,false,false,false);
+          }
           VcsDirtyScopeManager.getInstance(project).fileDirty(file);
         }
  catch (        SVNException e) {
