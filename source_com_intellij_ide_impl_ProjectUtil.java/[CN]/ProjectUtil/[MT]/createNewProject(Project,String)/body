@@ -6,31 +6,32 @@
   }
   final ProjectManagerEx projectManager=ProjectManagerEx.getInstanceEx();
   final String projectFilePath=dialog.getNewProjectFilePath();
-  final Project newProject=projectManager.newProject(projectFilePath,true,false);
-  final ProjectJdk jdk=dialog.getNewProjectJdk();
-  if (jdk != null) {
-    final String versionString=jdk.getVersionString();
-    if (versionString != null) {
-      CommandProcessor.getInstance().executeCommand(newProject,new Runnable(){
-        public void run(){
-          ApplicationManager.getApplication().runWriteAction(new Runnable(){
-            public void run(){
-              final ProjectRootManagerEx projectRootManager=(ProjectRootManagerEx)ProjectRootManager.getInstance(newProject);
-              projectRootManager.setProjectJdk(jdk);
-              final LanguageLevel languageLevel=getDefaultLanguageLevel(versionString);
-              if (projectRootManager.getLanguageLevel().compareTo(languageLevel) > 0) {
-                projectRootManager.setLanguageLevel(languageLevel);
+  final ProjectBuilder projectBuilder=dialog.getProjectBuilder();
+  try {
+    final Project newProject=projectBuilder == null || !projectBuilder.isUpdate() ? projectManager.newProject(projectFilePath,true,false) : projectToClose;
+    final ProjectJdk jdk=dialog.getNewProjectJdk();
+    if (jdk != null) {
+      final String versionString=jdk.getVersionString();
+      if (versionString != null) {
+        CommandProcessor.getInstance().executeCommand(newProject,new Runnable(){
+          public void run(){
+            ApplicationManager.getApplication().runWriteAction(new Runnable(){
+              public void run(){
+                final ProjectRootManagerEx projectRootManager=(ProjectRootManagerEx)ProjectRootManager.getInstance(newProject);
+                projectRootManager.setProjectJdk(jdk);
+                final LanguageLevel languageLevel=getDefaultLanguageLevel(versionString);
+                if (projectRootManager.getLanguageLevel().compareTo(languageLevel) > 0) {
+                  projectRootManager.setLanguageLevel(languageLevel);
+                }
               }
             }
-          }
 );
+          }
         }
-      }
 ,null,null);
+      }
     }
-  }
-  final String compileOutput=dialog.getNewCompileOutput();
-  if (compileOutput != null) {
+    final String compileOutput=dialog.getNewCompileOutput();
     CommandProcessor.getInstance().executeCommand(newProject,new Runnable(){
       public void run(){
         ApplicationManager.getApplication().runWriteAction(new Runnable(){
@@ -50,45 +51,41 @@
       }
     }
 ,null,null);
-  }
-  newProject.save();
-  closePreviousProject(projectToClose);
-  final ModuleBuilder moduleBuilder=dialog.getModuleBuilder();
-  if (moduleBuilder != null) {
-    Exception ex=ApplicationManager.getApplication().runWriteAction(new Computable<Exception>(){
-      public Exception compute(){
-        try {
-          final ModifiableModuleModel moduleModel=ModuleManager.getInstance(newProject).getModifiableModel();
-          moduleBuilder.createAndCommit(moduleModel,true);
-          return null;
+    newProject.save();
+    if (projectBuilder != null && !projectBuilder.validate(projectToClose,newProject)) {
+      return;
+    }
+    if (newProject != projectToClose) {
+      closePreviousProject(projectToClose);
+    }
+    if (projectBuilder != null) {
+      projectBuilder.commit(newProject);
+    }
+    StartupManager.getInstance(newProject).registerPostStartupActivity(new Runnable(){
+      public void run(){
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            final ToolWindow toolWindow=ToolWindowManager.getInstance(newProject).getToolWindow(ToolWindowId.PROJECT_VIEW);
+            if (toolWindow != null) {
+              toolWindow.activate(null);
+            }
+            if (projectBuilder == null || projectBuilder.isOpenProjectSettingsAfter()) {
+              ModulesConfigurator.showDialog(newProject,null,null,true);
+            }
+          }
         }
- catch (        Exception e) {
-          return e;
-        }
+);
       }
     }
 );
-    if (ex != null) {
-      Messages.showErrorDialog(IdeBundle.message("error.adding.module.to.project",ex.getMessage()),IdeBundle.message("title.add.module"));
+    if (newProject != projectToClose) {
+      updateLastProjectLocation(projectFilePath);
+      projectManager.openProject(newProject);
     }
   }
-  StartupManager.getInstance(newProject).registerPostStartupActivity(new Runnable(){
-    public void run(){
-      SwingUtilities.invokeLater(new Runnable(){
-        public void run(){
-          final ToolWindow toolWindow=ToolWindowManager.getInstance(newProject).getToolWindow(ToolWindowId.PROJECT_VIEW);
-          if (toolWindow != null) {
-            toolWindow.activate(null);
-          }
-          if (moduleBuilder == null) {
-            ModulesConfigurator.showDialog(newProject,null,null,true);
-          }
-        }
-      }
-);
+  finally {
+    if (projectBuilder != null) {
+      projectBuilder.cleanup();
     }
   }
-);
-  updateLastProjectLocation(projectFilePath);
-  projectManager.openProject(newProject);
 }
