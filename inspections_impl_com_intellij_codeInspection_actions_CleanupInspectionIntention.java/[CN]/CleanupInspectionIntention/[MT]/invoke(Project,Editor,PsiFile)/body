@@ -1,11 +1,33 @@
 {
-  runInspection(project,file,new Processor(){
-    public void process(    final Project project,    final CommonProblemDescriptor descriptor,    final QuickFix fix){
-      final PsiElement element=((ProblemDescriptor)descriptor).getPsiElement();
-      if (element != null && element.isValid()) {
-        fix.applyFix(project,descriptor);
-      }
+  final InspectionManagerEx managerEx=((InspectionManagerEx)InspectionManagerEx.getInstance(project));
+  final GlobalInspectionContextImpl context=managerEx.createNewGlobalContext(false);
+  final LocalInspectionToolWrapper tool=new LocalInspectionToolWrapper(myTool);
+  tool.initialize(context);
+  ((RefManagerImpl)context.getRefManager()).inspectionReadActionStarted();
+  tool.processFile(file,true,managerEx);
+  final List<CommonProblemDescriptor> descriptions=new ArrayList<CommonProblemDescriptor>(tool.getProblemDescriptors());
+  Collections.sort(descriptions,new Comparator<CommonProblemDescriptor>(){
+    public int compare(    final CommonProblemDescriptor o1,    final CommonProblemDescriptor o2){
+      final ProblemDescriptorImpl d1=(ProblemDescriptorImpl)o1;
+      final ProblemDescriptorImpl d2=(ProblemDescriptorImpl)o2;
+      return d2.getTextRange().getStartOffset() - d1.getTextRange().getStartOffset();
     }
   }
 );
+  for (  CommonProblemDescriptor descriptor : descriptions) {
+    final QuickFix[] fixes=descriptor.getFixes();
+    if (fixes != null && fixes.length > 0) {
+      for (      QuickFix fix : fixes) {
+        if (fix != null && fix.getClass().isAssignableFrom(myQuickfixClass)) {
+          final PsiElement element=((ProblemDescriptor)descriptor).getPsiElement();
+          if (element != null && element.isValid()) {
+            fix.applyFix(project,descriptor);
+          }
+          break;
+        }
+      }
+    }
+  }
+  ((RefManagerImpl)context.getRefManager()).inspectionReadActionFinished();
+  context.cleanup(managerEx);
 }
