@@ -1,2 +1,80 @@
 {
+  final LibraryTable projectLibraryTable=LibraryTablesRegistrar.getInstance().getLibraryTable(project);
+  final Map<LibraryDescriptor,Library> projectLibs=new HashMap<LibraryDescriptor,Library>();
+  Exception e=ApplicationManager.getApplication().runWriteAction(new Computable<Exception>(){
+    public Exception compute(){
+      try {
+        for (        LibraryDescriptor lib : myChosenLibraries) {
+          final Collection<File> files=lib.getJars();
+          if (files.size() > 1) {
+            final Library projectLib=projectLibraryTable.createLibrary(lib.getName());
+            final Library.ModifiableModel model=projectLib.getModifiableModel();
+            for (            File file : files) {
+              model.addRoot(VfsUtil.getUrlForLibraryRoot(file),OrderRootType.CLASSES);
+            }
+            model.commit();
+            projectLibs.put(lib,projectLib);
+          }
+        }
+        return null;
+      }
+ catch (      Exception e) {
+        return e;
+      }
+    }
+  }
+);
+  if (e != null) {
+    Messages.showErrorDialog(IdeBundle.message("error.adding.module.to.project",e.getMessage()),IdeBundle.message("title.add.module"));
+  }
+  final Map<String,String> sourceRootToPrefixMap=new HashMap<String,String>();
+  for (  Pair<String,String> pair : getSourcePaths()) {
+    sourceRootToPrefixMap.put(FileUtil.toSystemIndependentName(pair.getFirst()),pair.getSecond());
+  }
+  final Map<ModuleDescriptor,Module> descriptorToModuleMap=new HashMap<ModuleDescriptor,Module>();
+  for (  final ModuleDescriptor moduleDescriptor : myChosenModules) {
+    Exception ex=ApplicationManager.getApplication().runWriteAction(new Computable<Exception>(){
+      public Exception compute(){
+        try {
+          final Module module=createModule(project,moduleDescriptor,sourceRootToPrefixMap,projectLibs);
+          descriptorToModuleMap.put(moduleDescriptor,module);
+          return null;
+        }
+ catch (        Exception e) {
+          return e;
+        }
+      }
+    }
+);
+    if (ex != null) {
+      Messages.showErrorDialog(IdeBundle.message("error.adding.module.to.project",ex.getMessage()),IdeBundle.message("title.add.module"));
+    }
+  }
+  for (  final ModuleDescriptor descriptor : myChosenModules) {
+    Exception ex=ApplicationManager.getApplication().runWriteAction(new Computable<Exception>(){
+      public Exception compute(){
+        try {
+          final Module module=descriptorToModuleMap.get(descriptor);
+          if (module != null) {
+            final ModifiableRootModel rootModel=ModuleRootManager.getInstance(module).getModifiableModel();
+            for (            ModuleDescriptor dependentDescriptor : descriptor.getDependencies()) {
+              final Module dependentModule=descriptorToModuleMap.get(dependentDescriptor);
+              if (dependentModule != null) {
+                rootModel.addModuleOrderEntry(dependentModule);
+              }
+            }
+            rootModel.commit();
+          }
+          return null;
+        }
+ catch (        Exception e) {
+          return e;
+        }
+      }
+    }
+);
+    if (ex != null) {
+      Messages.showErrorDialog(IdeBundle.message("error.adding.module.to.project",ex.getMessage()),IdeBundle.message("title.add.module"));
+    }
+  }
 }
