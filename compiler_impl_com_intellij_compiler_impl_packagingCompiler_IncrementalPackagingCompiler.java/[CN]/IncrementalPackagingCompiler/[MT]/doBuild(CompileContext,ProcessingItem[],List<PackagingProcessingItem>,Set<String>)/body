@@ -1,0 +1,74 @@
+{
+  final DeploymentUtil deploymentUtil=DeploymentUtil.getInstance();
+  final FileFilter fileFilter=new IgnoredFileFilter();
+  Map<ExplodedDestinationInfo,BuildParticipant> destinationOwners=context.getUserData(DESTINATION_OWNERS_KEY);
+  Set<BuildParticipant> affectedParticipants=new HashSet<BuildParticipant>();
+  try {
+    Set<JarInfo> changedJars=new HashSet<JarInfo>();
+    for (    ProcessingItem item0 : items) {
+      if (item0 instanceof MockProcessingItem)       continue;
+      context.getProgressIndicator().checkCanceled();
+      PackagingProcessingItem item=(PackagingProcessingItem)item0;
+      final List<DestinationInfo> destinations=item.getDestinations();
+      final File fromFile=VfsUtil.virtualToIoFile(item.getFile());
+      for (      DestinationInfo destination : destinations) {
+        if (destination instanceof ExplodedDestinationInfo) {
+          final ExplodedDestinationInfo explodedDestination=(ExplodedDestinationInfo)destination;
+          File toFile=new File(FileUtil.toSystemDependentName(explodedDestination.getOutputPath()));
+          if (DeploymentUtil.checkFileExists(fromFile,context)) {
+            deploymentUtil.copyFile(fromFile,toFile,context,writtenPaths,fileFilter);
+          }
+          affectedParticipants.add(destinationOwners.get(explodedDestination));
+        }
+ else {
+          changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+        }
+      }
+      processedItems.add(item);
+    }
+    createManifestFiles(context.getUserData(MANIFEST_FILES_KEY));
+    JarsBuilder builder=new JarsBuilder(changedJars,fileFilter,context);
+    final boolean processed=builder.buildJars(writtenPaths);
+    if (!processed) {
+      return false;
+    }
+    Map<VirtualFile,PackagingProcessingItem> itemsBySource=context.getUserData(ITEMS_BY_SOURCE_KEY);
+    Set<VirtualFile> recompiledSources=new HashSet<VirtualFile>();
+    for (    JarInfo info : builder.getJarsToBuild()) {
+      for (      Pair<String,VirtualFile> pair : info.getContent()) {
+        recompiledSources.add(pair.getSecond());
+      }
+    }
+    for (    PackagingProcessingItem processedItem : processedItems) {
+      recompiledSources.remove(processedItem.getFile());
+    }
+    for (    VirtualFile source : recompiledSources) {
+      PackagingProcessingItem item=itemsBySource.get(source);
+      LOG.assertTrue(item != null,source);
+      processedItems.add(item);
+    }
+    for (    ExplodedDestinationInfo destination : builder.getJarsDestinations()) {
+      affectedParticipants.add(destinationOwners.get(destination));
+    }
+    context.putUserData(AFFECTED_PARTICIPANTS_KEY,affectedParticipants.toArray(new BuildParticipant[affectedParticipants.size()]));
+    for (    BuildParticipant participant : affectedParticipants) {
+      BuildConfiguration buildConfiguration=participant.getBuildConfiguration();
+      if (buildConfiguration.willBuildExploded()) {
+        participant.afterExplodedCreated(new File(FileUtil.toSystemDependentName(DeploymentUtilImpl.getOrCreateExplodedDir(participant))),context);
+      }
+      String jarPath=buildConfiguration.getJarPath();
+      if (buildConfiguration.isJarEnabled() && jarPath != null) {
+        participant.afterJarCreated(new File(FileUtil.toSystemDependentName(jarPath)),context);
+      }
+      participant.buildFinished(context);
+    }
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Exception e) {
+    LOG.info(e);
+    context.addMessage(CompilerMessageCategory.ERROR,e.getLocalizedMessage(),null,-1,-1);
+  }
+  return true;
+}
