@@ -1,0 +1,40 @@
+{
+  LOG.info("Space waste in " + path + " is "+ myDataTable.getWaste()+ " bytes. Compacting now.");
+  long start=System.currentTimeMillis();
+  lock.lock();
+  try {
+    File newDataFile=new File(path + ".data.temp");
+    FileUtil.delete(newDataFile);
+    newDataFile.createNewFile();
+    File oldDataFile=new File(path + ".data");
+    DataTable newDataTable;
+    newDataTable=new DataTable(newDataFile);
+    final int count=myRecordsTable.getRecordsCount();
+    for (int i=0; i < count; i++) {
+      final long addr=myRecordsTable.getAddress(i);
+      final int size=myRecordsTable.getSize(i);
+      if (addr != 0 && size != 0) {
+        final long newaddr=newDataTable.allocateSpace(size);
+        final byte[] bytes=new byte[size];
+        myDataTable.readBytes(addr,bytes);
+        newDataTable.writeBytes(newaddr,bytes);
+        myRecordsTable.setAddress(i,newaddr);
+      }
+    }
+    myDataTable.dispose();
+    newDataTable.dispose();
+    if (!FileUtil.delete(oldDataFile)) {
+      throw new IOException("Can't delete file: " + oldDataFile);
+    }
+    newDataFile.renameTo(oldDataFile);
+    myDataTable=new DataTable(oldDataFile);
+  }
+ catch (  IOException e) {
+    LOG.info("Compact failed: " + e.getMessage());
+  }
+ finally {
+    lock.unlock();
+  }
+  long timedelta=System.currentTimeMillis() - start;
+  LOG.info("Done compacting in " + timedelta + "msec.");
+}
