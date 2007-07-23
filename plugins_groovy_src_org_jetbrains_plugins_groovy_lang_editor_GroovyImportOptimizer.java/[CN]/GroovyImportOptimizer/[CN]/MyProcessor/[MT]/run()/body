@@ -1,5 +1,6 @@
 {
-  final ArrayList<GrImportStatement> importStatements=new ArrayList<GrImportStatement>(Arrays.asList(myFile.getImportStatements()));
+  final Set<String> importedClasses=new LinkedHashSet<String>();
+  final Set<String> staticallyImportedMembers=new LinkedHashSet<String>();
   myFile.accept(new GroovyRecursiveElementVisitor(){
     public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
       visitRefElement(refElement);
@@ -12,33 +13,64 @@
     private void visitRefElement(    GrReferenceElement refElement){
       final GroovyResolveResult resolveResult=refElement.advancedResolve();
       final GrImportStatement importStatement=resolveResult.getImportStatementContext();
-      if (importStatement != null && !isUnneeded(importStatement)) {
-        importStatements.remove(importStatement);
-      }
-    }
-    private boolean isUnneeded(    GrImportStatement importStatement){
-      if (!importStatement.isOnDemand())       return false;
-      final GrCodeReferenceElement ref=importStatement.getImportReference();
-      if (ref != null) {
-        String qName=PsiUtil.getQualifiedReferenceText(ref);
-        LOG.assertTrue(qName != null);
-        for (        String implicitlyImportedPackage : GroovyFile.IMPLICITLY_IMPORTED_PACKAGES) {
-          if (qName.equals(implicitlyImportedPackage))           return true;
+      if (importStatement != null) {
+        String importedName=null;
+        if (importStatement.isOnDemand()) {
+          final PsiElement element=resolveResult.getElement();
+          if (element == null)           return;
+          if (importStatement.isStatic()) {
+            if (element instanceof PsiMember) {
+              final PsiMember member=(PsiMember)element;
+              final PsiClass clazz=member.getContainingClass();
+              if (clazz != null) {
+                final String classQName=clazz.getQualifiedName();
+                if (classQName != null) {
+                  final String name=member.getName();
+                  if (name != null) {
+                    importedName=classQName + "." + name;
+                  }
+                }
+              }
+            }
+          }
+ else {
+            if (element instanceof PsiClass) {
+              importedName=((PsiClass)element).getQualifiedName();
+            }
+          }
         }
-        for (        String implicitlyImportedClass : GroovyFile.IMPLICITLY_IMPORTED_CLASSES) {
-          if (qName.equals(implicitlyImportedClass))           return true;
+ else {
+          final GrCodeReferenceElement importReference=importStatement.getImportReference();
+          if (importReference != null) {
+            importedName=PsiUtil.getQualifiedReferenceText(importReference);
+          }
+        }
+        if (importedName == null)         return;
+        if (importStatement.isStatic()) {
+          staticallyImportedMembers.add(importedName);
+        }
+ else {
+          importedClasses.add(importedName);
         }
       }
-      return false;
     }
   }
 );
-  for (  GrImportStatement importStatement : importStatements) {
+  for (  GrImportStatement importStatement : myFile.getImportStatements()) {
     try {
       myFile.removeImport(importStatement);
     }
  catch (    IncorrectOperationException e) {
       LOG.error(e);
     }
+  }
+  GrImportStatement[] newImports=prepare(importedClasses,staticallyImportedMembers);
+  try {
+    for (    GrImportStatement newImport : newImports) {
+      myFile.addImport(newImport);
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
   }
 }
