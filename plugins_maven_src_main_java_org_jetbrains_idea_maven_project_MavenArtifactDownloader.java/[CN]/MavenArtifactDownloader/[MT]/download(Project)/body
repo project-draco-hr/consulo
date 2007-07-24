@@ -1,0 +1,45 @@
+{
+  MavenProjectsState projectsState=project.getComponent(MavenProjectsState.class);
+  final MavenImporter importer=project.getComponent(MavenImporter.class);
+  final Map<MavenProject,Collection<String>> mavenProjects=new HashMap<MavenProject,Collection<String>>();
+  for (  VirtualFile file : projectsState.getFiles()) {
+    if (!projectsState.isIgnored(file)) {
+      MavenProject mavenProject=projectsState.getMavenProject(file);
+      if (mavenProject != null) {
+        mavenProjects.put(mavenProject,projectsState.getProfiles(file));
+      }
+    }
+  }
+  final Map<MavenProject,Module> projectsToModules=new HashMap<MavenProject,Module>();
+  for (  Module module : ModuleManager.getInstance(project).getModules()) {
+    VirtualFile pomFile=importer.findPomForModule(module);
+    if (pomFile != null && !projectsState.isIgnored(pomFile)) {
+      MavenProject mavenProject=projectsState.getMavenProject(pomFile);
+      if (mavenProject != null) {
+        projectsToModules.put(mavenProject,module);
+      }
+    }
+  }
+  final MavenEmbedder mavenEmbedder=MavenImportProcessor.createEmbedder(project);
+  if (mavenEmbedder != null) {
+    ProgressManager.getInstance().run(new Task.Modal(project,ProjectBundle.message("maven.title.downloading"),true){
+      public void run(      ProgressIndicator indicator){
+        Collection<MavenId> moduleIds=new ArrayList<MavenId>();
+        for (        MavenProject mavenProject : projectsToModules.keySet()) {
+          moduleIds.add(new MavenId(mavenProject.getArtifact()));
+        }
+        new MavenArtifactDownloader(importer.getArtifactPreferences(),mavenEmbedder,indicator).download(project,mavenProjects,moduleIds,true);
+      }
+    }
+);
+    MavenEnv.releaseEmbedder(mavenEmbedder);
+  }
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      for (      Map.Entry<MavenProject,Module> entry : projectsToModules.entrySet()) {
+        MavenToIdeaConverter.updateDependencies(entry.getValue(),entry.getKey());
+      }
+    }
+  }
+);
+}
