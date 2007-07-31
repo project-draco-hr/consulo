@@ -19,8 +19,8 @@ class InnerClassOverridingMethod extends InnerClassMethod {
         super(method);
       }
       public void createMethod(      PsiClass innerClass) throws IncorrectOperationException {
-        OverridenMethodClassMemberReferencesVisitor visitor=new OverridenMethodClassMemberReferencesVisitor();
-        myMethod.accept(visitor);
+        OverriddenMethodClassMemberReferencesVisitor visitor=new OverriddenMethodClassMemberReferencesVisitor();
+        myClass.accept(visitor);
         final List<PsiAction> actions=visitor.getPsiActions();
         for (        PsiAction action : actions) {
           action.run();
@@ -29,15 +29,16 @@ class InnerClassOverridingMethod extends InnerClassMethod {
         myMethod.delete();
       }
     }
-    for (    PsiMethod method : myOverridenMethods) {
+    for (    PsiMethod method : myOverriddenMethods) {
       result.add(new InnerClassOverridingMethod(method));
     }
   }
 {
 class InnerClassAbstractMethod extends InnerClassMethod {
-      public InnerClassAbstractMethod(      PsiMethod method){
+      private boolean myImplicitImplementation;
+      public InnerClassAbstractMethod(      PsiMethod method,      final boolean implicitImplementation){
         super(method);
-        LOG.assertTrue(method.hasModifierProperty(PsiModifier.ABSTRACT));
+        myImplicitImplementation=implicitImplementation;
       }
       public void createMethod(      PsiClass innerClass) throws IncorrectOperationException {
         PsiSubstitutor substitutor=getSuperSubstitutor(myMethod.getContainingClass());
@@ -47,14 +48,17 @@ class InnerClassAbstractMethod extends InnerClassMethod {
           method.getModifierList().setModifierProperty(PsiModifier.PUBLIC,true);
         }
         innerClass.add(method);
-        final MethodSignature signature=myMethod.getSignature(substitutor);
-        PsiMethod outerMethod=MethodSignatureUtil.findMethodBySignature(myClass,signature,false);
-        if (outerMethod == null) {
-          final String visibility=checkOuterClassAbstractMethod(signature);
-          PsiMethod newOuterMethod=(PsiMethod)myClass.add(myMethod);
-          newOuterMethod.getModifierList().setModifierProperty(visibility,true);
-          if (newOuterMethod.getDocComment() != null) {
-            newOuterMethod.getDocComment().delete();
+        if (!myImplicitImplementation) {
+          final MethodSignature signature=myMethod.getSignature(substitutor);
+          PsiMethod outerMethod=MethodSignatureUtil.findMethodBySignature(myClass,signature,false);
+          if (outerMethod == null) {
+            final String visibility=checkOuterClassAbstractMethod(signature);
+            PsiMethod newOuterMethod=(PsiMethod)myClass.add(myMethod);
+            newOuterMethod.getModifierList().setModifierProperty(visibility,true);
+            final PsiDocComment docComment=newOuterMethod.getDocComment();
+            if (docComment != null) {
+              docComment.delete();
+            }
           }
         }
       }
@@ -65,7 +69,10 @@ class InnerClassAbstractMethod extends InnerClassMethod {
         final MethodSignature signature=method.getSignature(getSuperSubstitutor(method.getContainingClass()));
         PsiMethod classMethod=MethodSignatureUtil.findMethodBySignature(myClass,signature,true);
         if (classMethod == null || classMethod.hasModifierProperty(PsiModifier.ABSTRACT)) {
-          result.add(new InnerClassAbstractMethod(method));
+          result.add(new InnerClassAbstractMethod(method,false));
+        }
+ else         if ((myBaseClass.isInterface() && classMethod.getContainingClass() != myClass)) {
+          result.add(new InnerClassAbstractMethod(method,true));
         }
       }
     }
