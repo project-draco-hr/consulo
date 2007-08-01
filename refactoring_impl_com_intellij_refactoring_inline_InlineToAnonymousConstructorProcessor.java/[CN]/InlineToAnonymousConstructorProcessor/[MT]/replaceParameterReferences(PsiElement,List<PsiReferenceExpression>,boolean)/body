@@ -4,13 +4,14 @@
     if (element instanceof PsiParameter) {
       PsiParameter parameter=(PsiParameter)element;
       if (myLocalsForParameters.containsKey(parameter)) {
-        return (PsiExpression)argument.replace(getParameterReference(parameter));
+        return argument.replace(getParameterReference(parameter));
       }
       int index=myConstructorParameters.getParameterIndex(parameter);
-      return (PsiExpression)argument.replace(myConstructorArguments.getExpressions()[index]);
+      return argument.replace(myConstructorArguments.getExpressions()[index]);
     }
   }
   final List<Pair<PsiReferenceExpression,PsiParameter>> parameterReferences=new ArrayList<Pair<PsiReferenceExpression,PsiParameter>>();
+  final Map<PsiElement,PsiElement> elementsToReplace=new HashMap<PsiElement,PsiElement>();
   argument.accept(new PsiRecursiveElementVisitor(){
     public void visitReferenceExpression(    final PsiReferenceExpression expression){
       super.visitReferenceExpression(expression);
@@ -18,8 +19,16 @@
       if (psiElement instanceof PsiParameter) {
         parameterReferences.add(new Pair<PsiReferenceExpression,PsiParameter>(expression,(PsiParameter)psiElement));
       }
- else       if (psiElement instanceof PsiVariable && localVarRefs != null) {
-        localVarRefs.add(expression);
+ else       if (psiElement instanceof PsiVariable) {
+        if (localVarRefs != null) {
+          localVarRefs.add(expression);
+        }
+        if (replaceFieldsWithInitializers && psiElement instanceof PsiField && ((PsiField)psiElement).getContainingClass() == myClass) {
+          final PsiExpression initializer=((PsiField)psiElement).getInitializer();
+          if (isConstant(initializer)) {
+            elementsToReplace.put(expression,initializer);
+          }
+        }
       }
     }
   }
@@ -33,12 +42,12 @@
  else {
       int index=myConstructorParameters.getParameterIndex(param);
       if (ref == argument) {
-        argument=(PsiExpression)argument.replace(myConstructorArguments.getExpressions()[index]);
+        argument=argument.replace(myConstructorArguments.getExpressions()[index]);
       }
  else {
         ref.replace(myConstructorArguments.getExpressions()[index]);
       }
     }
   }
-  return argument;
+  return replaceElementsWithMap(argument,elementsToReplace);
 }
