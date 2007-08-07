@@ -3,6 +3,7 @@
     public void before(    final List<? extends VFileEvent> events){
     }
     public void after(    final List<? extends VFileEvent> events){
+      final List<VirtualFile> rootsToRefresh=new ArrayList<VirtualFile>();
       for (      VFileEvent event : events) {
         if (event.getFileSystem() instanceof LocalFileSystem) {
           final String path=event.getPath();
@@ -12,10 +13,38 @@ synchronized (PersistentFS.LOCK) {
           }
           for (          String jarPath : jarPaths) {
             if (FileUtil.startsWith(jarPath.substring(0,jarPath.length() - JAR_SEPARATOR.length()),path,SystemInfo.isFileSystemCaseSensitive)) {
-              markDirty(jarPath);
+              VirtualFile jarRootToRefresh=markDirty(jarPath);
+              if (jarRootToRefresh != null) {
+                rootsToRefresh.add(jarRootToRefresh);
+              }
             }
           }
         }
+      }
+      if (!rootsToRefresh.isEmpty()) {
+        final Application app=ApplicationManager.getApplication();
+        app.invokeLater(new Runnable(){
+          public void run(){
+            final List<VFileEvent> deleteEvents=new ArrayList<VFileEvent>();
+            for (            VirtualFile root : rootsToRefresh) {
+              for (              VirtualFile child : root.getChildren()) {
+                if (child != null) {
+                  deleteEvents.add(new VFileDeleteEvent(this,child,true));
+                }
+              }
+              ((NewVirtualFile)root).markDirtyRecursively();
+            }
+            app.runWriteAction(new Runnable(){
+              public void run(){
+                ManagingFS.getInstance().processEvents(deleteEvents);
+              }
+            }
+);
+            VirtualFile[] roots=rootsToRefresh.toArray(new VirtualFile[rootsToRefresh.size()]);
+            RefreshQueue.getInstance().refresh(true,true,null,roots);
+          }
+        }
+,ModalityState.NON_MODAL);
       }
     }
   }
