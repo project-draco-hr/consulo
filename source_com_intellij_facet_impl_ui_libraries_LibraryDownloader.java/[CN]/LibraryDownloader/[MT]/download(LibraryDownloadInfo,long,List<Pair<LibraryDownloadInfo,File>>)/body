@@ -1,51 +1,60 @@
 {
-  final String url=libraryInfo.getDownloadUrl();
   final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
-  String presentableUrl=libraryInfo.getPresentableUrl();
-  indicator.setText2(IdeBundle.message("progress.download.jar.text",getExpectedFileName(libraryInfo),presentableUrl));
-  File tempFile=null;
-  HttpURLConnection connection=(HttpURLConnection)new URL(url).openConnection();
-  InputStream input=null;
-  BufferedOutputStream output=null;
-  boolean deleteFile=true;
-  try {
-    final int responseCode=connection.getResponseCode();
-    if (responseCode != HttpURLConnection.HTTP_OK) {
-      throw new IOException(IdeBundle.message("error.connection.failed.with.http.code.N",responseCode));
-    }
-    final int size=connection.getContentLength();
-    if (size != -1 && size == existingFileSize) {
-      return false;
-    }
-    tempFile=FileUtil.createTempFile("downloaded","jar");
-    input=UrlConnectionUtil.getConnectionInputStreamWithException(connection,indicator);
-    output=new BufferedOutputStream(new FileOutputStream(tempFile));
-    indicator.setIndeterminate(size == -1);
-    int len;
-    final byte[] buf=new byte[1024];
-    int count=0;
-    while ((len=input.read(buf)) > 0) {
-      indicator.checkCanceled();
-      count+=len;
-      if (size > 0) {
-        indicator.setFraction((double)count / size);
+  final String presentableUrl=libraryInfo.getPresentableUrl();
+  final String url=libraryInfo.getDownloadUrl();
+  if (url.startsWith(LIB_SCHEMA)) {
+    indicator.setText2(IdeBundle.message("progress.locate.jar.text",getExpectedFileName(libraryInfo)));
+    final String path=url.substring(LIB_SCHEMA.length()).replace('/',File.separatorChar);
+    final String fullPath=PathManager.getLibPath() + File.separatorChar + path;
+    final File file=new File(fullPath);
+    downloadedFiles.add(Pair.create(libraryInfo,file));
+  }
+ else {
+    indicator.setText2(IdeBundle.message("progress.download.jar.text",getExpectedFileName(libraryInfo),presentableUrl));
+    HttpURLConnection connection=(HttpURLConnection)new URL(url).openConnection();
+    InputStream input=null;
+    BufferedOutputStream output=null;
+    boolean deleteFile=true;
+    File tempFile=null;
+    try {
+      final int responseCode=connection.getResponseCode();
+      if (responseCode != HttpURLConnection.HTTP_OK) {
+        throw new IOException(IdeBundle.message("error.connection.failed.with.http.code.N",responseCode));
       }
-      output.write(buf,0,len);
+      final int size=connection.getContentLength();
+      if (size != -1 && size == existingFileSize) {
+        return false;
+      }
+      tempFile=FileUtil.createTempFile("downloaded","jar");
+      input=UrlConnectionUtil.getConnectionInputStreamWithException(connection,indicator);
+      output=new BufferedOutputStream(new FileOutputStream(tempFile));
+      indicator.setIndeterminate(size == -1);
+      int len;
+      final byte[] buf=new byte[1024];
+      int count=0;
+      while ((len=input.read(buf)) > 0) {
+        indicator.checkCanceled();
+        count+=len;
+        if (size > 0) {
+          indicator.setFraction((double)count / size);
+        }
+        output.write(buf,0,len);
+      }
+      deleteFile=false;
+      downloadedFiles.add(Pair.create(libraryInfo,tempFile));
     }
-    deleteFile=false;
-    downloadedFiles.add(Pair.create(libraryInfo,tempFile));
-    return true;
-  }
   finally {
-    if (input != null) {
-      input.close();
+      if (input != null) {
+        input.close();
+      }
+      if (output != null) {
+        output.close();
+      }
+      if (deleteFile && tempFile != null) {
+        FileUtil.delete(tempFile);
+      }
+      connection.disconnect();
     }
-    if (output != null) {
-      output.close();
-    }
-    if (deleteFile && tempFile != null) {
-      FileUtil.delete(tempFile);
-    }
-    connection.disconnect();
   }
+  return true;
 }
