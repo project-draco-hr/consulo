@@ -14,16 +14,16 @@
   if (!(variableOrMethodType instanceof PsiClassType)) {
     return Collections.EMPTY_LIST;
   }
-  final PsiClassType variableClassType=(PsiClassType)variableOrMethodType;
-  final PsiClass variableClass=variableClassType.resolve();
-  if (variableClass == null) {
+  final PsiClassType variableOrMethodClassType=(PsiClassType)variableOrMethodType;
+  final PsiClass variableOrMethodClass=variableOrMethodClassType.resolve();
+  if (variableOrMethodClass == null) {
     return Collections.EMPTY_LIST;
   }
   final PsiManager manager=variableOrMethod.getManager();
   final GlobalSearchScope scope=variableOrMethod.getResolveScope();
   Set<PsiClass> weakestTypeClasses=new HashSet();
   final PsiClass javaLangObjectClass=manager.findClass("java.lang.Object",scope);
-  if (javaLangObjectClass == null || variableClass.equals(javaLangObjectClass)) {
+  if (javaLangObjectClass == null || variableOrMethodClass.equals(javaLangObjectClass)) {
     return Collections.EMPTY_LIST;
   }
   weakestTypeClasses.add(javaLangObjectClass);
@@ -105,6 +105,18 @@
           return Collections.EMPTY_LIST;
         }
       }
+ else       if (useRighthandTypeAsWeakestTypeInAssignments) {
+        if (rhs == null) {
+          return Collections.EMPTY_LIST;
+        }
+        if (!(rhs instanceof PsiNewExpression) || !(rhs instanceof PsiTypeCastExpression)) {
+          final PsiType rhsType=rhs.getType();
+          final PsiType lhsType=lhs.getType();
+          if (lhsType.equals(rhsType)) {
+            return Collections.EMPTY_LIST;
+          }
+        }
+      }
     }
  else     if (referenceParent instanceof PsiVariable) {
       final PsiVariable variable=(PsiVariable)referenceParent;
@@ -156,7 +168,34 @@
         return Collections.EMPTY_LIST;
       }
     }
-    if (weakestTypeClasses.contains(variableClass)) {
+ else     if (referenceParent instanceof PsiThrowStatement) {
+      final PsiThrowStatement throwStatement=(PsiThrowStatement)referenceParent;
+      final PsiClassType runtimeExceptionType=PsiType.getJavaLangRuntimeException(manager,throwStatement.getResolveScope());
+      final PsiClass runtimeExceptionClass=runtimeExceptionType.resolve();
+      if (runtimeExceptionClass != null && InheritanceUtil.isInheritorOrSelf(variableOrMethodClass,runtimeExceptionClass,true)) {
+        if (!checkType(runtimeExceptionType,weakestTypeClasses)) {
+          return Collections.EMPTY_LIST;
+        }
+      }
+ else {
+        final PsiMethod method=PsiTreeUtil.getParentOfType(throwStatement,PsiMethod.class);
+        final PsiReferenceList throwsList=method.getThrowsList();
+        final PsiClassType[] referencedTypes=throwsList.getReferencedTypes();
+        boolean checked=false;
+        for (        PsiClassType referencedType : referencedTypes) {
+          final PsiClass throwableClass=referencedType.resolve();
+          if (throwableClass != null && InheritanceUtil.isInheritorOrSelf(variableOrMethodClass,throwableClass,true)) {
+            if (checkType(referencedType,weakestTypeClasses)) {
+              checked=true;
+            }
+          }
+        }
+        if (!checked) {
+          return Collections.EMPTY_LIST;
+        }
+      }
+    }
+    if (weakestTypeClasses.contains(variableOrMethodClass)) {
       return Collections.EMPTY_LIST;
     }
   }
