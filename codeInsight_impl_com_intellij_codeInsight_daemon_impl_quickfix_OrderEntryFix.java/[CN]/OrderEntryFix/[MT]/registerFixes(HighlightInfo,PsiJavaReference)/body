@@ -1,16 +1,17 @@
 {
-  @NonNls final String referenceName=reference.getReferenceName();
-  if (referenceName == null)   return;
-  Project project=reference.getProject();
-  PsiFile containingFile=reference.getContainingFile();
-  if (containingFile == null)   return;
+  final PsiElement psiElement=reference.getElement();
+  @NonNls final String referenceName=reference.getRangeInElement().substring(psiElement.getText());
+  if (referenceName == null)   return null;
+  Project project=psiElement.getProject();
+  PsiFile containingFile=psiElement.getContainingFile();
+  if (containingFile == null)   return null;
   VirtualFile classVFile=containingFile.getVirtualFile();
-  if (classVFile == null)   return;
+  if (classVFile == null)   return null;
   final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
   final Module currentModule=fileIndex.getModuleForFile(classVFile);
-  if (currentModule == null)   return;
-  if ("TestCase".equals(referenceName) || isAnnotation(reference) && isJunitAnnotationName(referenceName)) {
-    QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+  if (currentModule == null)   return null;
+  if ("TestCase".equals(referenceName) || isAnnotation(psiElement) && isJunitAnnotationName(referenceName)) {
+    final OrderEntryFix fix=new OrderEntryFix(){
       @NotNull public String getText(){
         return QuickFixBundle.message("orderEntry.fix.add.junit.jar.to.classpath");
       }
@@ -20,17 +21,18 @@
       public boolean isAvailable(      @NotNull Project project,      Editor editor,      PsiFile file){
         return !project.isDisposed() && !currentModule.isDisposed();
       }
-      public void invoke(      @NotNull Project project,      Editor editor,      PsiFile file) throws IncorrectOperationException {
+      public void invoke(      @NotNull Project project,      @Nullable Editor editor,      PsiFile file) throws IncorrectOperationException {
         boolean isJunit4=!referenceName.equals("TestCase");
         String jarPath=isJunit4 ? PathUtilEx.getJunit4JarPath() : PathUtilEx.getJunit3JarPath();
         addBundledJarToRoots(project,editor,currentModule,reference,isJunit4 ? "org.junit." + referenceName : "junit.framework.TestCase",jarPath);
       }
     }
-);
-    return;
+;
+    QuickFixAction.registerQuickFixAction(info,fix);
+    return Arrays.asList((LocalQuickFix)fix);
   }
-  if (isAnnotation(reference) && AnnotationUtil.isJetbrainsAnnotation(referenceName)) {
-    QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+  if (isAnnotation(psiElement) && AnnotationUtil.isJetbrainsAnnotation(referenceName)) {
+    final OrderEntryFix fix=new OrderEntryFix(){
       @NotNull public String getText(){
         return QuickFixBundle.message("orderEntry.fix.add.annotations.jar.to.classpath");
       }
@@ -58,20 +60,22 @@
 );
       }
     }
-);
-    return;
+;
+    QuickFixAction.registerQuickFixAction(info,fix);
+    return Arrays.asList((LocalQuickFix)fix);
   }
+  List<LocalQuickFix> result=new ArrayList<LocalQuickFix>();
   Set<Object> librariesToAdd=new THashSet<Object>();
-  PsiClass[] classes=reference.getManager().getShortNamesCache().getClassesByName(referenceName,GlobalSearchScope.allScope(project));
+  PsiClass[] classes=psiElement.getManager().getShortNamesCache().getClassesByName(referenceName,GlobalSearchScope.allScope(project));
   for (  final PsiClass aClass : classes) {
-    if (!aClass.getManager().getResolveHelper().isAccessible(aClass,reference,aClass))     continue;
+    if (!aClass.getManager().getResolveHelper().isAccessible(aClass,psiElement,aClass))     continue;
     PsiFile psiFile=aClass.getContainingFile();
     if (psiFile == null)     continue;
     VirtualFile virtualFile=psiFile.getVirtualFile();
     if (virtualFile == null)     continue;
     final Module classModule=fileIndex.getModuleForFile(virtualFile);
     if (classModule != null && classModule != currentModule && !ModuleRootManager.getInstance(currentModule).isDependsOn(classModule)) {
-      QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+      final OrderEntryFix fix=new OrderEntryFix(){
         @NotNull public String getText(){
           return QuickFixBundle.message("orderEntry.fix.add.dependency.on.module",classModule.getName());
         }
@@ -81,13 +85,15 @@
         public boolean isAvailable(        @NotNull Project project,        Editor editor,        PsiFile file){
           return !project.isDisposed() && !classModule.isDisposed() && !currentModule.isDisposed();
         }
-        public void invoke(        @NotNull final Project project,        final Editor editor,        PsiFile file) throws IncorrectOperationException {
+        public void invoke(        @NotNull final Project project,        @Nullable final Editor editor,        PsiFile file) throws IncorrectOperationException {
           final Runnable doit=new Runnable(){
             public void run(){
               ModifiableRootModel model=ModuleRootManager.getInstance(currentModule).getModifiableModel();
               model.addModuleOrderEntry(classModule);
               model.commit();
-              new AddImportAction(project,reference,editor,aClass).execute();
+              if (editor != null) {
+                new AddImportAction(project,reference,editor,aClass).execute();
+              }
             }
           }
 ;
@@ -100,7 +106,9 @@
           }
         }
       }
-);
+;
+      QuickFixAction.registerQuickFixAction(info,fix);
+      result.add(fix);
     }
     for (    OrderEntry orderEntry : fileIndex.getOrderEntriesForFile(virtualFile)) {
       if (orderEntry instanceof LibraryOrderEntry) {
@@ -111,7 +119,7 @@
         if (files.length == 0)         continue;
         final VirtualFile jar=files[0];
         if (jar == null || libraryEntry.isModuleLevel() && !librariesToAdd.add(jar) || !librariesToAdd.add(library))         continue;
-        QuickFixAction.registerQuickFixAction(info,new OrderEntryFix(){
+        final OrderEntryFix fix=new OrderEntryFix(){
           @NotNull public String getText(){
             return QuickFixBundle.message("orderEntry.fix.add.library.to.classpath",libraryEntry.getPresentableName());
           }
@@ -121,13 +129,18 @@
           public boolean isAvailable(          @NotNull Project project,          Editor editor,          PsiFile file){
             return !project.isDisposed() && !currentModule.isDisposed() && libraryEntry.isValid();
           }
-          public void invoke(          @NotNull Project project,          Editor editor,          PsiFile file) throws IncorrectOperationException {
+          public void invoke(          @NotNull Project project,          @Nullable Editor editor,          PsiFile file) throws IncorrectOperationException {
             OrderEntryUtil.addLibraryToRoots(libraryEntry,currentModule);
-            new AddImportAction(project,reference,editor,aClass).execute();
+            if (editor != null) {
+              new AddImportAction(project,reference,editor,aClass).execute();
+            }
           }
         }
-);
+;
+        QuickFixAction.registerQuickFixAction(info,fix);
+        result.add(fix);
       }
     }
   }
+  return result;
 }
