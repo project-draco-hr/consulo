@@ -1,0 +1,69 @@
+{
+  final TextRange contentsRange=new TextRange(prefixLength,parsedNode.getTextLength() - suffixLength);
+  final Map<LeafElement,String> newTexts=new THashMap<LeafElement,String>();
+  ((TreeElement)parsedNode).acceptTree(new RecursiveTreeElementVisitor(){
+    int currentHostNum=0;
+    int currentInHostOffset=rangeInsideHosts[0].getStartOffset();
+    LeafElement prevElement;
+    String prevElementTail;
+    int prevHostsCombinedLength=0;
+    protected boolean visitNode(    TreeElement element){
+      return true;
+    }
+    public void visitLeaf(    LeafElement leaf){
+      TextRange range=leaf.getTextRange();
+      if (prefixLength > range.getStartOffset() && prefixLength < range.getEndOffset()) {
+        LOG.error("Prefix must not contain text that will be glued with the element body after parsing. " + "However, parsed element of " + leaf.getClass() + " contains "+ (prefixLength - range.getStartOffset())+ " characters from the prefix. "+ "Parsed text is '"+ leaf.getText()+ "'");
+      }
+      if (range.getStartOffset() < contentsRange.getEndOffset() && contentsRange.getEndOffset() < range.getEndOffset()) {
+        LOG.error("Suffix must not contain text that will be glued with the element body after parsing. " + "However, parsed element of " + leaf.getClass() + " contains "+ (range.getEndOffset() - contentsRange.getEndOffset())+ " characters from the suffix. "+ "Parsed text is '"+ leaf.getText()+ "'");
+      }
+      if (!contentsRange.contains(range))       return;
+      int startOffsetInHost=currentInHostOffset;
+      int endOffsetInHost;
+      String leafEncodedText="";
+      while (true) {
+        int end=range.getEndOffset() - prefixLength - prevHostsCombinedLength;
+        endOffsetInHost=escapers[currentHostNum] == null ? end + rangeInsideHosts[currentHostNum].getStartOffset() : escapers[currentHostNum].getOffsetInHost(end,rangeInsideHosts[currentHostNum]);
+        String hostText=injectionHosts[currentHostNum].getText();
+        if (endOffsetInHost != -1) {
+          leafEncodedText+=hostText.substring(startOffsetInHost,endOffsetInHost);
+          break;
+        }
+        String rest=hostText.substring(startOffsetInHost,rangeInsideHosts[currentHostNum].getEndOffset());
+        leafEncodedText+=rest;
+        prevHostsCombinedLength+=escapers[currentHostNum] == null ? rangeInsideHosts[currentHostNum].getLength() : escapers[currentHostNum].getOffsetInHost(rangeInsideHosts[currentHostNum].getLength(),rangeInsideHosts[currentHostNum]) - escapers[currentHostNum].getOffsetInHost(0,rangeInsideHosts[currentHostNum]);
+        currentHostNum++;
+        currentInHostOffset=startOffsetInHost=rangeInsideHosts[currentHostNum].getStartOffset();
+      }
+      if (leaf.getElementType() == TokenType.WHITE_SPACE && prevElementTail != null) {
+        leafEncodedText=prevElementTail + leafEncodedText;
+        newTexts.remove(prevElement);
+      }
+      String leafText=leaf.getText();
+      if (!Comparing.strEqual(leafText,leafEncodedText)) {
+        newTexts.put(leaf,leafEncodedText);
+      }
+      if (leafEncodedText.startsWith(leafText) && leafEncodedText.length() != leafText.length()) {
+        prevElementTail=leafEncodedText.substring(leafText.length());
+      }
+ else {
+        prevElementTail=null;
+      }
+      currentInHostOffset+=endOffsetInHost - startOffsetInHost;
+      prevElement=leaf;
+    }
+  }
+);
+  for (  LeafElement leaf : newTexts.keySet()) {
+    String newText=newTexts.get(leaf);
+    leaf.setText(newText);
+  }
+  ((TreeElement)parsedNode).acceptTree(new RecursiveTreeElementVisitor(){
+    protected boolean visitNode(    TreeElement element){
+      element.clearCaches();
+      return true;
+    }
+  }
+);
+}

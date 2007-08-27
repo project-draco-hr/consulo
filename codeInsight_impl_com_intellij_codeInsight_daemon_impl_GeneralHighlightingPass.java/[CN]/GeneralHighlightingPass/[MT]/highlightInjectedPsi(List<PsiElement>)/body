@@ -1,25 +1,33 @@
 {
-  Collection<PsiLanguageInjectionHost> hosts=new THashSet<PsiLanguageInjectionHost>();
-  List<DocumentRange> injected=InjectedLanguageUtil.getCachedInjectedDocuments(getDocument());
-  for (  DocumentRange documentRange : injected) {
+  Collection<PsiElement> hosts=new THashSet<PsiElement>();
+  List<DocumentWindow> injected=InjectedLanguageUtil.getCachedInjectedDocuments(getDocument());
+  for (  DocumentWindow documentRange : injected) {
     PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(documentRange);
     if (file == null)     continue;
     PsiElement context=file.getContext();
-    if (context instanceof PsiLanguageInjectionHost && context.isValid() && (myUpdateAll || new TextRange(myStartOffset,myEndOffset).contains(context.getTextRange())))     hosts.add((PsiLanguageInjectionHost)context);
+    if (context != null && context.isValid() && (myUpdateAll || new TextRange(myStartOffset,myEndOffset).contains(context.getTextRange())))     hosts.add(context);
   }
-  for (  PsiElement element : elements) {
-    if (element instanceof PsiLanguageInjectionHost)     hosts.add((PsiLanguageInjectionHost)element);
+  hosts.addAll(elements);
+  final Collection<PsiFile> injectedFiles=new THashSet<PsiFile>();
+  final AnnotationHolderImpl annotationHolder=new AnnotationHolderImpl();
+  final Map<TextRange,Collection<HighlightInfo>> result=new THashMap<TextRange,Collection<HighlightInfo>>(hosts.size());
+  for (  PsiElement element : hosts) {
+    InjectedLanguageUtil.enumerate(element,new PsiLanguageInjectionHost.InjectedPsiVisitor(){
+      public void visit(      @NotNull PsiFile injectedPsi,      @NotNull List<Pair<PsiLanguageInjectionHost,TextRange>> places){
+        injectedFiles.add(injectedPsi);
+      }
+    }
+,false);
   }
-  AnnotationHolderImpl annotationHolder=new AnnotationHolderImpl();
-  Map<TextRange,Collection<HighlightInfo>> result=new THashMap<TextRange,Collection<HighlightInfo>>(hosts.size());
-  for (  PsiLanguageInjectionHost host : hosts) {
-    highlightInjectedIn(host,annotationHolder);
-    TextRange textRange=host.getTextRange();
+  for (  PsiFile injectedPsi : injectedFiles) {
+    highlightInjectedIn(injectedPsi,annotationHolder);
+    DocumentWindow documentWindow=(DocumentWindow)PsiDocumentManager.getInstance(myProject).getCachedDocument(injectedPsi);
     for (    Annotation annotation : annotationHolder) {
       HighlightInfo highlightInfo=HighlightUtil.convertToHighlightInfo(annotation);
+      TextRange textRange=documentWindow.getHostRange(highlightInfo.startOffset);
       Collection<HighlightInfo> infos=result.get(textRange);
       if (infos == null) {
-        infos=new ArrayList<HighlightInfo>();
+        infos=new ArrayList<HighlightInfo>(10);
         result.put(textRange,infos);
       }
       infos.add(highlightInfo);
