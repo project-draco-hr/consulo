@@ -3,47 +3,98 @@
   myHeaderFitSize=new Dimension(getSize().width,myHorizontalSide ? Math.max(max.myLabel.height,max.myToolbar.height) : max.myLabel.height);
   final TabInfo selected=getSelectedInfo();
   final JComponent selectedToolbar=myInfo2Toolbar.get(selected);
+  final LayoutData data=new LayoutData();
   Insets insets=getInsets();
   if (insets == null) {
     insets=new Insets(0,0,0,0);
   }
-  int currentX=insets.left;
-  int xAddin=0;
+  data.eachX=insets.left;
   if (!myHorizontalSide && selectedToolbar != null) {
-    xAddin=selectedToolbar.getPreferredSize().width + 1;
+    data.xAddin=selectedToolbar.getPreferredSize().width + 1;
   }
   mySelectedBounds=null;
   final int yComp=myHeaderFitSize.height + insets.top;
+  final int toolbarInset=getArcSize() + 1;
+  boolean willDisplayHorizontalToolbar=myHorizontalSide && selectedToolbar != null;
+  data.toFitWidth=getWidth() - insets.left - insets.right- (willDisplayHorizontalToolbar ? toolbarInset : 0);
   for (  TabInfo eachInfo : myInfos) {
-    final TabLabel label=myInfo2Label.get(eachInfo);
-    final Dimension eachSize=label.getPreferredSize();
-    label.setBounds(currentX,insets.top,eachSize.width,myHeaderFitSize.height);
-    currentX+=eachSize.width;
-    final JComponent comp=eachInfo.getComponent();
-    if (selected == eachInfo) {
-      comp.setBounds(insets.left + INNER + xAddin,yComp,getWidth() - insets.left - insets.right- INNER * 2 - xAddin,getHeight() - insets.top - insets.bottom- myHeaderFitSize.height- 1);
-      mySelectedBounds=label.getBounds();
+    data.requiredWidth+=myInfo2Label.get(eachInfo).getPreferredSize().width;
+    data.toLayout.add(eachInfo);
+  }
+  boolean leftCropped=false, rightCropped=false;
+  while (true) {
+    if (data.requiredWidth <= data.toFitWidth - data.eachX)     break;
+    if (data.toLayout.size() == 0)     break;
+    final TabInfo first=data.toLayout.get(0);
+    final TabInfo last=data.toLayout.get(data.toLayout.size() - 1);
+    if (first != getSelectedInfo()) {
+      processDrop(data,first);
+      leftCropped=true;
+    }
+ else     if (last != getSelectedInfo()) {
+      processDrop(data,last);
+      rightCropped=true;
     }
  else {
-      comp.setBounds(0,0,0,0);
-    }
-    final JComponent eachToolbar=myInfo2Toolbar.get(eachInfo);
-    if (eachToolbar != null) {
-      eachToolbar.setBounds(0,0,0,0);
+      if (data.toDrop.size() > 0) {
+        leftCropped=true;
+        rightCropped=true;
+      }
+      break;
     }
   }
-  if (selectedToolbar != null) {
-    final int toolbarInset=getArcSize() * 2;
-    if (myHorizontalSide) {
-      if (currentX + selectedToolbar.getMinimumSize().width + toolbarInset < getWidth()) {
-        selectedToolbar.setBounds(currentX + toolbarInset,insets.top,getSize().width - currentX - insets.left- toolbarInset,myHeaderFitSize.height - 1);
+  myMoreIcon.setPaintedIcons(leftCropped,rightCropped);
+  data.moreRect=null;
+  boolean reachedBounds=false;
+  for (  TabInfo each : myInfos) {
+    final JComponent c=each.getComponent();
+    if (c != null) {
+      c.setBounds(0,0,0,0);
+    }
+    final JComponent toolbar=myInfo2Toolbar.get(each);
+    if (toolbar != null) {
+      toolbar.setBounds(0,0,0,0);
+    }
+  }
+  for (  TabInfo eachInfo : data.toLayout) {
+    final TabLabel label=myInfo2Label.get(eachInfo);
+    final Dimension eachSize=label.getPreferredSize();
+    if (data.eachX + eachSize.width <= data.toFitWidth) {
+      label.setBounds(data.eachX,insets.top,eachSize.width,myHeaderFitSize.height);
+      data.eachX+=eachSize.width;
+      data.eachX++;
+    }
+ else {
+      if (!reachedBounds) {
+        final int width=getWidth() - data.eachX - data.moreRectWidth;
+        label.setBounds(data.eachX,insets.top,width,myHeaderFitSize.height);
+        data.eachX+=width;
+        data.eachX++;
       }
  else {
-        selectedToolbar.setBounds(0,0,0,0);
+        label.setBounds(0,0,0,0);
       }
+    }
+    final JComponent comp=eachInfo.getComponent();
+    if (selected == eachInfo) {
+      comp.setBounds(insets.left + INNER + data.xAddin,yComp,getWidth() - insets.left - insets.right- INNER * 2 - data.xAddin,getHeight() - insets.top - insets.bottom- myHeaderFitSize.height- 1);
+      mySelectedBounds=label.getBounds();
+    }
+  }
+  if (data.toDrop.size() > 0) {
+    data.moreRect=new Rectangle(data.eachX,insets.top,data.moreRectWidth - 1,myHeaderFitSize.height - 1);
+  }
+  for (  TabInfo eachInfo : data.toDrop) {
+    myInfo2Label.get(eachInfo).setBounds(0,0,0,0);
+  }
+  if (selectedToolbar != null) {
+    if (myHorizontalSide) {
+      int toolbarX=data.eachX + toolbarInset + (data.moreRect != null ? data.moreRect.width : 0);
+      selectedToolbar.setBounds(toolbarX,insets.top,getSize().width - insets.left - toolbarX,myHeaderFitSize.height - 1);
     }
  else {
       selectedToolbar.setBounds(insets.left + 1,yComp,selectedToolbar.getPreferredSize().width,getSize().height - yComp - insets.bottom- 1);
     }
   }
+  myLastLayout=data;
 }
