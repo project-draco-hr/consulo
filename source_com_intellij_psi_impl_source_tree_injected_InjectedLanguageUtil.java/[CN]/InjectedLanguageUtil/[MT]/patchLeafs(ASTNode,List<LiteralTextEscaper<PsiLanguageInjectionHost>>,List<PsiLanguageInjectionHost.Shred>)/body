@@ -1,17 +1,18 @@
 {
-  final TextRange contentsRange=new TextRange(prefixLength,parsedNode.getTextLength() - suffixLength);
   final Map<LeafElement,String> newTexts=new THashMap<LeafElement,String>();
   ((TreeElement)parsedNode).acceptTree(new RecursiveTreeElementVisitor(){
     int currentHostNum=0;
-    int currentInHostOffset=rangeInsideHosts[0].getStartOffset();
+    int currentInHostOffset=shreds.get(0).rangeInsideHost.getStartOffset();
     LeafElement prevElement;
     String prevElementTail;
     int prevHostsCombinedLength=0;
+    TextRange contentsRange=TextRange.from(shreds.get(0).prefix.length(),shreds.get(0).rangeInsideHost.getLength());
     protected boolean visitNode(    TreeElement element){
       return true;
     }
     public void visitLeaf(    LeafElement leaf){
       TextRange range=leaf.getTextRange();
+      int prefixLength=contentsRange.getStartOffset();
       if (prefixLength > range.getStartOffset() && prefixLength < range.getEndOffset()) {
         LOG.error("Prefix must not contain text that will be glued with the element body after parsing. " + "However, parsed element of " + leaf.getClass() + " contains "+ (prefixLength - range.getStartOffset())+ " characters from the prefix. "+ "Parsed text is '"+ leaf.getText()+ "'");
       }
@@ -23,18 +24,20 @@
       int endOffsetInHost;
       String leafEncodedText="";
       while (true) {
+        TextRange rangeInsideHost=shreds.get(currentHostNum).rangeInsideHost;
         int end=range.getEndOffset() - prefixLength - prevHostsCombinedLength;
-        endOffsetInHost=escapers[currentHostNum] == null ? end + rangeInsideHosts[currentHostNum].getStartOffset() : escapers[currentHostNum].getOffsetInHost(end,rangeInsideHosts[currentHostNum]);
-        String hostText=injectionHosts[currentHostNum].getText();
+        endOffsetInHost=escapers.get(currentHostNum).getOffsetInHost(end,rangeInsideHost);
+        String hostText=shreds.get(currentHostNum).host.getText();
         if (endOffsetInHost != -1) {
           leafEncodedText+=hostText.substring(startOffsetInHost,endOffsetInHost);
           break;
         }
-        String rest=hostText.substring(startOffsetInHost,rangeInsideHosts[currentHostNum].getEndOffset());
+        String rest=hostText.substring(startOffsetInHost,rangeInsideHost.getEndOffset());
         leafEncodedText+=rest;
-        prevHostsCombinedLength+=escapers[currentHostNum] == null ? rangeInsideHosts[currentHostNum].getLength() : escapers[currentHostNum].getOffsetInHost(rangeInsideHosts[currentHostNum].getLength(),rangeInsideHosts[currentHostNum]) - escapers[currentHostNum].getOffsetInHost(0,rangeInsideHosts[currentHostNum]);
+        prevHostsCombinedLength+=escapers.get(currentHostNum).getOffsetInHost(rangeInsideHost.getLength(),rangeInsideHost) - escapers.get(currentHostNum).getOffsetInHost(0,rangeInsideHost);
         currentHostNum++;
-        currentInHostOffset=startOffsetInHost=rangeInsideHosts[currentHostNum].getStartOffset();
+        currentInHostOffset=startOffsetInHost=rangeInsideHost.getStartOffset();
+        contentsRange=TextRange.from(shreds.get(currentHostNum).prefix.length(),shreds.get(currentHostNum).rangeInsideHost.getLength());
       }
       if (leaf.getElementType() == TokenType.WHITE_SPACE && prevElementTail != null) {
         leafEncodedText=prevElementTail + leafEncodedText;
