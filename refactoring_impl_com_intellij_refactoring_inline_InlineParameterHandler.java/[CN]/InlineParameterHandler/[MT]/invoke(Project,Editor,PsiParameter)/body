@@ -1,0 +1,45 @@
+{
+  String errorMessage=getCannotInlineMessage(psiParameter);
+  if (errorMessage != null) {
+    CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),errorMessage,null,project);
+    return;
+  }
+  final PsiParameterList parameterList=(PsiParameterList)psiParameter.getParent();
+  if (!(parameterList.getParent() instanceof PsiMethod)) {
+    return;
+  }
+  final int index=parameterList.getParameterIndex(psiParameter);
+  PsiMethod method=(PsiMethod)parameterList.getParent();
+  final Ref<PsiExpression> refInitializer=new Ref<PsiExpression>();
+  final Ref<PsiExpression> refConstantInitializer=new Ref<PsiExpression>();
+  boolean result=ReferencesSearch.search(method).forEach(new Processor<PsiReference>(){
+    public boolean process(    final PsiReference psiReference){
+      PsiElement element=psiReference.getElement();
+      if (element.getParent() instanceof PsiMethodCallExpression) {
+        PsiMethodCallExpression methodCall=(PsiMethodCallExpression)element.getParent();
+        PsiExpression argument=methodCall.getArgumentList().getExpressions()[index];
+        if (!refInitializer.isNull()) {
+          return false;
+        }
+        if (InlineToAnonymousConstructorProcessor.isConstant(argument)) {
+          if (refConstantInitializer.isNull()) {
+            refConstantInitializer.set(argument);
+          }
+ else           if (!isSameConstant(argument,refConstantInitializer.get())) {
+            return false;
+          }
+        }
+ else {
+          refInitializer.set(argument);
+        }
+      }
+      return true;
+    }
+  }
+);
+  if (!result || refConstantInitializer.isNull()) {
+    CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),"Cannot find constant initializer for parameter",null,project);
+    return;
+  }
+  SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method,psiParameter,refConstantInitializer.get());
+}
