@@ -9,13 +9,17 @@
     return;
   }
   final int index=parameterList.getParameterIndex(psiParameter);
-  PsiMethod method=(PsiMethod)parameterList.getParent();
+  final PsiMethod method=(PsiMethod)parameterList.getParent();
   final Ref<PsiExpression> refInitializer=new Ref<PsiExpression>();
   final Ref<PsiExpression> refConstantInitializer=new Ref<PsiExpression>();
+  final List<PsiReference> occurrences=new ArrayList<PsiReference>();
+  final Collection<PsiFile> containingFiles=new HashSet<PsiFile>();
   boolean result=ReferencesSearch.search(method).forEach(new Processor<PsiReference>(){
     public boolean process(    final PsiReference psiReference){
       PsiElement element=psiReference.getElement();
       if (element.getParent() instanceof PsiMethodCallExpression) {
+        occurrences.add(psiReference);
+        containingFiles.add(element.getContainingFile());
         PsiMethodCallExpression methodCall=(PsiMethodCallExpression)element.getParent();
         PsiExpression argument=methodCall.getArgumentList().getExpressions()[index];
         if (!refInitializer.isNull()) {
@@ -41,5 +45,20 @@
     CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),"Cannot find constant initializer for parameter",null,project);
     return;
   }
-  SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method,psiParameter,refConstantInitializer.get());
+  String occurencesString=RefactoringBundle.message("occurences.string",occurrences.size());
+  String question=RefactoringBundle.message("inline.parameter.confirmation",psiParameter.getName(),refConstantInitializer.get().getText(),occurencesString);
+  RefactoringMessageDialog dialog=new RefactoringMessageDialog(REFACTORING_NAME,question,HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
+  dialog.show();
+  if (!dialog.isOK()) {
+    return;
+  }
+  new WriteCommandAction(project,RefactoringBundle.message("inline.parameter.command.name",psiParameter.getName()),containingFiles.toArray(new PsiFile[containingFiles.size()])){
+    protected void run(    final Result result) throws Throwable {
+      SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method,psiParameter,refConstantInitializer.get());
+    }
+    protected UndoConfirmationPolicy getUndoConfirmationPolicy(){
+      return UndoConfirmationPolicy.DEFAULT;
+    }
+  }
+.execute();
 }
