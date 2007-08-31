@@ -12,6 +12,7 @@
   final PsiMethod method=(PsiMethod)parameterList.getParent();
   final Ref<PsiExpression> refInitializer=new Ref<PsiExpression>();
   final Ref<PsiExpression> refConstantInitializer=new Ref<PsiExpression>();
+  final Ref<PsiMethodCallExpression> refMethodCall=new Ref<PsiMethodCallExpression>();
   final List<PsiReference> occurrences=new ArrayList<PsiReference>();
   final Collection<PsiFile> containingFiles=new HashSet<PsiFile>();
   boolean result=ReferencesSearch.search(method).forEach(new Processor<PsiReference>(){
@@ -35,19 +36,33 @@
         }
  else {
           refInitializer.set(argument);
+          refMethodCall.set(methodCall);
         }
       }
       return true;
     }
   }
 );
-  if (!result || refConstantInitializer.isNull()) {
+  if (occurrences.isEmpty()) {
+    CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),"Method has no usages",null,project);
+    return;
+  }
+  if (!result) {
+    CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),"Cannot find constant initializer for parameter",null,project);
+    return;
+  }
+  final ApplicationEx app=(ApplicationEx)ApplicationManager.getApplication();
+  if ((app.isInternal() || app.isUnitTestMode()) && !refInitializer.isNull()) {
+    tryInlineReferenceArgument(refMethodCall.get(),method,psiParameter,refInitializer.get());
+    return;
+  }
+  if (refConstantInitializer.isNull()) {
     CommonRefactoringUtil.showErrorMessage(RefactoringBundle.message("inline.parameter.refactoring"),"Cannot find constant initializer for parameter",null,project);
     return;
   }
   if (!ApplicationManager.getApplication().isUnitTestMode()) {
     String occurencesString=RefactoringBundle.message("occurences.string",occurrences.size());
-    String question=RefactoringBundle.message("inline.parameter.confirmation",psiParameter.getName(),refConstantInitializer.get().getText(),occurencesString);
+    String question=RefactoringBundle.message("inline.parameter.confirmation",psiParameter.getName(),refConstantInitializer.get().getText()) + " " + occurencesString;
     RefactoringMessageDialog dialog=new RefactoringMessageDialog(REFACTORING_NAME,question,HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
     dialog.show();
     if (!dialog.isOK()) {
