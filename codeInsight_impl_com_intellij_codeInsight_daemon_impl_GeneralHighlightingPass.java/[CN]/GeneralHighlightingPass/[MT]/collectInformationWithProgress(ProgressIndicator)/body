@@ -1,47 +1,58 @@
 {
-  HighlightVisitor[] highlightVisitors=createHighlightVisitors();
-  RefCountHolder refCountHolder=null;
-  Collection<HighlightInfo> result=new THashSet<HighlightInfo>(100);
-  List<LineMarkerInfo> lineMarkers=new ArrayList<LineMarkerInfo>();
+  final HighlightVisitor[] highlightVisitors=createHighlightVisitors();
+  final Collection<HighlightInfo> result=new THashSet<HighlightInfo>(100);
+  final List<LineMarkerInfo> lineMarkers=new ArrayList<LineMarkerInfo>();
   try {
+    final RefCountHolder refCountHolder;
     if (myUpdateAll) {
       DaemonCodeAnalyzer daemonCodeAnalyzer=DaemonCodeAnalyzer.getInstance(myProject);
-      refCountHolder=((DaemonCodeAnalyzerImpl)daemonCodeAnalyzer).getFileStatusMap().getRefCountHolder(myFile,true);
-      setRefCountHolders(refCountHolder,highlightVisitors);
-      PsiElement dirtyScope=((DaemonCodeAnalyzerImpl)daemonCodeAnalyzer).getFileStatusMap().getFileDirtyScope(myDocument,Pass.UPDATE_ALL);
-      if (dirtyScope != null) {
-        if (dirtyScope instanceof PsiFile) {
-          refCountHolder.clear();
-        }
+      refCountHolder=((DaemonCodeAnalyzerImpl)daemonCodeAnalyzer).getFileStatusMap().getRefCountHolder(myFile);
+    }
  else {
-          refCountHolder.removeInvalidRefs();
+      refCountHolder=null;
+    }
+    setRefCountHolders(refCountHolder,highlightVisitors);
+    Runnable doCollectInfo=new Runnable(){
+      public void run(){
+        if (refCountHolder != null) {
+          DaemonCodeAnalyzerImpl daemonCodeAnalyzer=(DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject);
+          PsiElement dirtyScope=daemonCodeAnalyzer.getFileStatusMap().getFileDirtyScope(myDocument,Pass.UPDATE_ALL);
+          if (dirtyScope != null) {
+            if (dirtyScope instanceof PsiFile) {
+              refCountHolder.clear();
+            }
+ else {
+              refCountHolder.removeInvalidRefs();
+            }
+          }
+        }
+        final FileViewProvider viewProvider=myFile.getViewProvider();
+        final Set<Language> relevantLanguages=viewProvider.getPrimaryLanguages();
+        for (        Language language : relevantLanguages) {
+          PsiElement psiRoot=viewProvider.getPsi(language);
+          if (!HighlightUtil.shouldHighlight(psiRoot))           continue;
+          List<PsiElement> elements=CodeInsightUtil.getElementsInRange(psiRoot,myStartOffset,myEndOffset);
+          if (elements.isEmpty()) {
+            elements=Collections.singletonList(psiRoot);
+          }
+          addLineMarkers(elements,lineMarkers);
+          result.addAll(collectHighlights(elements,highlightVisitors));
+          result.addAll(highlightTodos());
+          myInjectedPsiHighlights=highlightInjectedPsi(elements);
         }
       }
     }
- else {
-      setRefCountHolders(null,highlightVisitors);
+;
+    if (refCountHolder != null) {
+      refCountHolder.analyzeAndStoreReferences(doCollectInfo);
     }
-    final FileViewProvider viewProvider=myFile.getViewProvider();
-    final Set<Language> relevantLanguages=viewProvider.getPrimaryLanguages();
-    for (    Language language : relevantLanguages) {
-      PsiElement psiRoot=viewProvider.getPsi(language);
-      if (!HighlightUtil.shouldHighlight(psiRoot))       continue;
-      List<PsiElement> elements=CodeInsightUtil.getElementsInRange(psiRoot,myStartOffset,myEndOffset);
-      if (elements.isEmpty()) {
-        elements=Collections.singletonList(psiRoot);
-      }
-      addLineMarkers(elements,lineMarkers);
-      result.addAll(collectHighlights(elements,highlightVisitors));
-      result.addAll(highlightTodos());
-      myInjectedPsiHighlights=highlightInjectedPsi(elements);
+ else {
+      doCollectInfo.run();
     }
   }
   finally {
     setRefCountHolders(null,highlightVisitors);
     releaseHighlightVisitors();
-    if (refCountHolder != null) {
-      refCountHolder.touch();
-    }
   }
   myHighlights=result;
   myMarkers=lineMarkers;
