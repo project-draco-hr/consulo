@@ -1,45 +1,86 @@
 {
+  final List<Pair<Element,VirtualFile>> files=new ArrayList<Pair<Element,VirtualFile>>();
   for (  final Object o : parentNode.getChildren(BUILD_FILE)) {
     final Element element=(Element)o;
     final String url=element.getAttributeValue(URL);
-    VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(url);
-    if (file == null)     continue;
-    PsiFile psiFile=myPsiManager.findFile(file);
-    if (psiFile != null) {
-      AntSupport.markFileAsAntFile(file,psiFile.getViewProvider(),true);
-      psiFile=AntSupport.getAntFile(psiFile);
+    final VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(url);
+    if (file != null) {
+      files.add(new Pair<Element,VirtualFile>(element,file));
     }
-    if (!(psiFile instanceof AntFile))     continue;
-    AntBuildFileBase buildFile=new AntBuildFileImpl((AntFile)psiFile,this);
-    buildFile.readProperties(element);
-    myBuildFiles.add(buildFile);
-    for (    final Object o1 : element.getChildren(EXECUTE_ON_ELEMENT)) {
-      Element e=(Element)o1;
-      String eventId=e.getAttributeValue(EVENT_ELEMENT);
-      ExecutionEvent event=null;
-      String targetName=e.getAttributeValue(TARGET_ELEMENT);
-      if (ExecuteBeforeCompilationEvent.TYPE_ID.equals(eventId)) {
-        event=ExecuteBeforeCompilationEvent.getInstance();
-      }
- else       if (ExecuteAfterCompilationEvent.TYPE_ID.equals(eventId)) {
-        event=ExecuteAfterCompilationEvent.getInstance();
-      }
- else       if (ExecuteBeforeRunEvent.TYPE_ID.equals(eventId)) {
-        event=new ExecuteBeforeRunEvent();
-      }
- else       if (ExecuteCompositeTargetEvent.TYPE_ID.equals(eventId)) {
-        try {
-          event=new ExecuteCompositeTargetEvent(targetName);
+  }
+  final String title=AntBundle.message("loading.ant.config.progress");
+  ProgressManager.getInstance().run(new Task.Backgroundable(getProject(),title,false){
+    public void run(    final ProgressIndicator indicator){
+      indicator.setIndeterminate(true);
+      indicator.pushState();
+      try {
+        indicator.setText(title);
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            try {
+              for (              Pair<Element,VirtualFile> pair : files) {
+                final Element element=pair.getFirst();
+                final VirtualFile file=pair.getSecond();
+                try {
+                  final AntBuildFileBase buildFile=addBuildFileImpl(file);
+                  buildFile.readProperties(element);
+                  for (                  final Object o1 : element.getChildren(EXECUTE_ON_ELEMENT)) {
+                    Element e=(Element)o1;
+                    String eventId=e.getAttributeValue(EVENT_ELEMENT);
+                    ExecutionEvent event=null;
+                    String targetName=e.getAttributeValue(TARGET_ELEMENT);
+                    if (ExecuteBeforeCompilationEvent.TYPE_ID.equals(eventId)) {
+                      event=ExecuteBeforeCompilationEvent.getInstance();
+                    }
+ else                     if (ExecuteAfterCompilationEvent.TYPE_ID.equals(eventId)) {
+                      event=ExecuteAfterCompilationEvent.getInstance();
+                    }
+ else                     if (ExecuteBeforeRunEvent.TYPE_ID.equals(eventId)) {
+                      event=new ExecuteBeforeRunEvent();
+                    }
+ else                     if (ExecuteCompositeTargetEvent.TYPE_ID.equals(eventId)) {
+                      try {
+                        event=new ExecuteCompositeTargetEvent(targetName);
+                      }
+ catch (                      WrongNameFormatException e1) {
+                        LOG.info(e1);
+                        event=null;
+                      }
+                    }
+                    if (event != null) {
+                      event.readExternal(e);
+                      setTargetForEvent(buildFile,targetName,event);
+                    }
+                  }
+                }
+ catch (                AntNoFileException ignored) {
+                }
+catch (                InvalidDataException e) {
+                  LOG.error(e);
+                }
+              }
+              AntWorkspaceConfiguration.getInstance(getProject()).loadFileProperties();
+            }
+ catch (            InvalidDataException e) {
+              LOG.error(e);
+            }
+ finally {
+              updateRegisteredActions();
+              ApplicationManager.getApplication().invokeLater(new Runnable(){
+                public void run(){
+                  myEventDispatcher.getMulticaster().configurationLoaded();
+                }
+              }
+);
+            }
+          }
         }
- catch (        WrongNameFormatException e1) {
-          LOG.info(e1);
-          event=null;
-        }
+);
       }
-      if (event != null) {
-        event.readExternal(e);
-        setTargetForEvent(buildFile,targetName,event);
+  finally {
+        indicator.popState();
       }
     }
   }
+);
 }
