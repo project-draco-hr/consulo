@@ -1,0 +1,44 @@
+{
+  PsiElement parent=target.getParent();
+  if (!(parent instanceof PsiReferenceList))   return null;
+  PsiElement grand=parent.getParent();
+  if (!(grand instanceof PsiClass))   return null;
+  final PsiClass aClass=(PsiClass)grand;
+  PsiReferenceList list=PsiKeyword.EXTENDS.equals(target.getText()) ? aClass.getExtendsList() : aClass.getImplementsList();
+  if (list == null)   return EMPTY_HIGHLIGHT_RUNNABLE;
+  final PsiClassType[] classTypes=list.getReferencedTypes();
+  if (classTypes.length == 0)   return EMPTY_HIGHLIGHT_RUNNABLE;
+  return new ChooseClassAndDoHighlightRunnable(classTypes,editor,CodeInsightBundle.message("highlight.overridden.classes.chooser.title")){
+    protected void selected(    PsiClass... classes){
+      List<PsiElement> toHighlight=new ArrayList<PsiElement>();
+      for (      PsiMethod method : aClass.getMethods()) {
+        List<HierarchicalMethodSignature> superSignatures=method.getHierarchicalMethodSignature().getSuperSignatures();
+        for (        HierarchicalMethodSignature superSignature : superSignatures) {
+          PsiClass containingClass=superSignature.getMethod().getContainingClass();
+          if (containingClass == null)           continue;
+          for (          PsiClass classToAnalyze : classes) {
+            if (InheritanceUtil.isInheritorOrSelf(classToAnalyze,containingClass,true)) {
+              toHighlight.add(method.getNameIdentifier());
+              break;
+            }
+          }
+        }
+      }
+      if (toHighlight.isEmpty()) {
+        if (ApplicationManager.getApplication().isUnitTestMode())         return;
+        String name=classes.length == 1 ? classes[0].getPresentation().getPresentableText() : "";
+        String text=CodeInsightBundle.message("no.methods.overriding.0.are.found",classes.length,name);
+        HintManager.getInstance().showInformationHint(editor,text);
+      }
+ else {
+        toHighlight.add(target);
+        Project project=target.getProject();
+        highlightOtherOccurrences(toHighlight,project,editor,clearHighlights);
+        setupFindModel(project);
+        String message=CodeInsightBundle.message("status.bar.overridden.methods.highlighted.message",toHighlight.size());
+        WindowManager.getInstance().getStatusBar(project).setInfo(message);
+      }
+    }
+  }
+;
+}
