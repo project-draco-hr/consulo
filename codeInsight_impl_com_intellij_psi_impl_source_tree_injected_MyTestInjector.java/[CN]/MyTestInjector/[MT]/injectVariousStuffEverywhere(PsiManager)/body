@@ -1,0 +1,110 @@
+{
+  LanguageInjector myInjector=new LanguageInjector(){
+    public void getLanguagesToInject(    @NotNull PsiLanguageInjectionHost host,    @NotNull InjectedLanguagePlaces placesToInject){
+      Language ql=findLanguageByID("FQL");
+      Language js=findLanguageByID("JavaScript");
+      if (host instanceof XmlAttributeValue) {
+        XmlAttributeValue value=(XmlAttributeValue)host;
+        PsiElement parent=value.getParent();
+        if (parent instanceof XmlAttribute) {
+          @NonNls String attrName=((XmlAttribute)parent).getLocalName();
+          if ("ql".equals(attrName)) {
+            inject(host,placesToInject,ql);
+            return;
+          }
+          if ("js".equals(attrName)) {
+            inject(host,placesToInject,js);
+            return;
+          }
+          if ("jsInBraces".equals(attrName)) {
+            String text=value.getText();
+            int index=0;
+            while (text.indexOf('{',index) != -1) {
+              int lbrace=text.indexOf('{',index);
+              int rbrace=text.indexOf('}',index);
+              placesToInject.addPlace(js,new TextRange(lbrace + 1,rbrace),null,null);
+              index=rbrace + 1;
+            }
+            return;
+          }
+        }
+      }
+      if (host instanceof XmlText) {
+        final XmlText xmlText=(XmlText)host;
+        XmlTag tag=xmlText.getParentTag();
+        if (tag == null)         return;
+        if ("ql".equals(tag.getLocalName())) {
+          TextRange textRange=new TextRange(0,xmlText.getTextLength());
+          placesToInject.addPlace(ql,textRange,null,null);
+          return;
+        }
+        if ("js".equals(tag.getLocalName())) {
+          TextRange textRange=new TextRange(0,xmlText.getTextLength());
+          placesToInject.addPlace(js,textRange,null,null);
+          return;
+        }
+        if ("jsprefix".equals(tag.getLocalName())) {
+          TextRange textRange=new TextRange(0,xmlText.getTextLength());
+          placesToInject.addPlace(js,textRange,"function foo(doc, window){","}");
+          return;
+        }
+        if ("jsInHash".equals(tag.getLocalName())) {
+          String text=xmlText.getText();
+          if (text.contains("#")) {
+            int start=text.indexOf('#');
+            int end=text.lastIndexOf('#');
+            if (start != end && start != -1) {
+              placesToInject.addPlace(js,new TextRange(start + 1,end),null,null);
+              return;
+            }
+          }
+        }
+      }
+      if (host instanceof PsiCommentImpl) {
+        String text=host.getText();
+        if (text.startsWith("/*-{") && text.endsWith("}-*/")) {
+          TextRange textRange=new TextRange(4,text.length() - 4);
+          if (!(host.getParent() instanceof PsiMethod))           return;
+          PsiMethod method=(PsiMethod)host.getParent();
+          if (!method.hasModifierProperty(PsiModifier.NATIVE) || !method.hasModifierProperty(PsiModifier.PUBLIC))           return;
+          String paramList="";
+          for (          PsiParameter parameter : method.getParameterList().getParameters()) {
+            if (paramList.length() != 0)             paramList+=",";
+            paramList+=parameter.getName();
+          }
+          @NonNls String header="function " + method.getName() + "("+ paramList+ ") {";
+          placesToInject.addPlace(js,textRange,header,"}");
+          return;
+        }
+      }
+      if (host instanceof PsiLiteralExpression) {
+        PsiVariable variable=PsiTreeUtil.getParentOfType(host,PsiVariable.class);
+        if (variable == null)         return;
+        if (host.getParent() instanceof PsiBinaryExpression)         return;
+        if ("ql".equals(variable.getName())) {
+          TextRange textRange=new TextRange(1,host.getTextLength() - 1);
+          placesToInject.addPlace(ql,textRange,null,null);
+        }
+        if ("xml".equals(variable.getName())) {
+          TextRange textRange=new TextRange(1,host.getTextLength() - 1);
+          placesToInject.addPlace(StdLanguages.XML,textRange,null,null);
+        }
+        if ("js".equals(variable.getName())) {
+          TextRange textRange=new TextRange(1,host.getTextLength() - 1);
+          placesToInject.addPlace(js,textRange,"function foo(doc,window) {","}");
+        }
+        if ("lang".equals(variable.getName())) {
+          PsiClass aClass=PsiTreeUtil.getParentOfType(variable,PsiClass.class);
+          aClass=aClass.findInnerClassByName("Language",false);
+          String text=aClass.getInitializers()[0].getBody().getFirstBodyElement().getNextSibling().getText().substring(2);
+          Language language=findLanguageByID(text);
+          TextRange textRange=new TextRange(1,host.getTextLength() - 1);
+          placesToInject.addPlace(language,textRange,"","");
+        }
+      }
+    }
+  }
+;
+  psiManager.registerLanguageInjector(myInjector);
+  return myInjector;
+}
