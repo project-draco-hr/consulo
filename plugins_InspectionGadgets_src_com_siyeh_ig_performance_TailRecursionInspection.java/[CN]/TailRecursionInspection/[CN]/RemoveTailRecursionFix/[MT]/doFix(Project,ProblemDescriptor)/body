@@ -1,6 +1,6 @@
 {
-  final PsiElement methodNameToken=descriptor.getPsiElement();
-  final PsiMethod method=PsiTreeUtil.getParentOfType(methodNameToken,PsiMethod.class);
+  final PsiElement tailCallToken=descriptor.getPsiElement();
+  final PsiMethod method=PsiTreeUtil.getParentOfType(tailCallToken,PsiMethod.class);
   if (method == null) {
     return;
   }
@@ -8,25 +8,52 @@
   if (body == null) {
     return;
   }
-  final PsiManager psiManager=PsiManager.getInstance(project);
-  final CodeStyleManager codeStyleManager=psiManager.getCodeStyleManager();
-  final PsiElement[] children=body.getChildren();
-  final boolean[] containedTailCallInLoop=new boolean[1];
-  containedTailCallInLoop[0]=false;
-  final StringBuffer buffer=new StringBuffer();
-  for (int i=1; i < children.length; i++) {
-    replaceTailCalls(children[i],method,buffer,containedTailCallInLoop);
-  }
-  final String labelString;
-  if (containedTailCallInLoop[0]) {
-    labelString=method.getName() + ':';
+  final StringBuilder builder=new StringBuilder();
+  builder.append('{');
+  final String thisVariableName;
+  if (!method.hasModifierProperty(PsiModifier.STATIC)) {
+    final PsiType returnType=method.getReturnType();
+    final PsiClass containingClass=method.getContainingClass();
+    if (returnType instanceof PsiClassType) {
+      final PsiClassType classType=(PsiClassType)returnType;
+      final PsiClass aClass=classType.resolve();
+      if (aClass != null && aClass.equals(containingClass)) {
+        builder.append(containingClass.getName());
+        final PsiManager manager=method.getManager();
+        final CodeStyleManager styleManager=manager.getCodeStyleManager();
+        thisVariableName=styleManager.suggestUniqueVariableName("result",method,false);
+        builder.append(' ');
+        builder.append(thisVariableName);
+        builder.append(" = this;");
+      }
+ else {
+        thisVariableName=null;
+      }
+    }
+ else {
+      thisVariableName=null;
+    }
   }
  else {
-    labelString="";
+    thisVariableName=null;
   }
-  @NonNls final String replacementText='{' + labelString + "while(true){"+ buffer+ '}';
+  final boolean tailCallIsContainedInLoop;
+  if (ControlFlowUtils.isInLoop(tailCallToken)) {
+    tailCallIsContainedInLoop=true;
+    builder.append(method.getName());
+    builder.append(':');
+  }
+ else {
+    tailCallIsContainedInLoop=false;
+  }
+  builder.append("while(true)");
+  final PsiManager psiManager=PsiManager.getInstance(project);
+  final CodeStyleManager codeStyleManager=psiManager.getCodeStyleManager();
+  replaceTailCalls(body,method,thisVariableName,tailCallIsContainedInLoop,builder);
+  builder.append('}');
+  @NonNls final String replacementText=builder.toString();
   final PsiElementFactory elementFactory=psiManager.getElementFactory();
-  final PsiCodeBlock block=elementFactory.createCodeBlockFromText(replacementText,null);
+  final PsiCodeBlock block=elementFactory.createCodeBlockFromText(replacementText,method);
   body.replace(block);
   codeStyleManager.reformat(method);
 }
