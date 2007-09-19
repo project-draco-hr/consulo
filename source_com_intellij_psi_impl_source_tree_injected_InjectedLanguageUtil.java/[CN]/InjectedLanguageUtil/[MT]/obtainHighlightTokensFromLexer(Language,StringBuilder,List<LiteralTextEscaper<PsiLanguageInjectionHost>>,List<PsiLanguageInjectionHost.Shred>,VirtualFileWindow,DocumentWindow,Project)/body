@@ -3,22 +3,37 @@
   SyntaxHighlighter syntaxHighlighter=language.getSyntaxHighlighter(project,virtualFile);
   Lexer lexer=syntaxHighlighter.getHighlightingLexer();
   lexer.start(outChars,0,outChars.length(),0);
-  for (IElementType tokenType=lexer.getTokenType(); tokenType != null; lexer.advance(), tokenType=lexer.getTokenType()) {
-    TextRange textRange=new TextRange(lexer.getTokenStart(),lexer.getTokenEnd());
-    TextRange editable=documentWindow.intersectWithEditable(textRange);
-    if (editable == null || editable.getLength() == 0)     continue;
-    int i=documentWindow.getHostNumber(textRange.getStartOffset());
-    if (i == -1)     continue;
-    PsiLanguageInjectionHost host=shreds.get(i).host;
-    LiteralTextEscaper<PsiLanguageInjectionHost> escaper=escapers.get(i);
-    TextRange rangeInsideHost=shreds.get(i).getRangeInsideHost();
-    int prefixLength=shreds.get(i).prefix.length();
-    int prevHostsCombinedLength=documentWindow.getPrevHostsCombinedLength(i);
-    int start=escaper.getOffsetInHost(editable.getStartOffset() - prevHostsCombinedLength - prefixLength,rangeInsideHost);
-    int end=escaper.getOffsetInHost(editable.getEndOffset() - prevHostsCombinedLength - prefixLength,rangeInsideHost);
-    if (end == -1)     end=rangeInsideHost.getEndOffset();
-    TextRange rangeInHost=new TextRange(start,end);
-    tokens.add(Trinity.create(tokenType,host,rangeInHost));
+  int hostNum=0;
+  int prevHostsCombinedLength=0;
+  nextToken:   for (IElementType tokenType=lexer.getTokenType(); tokenType != null; lexer.advance(), tokenType=lexer.getTokenType()) {
+    TextRange range=new TextRange(lexer.getTokenStart(),lexer.getTokenEnd());
+    while (!range.isEmpty()) {
+      if (range.getStartOffset() >= shreds.get(hostNum).range.getEndOffset()) {
+        hostNum++;
+        prevHostsCombinedLength=range.getStartOffset();
+      }
+      TextRange editable=documentWindow.intersectWithEditable(range);
+      if (editable == null || editable.getLength() == 0)       continue nextToken;
+      editable=editable.intersection(shreds.get(hostNum).range);
+      if (editable == null || editable.getLength() == 0)       continue nextToken;
+      range=new TextRange(editable.getEndOffset(),range.getEndOffset());
+      PsiLanguageInjectionHost host=shreds.get(hostNum).host;
+      LiteralTextEscaper<PsiLanguageInjectionHost> escaper=escapers.get(hostNum);
+      TextRange rangeInsideHost=shreds.get(hostNum).getRangeInsideHost();
+      int prefixLength=shreds.get(hostNum).prefix.length();
+      int start=escaper.getOffsetInHost(editable.getStartOffset() - prevHostsCombinedLength - prefixLength,rangeInsideHost);
+      int end=escaper.getOffsetInHost(editable.getEndOffset() - prevHostsCombinedLength - prefixLength,rangeInsideHost);
+      if (end == -1) {
+        end=rangeInsideHost.getEndOffset();
+        tokens.add(Trinity.create(tokenType,host,new TextRange(start,end)));
+        prevHostsCombinedLength=shreds.get(hostNum).range.getEndOffset();
+        range=new TextRange(shreds.get(hostNum).range.getEndOffset(),range.getEndOffset());
+      }
+ else {
+        TextRange rangeInHost=new TextRange(start,end);
+        tokens.add(Trinity.create(tokenType,host,rangeInHost));
+      }
+    }
   }
   return tokens;
 }
