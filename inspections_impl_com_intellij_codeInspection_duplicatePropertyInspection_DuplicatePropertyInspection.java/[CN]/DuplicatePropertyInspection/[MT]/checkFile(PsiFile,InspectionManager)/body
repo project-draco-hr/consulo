@@ -1,34 +1,49 @@
 {
   if (!(file instanceof PropertiesFile))   return;
-  if (getContext().RUN_WITH_EDITOR_PROFILE && InspectionProjectProfileManager.getInstance(file.getProject()).getInspectionProfile((PsiElement)file).getInspectionTool(getShortName()) != this) {
+  if (getContext().RUN_WITH_EDITOR_PROFILE && InspectionProjectProfileManager.getInstance(file.getProject()).getInspectionProfile(file).getInspectionTool(getShortName()) != this) {
     return;
   }
   final PsiSearchHelper searchHelper=file.getManager().getSearchHelper();
-  final PropertiesFile propertiesFile=((PropertiesFile)file);
+  final PropertiesFile propertiesFile=(PropertiesFile)file;
   final List<Property> properties=propertiesFile.getProperties();
   Module module=ModuleUtil.findModuleForPsiElement(file);
   if (module == null)   return;
-  final GlobalSearchScope scope=CURRENT_FILE ? (GlobalSearchScope)GlobalSearchScope.fileScope(file) : (MODULE_WITH_DEPENDENCIES ? GlobalSearchScope.moduleWithDependenciesScope(module) : GlobalSearchScope.projectScope(file.getProject()));
-  final Map<String,Set<PsiFile>> processedValueToFiles=new HashMap<String,Set<PsiFile>>();
-  final Map<String,Set<PsiFile>> processedKeyToFiles=new HashMap<String,Set<PsiFile>>();
+  final GlobalSearchScope scope=CURRENT_FILE ? (GlobalSearchScope)GlobalSearchScope.fileScope(file) : MODULE_WITH_DEPENDENCIES ? GlobalSearchScope.moduleWithDependenciesScope(module) : GlobalSearchScope.projectScope(file.getProject());
+  final Map<String,Set<PsiFile>> processedValueToFiles=Collections.synchronizedMap(new HashMap<String,Set<PsiFile>>());
+  final Map<String,Set<PsiFile>> processedKeyToFiles=Collections.synchronizedMap(new HashMap<String,Set<PsiFile>>());
   final ProgressIndicator original=ProgressManager.getInstance().getProgressIndicator();
   final ProgressIndicator progress=original == null ? null : new ProgressWrapper(original);
   ProgressManager.getInstance().runProcess(new Runnable(){
     public void run(){
-      for (      Property property : properties) {
-        if (original != null) {
-          if (original.isCanceled())           throw new ProcessCanceledException();
-          original.setText2(PropertiesBundle.message("searching.for.property.key.progress.text",property.getUnescapedKey()));
+      final Job<?> job=JobScheduler.getInstance().createJob("Searching properties usages",Job.DEFAULT_PRIORITY);
+      for (      final Property property : properties) {
+        job.addTask(new Runnable(){
+          public void run(){
+            if (original != null) {
+              original.checkCanceled();
+              original.setText2(PropertiesBundle.message("searching.for.property.key.progress.text",property.getUnescapedKey()));
+            }
+            processTextUsages(processedValueToFiles,property.getValue(),processedKeyToFiles,searchHelper,scope);
+            processTextUsages(processedKeyToFiles,property.getUnescapedKey(),processedValueToFiles,searchHelper,scope);
+          }
         }
-        processTextUsages(processedValueToFiles,property.getValue(),processedKeyToFiles,searchHelper,scope);
-        processTextUsages(processedKeyToFiles,property.getUnescapedKey(),processedValueToFiles,searchHelper,scope);
+);
+      }
+      try {
+        job.scheduleAndWaitForResults();
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      Throwable e) {
+        LOG.error(e);
       }
       List<ProblemDescriptor> problemDescriptors=new ArrayList<ProblemDescriptor>();
       Map<String,Set<String>> keyToDifferentValues=new HashMap<String,Set<String>>();
       if (CHECK_DUPLICATE_KEYS || CHECK_DUPLICATE_KEYS_WITH_DIFFERENT_VALUES)       prepareDuplicateKeysByFile(processedKeyToFiles,manager,keyToDifferentValues,problemDescriptors,file,original);
       if (CHECK_DUPLICATE_VALUES)       prepareDuplicateValuesByFile(processedValueToFiles,manager,problemDescriptors,file,original);
       if (CHECK_DUPLICATE_KEYS_WITH_DIFFERENT_VALUES)       processDuplicateKeysWithDifferentValues(keyToDifferentValues,processedKeyToFiles,problemDescriptors,manager,file,original);
-      if (problemDescriptors.size() > 0) {
+      if (!problemDescriptors.isEmpty()) {
         addProblemElement(getRefManager().getReference(file),problemDescriptors.toArray(new ProblemDescriptor[problemDescriptors.size()]));
       }
     }
