@@ -1,0 +1,53 @@
+{
+  PsiFile file=DataKeys.PSI_FILE.getData(dataContext);
+  Project project=DataKeys.PROJECT.getData(dataContext);
+  String fileText=editor.getDocument().getText();
+  if (fileText.length() == carret)   return false;
+  if (fileText.length() > carret && (fileText.charAt(carret) == '\n' || fileText.charAt(carret) == '\r')) {
+    return false;
+  }
+  if (file == null || project == null)   return false;
+  PsiElement stringElement=file.findElementAt(carret - 1);
+  if (stringElement == null)   return false;
+  ASTNode node=stringElement.getNode();
+  if (node == null)   return false;
+  GroovyElementFactory factory=GroovyElementFactory.getInstance(project);
+  if (GroovyTokenTypes.mSTRING_LITERAL == node.getElementType() && GroovyEditorActionUtil.isPlainStringLiteral(node)) {
+    String text=node.getText();
+    String innerText=text.equals("''") ? "" : text.substring(1,text.length() - 1);
+    PsiElement literal=stringElement.getParent();
+    if (!(literal instanceof GrLiteral))     return false;
+    ((GrExpression)literal).replaceWithExpression(factory.createExpressionFromText("'''" + innerText + "'''"));
+    editor.getCaretModel().moveToOffset(carret + 2);
+    myOriginalHandler.execute(editor,dataContext);
+    return true;
+  }
+  if (!GroovyEditorActionUtil.GSTRING_TOKENS.contains(node.getElementType()) && checkGStringInnerExpression(stringElement)) {
+    stringElement=stringElement.getParent().getNextSibling();
+    if (stringElement == null)     return false;
+    node=stringElement.getNode();
+    if (node == null)     return false;
+  }
+  if (GroovyEditorActionUtil.GSTRING_TOKENS.contains(node.getElementType())) {
+    PsiElement parent=stringElement.getParent();
+    while (parent != null && !(parent instanceof GrLiteral)) {
+      parent=parent.getParent();
+    }
+    if (parent == null || parent.getLastChild() instanceof PsiErrorElement)     return false;
+    if (GroovyEditorActionUtil.isPlainGString(parent.getNode())) {
+      PsiElement exprSibling=stringElement.getNextSibling();
+      boolean rightFromDollar=exprSibling instanceof GrExpression && exprSibling.getTextRange().getStartOffset() == carret;
+      if (rightFromDollar)       carret--;
+      String text=parent.getText();
+      String innerText=text.equals("\"\"") ? "" : text.substring(1,text.length() - 1);
+      ((GrLiteral)parent).replaceWithExpression(factory.createExpressionFromText("\"\"\"" + innerText + "\"\"\""));
+      editor.getCaretModel().moveToOffset(carret + 2);
+      myOriginalHandler.execute(editor,dataContext);
+      if (rightFromDollar) {
+        editor.getCaretModel().moveCaretRelatively(1,0,false,false,true);
+      }
+      return true;
+    }
+  }
+  return false;
+}
