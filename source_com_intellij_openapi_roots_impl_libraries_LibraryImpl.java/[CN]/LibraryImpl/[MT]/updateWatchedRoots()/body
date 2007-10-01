@@ -13,17 +13,65 @@
     }
   }
   if (myJarDirectories.size() > 0) {
-    if (myVfsListener == null) {
-      final VirtualFileAdapter listener=new VFSChangesListsner();
-      myVfsListener=listener;
-      VirtualFileManager.getInstance().addVirtualFileListener(listener,this);
+    if (myBusConnection == null) {
+      myBusConnection=ApplicationManager.getApplication().getMessageBus().connect();
+      myBusConnection.subscribe(VirtualFileManager.VFS_CHANGES,new BulkFileListener(){
+        public void before(        final List<? extends VFileEvent> events){
+        }
+        public void after(        final List<? extends VFileEvent> events){
+          boolean changesDetected=false;
+          for (          VFileEvent event : events) {
+            if (event instanceof VFileCopyEvent) {
+              final VFileCopyEvent copyEvent=(VFileCopyEvent)event;
+              if (isUnderJarDirectory(copyEvent.getNewParent() + "/" + copyEvent.getNewChildName()) || isUnderJarDirectory(copyEvent.getFile().getUrl())) {
+                changesDetected=true;
+                break;
+              }
+            }
+ else             if (event instanceof VFileMoveEvent) {
+              final VFileMoveEvent moveEvent=(VFileMoveEvent)event;
+              final VirtualFile file=moveEvent.getFile();
+              if (isUnderJarDirectory(file.getUrl()) || isUnderJarDirectory(moveEvent.getOldParent().getUrl() + "/" + file.getName())) {
+                changesDetected=true;
+                break;
+              }
+            }
+ else             if (event instanceof VFileDeleteEvent) {
+              final VFileDeleteEvent deleteEvent=(VFileDeleteEvent)event;
+              if (isUnderJarDirectory(deleteEvent.getFile().getUrl())) {
+                changesDetected=true;
+                break;
+              }
+            }
+ else             if (event instanceof VFileCreateEvent) {
+              final VFileCreateEvent createEvent=(VFileCreateEvent)event;
+              if (isUnderJarDirectory(createEvent.getParent().getUrl() + "/" + createEvent.getChildName())) {
+                changesDetected=true;
+                break;
+              }
+            }
+          }
+          if (changesDetected) {
+            myRootProvider.fireRootSetChanged();
+          }
+        }
+        private boolean isUnderJarDirectory(        String url){
+          for (          String rootUrl : myJarDirectories.keySet()) {
+            if (FileUtil.startsWith(url,rootUrl)) {
+              return true;
+            }
+          }
+          return false;
+        }
+      }
+);
     }
   }
  else {
-    final VirtualFileListener listener=myVfsListener;
-    if (listener != null) {
-      myVfsListener=null;
-      VirtualFileManager.getInstance().removeVirtualFileListener(listener);
+    final MessageBusConnection connection=myBusConnection;
+    if (connection != null) {
+      myBusConnection=null;
+      connection.disconnect();
     }
   }
 }
