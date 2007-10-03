@@ -22,39 +22,20 @@
   if (editor != null) {
     RefactoringUtil.highlightAllOccurences(myProject,occurences,editor);
   }
-  final String variableName;
-  final String fieldName;
-  final BaseExpressionToFieldHandler.InitializationPlace initializerPlace;
-  final boolean declareFinal;
-  final String fieldVisibility;
-  final TypeSelectorManagerImpl typeSelectorManager=new TypeSelectorManagerImpl(myProject,local.getType(),occurences);
+  BaseExpressionToFieldHandler.Settings settings=showRefactoringDialog(aClass,local,occurences,isStatic);
+  if (settings == null)   return false;
+  final String variableName=local.getName();
+  final String fieldName=settings.getFieldName();
+  final BaseExpressionToFieldHandler.InitializationPlace initializerPlace=settings.getInitializerPlace();
+  final boolean declareFinal=settings.isDeclareFinal();
+  final String fieldVisibility=settings.getFieldVisibility();
+  final PsiClass destinationClass=settings.getDestinationClass();
   boolean rebindNeeded=false;
-  if (!myIsConstant) {
-    PsiMethod method=PsiTreeUtil.getParentOfType(local,PsiMethod.class);
-    IntroduceFieldDialog dialog=new IntroduceFieldDialog(myProject,aClass,local.getInitializer(),local,method != null && method.isConstructor(),true,isStatic,occurences.length,method != null,method != null,typeSelectorManager);
-    dialog.show();
-    if (!dialog.isOK())     return false;
-    variableName=local.getName();
-    fieldName=dialog.getEnteredName();
-    initializerPlace=dialog.getInitializerPlace();
-    declareFinal=dialog.isDeclareFinal();
-    fieldVisibility=dialog.getFieldVisibility();
+  if (destinationClass != null) {
+    aClass=destinationClass;
+    rebindNeeded=true;
   }
- else {
-    IntroduceConstantDialog dialog=new IntroduceConstantDialog(myProject,aClass,local.getInitializer(),local,true,occurences,aClass,typeSelectorManager);
-    dialog.show();
-    if (!dialog.isOK())     return false;
-    variableName=local.getName();
-    fieldName=dialog.getEnteredName();
-    declareFinal=true;
-    initializerPlace=IN_FIELD_DECLARATION;
-    fieldVisibility=dialog.getFieldVisibility();
-    final PsiClass destinationClass=dialog.getDestinationClass();
-    if (destinationClass != null) {
-      aClass=destinationClass;
-      rebindNeeded=true;
-    }
-  }
+  final boolean annotateAsNonNls=settings.isAnnotateAsNonNls();
   final PsiClass aaClass=aClass;
   final boolean rebindNeeded1=rebindNeeded;
   final Runnable runnable=new Runnable(){
@@ -78,8 +59,13 @@
         if (declareFinal) {
           field.getModifierList().setModifierProperty(PsiModifier.FINAL,true);
         }
+        if (annotateAsNonNls) {
+          PsiAnnotation annotation=local.getManager().getElementFactory().createAnnotationFromText("@" + AnnotationUtil.NON_NLS,field);
+          field.getModifierList().addAfter(annotation,null);
+        }
         field.getModifierList().setModifierProperty(fieldVisibility,true);
         field=(PsiField)aaClass.add(field);
+        CodeStyleManager.getInstance(myProject).shortenClassReferences(field);
         local.normalizeDeclaration();
         PsiDeclarationStatement declarationStatement=(PsiDeclarationStatement)local.getParent();
         final BaseExpressionToFieldHandler.InitializationPlace finalInitializerPlace;
