@@ -1,14 +1,18 @@
 {
   result.myToComplete=new ArrayList<LookupFile>();
+  result.mySiblings=new ArrayList<LookupFile>();
+  result.myKidsAfterSeparator=new ArrayList<LookupFile>();
   String typed=result.myCompletionBase;
   final LookupFile current=getClosestParent(typed);
   result.myClosestParent=current;
   if (current == null)   return;
   if (typed == null || typed.length() == 0)   return;
   final String typedText=myFinder.normalize(typed);
-  final String parentText=current.getAbsolutePath();
-  if (!typedText.toUpperCase().startsWith(parentText.toUpperCase()))   return;
-  String prefix=typedText.substring(parentText.length());
+  final boolean currentParentMatch=typedText.equals(current.getAbsolutePath());
+  final boolean closedPath=typed.endsWith(myFinder.getSeparator()) && typedText.length() > myFinder.getSeparator().length();
+  final String currentParentText=current.getAbsolutePath();
+  if (!typedText.toUpperCase().startsWith(currentParentText.toUpperCase()))   return;
+  String prefix=typedText.substring(currentParentText.length());
   if (prefix.startsWith(myFinder.getSeparator())) {
     prefix=prefix.substring(myFinder.getSeparator().length());
   }
@@ -16,16 +20,35 @@
     prefix="";
   }
   final String effectivePrefix=prefix.toUpperCase();
+  final LookupFile currentGrandparent=current.getParent();
+  final String[] grandparentPrefix=new String[1];
+  if (currentGrandparent != null && currentParentMatch && !closedPath) {
+    final String currentGrandparentText=currentGrandparent.getAbsolutePath();
+    if (typedText.startsWith(currentGrandparentText + myFinder.getSeparator())) {
+      grandparentPrefix[0]=currentParentText.substring(currentGrandparentText.length() + myFinder.getSeparator().length()).toUpperCase();
+      result.myPreselected=current;
+    }
+  }
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
-      final List<LookupFile> files=current.getChildren(new LookupFilter(){
+      result.myToComplete.addAll(current.getChildren(new LookupFilter(){
         public boolean isAccepted(        final LookupFile file){
           return myFilter.isAccepted(file) && file.getName().toUpperCase().startsWith(effectivePrefix);
         }
       }
+));
+      if (currentParentMatch && !closedPath) {
+        result.myKidsAfterSeparator.addAll(result.myToComplete);
+      }
+      if (grandparentPrefix[0] != null) {
+        final List<LookupFile> siblings=currentGrandparent.getChildren(new LookupFilter(){
+          public boolean isAccepted(          final LookupFile file){
+            return myFilter.isAccepted(file) && file.getName().toUpperCase().startsWith(grandparentPrefix[0]);
+          }
+        }
 );
-      for (      LookupFile each : files) {
-        result.myToComplete.add(each);
+        result.myToComplete.addAll(siblings);
+        result.mySiblings.addAll(siblings);
       }
     }
   }
