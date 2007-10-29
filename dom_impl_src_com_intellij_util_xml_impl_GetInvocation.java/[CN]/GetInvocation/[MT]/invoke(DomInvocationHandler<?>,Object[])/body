@@ -1,20 +1,27 @@
 {
   handler.checkIsValid();
-  FactoryMap<Converter,CachedValue> map=handler.getUserData(DOM_VALUE_KEY);
-  if (map == null) {
-    final DomManagerImpl domManager=handler.getManager();
-    final CachedValuesManager cachedValuesManager=PsiManager.getInstance(domManager.getProject()).getCachedValuesManager();
-    handler.putUserData(DOM_VALUE_KEY,map=new FactoryMap<Converter,CachedValue>(){
-      protected CachedValue create(      final Converter key){
-        return cachedValuesManager.createCachedValue(new CachedValueProvider<Object>(){
-          public Result<Object> compute(){
-            return Result.create(getValueInner(handler,key),PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT,domManager);
-          }
-        }
-,false);
-      }
-    }
-);
+  if (myConverter == Converter.EMPTY_CONVERTER) {
+    return getValueInner(handler,myConverter);
   }
-  return map.get(myConverter).getValue();
+  CachedValue<ConcurrentFactoryMap<Converter,Object>> value;
+synchronized (handler) {
+    value=handler.getUserData(DOM_VALUE_KEY);
+    if (value == null) {
+      final DomManagerImpl domManager=handler.getManager();
+      final CachedValuesManager cachedValuesManager=PsiManager.getInstance(domManager.getProject()).getCachedValuesManager();
+      handler.putUserData(DOM_VALUE_KEY,value=cachedValuesManager.createCachedValue(new CachedValueProvider<ConcurrentFactoryMap<Converter,Object>>(){
+        public Result<ConcurrentFactoryMap<Converter,Object>> compute(){
+          final ConcurrentFactoryMap<Converter,Object> map=new ConcurrentFactoryMap<Converter,Object>(){
+            protected Object create(            final Converter key){
+              return getValueInner(handler,key);
+            }
+          }
+;
+          return Result.create(map,PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT,domManager,ProjectRootManager.getInstance(domManager.getProject()));
+        }
+      }
+,false));
+    }
+  }
+  return value.getValue().get(myConverter);
 }
