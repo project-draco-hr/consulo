@@ -1,0 +1,102 @@
+{
+  super(new BorderLayout());
+  myBuilders=builders;
+  final DependenciesBuilder main=myBuilders.get(0);
+  myForward=!main.isBackward();
+  myScopeOfInterest=main.getScopeOfInterest();
+  myDependencies=new HashMap<PsiFile,Set<PsiFile>>();
+  myIllegalDependencies=new HashMap<PsiFile,Map<DependencyRule,Set<PsiFile>>>();
+  for (  DependenciesBuilder builder : builders) {
+    myDependencies.putAll(builder.getDependencies());
+    myIllegalDependencies.putAll(builder.getIllegalDependencies());
+  }
+  myProject=project;
+  myUsagesPanel=new UsagesPanel(myProject,myBuilders);
+  Disposer.register(this,myUsagesPanel);
+  final Splitter treeSplitter=new Splitter();
+  Disposer.register(this,new Disposable(){
+    public void dispose(){
+      treeSplitter.dispose();
+    }
+  }
+);
+  treeSplitter.setFirstComponent(ScrollPaneFactory.createScrollPane(myLeftTree));
+  treeSplitter.setSecondComponent(ScrollPaneFactory.createScrollPane(myRightTree));
+  final Splitter splitter=new Splitter(true);
+  Disposer.register(this,new Disposable(){
+    public void dispose(){
+      splitter.dispose();
+    }
+  }
+);
+  splitter.setFirstComponent(treeSplitter);
+  splitter.setSecondComponent(myUsagesPanel);
+  add(splitter,BorderLayout.CENTER);
+  add(createToolbar(),BorderLayout.NORTH);
+  myRightTreeExpansionMonitor=TreeExpansionMonitor.install(myRightTree,myProject);
+  myLeftTreeExpansionMonitor=TreeExpansionMonitor.install(myLeftTree,myProject);
+  myRightTreeMarker=new TreeModelBuilder.Marker(){
+    public boolean isMarked(    PsiFile file){
+      return myIllegalsInRightTree.contains(file);
+    }
+  }
+;
+  myLeftTreeMarker=new TreeModelBuilder.Marker(){
+    public boolean isMarked(    PsiFile file){
+      return myIllegalDependencies.containsKey(file);
+    }
+  }
+;
+  updateLeftTreeModel();
+  updateRightTreeModel();
+  myLeftTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      updateRightTreeModel();
+      final StringBuffer denyRules=new StringBuffer();
+      final StringBuffer allowRules=new StringBuffer();
+      final TreePath selectionPath=myLeftTree.getSelectionPath();
+      if (selectionPath == null) {
+        return;
+      }
+      PackageDependenciesNode selectedNode=(PackageDependenciesNode)selectionPath.getLastPathComponent();
+      traverseToLeaves(selectedNode,denyRules,allowRules);
+      final StatusBar statusBar=WindowManager.getInstance().getStatusBar(myProject);
+      if (denyRules.length() + allowRules.length() > 0) {
+        statusBar.setInfo(AnalysisScopeBundle.message("status.bar.rule.violation.message",((denyRules.length() == 0 || allowRules.length() == 0) ? 1 : 2),(denyRules.length() > 0 ? denyRules.toString() + (allowRules.length() > 0 ? "; " : "") : " ") + (allowRules.length() > 0 ? allowRules.toString() : " ")));
+      }
+ else {
+        statusBar.setInfo(AnalysisScopeBundle.message("status.bar.no.rule.violation.message"));
+      }
+    }
+  }
+);
+  myRightTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          Set<PsiFile> searchIn=getSelectedScope(myLeftTree);
+          Set<PsiFile> searchFor=getSelectedScope(myRightTree);
+          if (searchIn.isEmpty() || searchFor.isEmpty()) {
+            myUsagesPanel.setToInitialPosition();
+          }
+ else {
+            myUsagesPanel.findUsages(searchIn,searchFor);
+          }
+        }
+      }
+);
+    }
+  }
+);
+  initTree(myLeftTree,false);
+  initTree(myRightTree,true);
+  if (builders.size() == 1) {
+    AnalysisScope scope=builders.get(0).getScope();
+    if (scope.getScopeType() == AnalysisScope.FILE) {
+      Set<PsiFile> oneFileSet=myDependencies.keySet();
+      if (oneFileSet.size() == 1) {
+        selectElementInLeftTree(oneFileSet.iterator().next());
+      }
+    }
+  }
+}
