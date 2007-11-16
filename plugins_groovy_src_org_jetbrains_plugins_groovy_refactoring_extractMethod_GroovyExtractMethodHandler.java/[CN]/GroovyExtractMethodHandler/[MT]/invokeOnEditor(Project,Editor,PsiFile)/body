@@ -7,24 +7,35 @@
   int startOffset=editor.getSelectionModel().getSelectionStart();
   int endOffset=editor.getSelectionModel().getSelectionEnd();
   PsiDocumentManager.getInstance(project).commitAllDocuments();
-  PsiElement[] elements;
-  GrExpression expr=GroovyRefactoringUtil.findElementInRange(((GroovyFileBase)file),startOffset,endOffset,GrExpression.class);
-  if (expr != null) {
-    elements=new PsiElement[]{expr};
+  PsiElement[] elements=ExtractMethodUtil.getElementsInOffset(file,startOffset,endOffset);
+  GrStatement[] statements=ExtractMethodUtil.getStatementsByElements(elements);
+  if (statements.length == 0) {
+    String message=RefactoringBundle.getCannotRefactorMessage(GroovyRefactoringBundle.message("selected.block.should.represent.a.statement.set"));
+    showErrorMessage(message,project);
+    return false;
   }
- else {
-    elements=GroovyRefactoringUtil.findStatementsInRange(file,startOffset,endOffset);
+  GrMethodOwner owner=ExtractMethodUtil.getMethodOwner(statements[0]);
+  if (owner == null) {
+    String message=RefactoringBundle.getCannotRefactorMessage(GroovyRefactoringBundle.message("refactoring.is.not.supported.in.the.current.context"));
+    showErrorMessage(message,project);
+    return false;
   }
-  ArrayList<GrStatement> statementList=new ArrayList<GrStatement>();
-  for (  PsiElement element : elements) {
-    if (element instanceof GrStatement) {
-      statementList.add(((GrStatement)element));
-    }
+  VariableInfo variableInfo=ReachingDefinitionsCollector.obtainVariableFlowInformation(statements[0],statements[statements.length - 1]);
+  String[] inputNames=variableInfo.getInputVariableNames();
+  String[] outputNames=variableInfo.getOutputVariableNames();
+  if (outputNames.length > 1) {
+    String message=RefactoringBundle.getCannotRefactorMessage("multiple.output.values");
+    showErrorMessage(message,project);
+    return false;
   }
-  GrStatement[] statements=statementList.toArray(new GrStatement[statementList.size()]);
-  if (statements.length > 0) {
-    VariableInfo info=ReachingDefinitionsCollector.obtainVariableFlowInformation(statements[0],statements[statements.length - 1]);
-    System.out.println("preved!");
+  String outputName=outputNames.length == 0 ? null : outputNames[0];
+  Map<String,PsiType> typeMap=ExtractMethodUtil.getVariableTypes(statements);
+  if (typeMap == null) {
+    String message=RefactoringBundle.getCannotRefactorMessage(GroovyRefactoringBundle.message("cannot.perform.analysis"));
+    showErrorMessage(message,project);
+    return false;
   }
-  return elements.length > 0;
+  ExtractMethodInfoHelper helper=new ExtractMethodInfoHelper(inputNames,outputName,typeMap,elements);
+  runRefactoring(helper,owner);
+  return true;
 }
