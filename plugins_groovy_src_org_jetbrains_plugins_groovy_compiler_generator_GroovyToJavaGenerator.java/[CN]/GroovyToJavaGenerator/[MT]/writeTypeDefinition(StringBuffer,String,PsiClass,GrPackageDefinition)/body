@@ -1,0 +1,87 @@
+{
+  final boolean isScript=groovyClass == null;
+  writePackageStatement(text,packageDefinition);
+  GrMembersDeclaration[] membersDeclarations=groovyClass instanceof GrTypeDefinition ? ((GrTypeDefinition)groovyClass).getMemberDeclarations() : GrMembersDeclaration.EMPTY_ARRAY;
+  boolean isClassDef=groovyClass instanceof GrClassDefinition;
+  boolean isInterface=groovyClass instanceof GrInterfaceDefinition;
+  if (groovyClass != null) {
+    PsiModifierList modifierList=groovyClass.getModifierList();
+    boolean wasAddedModifiers=modifierList != null && writeTypeDefinitionMethodModifiers(text,modifierList,JAVA_TYPE_DEFINITION_MODIFIERS,groovyClass.isInterface());
+    if (!wasAddedModifiers) {
+      text.append("public ");
+    }
+  }
+  if (isScript) {
+    text.append("public ");
+  }
+  if (isInterface)   text.append("interface");
+ else   text.append("class");
+  text.append(" ");
+  text.append(typeDefinitionName);
+  text.append(" ");
+  if (isScript) {
+    text.append("extends ");
+    text.append("groovy.lang.Script ");
+  }
+ else {
+    final PsiClassType[] extendsClassesTypes=groovyClass.getExtendsListTypes();
+    if (extendsClassesTypes.length > 0) {
+      text.append("extends ");
+      text.append(computeTypeText(extendsClassesTypes[0]));
+      text.append(" ");
+    }
+ else {
+      if (isClassDef) {
+        text.append("extends ");
+        text.append(GrTypeDefinition.DEFAULT_BASE_CLASS_NAME);
+        text.append(" ");
+      }
+    }
+    PsiClassType[] implementsTypes=groovyClass.getImplementsListTypes();
+    if (implementsTypes.length > 0) {
+      text.append(isInterface ? "extends " : "implements ");
+      int i=0;
+      while (i < implementsTypes.length) {
+        if (i > 0)         text.append(", ");
+        text.append(computeTypeText(implementsTypes[i]));
+        text.append(" ");
+        i++;
+      }
+    }
+  }
+  text.append("{");
+  boolean wasRunMethodPresent=false;
+  Set<MethodSignature> methodSignatures=new HashSet<MethodSignature>();
+  PsiMethod[] methods=groovyClass.getMethods();
+  for (  PsiMethod method : methods) {
+    if (method instanceof GrConstructor) {
+      writeConstructor(text,(GrConstructor)method);
+      continue;
+    }
+    MethodSignature signature=method.getSignature(PsiSubstitutor.EMPTY);
+    if (methodSignatures.add(signature))     writeMethod(text,method);
+    wasRunMethodPresent=wasRunMethod(method);
+  }
+  for (  GrMembersDeclaration declaration : membersDeclarations) {
+    if (declaration instanceof GrVariableDeclaration) {
+      writeVariableDeclarations(text,(GrVariableDeclaration)declaration);
+    }
+  }
+  for (  GrMembersDeclaration decl : membersDeclarations) {
+    if (decl instanceof GrVariableDeclaration) {
+      final GrVariable[] variables=((GrVariableDeclaration)decl).getVariables();
+      for (      GrVariable variable : variables) {
+        if (variable instanceof GrField && ((GrField)variable).isProperty()) {
+          PsiMethod getter=((GrField)variable).getGetter();
+          if (getter != null)           writeMethod(text,getter);
+          PsiMethod setter=((GrField)variable).getSetter();
+          if (setter != null)           writeMethod(text,setter);
+        }
+      }
+    }
+  }
+  if (isScript && !wasRunMethodPresent) {
+    writeRunMethod(text);
+  }
+  text.append("}");
+}
