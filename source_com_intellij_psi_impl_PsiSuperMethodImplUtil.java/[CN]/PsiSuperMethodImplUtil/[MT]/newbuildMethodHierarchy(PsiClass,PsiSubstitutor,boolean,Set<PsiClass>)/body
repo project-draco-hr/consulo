@@ -1,9 +1,5 @@
 {
-  Pair<PsiClass,PsiSubstitutor> key=Pair.create(aClass,substitutor);
-  Map<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl> cached=visited.get(key);
-  if (cached != null)   return;
-  cached=new LinkedHashMap<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl>();
-  visited.put(key,cached);
+  Map<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl> result=new LinkedHashMap<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl>();
   final Map<MethodSignature,List<PsiMethod>> sameParameterErasureMethods=new THashMap<MethodSignature,List<PsiMethod>>(MethodSignatureUtil.METHOD_PARAMETERS_ERASURE_EQUALITY);
   Map<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl> map=new THashMap<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl>(new TObjectHashingStrategy<MethodSignatureBackedByPsiMethod>(){
     public int computeHashCode(    MethodSignatureBackedByPsiMethod object){
@@ -38,7 +34,7 @@
       sameParameterErasureMethods.put(signature,list);
     }
     list.add(method);
-    cached.put(signature,newH);
+    result.put(signature,newH);
     map.put(signature,newH);
   }
   for (  PsiClassType superType : aClass.getSuperTypes()) {
@@ -46,12 +42,10 @@
     PsiClass superClass=superTypeResolveResult.getElement();
     if (superClass == null)     continue;
     PsiSubstitutor finalSubstitutor=obtainFinalSubstitutor(superClass,superTypeResolveResult.getSubstitutor(),substitutor);
-    Map<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl> superResult=visited.get(Pair.create(superClass,finalSubstitutor));
-    if (superResult == null) {
-      newbuildMethodHierarchy(superClass,finalSubstitutor,visited,false);
-      superResult=visited.get(Pair.create(superClass,finalSubstitutor));
-    }
-    nextSuperSignature:     for (    MethodSignatureBackedByPsiMethod superSignature : superResult.keySet()) {
+    if (!visited.add(superClass))     continue;
+    Map<MethodSignatureBackedByPsiMethod,HierarchicalMethodSignatureImpl> superResult=newbuildMethodHierarchy(superClass,finalSubstitutor,false,visited);
+    visited.remove(superClass);
+    for (    MethodSignatureBackedByPsiMethod superSignature : superResult.keySet()) {
       HierarchicalMethodSignatureImpl hierarchicalMethodSignature=superResult.get(superSignature);
       if (!PsiUtil.isAccessible(hierarchicalMethodSignature.getMethod(),aClass,aClass))       continue;
       HierarchicalMethodSignatureImpl existing=map.get(superSignature);
@@ -61,15 +55,16 @@
  else       if (isSuperMethod(aClass,existing,hierarchicalMethodSignature)) {
         mergeSupers(existing,hierarchicalMethodSignature);
       }
- else       if (!cached.containsKey(superSignature)) {
-        cached.put(superSignature,hierarchicalMethodSignature);
+ else       if (!result.containsKey(superSignature)) {
+        result.put(superSignature,hierarchicalMethodSignature);
       }
     }
   }
   for (  MethodSignatureBackedByPsiMethod methodSignature : map.keySet()) {
     HierarchicalMethodSignatureImpl hierarchicalMethodSignature=map.get(methodSignature);
-    if (cached.get(methodSignature) == null && PsiUtil.isAccessible(hierarchicalMethodSignature.getMethod(),aClass,aClass)) {
-      cached.put(methodSignature,hierarchicalMethodSignature);
+    if (result.get(methodSignature) == null && PsiUtil.isAccessible(hierarchicalMethodSignature.getMethod(),aClass,aClass)) {
+      result.put(methodSignature,hierarchicalMethodSignature);
     }
   }
+  return result;
 }
