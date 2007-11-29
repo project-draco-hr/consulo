@@ -1,0 +1,67 @@
+{
+  final ProgressIndicator pi=ProgressManager.getInstance().getProgressIndicator();
+  final JspManager jspManager=JspManager.getInstance(file.getProject());
+  final String localName=tag.getLocalName();
+  if (processor.acceptTaglib() && jspManager != null) {
+    if (pi != null)     pi.setText(XmlErrorMessages.message("looking.in.tlds"));
+    final JspFile jspFile=(JspFile)file;
+    final String[] possibleTldUris=jspManager.getPossibleTldUris(jspFile);
+    Arrays.sort(possibleTldUris);
+    int i=0;
+    boolean foundSomething=false;
+    for (    String uri : possibleTldUris) {
+      if (pi != null) {
+        pi.setFraction((double)i / possibleTldUris.length);
+        pi.setText2(uri);
+        ++i;
+      }
+      final XmlFile tldFileByUri=jspManager.getTldFileByUri(uri,jspFile);
+      if (tldFileByUri == null)       continue;
+      final boolean wordFound=checkIfGivenXmlHasTheseWords(localName,tldFileByUri);
+      if (!wordFound)       continue;
+      final PsiMetaDataBase metaData=tldFileByUri.getDocument().getMetaData();
+      if (metaData instanceof TldDescriptor) {
+        if (((TldDescriptor)metaData).getElementDescriptor(tag) != null) {
+          processor.process(uri,null);
+          foundSomething=true;
+        }
+      }
+    }
+    if (file.getFileType() == StdFileTypes.JSPX && !foundSomething) {
+      final XmlNSDescriptorImpl nsDescriptor=(XmlNSDescriptorImpl)jspManager.getActionsLibrary(file);
+      final XmlElementDescriptor descriptor=nsDescriptor.getElementDescriptor(localName,XmlUtil.JSP_URI);
+      if (descriptor != null) {
+        processor.process(XmlUtil.JSP_URI,null);
+      }
+    }
+  }
+  if (processor.acceptXmlNs()) {
+    if (pi != null)     pi.setText(XmlErrorMessages.message("looking.in.schemas"));
+    final ExternalResourceManagerEx instanceEx=ExternalResourceManagerEx.getInstanceEx();
+    final String[] availableUrls=instanceEx.getResourceUrls(null,true);
+    int i=0;
+    for (    String url : availableUrls) {
+      if (pi != null) {
+        pi.setFraction((double)i / availableUrls.length);
+        pi.setText2(url);
+        ++i;
+      }
+      final XmlFile xmlFile=XmlUtil.findNamespace(file,url);
+      if (xmlFile != null) {
+        final boolean wordFound=checkIfGivenXmlHasTheseWords(localName,xmlFile);
+        if (!wordFound)         continue;
+        final PsiMetaDataBase metaData=xmlFile.getDocument().getMetaData();
+        if (metaData instanceof XmlNSDescriptorImpl) {
+          final XmlNSDescriptorImpl descriptor=(XmlNSDescriptorImpl)metaData;
+          XmlElementDescriptor elementDescriptor=descriptor.getElementDescriptor(tag.getLocalName(),url);
+          if (elementDescriptor != null && !(elementDescriptor instanceof AnyXmlElementDescriptor)) {
+            final String defaultNamespace=descriptor.getDefaultNamespace();
+            if (!XmlUtil.XML_SCHEMA_URI2.equals(defaultNamespace) && !XmlUtil.XML_SCHEMA_URI3.equals(defaultNamespace)) {
+              processor.process(defaultNamespace,url);
+            }
+          }
+        }
+      }
+    }
+  }
+}
