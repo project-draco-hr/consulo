@@ -1,32 +1,48 @@
 {
   final int offset=textRange.getEndOffset();
-  final ASTNode leafElement=findElementAt(offset);
+  ASTNode leafElement=findElementAt(offset);
   if (leafElement != null) {
     if (!myCanModifyAllWhiteSpaces) {
-      if (leafElement.getElementType() == ElementType.WHITE_SPACE)       return false;
+      if (leafElement.getElementType() == ElementType.WHITE_SPACE)       return null;
       LOG.assertTrue(leafElement.getPsi().isValid());
       ASTNode prevNode=TreeUtil.prevLeaf(leafElement);
       if (prevNode != null) {
         IElementType type=prevNode.getElementType();
         if (type == ElementType.WHITE_SPACE) {
-          final String s=prevNode.getText();
-          if (s.indexOf("<![CDATA[") != -1) {
-            return false;
+          final String text=prevNode.getText();
+          final @NonNls String cdataStartMarker="<![CDATA[";
+          final int cdataPos=text.indexOf(cdataStartMarker);
+          if (cdataPos != -1 && whiteSpace.indexOf(cdataStartMarker) == -1) {
+            whiteSpace=mergeWsWithCdataMarker(whiteSpace,text,cdataPos);
+            if (whiteSpace == null)             return null;
           }
           prevNode=TreeUtil.prevLeaf(prevNode);
           type=prevNode != null ? prevNode.getElementType() : null;
         }
-        if (type == XmlElementType.XML_CDATA_END)         return false;
+        final @NonNls String cdataEndMarker="]]>";
+        if (type == XmlElementType.XML_CDATA_END && whiteSpace.indexOf(cdataEndMarker) == -1) {
+          final ASTNode at=findElementAt(prevNode.getStartOffset());
+          if (at != null && at.getPsi() instanceof PsiWhiteSpace) {
+            final String s=at.getText();
+            final int cdataEndPos=s.indexOf(cdataEndMarker);
+            whiteSpace=mergeWsWithCdataMarker(whiteSpace,s,cdataEndPos);
+            leafElement=at;
+          }
+ else {
+            whiteSpace=null;
+          }
+          if (whiteSpace == null)           return null;
+        }
       }
     }
     FormatterUtil.replaceWhiteSpace(whiteSpace,leafElement,ElementType.WHITE_SPACE,textRange);
-    return true;
+    return whiteSpace;
   }
  else   if (textRange.getEndOffset() == myASTNode.getTextLength()) {
     FormatterUtil.replaceLastWhiteSpace(myASTNode,whiteSpace,textRange);
-    return true;
+    return whiteSpace;
   }
  else {
-    return false;
+    return null;
   }
 }
