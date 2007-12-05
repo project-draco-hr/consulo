@@ -1,0 +1,110 @@
+{
+  try {
+    if (isRebuild) {
+      deleteAll(context,outputDirectories);
+      if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+        if (LOG.isDebugEnabled()) {
+          logErrorMessages(context);
+        }
+        return ExitStatus.ERRORS;
+      }
+    }
+    if (!onlyCheckStatus) {
+      try {
+        context.getProgressIndicator().pushState();
+        if (!executeCompileTasks(context,true)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Compilation cancelled");
+          }
+          return ExitStatus.CANCELLED;
+        }
+      }
+  finally {
+        context.getProgressIndicator().popState();
+      }
+    }
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      if (LOG.isDebugEnabled()) {
+        logErrorMessages(context);
+      }
+      return ExitStatus.ERRORS;
+    }
+    final List<VirtualFile> outputsToRefresh=new ArrayList<VirtualFile>();
+    for (    VirtualFile output : context.getAllOutputDirectories()) {
+      walkChildren(output);
+      outputsToRefresh.add(output);
+    }
+    for (    Pair<IntermediateOutputCompiler,Module> pair : myGenerationCompilerModuleToOutputDirMap.keySet()) {
+      final Pair<VirtualFile,VirtualFile> generated=myGenerationCompilerModuleToOutputDirMap.get(pair);
+      walkChildren(generated.getFirst());
+      outputsToRefresh.add(generated.getFirst());
+      walkChildren(generated.getSecond());
+      outputsToRefresh.add(generated.getSecond());
+    }
+    RefreshQueue.getInstance().refresh(false,true,null,outputsToRefresh.toArray(new VirtualFile[outputsToRefresh.size()]));
+    boolean didSomething=false;
+    final CompilerManager compilerManager=CompilerManager.getInstance(myProject);
+    try {
+      didSomething|=generateSources(compilerManager,context,forceCompile,onlyCheckStatus);
+      didSomething|=invokeFileProcessingCompilers(compilerManager,context,SourceInstrumentingCompiler.class,myProcessingCompilerAdapterFactory,forceCompile,true,onlyCheckStatus);
+      didSomething|=translate(context,compilerManager,forceCompile,isRebuild,trackDependencies,outputDirectories,onlyCheckStatus);
+      didSomething|=invokeFileProcessingCompilers(compilerManager,context,ClassInstrumentingCompiler.class,myFixedTimestampCompilerAdapterFactory,isRebuild,false,onlyCheckStatus);
+      didSomething|=invokeFileProcessingCompilers(compilerManager,context,ClassPostProcessingCompiler.class,myFixedTimestampCompilerAdapterFactory,isRebuild,false,onlyCheckStatus);
+      didSomething|=invokeFileProcessingCompilers(compilerManager,context,PackagingCompiler.class,myPackagingCompilerAdapterFactory,isRebuild,true,onlyCheckStatus);
+      didSomething|=invokeFileProcessingCompilers(compilerManager,context,Validator.class,myProcessingCompilerAdapterFactory,forceCompile,true,onlyCheckStatus);
+    }
+ catch (    ExitException e) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(e);
+        logErrorMessages(context);
+      }
+      return e.getExitStatus();
+    }
+ finally {
+      dropDependencyCache(context);
+      final VirtualFile[] allOutputDirs=context.getAllOutputDirectories();
+      if (didSomething && GENERATE_CLASSPATH_INDEX) {
+        context.getProgressIndicator().pushState();
+        context.getProgressIndicator().setText("Generating classpath index...");
+        int count=0;
+        for (        VirtualFile file : allOutputDirs) {
+          context.getProgressIndicator().setFraction(((double)++count) / allOutputDirs.length);
+          createClasspathIndex(file);
+        }
+        context.getProgressIndicator().popState();
+      }
+      if (!context.getProgressIndicator().isCanceled() && context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+        RefreshQueue.getInstance().refresh(true,true,new Runnable(){
+          public void run(){
+            CompilerDirectoryTimestamp.updateTimestamp(Arrays.asList(allOutputDirs));
+          }
+        }
+,allOutputDirs);
+      }
+    }
+    if (!onlyCheckStatus) {
+      try {
+        context.getProgressIndicator().pushState();
+        if (!executeCompileTasks(context,false)) {
+          return ExitStatus.CANCELLED;
+        }
+      }
+  finally {
+        context.getProgressIndicator().popState();
+      }
+    }
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      if (LOG.isDebugEnabled()) {
+        logErrorMessages(context);
+      }
+      return ExitStatus.ERRORS;
+    }
+    if (!didSomething) {
+      return ExitStatus.UP_TO_DATE;
+    }
+    return ExitStatus.SUCCESS;
+  }
+ catch (  ProcessCanceledException e) {
+    return ExitStatus.CANCELLED;
+  }
+}
