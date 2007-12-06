@@ -1,2 +1,41 @@
 {
+  PsiFile oldFileCopy=createFileCopy(context.file);
+  PsiFile hostFile=InjectedLanguageUtil.getTopLevelFile(oldFileCopy);
+  Project project=hostFile.getProject();
+  InjectedLanguageManager injectedLanguageManager=InjectedLanguageManager.getInstance(project);
+  int hostStartOffset=injectedLanguageManager == null ? context.startOffset : injectedLanguageManager.injectedToHost(oldFileCopy,TextRange.from(context.startOffset,0)).getStartOffset();
+  Document document=oldFileCopy.getViewProvider().getDocument();
+  document.insertString(context.startOffset,CompletionUtil.DUMMY_IDENTIFIER);
+  PsiDocumentManager.getInstance(project).commitDocument(document);
+  PsiFile fileCopy=InjectedLanguageUtil.findInjectedPsiAt(hostFile,hostStartOffset);
+  if (fileCopy == null) {
+    PsiElement elementAfterCommit=findElementAt(hostFile,hostStartOffset);
+    fileCopy=elementAfterCommit == null ? oldFileCopy : elementAfterCommit.getContainingFile();
+  }
+  context.offset=context.startOffset;
+  if (oldFileCopy != fileCopy) {
+    Editor oldEditor=context.editor;
+    Editor editor=EditorFactory.getInstance().createEditor(document,project);
+    Editor newEditor=InjectedLanguageUtil.getEditorForInjectedLanguage(editor,hostFile,context.startOffset);
+    if (newEditor instanceof EditorWindow) {
+      EditorWindow injectedEditor=(EditorWindow)newEditor;
+      int newOffset1=injectedEditor.logicalPositionToOffset(injectedEditor.hostToInjected(oldEditor.offsetToLogicalPosition(context.startOffset)));
+      int newOffset2=injectedEditor.logicalPositionToOffset(injectedEditor.hostToInjected(oldEditor.offsetToLogicalPosition(context.selectionEndOffset)));
+      PsiFile injectedFile=injectedEditor.getInjectedFile();
+      CompletionContext newContext=new CompletionContext(context.project,injectedEditor,injectedFile,newOffset1,newOffset2);
+      newContext.offset=newContext.startOffset;
+      PsiElement element=findElementAt(injectedFile,newContext.startOffset);
+      if (element == null) {
+        LOG.assertTrue(false,"offset " + newContext.startOffset + " at:\n"+ injectedFile.getText());
+      }
+      EditorFactory.getInstance().releaseEditor(editor);
+      return Pair.create(newContext,element);
+    }
+    EditorFactory.getInstance().releaseEditor(editor);
+  }
+  PsiElement element=findElementAt(fileCopy,context.startOffset);
+  if (element == null) {
+    LOG.assertTrue(false,"offset " + context.startOffset + " at:\n"+ fileCopy.getText());
+  }
+  return Pair.create(context,element);
 }
