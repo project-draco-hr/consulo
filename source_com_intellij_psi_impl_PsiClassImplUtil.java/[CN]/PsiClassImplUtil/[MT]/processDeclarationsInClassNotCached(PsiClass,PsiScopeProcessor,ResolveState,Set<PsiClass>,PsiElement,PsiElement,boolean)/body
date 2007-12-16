@@ -1,0 +1,59 @@
+{
+  if (!visited.add(aClass))   return true;
+  processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER,aClass);
+  final ElementClassHint classHint=processor.getHint(ElementClassHint.class);
+  final NameHint nameHint=processor.getHint(NameHint.class);
+  if (classHint == null || classHint.shouldProcess(PsiField.class)) {
+    if (nameHint != null) {
+      final PsiField fieldByName=aClass.findFieldByName(nameHint.getName(),false);
+      if (fieldByName != null) {
+        if (!processor.execute(fieldByName,state))         return false;
+      }
+    }
+ else {
+      final PsiField[] fields=aClass.getFields();
+      for (      final PsiField field : fields) {
+        if (!processor.execute(field,state))         return false;
+      }
+    }
+  }
+  if (classHint == null || classHint.shouldProcess(PsiMethod.class)) {
+    final PsiMethod[] methods=nameHint != null ? aClass.findMethodsByName(nameHint.getName(),false) : aClass.getMethods();
+    for (    final PsiMethod method : methods) {
+      if (isRaw && !method.hasModifierProperty(PsiModifier.STATIC)) {
+        PsiTypeParameter[] methodTypeParameters=method.getTypeParameters();
+        for (        PsiTypeParameter methodTypeParameter : methodTypeParameters) {
+          PsiSubstitutor substitutor=state.get(PsiSubstitutor.KEY);
+          state=state.put(PsiSubstitutor.KEY,substitutor.put(methodTypeParameter,null));
+        }
+      }
+      if (!processor.execute(method,state))       return false;
+    }
+  }
+  if (classHint == null || classHint.shouldProcess(PsiClass.class)) {
+    if (last != null && last.getParent() == aClass) {
+      final PsiTypeParameterList list=aClass.getTypeParameterList();
+      if (list != null && !list.processDeclarations(processor,ResolveState.initial(),last,place))       return false;
+    }
+    if (!(last instanceof PsiReferenceList) && !(last instanceof PsiModifierList)) {
+      if (nameHint != null) {
+        final PsiClass inner=aClass.findInnerClassByName(nameHint.getName(),false);
+        if (inner != null) {
+          if (!processor.execute(inner,state))           return false;
+        }
+      }
+ else {
+        final PsiClass[] inners=aClass.getInnerClasses();
+        for (        final PsiClass inner : inners) {
+          if (!processor.execute(inner,state))           return false;
+        }
+      }
+    }
+  }
+  if (!(last instanceof PsiReferenceList)) {
+    if (!processSuperTypes(aClass.getSuperTypes(),processor,visited,last,place,aClass,state,isRaw)) {
+      return false;
+    }
+  }
+  return true;
+}
