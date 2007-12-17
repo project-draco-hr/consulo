@@ -1,0 +1,106 @@
+{
+  LOG.debug("updateCurrentEvent: " + aComponentOverDragging);
+  DragSourceContext currentDragContext=myCurrentDragContext;
+  DnDEventImpl currentEvent=myCurrentEvent;
+  if (myCurrentEvent == null) {
+    if (aComponentOverDragging instanceof JComponent) {
+      JComponent jComp=(JComponent)aComponentOverDragging;
+      DnDTarget target=getTarget(jComp);
+      if (target instanceof DnDNativeTarget) {
+        DnDEventImpl event=(DnDEventImpl)jComp.getClientProperty(DnDNativeTarget.EVENT_KEY);
+        if (event == null) {
+          DnDNativeTarget.EventInfo info=new DnDNativeTarget.EventInfo(flavors,transferable);
+          event=new DnDEventImpl(this,DnDAction.COPY,info,aPoint);
+          jComp.putClientProperty(DnDNativeTarget.EVENT_KEY,event);
+        }
+        currentEvent=event;
+      }
+    }
+  }
+  if (currentEvent == null)   return currentEvent;
+  currentEvent.updateAction(getDnDActionForPlatformAction(nativeAction));
+  currentEvent.setPoint(aPoint);
+  currentEvent.setHandlerComponent(aComponentOverDragging);
+  boolean samePoint=currentEvent.getPoint().equals(myLastProcessedPoint);
+  boolean sameComponent=currentEvent.getCurrentOverComponent().equals(myLastProcessedOverComponent);
+  boolean sameAction=(nativeAction == myLastProcessedAction);
+  LOG.debug("updateCurrentEvent: point:" + aPoint);
+  LOG.debug("updateCurrentEvent: action:" + nativeAction);
+  if (samePoint && sameComponent && sameAction) {
+    return currentEvent;
+  }
+  DnDTarget target=getTarget(aComponentOverDragging);
+  DnDTarget immediateTarget=target;
+  Component eachParent=aComponentOverDragging;
+  final Pair<Image,Point> pair=currentEvent.getUserData(DRAGGED_IMAGE_KEY);
+  if (pair != null) {
+    target.updateDraggedImage(pair.first,aPoint,pair.second);
+  }
+  LOG.debug("updateCurrentEvent: action:" + nativeAction);
+  while (true) {
+    boolean canGoToParent=update(target,currentEvent);
+    if (currentEvent.isDropPossible()) {
+      if (currentEvent.wasDelegated()) {
+        target=currentEvent.getDelegatedTarget();
+      }
+      break;
+    }
+    if (!canGoToParent) {
+      break;
+    }
+    eachParent=findAllowedParentComponent(eachParent);
+    if (eachParent == null) {
+      break;
+    }
+    target=getTarget(eachParent);
+  }
+  LOG.debug("updateCurrentEvent: target:" + target);
+  LOG.debug("updateCurrentEvent: immediateTarget:" + immediateTarget);
+  if (!currentEvent.isDropPossible() && !immediateTarget.equals(target)) {
+    update(immediateTarget,currentEvent);
+  }
+  updateCursor();
+  final Container current=(Container)currentEvent.getCurrentOverComponent();
+  final Point point=currentEvent.getPointOn(getLayeredPane(current));
+  Rectangle inPlaceRect=new Rectangle(point.x - 5,point.y - 5,5,5);
+  if (!currentEvent.equals(myLastProcessedEvent)) {
+    hideCurrentHighlighter();
+  }
+  final DnDTarget processedTarget=getLastProcessedTarget();
+  boolean sameTarget=processedTarget != null && processedTarget.equals(target);
+  if (sameTarget) {
+    if (currentEvent.isDropPossible()) {
+      if (!myLastProcessedPoint.equals(currentEvent.getPoint())) {
+        if (!Highlighters.isVisibleExcept(TEXT | ERROR_TEXT)) {
+          hideCurrentHighlighter();
+          restartTimer();
+          queueTooltip(currentEvent,getLayeredPane(current),inPlaceRect);
+        }
+      }
+    }
+ else {
+      if (myLastProcessedPoint == null || currentEvent == null || !myLastProcessedPoint.equals(currentEvent.getPoint())) {
+        hideCurrentHighlighter();
+        restartTimer();
+        queueTooltip(currentEvent,getLayeredPane(current),inPlaceRect);
+      }
+    }
+  }
+ else {
+    hideCurrentHighlighter();
+    if (processedTarget != null) {
+      processedTarget.cleanUpOnLeave();
+    }
+    currentEvent.clearDropHandler();
+    restartTimer();
+    if (!currentEvent.isDropPossible()) {
+      queueTooltip(currentEvent,getLayeredPane(current),inPlaceRect);
+    }
+  }
+  myLastProcessedTarget=new WeakReference<DnDTarget>(target);
+  myLastProcessedPoint=currentEvent.getPoint();
+  myLastProcessedOverComponent=currentEvent.getCurrentOverComponent();
+  myLastProcessedAction=currentEvent.getAction().getActionId();
+  myLastProcessedEvent=(DnDEvent)currentEvent.clone();
+  return currentEvent;
+}
