@@ -1,0 +1,64 @@
+{
+  final HashMap<String,Set<InspectionTool>> usedTools=new HashMap<String,Set<InspectionTool>>();
+  final Map<String,Set<InspectionTool>> localTools=new HashMap<String,Set<InspectionTool>>();
+  initializeTools(scope,usedTools,localTools);
+  ((RefManagerImpl)getRefManager()).initializeAnnotators();
+  for (  Set<InspectionTool> tools : usedTools.values()) {
+    for (    InspectionTool tool : tools) {
+      try {
+        if (tool.isGraphNeeded()) {
+          ((RefManagerImpl)tool.getRefManager()).findAllDeclarations();
+        }
+        tool.runInspection(scope,manager);
+        if (tool.queryExternalUsagesRequests(manager)) {
+          needRepeatSearchRequest.add(tool);
+        }
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        LOG.error(e);
+      }
+    }
+  }
+  for (  GlobalInspectionContextExtension extension : myExtensions.values()) {
+    extension.performPostRunActivities(needRepeatSearchRequest,this);
+  }
+  if (RUN_GLOBAL_TOOLS_ONLY)   return;
+  final Set<InspectionTool> currentProfileLocalTools=localTools.get(getCurrentProfile().getName());
+  if (RUN_WITH_EDITOR_PROFILE || currentProfileLocalTools != null && !currentProfileLocalTools.isEmpty()) {
+    final PsiManager psiManager=PsiManager.getInstance(myProject);
+    final InspectionProjectProfileManager profileManager=InspectionProjectProfileManager.getInstance(myProject);
+    scope.accept(new PsiRecursiveElementVisitor(){
+      @Override public void visitFile(      PsiFile file){
+        InspectionProfile profile;
+        if (RUN_WITH_EDITOR_PROFILE) {
+          profile=profileManager.getInspectionProfile(file);
+        }
+ else {
+          profile=getCurrentProfile();
+        }
+        final VirtualFile virtualFile=file.getVirtualFile();
+        if (virtualFile != null) {
+          incrementJobDoneAmount(LOCAL_ANALYSIS,ProjectUtil.calcRelativeToProjectPath(virtualFile,myProject));
+        }
+        final Set<InspectionTool> tools=localTools.get(profile.getName());
+        final FileViewProvider viewProvider=psiManager.findViewProvider(virtualFile);
+        final com.intellij.openapi.editor.Document document=viewProvider != null ? viewProvider.getDocument() : null;
+        if (document == null)         return;
+        final LocalInspectionsPass pass=new LocalInspectionsPass(file,document,0,file.getTextLength());
+        try {
+          pass.doInspectInBatch((InspectionManagerEx)manager,tools.toArray(new InspectionTool[tools.size()]),myProgressIndicator);
+        }
+ catch (        ProcessCanceledException e) {
+          throw e;
+        }
+catch (        Exception e) {
+          LOG.error(e);
+        }
+      }
+    }
+);
+  }
+}

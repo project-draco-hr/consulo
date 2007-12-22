@@ -1,0 +1,60 @@
+{
+  if (userObject == null)   return null;
+  if (userObject instanceof CommonProblemDescriptor) {
+    return (CommonProblemDescriptor)userObject;
+  }
+  final InspectionManager inspectionManager=InspectionManager.getInstance(myTool.getContext().getProject());
+  final OfflineProblemDescriptor offlineProblemDescriptor=(OfflineProblemDescriptor)userObject;
+  final RefEntity element=getElement();
+  if (myTool instanceof LocalInspectionToolWrapper) {
+    final ProblemsHolder holder=new ProblemsHolder(inspectionManager);
+    if (element instanceof RefElement) {
+      final PsiElement psiElement=((RefElement)element).getElement();
+      if (psiElement != null) {
+        final LocalInspectionTool localInspectionTool=((LocalInspectionToolWrapper)myTool).getTool();
+        final PsiElementVisitor visitor=localInspectionTool.buildVisitor(holder,false);
+        final PsiElement[] elementsInRange=LocalInspectionsPass.getElementsIntersectingRange(psiElement.getContainingFile(),psiElement.getTextRange().getStartOffset(),psiElement.getTextRange().getEndOffset());
+        for (        PsiElement el : elementsInRange) {
+          el.accept(visitor);
+        }
+        if (holder.hasResults()) {
+          final List<ProblemDescriptor> list=holder.getResults();
+          final int idx=offlineProblemDescriptor.getProblemIndex();
+          if (list != null) {
+            int curIdx=0;
+            for (            ProblemDescriptor descriptor : list) {
+              final PsiNamedElement member=localInspectionTool.getProblemElement(descriptor.getPsiElement());
+              if (psiElement instanceof PsiFile || (member != null && member.equals(psiElement))) {
+                if (curIdx == idx) {
+                  setUserObject(descriptor);
+                  return descriptor;
+                }
+                curIdx++;
+              }
+            }
+          }
+        }
+      }
+    }
+    setUserObject(null);
+    return null;
+  }
+  final List<String> hints=offlineProblemDescriptor.getHints();
+  if (element instanceof RefElement) {
+    final PsiElement psiElement=((RefElement)element).getElement();
+    ProblemDescriptor descriptor=inspectionManager.createProblemDescriptor(psiElement,offlineProblemDescriptor.getDescription(),(LocalQuickFix)null,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+    final LocalQuickFix[] quickFixes=getFixes(descriptor,hints);
+    if (quickFixes != null) {
+      descriptor=inspectionManager.createProblemDescriptor(psiElement,offlineProblemDescriptor.getDescription(),quickFixes,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+    }
+    setUserObject(descriptor);
+    return descriptor;
+  }
+  CommonProblemDescriptor descriptor=inspectionManager.createProblemDescriptor(offlineProblemDescriptor.getDescription(),(QuickFix)null);
+  final QuickFix[] quickFixes=getFixes(descriptor,hints);
+  if (quickFixes != null) {
+    descriptor=inspectionManager.createProblemDescriptor(offlineProblemDescriptor.getDescription(),quickFixes);
+  }
+  setUserObject(descriptor);
+  return descriptor;
+}

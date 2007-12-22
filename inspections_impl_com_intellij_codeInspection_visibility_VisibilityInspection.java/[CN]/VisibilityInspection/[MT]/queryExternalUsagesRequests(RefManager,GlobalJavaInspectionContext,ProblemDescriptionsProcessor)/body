@@ -1,0 +1,87 @@
+{
+  for (  SmartRefElementPointer entryPoint : getEntryPointsManager(manager).getEntryPoints()) {
+    final RefEntity refElement=entryPoint.getRefElement();
+    if (refElement != null) {
+      ignoreElement(processor,refElement);
+    }
+  }
+  final Object[] addins=Extensions.getRootArea().getExtensionPoint(ExtensionPoints.VISIBLITY_TOOL).getExtensions();
+  for (  Object addin : addins) {
+    ((VisibilityExtension)addin).fillIgnoreList(manager,processor);
+  }
+  manager.iterate(new RefJavaVisitor(){
+    @Override public void visitElement(    final RefEntity refEntity){
+      if (!(refEntity instanceof RefElement))       return;
+      if (processor.getDescriptions(refEntity) == null)       return;
+      refEntity.accept(new RefJavaVisitor(){
+        @Override public void visitField(        final RefField refField){
+          if (refField.getAccessModifier() != PsiModifier.PRIVATE) {
+            globalContext.enqueueFieldUsagesProcessor(refField,new GlobalJavaInspectionContext.UsagesProcessor(){
+              public boolean process(              PsiReference psiReference){
+                ignoreElement(processor,refField);
+                return false;
+              }
+            }
+);
+          }
+        }
+        @Override public void visitMethod(        final RefMethod refMethod){
+          if (!refMethod.isExternalOverride() && refMethod.getAccessModifier() != PsiModifier.PRIVATE && !(refMethod instanceof RefImplicitConstructor)) {
+            globalContext.enqueueDerivedMethodsProcessor(refMethod,new GlobalJavaInspectionContext.DerivedMethodsProcessor(){
+              public boolean process(              PsiMethod derivedMethod){
+                ignoreElement(processor,refMethod);
+                return false;
+              }
+            }
+);
+            globalContext.enqueueMethodUsagesProcessor(refMethod,new GlobalJavaInspectionContext.UsagesProcessor(){
+              public boolean process(              PsiReference psiReference){
+                ignoreElement(processor,refMethod);
+                return false;
+              }
+            }
+);
+            if (getEntryPointsManager(manager).isAddNonJavaEntries()) {
+              final RefClass ownerClass=refMethod.getOwnerClass();
+              if (refMethod.isConstructor() && ownerClass.getDefaultConstructor() != null) {
+                String qualifiedName=ownerClass.getElement().getQualifiedName();
+                if (qualifiedName != null) {
+                  final Project project=manager.getProject();
+                  PsiManager.getInstance(project).getSearchHelper().processUsagesInNonJavaFiles(qualifiedName,new PsiNonJavaFileReferenceProcessor(){
+                    public boolean process(                    PsiFile file,                    int startOffset,                    int endOffset){
+                      getEntryPointsManager(manager).addEntryPoint(refMethod,false);
+                      ignoreElement(processor,refMethod);
+                      return false;
+                    }
+                  }
+,GlobalSearchScope.projectScope(project));
+                }
+              }
+            }
+          }
+        }
+        @Override public void visitClass(        final RefClass refClass){
+          if (!refClass.isAnonymous()) {
+            globalContext.enqueueDerivedClassesProcessor(refClass,new GlobalJavaInspectionContext.DerivedClassesProcessor(){
+              public boolean process(              PsiClass inheritor){
+                ignoreElement(processor,refClass);
+                return false;
+              }
+            }
+);
+            globalContext.enqueueClassUsagesProcessor(refClass,new GlobalJavaInspectionContext.UsagesProcessor(){
+              public boolean process(              PsiReference psiReference){
+                ignoreElement(processor,refClass);
+                return false;
+              }
+            }
+);
+          }
+        }
+      }
+);
+    }
+  }
+);
+  return false;
+}
