@@ -1,2 +1,61 @@
 {
+  CodeInsightSettings settings=CodeInsightSettings.getInstance();
+  if (project == null) {
+    myOriginalHandler.execute(editor,dataContext);
+    return;
+  }
+  final Document document=editor.getDocument();
+  final PsiFile file=PsiDocumentManager.getInstance(project).getPsiFile(document);
+  if (file == null) {
+    myOriginalHandler.execute(editor,dataContext);
+    return;
+  }
+  CommandProcessor.getInstance().setCurrentCommandName(CodeInsightBundle.message("command.name.typing"));
+  EditorModificationUtil.deleteSelectedText(editor);
+  int caretOffset=editor.getCaretModel().getOffset();
+  CharSequence text=document.getCharsSequence();
+  int length=document.getTextLength();
+  if (caretOffset < length && text.charAt(caretOffset) != '\n') {
+    int offset1=CharArrayUtil.shiftBackward(text,caretOffset," \t");
+    if (offset1 < 0 || text.charAt(offset1) == '\n') {
+      int offset2=CharArrayUtil.shiftForward(text,offset1 + 1," \t");
+      boolean isEmptyLine=offset2 >= length || text.charAt(offset2) == '\n';
+      if (!isEmptyLine) {
+        myOriginalHandler.execute(editor,dataContext);
+        return;
+      }
+    }
+  }
+  PsiDocumentManager.getInstance(project).commitDocument(document);
+  PsiElement psiAtOffset=file.findElementAt(caretOffset);
+  boolean forceIndent=false;
+  Ref<Integer> caretOffsetRef=new Ref<Integer>(caretOffset);
+  Ref<Integer> caretAdvanceRef=new Ref<Integer>(0);
+  for (  EnterHandlerDelegate delegate : Extensions.getExtensions(EnterHandlerDelegate.EP_NAME)) {
+    EnterHandlerDelegate.Result result=delegate.preprocessEnter(file,editor,caretOffsetRef,caretAdvanceRef,dataContext,myOriginalHandler);
+    if (result == EnterHandlerDelegate.Result.HandledAndSkipOriginal)     return;
+    if (result != EnterHandlerDelegate.Result.NotHandled) {
+      text=document.getCharsSequence();
+      if (result == EnterHandlerDelegate.Result.HandledAndForceIndent) {
+        forceIndent=true;
+      }
+      break;
+    }
+  }
+  caretOffset=caretOffsetRef.get().intValue();
+  boolean isFirstColumn=caretOffset == 0 || text.charAt(caretOffset - 1) == '\n';
+  final boolean insertSpace=!isFirstColumn && !(caretOffset >= document.getTextLength() || text.charAt(caretOffset) == ' ' || text.charAt(caretOffset) == '\t');
+  editor.getCaretModel().moveToOffset(caretOffset);
+  myOriginalHandler.execute(editor,dataContext);
+  if (settings.SMART_INDENT_ON_ENTER || forceIndent) {
+    caretOffset+=1;
+    caretOffset=CharArrayUtil.shiftForward(editor.getDocument().getCharsSequence(),caretOffset," \t");
+  }
+ else {
+    caretOffset=editor.getCaretModel().getOffset();
+  }
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  final DoEnterAction action=new DoEnterAction(file,editor,document,caretOffset,!insertSpace,caretAdvanceRef.get());
+  action.setForceIndent(forceIndent);
+  action.run();
 }
