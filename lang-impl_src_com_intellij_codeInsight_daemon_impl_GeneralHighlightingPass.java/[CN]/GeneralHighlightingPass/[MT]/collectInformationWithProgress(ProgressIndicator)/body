@@ -1,69 +1,30 @@
 {
-  final HighlightVisitor[] highlightVisitors=createHighlightVisitors();
+  final HighlightVisitor[] highlightVisitors=createHighlightVisitors(progress);
   final Collection<HighlightInfo> result=new THashSet<HighlightInfo>(100);
   DaemonCodeAnalyzer daemonCodeAnalyzer=DaemonCodeAnalyzer.getInstance(myProject);
   FileStatusMap fileStatusMap=((DaemonCodeAnalyzerImpl)daemonCodeAnalyzer).getFileStatusMap();
+  boolean finishedSuccessfully=false;
   try {
-    final RefCountHolder refCountHolder;
-    if (myUpdateAll) {
-      refCountHolder=fileStatusMap.getRefCountHolder(myFile);
-    }
- else {
-      refCountHolder=null;
-    }
-    setRefCountHolders(refCountHolder,highlightVisitors);
-    Runnable doCollectInfo=new Runnable(){
-      public void run(){
-        if (refCountHolder != null) {
-          DaemonCodeAnalyzerImpl daemonCodeAnalyzer=(DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject);
-          PsiElement dirtyScope=daemonCodeAnalyzer.getFileStatusMap().getFileDirtyScope(myDocument,Pass.UPDATE_ALL);
-          if (dirtyScope != null) {
-            if (dirtyScope instanceof PsiFile) {
-              refCountHolder.clear();
-            }
- else {
-              refCountHolder.removeInvalidRefs();
-            }
-          }
-        }
-        final FileViewProvider viewProvider=myFile.getViewProvider();
-        final Set<Language> relevantLanguages=viewProvider.getPrimaryLanguages();
-        for (        Language language : relevantLanguages) {
-          PsiElement psiRoot=viewProvider.getPsi(language);
-          if (!HighlightUtil.shouldHighlight(psiRoot))           continue;
-          List<PsiElement> elements=CodeInsightUtil.getElementsInRange(psiRoot,myStartOffset,myEndOffset);
-          if (elements.isEmpty()) {
-            elements=Collections.singletonList(psiRoot);
-          }
-          result.addAll(collectHighlights(elements,highlightVisitors));
-          result.addAll(highlightTodos());
-          addInjectedPsiHighlights(elements,refCountHolder);
-        }
+    final FileViewProvider viewProvider=myFile.getViewProvider();
+    final Set<Language> relevantLanguages=viewProvider.getPrimaryLanguages();
+    for (    Language language : relevantLanguages) {
+      PsiElement psiRoot=viewProvider.getPsi(language);
+      if (!HighlightUtil.shouldHighlight(psiRoot))       continue;
+      List<PsiElement> elements=CodeInsightUtil.getElementsInRange(psiRoot,myStartOffset,myEndOffset);
+      if (elements.isEmpty()) {
+        elements=Collections.singletonList(psiRoot);
       }
-    }
-;
-    if (refCountHolder != null) {
-      if (!refCountHolder.analyzeAndStoreReferences(doCollectInfo)) {
-        progress.cancel();
-        ApplicationManager.getApplication().invokeLater(new Runnable(){
-          public void run(){
-            DaemonCodeAnalyzer.getInstance(myProject).restart();
-          }
-        }
-,myProject.getDisposed());
-        throw new ProcessCanceledException();
-      }
-    }
- else {
-      doCollectInfo.run();
+      result.addAll(collectHighlights(elements,highlightVisitors));
+      result.addAll(highlightTodos());
+      addInjectedPsiHighlights(elements);
     }
     if (myUpdateAll) {
       fileStatusMap.setErrorFoundFlag(myDocument,myErrorFound);
     }
+    finishedSuccessfully=true;
   }
   finally {
-    setRefCountHolders(null,highlightVisitors);
-    releaseHighlightVisitors(highlightVisitors);
+    releaseHighlightVisitors(highlightVisitors,finishedSuccessfully);
   }
   myHighlights=result;
 }
