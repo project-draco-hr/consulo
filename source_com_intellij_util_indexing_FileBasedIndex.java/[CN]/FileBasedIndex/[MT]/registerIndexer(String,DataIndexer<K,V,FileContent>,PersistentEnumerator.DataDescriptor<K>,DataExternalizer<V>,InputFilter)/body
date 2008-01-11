@@ -1,0 +1,45 @@
+{
+  final File storageFile=getStorageFile(name);
+  MapIndexStorage<K,V> _storage=null;
+  boolean requiresRebuild=false;
+  int initAttempt=0;
+  final int maxAttempts=2;
+  while (initAttempt < maxAttempts) {
+    initAttempt++;
+    requiresRebuild=!storageFile.exists();
+    try {
+      _storage=new MapIndexStorage<K,V>(storageFile,keyDescriptor,valueExternalizer);
+      break;
+    }
+ catch (    IOException e) {
+      if (initAttempt < maxAttempts) {
+        FileUtil.delete(storageFile);
+      }
+ else {
+        throw e;
+      }
+    }
+  }
+  final MapIndexStorage<K,V> storage=_storage;
+  myDisposables.add(new Disposable(){
+    public void dispose(){
+      try {
+        storage.close();
+      }
+ catch (      StorageException e) {
+        LOG.error(e);
+      }
+    }
+  }
+);
+  final MapReduceIndex<K,V,FileContent> index=new MapReduceIndex<K,V,FileContent>(indexer,storage);
+  myIndices.put(name,new Pair<UpdatableIndex<?,?,FileContent>,InputFilter>(index,filter));
+  myCompositeFilter.addFilter(filter);
+  myFlushStorages.add(new Runnable(){
+    public void run(){
+      storage.flush();
+    }
+  }
+);
+  return requiresRebuild;
+}
