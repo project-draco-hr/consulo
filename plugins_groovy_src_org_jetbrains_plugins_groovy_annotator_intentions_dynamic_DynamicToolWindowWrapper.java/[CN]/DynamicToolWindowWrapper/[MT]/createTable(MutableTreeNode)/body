@@ -1,13 +1,63 @@
 {
   ColumnInfo[] columnInfos={new ClassColumnInfo(myColumnNames[0]){
-    public Class getColumnClass(){
-      return TreeTableModel.class;
-    }
   }
 ,new PropertyTypeColumnInfo(myColumnNames[1])};
   myTreeTableModel=new ListTreeTableModelOnColumns(myTreeRoot,columnInfos);
   myTreeTable=new TreeTable(myTreeTableModel);
   myTreeTable.setRootVisible(false);
+  myTreeTable.addAncestorListener(new AncestorListener(){
+    public void ancestorAdded(    AncestorEvent event){
+      System.out.println("");
+    }
+    public void ancestorRemoved(    AncestorEvent event){
+    }
+    public void ancestorMoved(    AncestorEvent event){
+    }
+  }
+);
+  myTreeTable.getTree().addTreeExpansionListener(new TreeExpansionListener(){
+    public void treeExpanded(    TreeExpansionEvent event){
+      myState.addExpandedElements(event.getPath());
+    }
+    public void treeCollapsed(    TreeExpansionEvent event){
+      myState.removeExpandedElements(event.getPath());
+    }
+  }
+);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      final List<TreePath> expandedTreePathList=TreeUtil.collectExpandedPaths(myTreeTable.getTree());
+      final int[] rows=myTreeTable.getSelectedRows();
+      final TreePath selectionPath=myTreeTable.getTree().getAnchorSelectionPath();
+      final TreePath parent=selectionPath.getParentPath();
+      final Module module=getModule();
+      if (parent.getParentPath() == null) {
+        final Object containingClassRow=parent.getLastPathComponent();
+        if (!(containingClassRow instanceof DefaultMutableTreeNode))         return;
+        final Object containingClass=((DefaultMutableTreeNode)containingClassRow).getUserObject();
+        if (module == null)         return;
+        if (!(containingClass instanceof DPContainingClassElement))         return;
+        DynamicPropertiesManager.getInstance(myProject).removeDynamicPropertiesOfClass(module.getName(),((DPContainingClassElement)containingClass).getContainingClassName());
+      }
+ else {
+        final Object containingClass=parent.getLastPathComponent();
+        final Object property=selectionPath.getLastPathComponent();
+        if (!(containingClass instanceof DefaultMutableTreeNode))         return;
+        if (!(property instanceof DefaultMutableTreeNode))         return;
+        final Object classElement=((DefaultMutableTreeNode)containingClass).getUserObject();
+        final Object propertyElement=((DefaultMutableTreeNode)property).getUserObject();
+        if (!(classElement instanceof DPContainingClassElement))         return;
+        if (!(propertyElement instanceof DPPropertyElement))         return;
+        final String containingClassName=((DPContainingClassElement)classElement).getContainingClassName();
+        final String propertyName=((DPPropertyElement)propertyElement).getPropertyName();
+        final String propertyType=((DPPropertyElement)propertyElement).getPropertyType();
+        DynamicPropertyVirtual dynamicProperty=new DynamicPropertyVirtual(propertyName,containingClassName,module.getName(),propertyType);
+        DynamicPropertiesManager.getInstance(myProject).removeDynamicProperty(dynamicProperty);
+      }
+      TreeUtil.restoreExpandedPaths(myTreeTable.getTree(),expandedTreePathList);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_DELETE,0),JComponent.WHEN_FOCUSED);
   myTreeTable.getTree().setShowsRootHandles(true);
   myTreeTable.getTableHeader().setReorderingAllowed(false);
   myTreeTable.setTreeCellRenderer(new ColoredTreeCellRenderer(){
@@ -20,20 +70,23 @@
         }
  else         if (value instanceof DPPropertyElement) {
           final DPPropertyElement propertyElement=(DPPropertyElement)value;
-          final String substringToHightlight=propertyElement.getHightlightedText();
+          final String substringToHighlight=propertyElement.getHightlightedText();
           final String propertyName=propertyElement.getPropertyName();
-          if (substringToHightlight != null) {
-            final int begin=propertyName.indexOf(substringToHightlight);
+          if (substringToHighlight != null) {
+            final int begin=propertyName.indexOf(substringToHighlight);
             final String first=propertyName.substring(0,begin);
             append(first,SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES);
             final TextAttributes textAttributes=TextAttributes.ERASE_MARKER;
             textAttributes.setBackgroundColor(UIUtil.getListSelectionBackground());
-            append(substringToHightlight,SimpleTextAttributes.fromTextAttributes(textAttributes));
-            append(propertyName.substring(first.length() + substringToHightlight.length()),SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES);
+            append(substringToHighlight,SimpleTextAttributes.fromTextAttributes(textAttributes));
+            append(propertyName.substring(first.length() + substringToHighlight.length()),SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES);
           }
  else {
             append(propertyName,SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES);
           }
+        }
+ else         if (value instanceof DPPropertyTypeElement) {
+          append(((DPPropertyTypeElement)value).getPropertyType(),SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES);
         }
       }
     }
