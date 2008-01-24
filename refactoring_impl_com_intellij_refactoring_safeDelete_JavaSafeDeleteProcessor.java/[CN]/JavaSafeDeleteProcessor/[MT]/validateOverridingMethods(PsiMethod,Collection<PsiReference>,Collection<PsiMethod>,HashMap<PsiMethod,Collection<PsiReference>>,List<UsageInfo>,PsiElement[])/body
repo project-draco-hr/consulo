@@ -1,0 +1,51 @@
+{
+  Set<PsiMethod> validOverriding=new LinkedHashSet<PsiMethod>(overridingMethods);
+  Set<PsiMethod> multipleInterfaceImplementations=new HashSet<PsiMethod>();
+  boolean anyNewBadRefs;
+  do {
+    anyNewBadRefs=false;
+    for (    PsiMethod overridingMethod : overridingMethods) {
+      if (validOverriding.contains(overridingMethod)) {
+        final Collection<PsiReference> overridingReferences=methodToReferences.get(overridingMethod);
+        boolean anyOverridingRefs=false;
+        for (        final PsiReference overridingReference : overridingReferences) {
+          final PsiElement element=overridingReference.getElement();
+          if (!isInside(element,allElementsToDelete) && !isInside(element,validOverriding)) {
+            anyOverridingRefs=true;
+            break;
+          }
+        }
+        if (!anyOverridingRefs && isMultipleInterfacesImplementation(overridingMethod,allElementsToDelete)) {
+          anyOverridingRefs=true;
+          multipleInterfaceImplementations.add(overridingMethod);
+        }
+        if (anyOverridingRefs) {
+          validOverriding.remove(overridingMethod);
+          anyNewBadRefs=true;
+          for (          PsiReference reference : originalReferences) {
+            final PsiElement element=reference.getElement();
+            if (!isInside(element,allElementsToDelete) && !isInside(element,overridingMethods)) {
+              usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(element,originalMethod,false));
+              validOverriding.clear();
+            }
+          }
+        }
+      }
+    }
+  }
+ while (anyNewBadRefs && !validOverriding.isEmpty());
+  for (  PsiMethod method : validOverriding) {
+    if (method != originalMethod) {
+      usages.add(new SafeDeleteOverridingMethodUsageInfo(method,originalMethod));
+    }
+  }
+  for (  PsiMethod method : overridingMethods) {
+    if (!validOverriding.contains(method) && !multipleInterfaceImplementations.contains(method)) {
+      final boolean methodCanBePrivate=canBePrivate(method,methodToReferences.get(method),validOverriding,allElementsToDelete);
+      if (methodCanBePrivate) {
+        usages.add(new SafeDeletePrivatizeMethod(method,originalMethod));
+      }
+    }
+  }
+  return validOverriding;
+}

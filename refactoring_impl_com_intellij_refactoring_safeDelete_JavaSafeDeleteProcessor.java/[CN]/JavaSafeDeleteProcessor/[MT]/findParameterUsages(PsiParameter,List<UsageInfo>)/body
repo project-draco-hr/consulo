@@ -1,0 +1,51 @@
+{
+  final PsiMethod method=(PsiMethod)parameter.getDeclarationScope();
+  final int index=method.getParameterList().getParameterIndex(parameter);
+  ReferencesSearch.search(method).forEach(new Processor<PsiReference>(){
+    public boolean process(    final PsiReference reference){
+      final PsiElement element=reference.getElement();
+      if (element.getParent() instanceof PsiCall) {
+        final PsiExpressionList argList=((PsiCall)element.getParent()).getArgumentList();
+        if (argList != null) {
+          final PsiExpression[] args=argList.getExpressions();
+          if (index < args.length) {
+            if (!parameter.isVarArgs()) {
+              usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(args[index],parameter,true));
+            }
+ else {
+              for (int i=index; i < args.length; i++) {
+                usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(args[i],parameter,true));
+              }
+            }
+          }
+        }
+      }
+      return true;
+    }
+  }
+);
+  ReferencesSearch.search(parameter).forEach(new Processor<PsiReference>(){
+    public boolean process(    final PsiReference reference){
+      PsiElement element=reference.getElement();
+      final PsiDocTag docTag=PsiTreeUtil.getParentOfType(element,PsiDocTag.class);
+      if (docTag != null) {
+        usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(docTag,parameter,true));
+        return true;
+      }
+      boolean isSafeDelete=false;
+      if (element.getParent().getParent() instanceof PsiMethodCallExpression) {
+        PsiMethodCallExpression call=(PsiMethodCallExpression)element.getParent().getParent();
+        PsiReferenceExpression methodExpression=call.getMethodExpression();
+        if (methodExpression.getText().equals(PsiKeyword.SUPER) || methodExpression.getQualifierExpression() instanceof PsiSuperExpression) {
+          final PsiMethod superMethod=call.resolveMethod();
+          if (superMethod != null && MethodSignatureUtil.isSuperMethod(superMethod,method)) {
+            isSafeDelete=true;
+          }
+        }
+      }
+      usages.add(new SafeDeleteReferenceSimpleDeleteUsageInfo(element,parameter,isSafeDelete));
+      return true;
+    }
+  }
+);
+}
