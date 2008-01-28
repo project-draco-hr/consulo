@@ -5,7 +5,7 @@ synchronized (PsiLock.LOCK) {
       if (fType instanceof CustomFileType) {
         TokenSet commentTokens=TokenSet.create(CustomHighlighterTokenType.LINE_COMMENT,CustomHighlighterTokenType.MULTI_LINE_COMMENT);
         Lexer lexer=SyntaxHighlighter.PROVIDER.create(fType,file.getProject(),file.getVirtualFile()).getHighlightingLexer();
-        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
+        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds,null);
       }
  else {
         commentStarts.add(0);
@@ -19,31 +19,23 @@ synchronized (PsiLock.LOCK) {
       final SyntaxHighlighter syntaxHighlighter=SyntaxHighlighterFactory.getSyntaxHighlighter(lang,file.getProject(),file.getVirtualFile());
       Lexer lexer=syntaxHighlighter.getHighlightingLexer();
       TokenSet commentTokens=null;
-      if (file instanceof PsiJavaFile && !(file instanceof JspFile)) {
-        lexer=new JavaLexer(((PsiJavaFile)file).getLanguageLevel());
-        commentTokens=TokenSet.orSet(StdTokenSets.COMMENT_BIT_SET,XML_COMMENT_BIT_SET,JavaDocTokenType.ALL_JAVADOC_TOKENS,XML_DATA_CHARS);
-      }
- else       if (PsiUtil.isInJspFile(file)) {
-        final JspFile jspFile=PsiUtil.getJspFile(file);
-        commentTokens=TokenSet.orSet(XML_COMMENT_BIT_SET,StdTokenSets.COMMENT_BIT_SET);
-        final ParserDefinition parserDefinition=LanguageParserDefinitions.INSTANCE.forLanguage(jspFile.getViewProvider().getTemplateDataLanguage());
-        if (parserDefinition != null) {
-          commentTokens=TokenSet.orSet(commentTokens,parserDefinition.getCommentTokens());
+      IndexPatternBuilder builderForFile=null;
+      for (      IndexPatternBuilder builder : Extensions.getExtensions(IndexPatternBuilder.EP_NAME)) {
+        Lexer lexerFromBuilder=builder.getIndexingLexer(file);
+        if (lexerFromBuilder != null) {
+          lexer=lexerFromBuilder;
+          commentTokens=builder.getCommentTokenSet(file);
+          builderForFile=builder;
         }
-        final EditorHighlighter highlighter=EditorHighlighterFactory.getInstance().createEditorHighlighter(file.getProject(),file.getVirtualFile());
-        lexer=new LexerEditorHighlighterLexer(highlighter);
       }
- else       if (file instanceof XmlFile) {
-        commentTokens=XML_COMMENT_BIT_SET;
-      }
- else {
+      if (builderForFile == null) {
         final ParserDefinition parserDefinition=LanguageParserDefinitions.INSTANCE.forLanguage(lang);
         if (parserDefinition != null) {
           commentTokens=parserDefinition.getCommentTokens();
         }
       }
       if (commentTokens != null) {
-        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds);
+        findComments(lexer,chars,range,commentTokens,commentStarts,commentEnds,builderForFile);
       }
     }
   }
