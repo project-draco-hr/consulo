@@ -1,0 +1,49 @@
+{
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  final DebugProcessEvents debugProcess=new DebugProcessEvents(myProject);
+  debugProcess.addDebugProcessListener(new DebugProcessAdapter(){
+    public void processAttached(    final DebugProcess process){
+      process.removeDebugProcessListener(this);
+      for (      Function<DebugProcess,PositionManager> factory : myCustomPositionManagerFactories) {
+        final PositionManager positionManager=factory.fun(process);
+        if (positionManager != null) {
+          process.appendPositionManager(positionManager);
+        }
+      }
+    }
+    public void processDetached(    final DebugProcess process,    final boolean closedByUser){
+      debugProcess.removeDebugProcessListener(this);
+    }
+    public void attachException(    final RunProfileState state,    final ExecutionException exception,    final RemoteConnection remoteConnection){
+      debugProcess.removeDebugProcessListener(this);
+    }
+  }
+);
+  DebuggerSession session=new DebuggerSession(profile.getName(),debugProcess);
+  final ExecutionResult executionResult=session.attach(runner,profile,state,remoteConnection,pollConnection);
+  if (executionResult == null) {
+    return null;
+  }
+  session.getContextManager().addListener(mySessionListener);
+  getContextManager().setState(DebuggerContextUtil.createDebuggerContext(session,session.getContextManager().getContext().getSuspendContext()),session.getState(),DebuggerSession.EVENT_CONTEXT,null);
+  final ProcessHandler processHandler=executionResult.getProcessHandler();
+synchronized (mySessions) {
+    mySessions.put(processHandler,session);
+  }
+  if (!(processHandler instanceof RemoteDebugProcessHandler)) {
+    processHandler.addProcessListener(new ProcessAdapter(){
+      public void processWillTerminate(      ProcessEvent event,      boolean willBeDestroyed){
+        final DebugProcessImpl debugProcess=getDebugProcess(event.getProcessHandler());
+        if (debugProcess != null) {
+          debugProcess.stop(willBeDestroyed);
+          if (!DebuggerManagerThreadImpl.isManagerThread()) {
+            debugProcess.waitFor(10000);
+          }
+        }
+      }
+    }
+);
+  }
+  myDispatcher.getMulticaster().sessionCreated(session);
+  return session;
+}
