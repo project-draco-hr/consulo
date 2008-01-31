@@ -1,0 +1,44 @@
+{
+  while (true) {
+    FinalizationRequest request=null;
+synchronized (lock) {
+      if (!myFinalizationQueue.isEmpty()) {
+        final PoolPageKey key;
+        if (lastFinalizedKey == null) {
+          key=myFinalizationQueue.firstKey();
+        }
+ else {
+          final SortedMap<PoolPageKey,FinalizationRequest> tail=myFinalizationQueue.tailMap(lastFinalizedKey);
+          key=tail.isEmpty() ? myFinalizationQueue.firstKey() : tail.firstKey();
+        }
+        lastFinalizedKey=key;
+        request=myFinalizationQueue.get(key);
+      }
+ else {
+        lastFinalizedKey=null;
+      }
+    }
+    if (request != null) {
+      if (request.page.flushIfFinalizationIdIsEqualTo(request.finalizationId)) {
+synchronized (lock) {
+          myFinalizationQueue.remove(lastFinalizedKey);
+          request.page.recycleIfFinalizationIdIsEqualTo(request.finalizationId);
+        }
+      }
+synchronized (finalizationLock) {
+        lastFinalizationPerformed=request.finalizationId;
+        finalizationLock.notifyAll();
+      }
+    }
+ else {
+synchronized (myFinalizationQueue) {
+        try {
+          myFinalizationQueue.wait();
+        }
+ catch (        InterruptedException e) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
+  }
+}

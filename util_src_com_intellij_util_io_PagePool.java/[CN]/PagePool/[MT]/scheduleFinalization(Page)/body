@@ -1,27 +1,23 @@
 {
+  boolean wakeUpFinalizer=false;
 synchronized (lock) {
     if (page.isDirty()) {
+      if (myFinalizerThread == null) {
+        myFinalizerThread=new Thread(new FinalizationThreadWorker(),"Disk cache finalization queue");
+        myFinalizerThread.start();
+      }
       final long curFinalizationId=++finalizationId;
       page.setFinalizationId(curFinalizationId);
-      myFinalizationQueue.put(keyForPage(page),page);
-      myFinalizer.submit(new Runnable(){
-        public void run(){
-          if (page.flushIfFinalizationIdIsEqualTo(curFinalizationId)) {
-synchronized (lock) {
-              myFinalizationQueue.remove(keyForPage(page));
-              page.recycleIfFinalizationIdIsEqualTo(curFinalizationId);
-            }
-          }
-synchronized (finalizationLock) {
-            lastFinalizationPerformed=curFinalizationId;
-            finalizationLock.notifyAll();
-          }
-        }
-      }
-);
+      wakeUpFinalizer=true;
+      myFinalizationQueue.put(keyForPage(page),new FinalizationRequest(page,curFinalizationId));
     }
  else {
       page.recycle();
+    }
+  }
+  if (wakeUpFinalizer) {
+synchronized (myFinalizationQueue) {
+      myFinalizationQueue.notifyAll();
     }
   }
 }
