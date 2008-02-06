@@ -1,0 +1,46 @@
+{
+  final List<UsageInfo> result=new ArrayList<UsageInfo>();
+  PsiManager manager=element.getManager();
+  GlobalSearchScope projectScope=GlobalSearchScope.projectScope(manager.getProject());
+  RenamePsiElementProcessor theProcessor=null;
+  Collection<PsiReference> refs=null;
+  for (  RenamePsiElementProcessor processor : Extensions.getExtensions(RenamePsiElementProcessor.EP_NAME)) {
+    if (processor.canProcessElement(element)) {
+      theProcessor=processor;
+      refs=processor.findReferences(element);
+      break;
+    }
+  }
+  if (refs == null) {
+    refs=ReferencesSearch.search(element).findAll();
+  }
+  for (  PsiReference ref : refs) {
+    PsiElement referenceElement=ref.getElement();
+    result.add(new MoveRenameUsageInfo(referenceElement,ref,ref.getRangeInElement().getStartOffset(),ref.getRangeInElement().getEndOffset(),element,false));
+  }
+  for (  RenameCollisionDetector collisionDetector : Extensions.getExtensions(RenameCollisionDetector.EP_NAME)) {
+    collisionDetector.findCollisions(element,newName,allRenames,result);
+  }
+  if (searchInStringsAndComments && !(element instanceof PsiDirectory)) {
+    String stringToSearch=ElementDescriptionUtil.getElementDescription(element,false ? NonCodeSearchDescriptionLocation.NON_JAVA : NonCodeSearchDescriptionLocation.STRINGS_AND_COMMENTS);
+    if (stringToSearch != null) {
+      final String stringToReplace=getStringToReplace(element,newName,false,theProcessor);
+      TextOccurrencesUtil.UsageInfoFactory factory=new NonCodeUsageInfoFactory(element,stringToReplace);
+      TextOccurrencesUtil.addUsagesInStringsAndComments(element,stringToSearch,result,factory);
+    }
+  }
+  if (searchForTextOccurences && !(element instanceof PsiDirectory)) {
+    String stringToSearch=ElementDescriptionUtil.getElementDescription(element,true ? NonCodeSearchDescriptionLocation.NON_JAVA : NonCodeSearchDescriptionLocation.STRINGS_AND_COMMENTS);
+    if (stringToSearch != null) {
+      final String stringToReplace=getStringToReplace(element,newName,true,theProcessor);
+      addTextOccurence(element,result,projectScope,stringToSearch,stringToReplace);
+      if (theProcessor != null) {
+        Pair<String,String> additionalStringToSearch=theProcessor.getTextOccurrenceSearchStrings(element,newName);
+        if (additionalStringToSearch != null) {
+          addTextOccurence(element,result,projectScope,additionalStringToSearch.first,additionalStringToSearch.second);
+        }
+      }
+    }
+  }
+  return result.toArray(new UsageInfo[result.size()]);
+}
