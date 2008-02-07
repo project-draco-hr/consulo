@@ -1,2 +1,113 @@
 {
+  ColumnInfo[] columnInfos={new ClassColumnInfo(myColumnNames[CLASS_OR_PROPERTY_NAME_COLUMN]),new PropertyTypeColumnInfo(myColumnNames[PROPERTY_TYPE_COLUMN])};
+  myTreeTableModel=new ListTreeTableModelOnColumns(myTreeRoot,columnInfos);
+  myTreeTable=new TreeTable(myTreeTableModel);
+  final MyColoredTreeCellRenderer treeCellRenderer=new MyColoredTreeCellRenderer();
+  final TreeTableCellRenderer tableCellRenderer=new TreeTableCellRenderer(myTreeTable,myTreeTable.getTree());
+  tableCellRenderer.setCellRenderer(treeCellRenderer);
+  myTreeTable.setTreeCellRenderer(treeCellRenderer);
+  myTreeTable.setRootVisible(false);
+  myTreeTable.setSelectionMode(DefaultTreeSelectionModel.CONTIGUOUS_TREE_SELECTION);
+  final MyPropertyOrClassCellEditor propertyOrClassCellEditor=new MyPropertyOrClassCellEditor(tableCellRenderer);
+  final MyPropertyTypeCellEditor typeCellEditor=new MyPropertyTypeCellEditor();
+  typeCellEditor.addCellEditorListener(new CellEditorListener(){
+    public void editingStopped(    ChangeEvent e){
+      final TreeTableTree tree=getTree();
+      final DPPropertyTypeElement newTypeValue=((MyPropertyTypeCellEditor)e.getSource()).getCellEditorValue();
+      if (newTypeValue == null || tree == null) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      final String newType=newTypeValue.getPropertyType();
+      final TreePath editingTypePath=tree.getSelectionPath();
+      final TreePath editingClassPath=editingTypePath.getParentPath();
+      Object oldTypeValue=myTreeTable.getValueAt(tree.getRowForPath(editingTypePath),PROPERTY_TYPE_COLUMN);
+      if (!(oldTypeValue instanceof DPPropertyTypeElement)) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      final Object editingPropertyObject=myTreeTable.getValueAt(tree.getRowForPath(editingTypePath),CLASS_OR_PROPERTY_NAME_COLUMN);
+      final Object editingClassObject=myTreeTable.getValueAt(tree.getRowForPath(editingClassPath),CLASS_OR_PROPERTY_NAME_COLUMN);
+      if (!(editingPropertyObject instanceof DPPropertyElement) || !(editingClassObject instanceof DPContainingClassElement)) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      final String name=((DPPropertyElement)editingPropertyObject).getPropertyName();
+      final String className=((DPContainingClassElement)editingClassObject).getContainingClassName();
+      DynamicPropertiesManager.getInstance(project).replaceDynamicProperty(new DynamicPropertyVirtual(name,className,getModule(project).getName(),((DPPropertyTypeElement)oldTypeValue).getPropertyType()),new DynamicPropertyVirtual(name,className,getModule(project).getName(),newType));
+    }
+    public void editingCanceled(    ChangeEvent e){
+      System.out.println("editing canceled");
+      myTreeTable.editingCanceled(e);
+    }
+  }
+);
+  RefactoringListenerManager.getInstance(project).addListenerProvider(new RefactoringElementListenerProvider(){
+    @Nullable public RefactoringElementListener getListener(    final PsiElement element){
+      if (element instanceof GrDynamicImplicitVariable) {
+        return new RefactoringElementListener(){
+          public void elementMoved(          PsiElement newElement){
+            renameElement(newElement,project,element);
+          }
+          public void elementRenamed(          PsiElement newElement){
+            renameElement(newElement,project,element);
+          }
+          private void renameElement(          PsiElement newElement,          Project project,          PsiElement element){
+            final Module module=getModule(project);
+            final GrReferenceExpression qualifiedExpressionElement=((GrDynamicImplicitVariable)element).getContainingClassElement();
+            final PsiType type=qualifiedExpressionElement.getType();
+            if (type == null)             return;
+            String typeText=type.getCanonicalText();
+            if (typeText == null)             typeText=type.getPresentableText();
+            DynamicPropertiesManager.getInstance(project).replaceDynamicProperty(module.getName(),typeText,((GrDynamicImplicitVariable)element).getName(),newElement.getText());
+          }
+        }
+;
+      }
+      return null;
+    }
+  }
+);
+  myTreeTable.setDefaultEditor(TreeTableModel.class,propertyOrClassCellEditor);
+  myTreeTable.setDefaultEditor(String.class,typeCellEditor);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      storeState(project);
+      deleteRow(project);
+      restoreState(project);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_DELETE,0),JComponent.WHEN_FOCUSED);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      storeState(project);
+      final int selectionRow=myTreeTable.getTree().getLeadSelectionRow();
+      myTreeTable.editCellAt(selectionRow,CLASS_OR_PROPERTY_NAME_COLUMN,event);
+      restoreState(project);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_F2,0),JComponent.WHEN_FOCUSED);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      storeState(project);
+      final int selectionRow=myTreeTable.getTree().getLeadSelectionRow();
+      myTreeTable.editCellAt(selectionRow,PROPERTY_TYPE_COLUMN,event);
+      restoreState(project);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_F2,KeyEvent.CTRL_MASK),JComponent.WHEN_FOCUSED);
+  myTreeTable.getTree().setShowsRootHandles(true);
+  myTreeTable.getTableHeader().setReorderingAllowed(false);
+  myTreeTable.setPreferredScrollableViewportSize(new Dimension(300,myTreeTable.getRowHeight() * 10));
+  myTreeTable.getColumn(myColumnNames[CLASS_OR_PROPERTY_NAME_COLUMN]).setPreferredWidth(200);
+  myTreeTable.getColumn(myColumnNames[PROPERTY_TYPE_COLUMN]).setPreferredWidth(160);
+  myTreeTable.addMouseListener(new MouseAdapter(){
+    public void mouseClicked(    MouseEvent e){
+      final Point point=e.getPoint();
+    }
+  }
+);
+  JScrollPane scrollpane=ScrollPaneFactory.createScrollPane(myTreeTable);
+  scrollpane.setPreferredSize(new Dimension(600,400));
+  return scrollpane;
 }
