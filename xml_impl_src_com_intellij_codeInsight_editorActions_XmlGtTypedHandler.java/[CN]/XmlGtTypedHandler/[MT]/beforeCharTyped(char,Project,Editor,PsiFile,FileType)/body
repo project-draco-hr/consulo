@@ -3,7 +3,7 @@
     PsiDocumentManager.getInstance(project).commitAllDocuments();
     XmlFile file=(XmlFile)PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
     FileViewProvider provider=file.getViewProvider();
-    final int offset=editor.getCaretModel().getOffset();
+    int offset=editor.getCaretModel().getOffset();
     PsiElement element;
     if (offset < editor.getDocument().getTextLength()) {
       element=provider.findElementAt(offset,XMLLanguage.class);
@@ -80,7 +80,33 @@
     int tagOffset=tag.getTextRange().getStartOffset();
     HighlighterIterator iterator=((EditorEx)editor).getHighlighter().createIterator(tagOffset);
     if (BraceMatchingUtil.matchBrace(editor.getDocument().getCharsSequence(),fileType,iterator,true,true))     return false;
+    boolean insertedCData=false;
+    if (name.indexOf(':') != -1) {
+      final XmlElementDescriptor descriptor=tag.getDescriptor();
+      if (descriptor instanceof XmlElementDescriptorWithCDataContent) {
+        final XmlElementDescriptorWithCDataContent cDataContainer=(XmlElementDescriptorWithCDataContent)descriptor;
+        if (cDataContainer.requiresCdataBracesInContext(tag)) {
+          final String cDataStart="><![CDATA[\n";
+          final String inserted=cDataStart + "\n]]>";
+          editor.getDocument().insertString(offset,inserted);
+          final int newoffset=offset + cDataStart.length();
+          editor.getCaretModel().moveToOffset(newoffset);
+          offset+=inserted.length();
+          insertedCData=true;
+        }
+      }
+    }
     editor.getDocument().insertString(offset,"</" + name + ">");
+    if (insertedCData) {
+      PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
+      try {
+        CodeStyleManager.getInstance(project).adjustLineIndent(file,editor.getCaretModel().getOffset());
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+    return insertedCData;
   }
   return false;
 }
