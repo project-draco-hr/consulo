@@ -1,0 +1,114 @@
+{
+  final Document document=editor.getDocument();
+  if (editor.isViewer()) {
+    document.fireReadOnlyModificationAttempt();
+    return;
+  }
+  if (!file.isWritable()) {
+    if (!FileDocumentManager.fileForDocumentCheckedOutSuccessfully(document,project)) {
+      return;
+    }
+  }
+  final CodeInsightSettings settings=CodeInsightSettings.getInstance();
+  Lookup activeLookup=LookupManager.getInstance(project).getActiveLookup();
+  if (activeLookup != null) {
+    Class<? extends CodeCompletionHandlerBase> handlerClass=activeLookup.getUserData(COMPLETION_HANDLER_CLASS_KEY);
+    if (handlerClass == null) {
+      handlerClass=CodeCompletionHandler.class;
+    }
+    if (handlerClass.equals(getClass())) {
+      if (!isAutocompleteCommonPrefixOnInvocation() || activeLookup.fillInCommonPrefix(true)) {
+        return;
+      }
+    }
+  }
+  EditorUtil.fillVirtualSpaceUntil(editor,editor.getCaretModel().getLogicalPosition().column,editor.getCaretModel().getLogicalPosition().line);
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  ShowAutoImportPass.autoImportReferenceAtCursor(editor,file,false);
+  PostprocessReformattingAspect.getInstance(project).doPostponedFormatting(file.getViewProvider());
+  final int offset1=editor.getSelectionModel().hasSelection() ? editor.getSelectionModel().getSelectionStart() : editor.getCaretModel().getOffset();
+  final int offset2=editor.getSelectionModel().hasSelection() ? editor.getSelectionModel().getSelectionEnd() : offset1;
+  final CompletionContext context=new CompletionContext(project,editor,file,offset1,offset2);
+  final LookupData data=getLookupData(context);
+  final LookupItem[] items=data.items;
+  String prefix=data.prefix;
+  context.setPrefix(data.prefix);
+  if (items.length == 0) {
+    handleEmptyLookup(context,data);
+    return;
+  }
+  final int startOffset=offset1 - prefix.length();
+  String uniqueText=null;
+  LookupItem item=null;
+  boolean doNotAutocomplete=false;
+  for (  final LookupItem curItem : items) {
+    if (curItem.getAttribute(LookupItem.DO_NOT_AUTOCOMPLETE_ATTR) != null) {
+      item=null;
+      doNotAutocomplete=true;
+      break;
+    }
+    if (uniqueText == null) {
+      uniqueText=curItem.getLookupString();
+      item=curItem;
+    }
+ else     if (!uniqueText.equals(curItem.getLookupString())) {
+      item=null;
+      break;
+    }
+  }
+  if (item != null) {
+    if (!isAutocompleteOnInvocation() && item.getAttribute(LookupItem.DO_AUTOCOMPLETE_ATTR) == null) {
+      item=null;
+    }
+  }
+  if (item != null && context.identifierEndOffset != context.selectionEndOffset) {
+    if (item.getAttribute(LookupItem.DO_AUTOCOMPLETE_ATTR) == null) {
+      item=null;
+    }
+  }
+  if (item != null) {
+    if (item.getObject() instanceof DeferredUserLookupValue) {
+      if (!((DeferredUserLookupValue)item.getObject()).handleUserSelection(item,context.project)) {
+        return;
+      }
+      uniqueText=item.getLookupString();
+      context.setStartOffset(context.getStartOffset() - prefix.length());
+      data.prefix="";
+      context.setPrefix("");
+    }
+    if (!StringUtil.startsWithIgnoreCase(uniqueText,prefix)) {
+      FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.completion.camelHumps");
+    }
+    insertLookupString(context,offset2,uniqueText,startOffset);
+    context.editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    lookupItemSelected(context,startOffset,data,item,false,(char)0);
+  }
+ else {
+    if (isAutocompleteCommonPrefixOnInvocation() && !doNotAutocomplete) {
+      final int offset=context.getStartOffset();
+      final String newPrefix=fillInCommonPrefix(items,prefix,context);
+      if (!newPrefix.equals(prefix)) {
+        final int shift=newPrefix.length() - prefix.length();
+        context.setPrefix(newPrefix);
+        prefix=newPrefix;
+        context.shiftOffsets(shift);
+        editor.getCaretModel().moveToOffset(offset + shift);
+        editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+      }
+    }
+    PsiDocumentManager.getInstance(project).commitAllDocuments();
+    final RangeMarker startOffsetMarker=document.createRangeMarker(startOffset,startOffset);
+    final Lookup lookup=showLookup(project,editor,items,prefix,data,file,appendSuggestion(null,data));
+    if (lookup != null) {
+      lookup.putUserData(COMPLETION_HANDLER_CLASS_KEY,getClass());
+      lookup.addLookupListener(new LookupAdapter(){
+        public void itemSelected(        LookupEvent event){
+          LookupItem item=event.getItem();
+          if (item == null)           return;
+          selectLookupItem(item,settings.SHOW_SIGNATURES_IN_LOOKUPS || item.getAttribute(LookupItem.FORCE_SHOW_SIGNATURE_ATTR) != null,event.getCompletionChar(),startOffsetMarker.getStartOffset(),context,data);
+        }
+      }
+);
+    }
+  }
+}
