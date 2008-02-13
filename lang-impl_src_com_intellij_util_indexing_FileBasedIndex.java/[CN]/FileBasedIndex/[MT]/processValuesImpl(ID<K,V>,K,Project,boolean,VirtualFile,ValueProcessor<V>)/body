@@ -1,0 +1,48 @@
+{
+  try {
+    checkRebuild(indexId);
+    indexUnsavedDocuments();
+    final UpdatableIndex<K,V,FileContent> index=getIndex(indexId);
+    if (index == null) {
+      return;
+    }
+    final Lock readLock=index.getReadLock();
+    readLock.lock();
+    try {
+      final ValueContainer<V> container=index.getData(dataKey);
+      if (restrictToFile != null) {
+        final int restrictedFileId=getFileId(restrictToFile);
+        for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+          final V value=valueIt.next();
+          if (container.isAssociated(value,restrictedFileId)) {
+            processor.process(restrictToFile,value);
+          }
+        }
+      }
+ else {
+        final DirectoryIndex dirIndex=DirectoryIndex.getInstance(project);
+        final PersistentFS fs=(PersistentFS)PersistentFS.getInstance();
+        for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+          V value=valueIt.next();
+          for (final ValueContainer.IntIterator inputIdsIterator=container.getInputIdsIterator(value); inputIdsIterator.hasNext(); ) {
+            final int id=inputIdsIterator.next();
+            VirtualFile file=findFileById(dirIndex,fs,id);
+            if (file != null) {
+              processor.process(file,value);
+              if (ensureValueProcessedOnce) {
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  finally {
+      readLock.unlock();
+    }
+  }
+ catch (  StorageException e) {
+    requestRebuild(indexId);
+    LOG.error(e);
+  }
+}
