@@ -1,9 +1,8 @@
 {
   String text=textWithImports.getText();
   String imports=textWithImports.getImports();
-  final GroovyPsiElement toEval;
-  GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(project);
-  toEval=factory.createGroovyFile(text,false,context);
+  final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(project);
+  final GroovyFile toEval=factory.createGroovyFile(text,false,context);
   final Set<String> namesList=new HashSet<String>();
   toEval.accept(new GroovyRecursiveElementVisitor(){
     public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
@@ -13,8 +12,26 @@
         namesList.add(((GrVariable)resolved).getName());
       }
     }
+    public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
+      if (refElement.getQualifier() != null) {
+        super.visitCodeReferenceElement(refElement);
+      }
+ else {
+        PsiElement resolved=refElement.resolve();
+        if (resolved instanceof PsiClass) {
+          String qName=((PsiClass)resolved).getQualifiedName();
+          if (qName != null) {
+            int dotIndex=qName.lastIndexOf(".");
+            if (dotIndex < 0)             return;
+            String packageName=qName.substring(0,dotIndex);
+            refElement.setQualifier(factory.createReferenceElementFromText(packageName));
+          }
+        }
+      }
+    }
   }
 );
+  text=toEval.getText();
   String[] names=namesList.toArray(new String[namesList.size()]);
   PsiClass contextClass=getContextClass(context);
   boolean isStatic=isStaticContext(context);
@@ -29,7 +46,7 @@
     javaText.append("clazz = java.lang.Class.forName(\"").append(contextClass.getQualifiedName()).append("\");\n");
     javaText.append("mc = groovy.lang.GroovySystem.getMetaClassRegistry().getMetaClass(clazz);\n");
   }
-  javaText.append(createProperty(StringUtil.escapeStringCharacters(text),imports,names));
+  javaText.append(createProperty(stripImports(text,toEval),imports,names));
   javaText.append("groovy.lang.ExpandoMetaClass emc = new groovy.lang.ExpandoMetaClass(clazz);\n");
   if (!isStatic) {
     javaText.append("emc.setProperty(\"").append(EVAL_NAME).append("\", closure);\n");
