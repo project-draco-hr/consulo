@@ -1,30 +1,40 @@
 {
+  boolean flushQueueNow=false;
+  try {
 synchronized (lock) {
-    hits++;
-    offset-=offset % Page.PAGE_SIZE;
-    PoolPageKey key=setupKey(owner,offset);
-    Page page=myProtectedQueue.remove(key);
-    if (page != null) {
-      protected_queue_hits++;
-      toProtectedQueue(page);
+      flushNow=false;
+      hits++;
+      offset-=offset % Page.PAGE_SIZE;
+      PoolPageKey key=setupKey(owner,offset);
+      Page page=myProtectedQueue.remove(key);
+      if (page != null) {
+        protected_queue_hits++;
+        toProtectedQueue(page);
+        return page;
+      }
+      page=myProbationalQueue.remove(key);
+      if (page != null) {
+        probational_queue_hits++;
+        toProtectedQueue(page);
+        return page;
+      }
+      final FinalizationRequest request=myFinalizationQueue.remove(key);
+      if (request != null) {
+        page=request.page;
+        finalization_queue_hits++;
+        toProtectedQueue(page);
+        return page;
+      }
+      cache_misses++;
+      page=new Page(owner,offset);
+      myProbationalQueue.put(keyForPage(page),page);
+      flushQueueNow=flushNow;
       return page;
     }
-    page=myProbationalQueue.remove(key);
-    if (page != null) {
-      probational_queue_hits++;
-      toProtectedQueue(page);
-      return page;
+  }
+  finally {
+    if (flushQueueNow) {
+      flushFinalizationQueue(5000);
     }
-    final FinalizationRequest request=myFinalizationQueue.remove(key);
-    if (request != null) {
-      page=request.page;
-      finalization_queue_hits++;
-      toProtectedQueue(page);
-      return page;
-    }
-    cache_misses++;
-    page=new Page(owner,offset);
-    myProbationalQueue.put(keyForPage(page),page);
-    return page;
   }
 }
