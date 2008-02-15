@@ -1,27 +1,35 @@
 {
   return new XmlElementVisitor(){
-    private XmlRefCountHolder myRefCountHolder;
-    public void visitXmlAttributeValue(    final XmlAttributeValue value){
-      if (myRefCountHolder == null) {
-        final PsiFile psiFile=value.getContainingFile();
-        if (psiFile instanceof XmlFile) {
-          processFile((XmlFile)psiFile);
+    @Override public void visitXmlAttributeValue(    final XmlAttributeValue value){
+      final PsiFile file=value.getContainingFile();
+      if (file instanceof XmlFile) {
+        final XmlRefCountHolder refHolder=XmlRefCountHolder.getInstance((XmlFile)file);
+        if (refHolder == null)         return;
+        final PsiElement parent=value.getParent();
+        if (!(parent instanceof XmlAttribute))         return;
+        final XmlTag tag=((XmlAttribute)parent).getParent();
+        if (tag == null)         return;
+        if (refHolder.isValidatable(tag.getParent()) && refHolder.isDuplicateIdAttributeValue(value)) {
+          holder.registerProblem(value,XmlErrorMessages.message("duplicate.id.reference"),ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
         }
-      }
-      if (myRefCountHolder != null) {
-        checkIdRefAttrValue(value,myRefCountHolder,holder);
-      }
-    }
-    private void processFile(    final XmlFile file){
-      myRefCountHolder=XmlRefCountHolder.getInstance(file);
-      for (Iterator<Map.Entry<PsiElement,Boolean>> iterator=myRefCountHolder.getPossiblyDuplicateElementsMap().entrySet().iterator(); iterator.hasNext(); ) {
-        Map.Entry<PsiElement,Boolean> entry=iterator.next();
-        final XmlAttributeValue value=(XmlAttributeValue)entry.getKey();
-        if (value.isValid()) {
-          processAttributeValue(value,entry.getValue().booleanValue(),myRefCountHolder,holder);
+        String idRef=XmlHighlightVisitor.getUnquotedValue(value,tag);
+        if (tag instanceof HtmlTag) {
+          idRef=idRef.toLowerCase();
         }
+        if (XmlUtil.isSimpleXmlAttributeValue(idRef,value) && refHolder.isIdReferenceValue(value)) {
+          boolean hasIdDeclaration=refHolder.hasIdDeclaration(idRef);
+          if (!hasIdDeclaration && tag instanceof HtmlTag) {
+            hasIdDeclaration=refHolder.hasIdDeclaration(StringUtil.stripQuotesAroundValue(value.getText()));
+          }
+          if (!hasIdDeclaration) {
+            final FileViewProvider viewProvider=tag.getContainingFile().getViewProvider();
+            if (viewProvider instanceof TemplateLanguageFileViewProvider) {
+              holder.registerProblem(value,XmlErrorMessages.message("invalid.id.reference"),ProblemHighlightType.LIKE_UNKNOWN_SYMBOL,new XmlDeclareIdInCommentAction(idRef));
+            }
  else {
-          iterator.remove();
+              holder.registerProblem(value,XmlErrorMessages.message("invalid.id.reference"),ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
+            }
+          }
         }
       }
     }
