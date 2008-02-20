@@ -1,0 +1,58 @@
+{
+  if (file.isDirectory()) {
+    if (!(file instanceof NewVirtualFile) || ManagingFS.getInstance().areChildrenLoaded(file)) {
+      for (      VirtualFile child : file.getChildren()) {
+        scheduleInvalidation(child,false);
+      }
+    }
+  }
+ else {
+    final List<ID<?,?>> affectedIndices=new ArrayList<ID<?,?>>(myIndices.size());
+    for (    ID<?,?> indexId : myIndices.keySet()) {
+      if (getInputFilter(indexId).acceptInput(file) && IndexingStamp.isFileIndexed(file,indexId,getIndexCreationStamp(indexId))) {
+        if (myNeedContentLoading.contains(indexId)) {
+          affectedIndices.add(indexId);
+        }
+ else {
+          try {
+            updateSingleIndex(indexId,file,null,new FileContent(file,null));
+          }
+ catch (          StorageException e) {
+            LOG.error(e);
+            requestRebuild(indexId);
+          }
+        }
+      }
+    }
+    if (affectedIndices.size() > 0) {
+      iterateIndexableFiles(file,new Processor<VirtualFile>(){
+        public boolean process(        final VirtualFile file){
+          myFileToUpdate.add(file);
+          return true;
+        }
+      }
+);
+      if (saveContent) {
+        myOldContentStorage.offer(file);
+      }
+ else {
+        final FileContent fc=new FileContent(file,loadContent(file));
+        final FutureTask<?> future=(FutureTask<?>)myInvalidationService.submit(new Runnable(){
+          public void run(){
+            for (            ID<?,?> indexId : affectedIndices) {
+              try {
+                updateSingleIndex(indexId,file,null,fc);
+              }
+ catch (              StorageException e) {
+                LOG.error(e);
+                requestRebuild(indexId);
+              }
+            }
+          }
+        }
+);
+        myFutureInvalidations.offer(future);
+      }
+    }
+  }
+}

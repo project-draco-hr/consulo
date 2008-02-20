@@ -1,19 +1,47 @@
 {
-  myValueExternalizer=valueExternalizer;
   myStorageFile=storageFile;
   myKeyDescriptor=keyDescriptor;
   myValueContainerExternalizer=new ValueContainerExternalizer<Value>(valueExternalizer);
-  myMap=new PersistentHashMap<Key,ValueContainerImpl<Value>>(myStorageFile,myKeyDescriptor,myValueContainerExternalizer);
-  myCache=new ObjectCache<Key,ValueContainerImpl<Value>>(1024);
-  myCache.addDeletedPairsListener(new ObjectCache.DeletedPairsListener(){
-    public void objectRemoved(    final Object key,    final Object value){
-      final Key _key=(Key)key;
-      if (_key.equals(myKeyBeingRemoved)) {
+  myMap=new PersistentHashMap<Key,ValueContainer<Value>>(myStorageFile,myKeyDescriptor,myValueContainerExternalizer);
+  myCache=new SLRUCache<Key,ChangeTrackingValueContainer<Value>>(16 * 1024,4 * 1024){
+    @NotNull public ChangeTrackingValueContainer<Value> createValue(    final Key key){
+      return new ChangeTrackingValueContainer<Value>(new Computable<ValueContainer<Value>>(){
+        public ValueContainer<Value> compute(){
+          ValueContainer<Value> value=null;
+          try {
+            value=myMap.get(key);
+            if (value == null) {
+              value=new ValueContainerImpl<Value>();
+            }
+          }
+ catch (          IOException e) {
+            LOG.error(e);
+          }
+          return value;
+        }
+      }
+);
+    }
+    protected void onDropFromCache(    final Key key,    final ChangeTrackingValueContainer<Value> valueContainer){
+      if (key.equals(myKeyBeingRemoved) || myMap == null || !valueContainer.isDirty()) {
         return;
       }
       try {
-        if (myMap != null) {
-          myMap.put(_key,(ValueContainerImpl<Value>)value);
+        if (valueContainer.canUseDataAppend()) {
+          final ValueContainer<Value> toAppend=valueContainer.getDataToAppend();
+          if (toAppend.size() > 0) {
+            final ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+            myValueContainerExternalizer.save(new DataOutputStream(bytes),toAppend);
+            myMap.appendData(key,new PersistentHashMap.ValueDataAppender(){
+              public void append(              final DataOutput out) throws IOException {
+                out.write(bytes.toByteArray());
+              }
+            }
+);
+          }
+        }
+ else {
+          myMap.put(key,valueContainer);
         }
       }
  catch (      IOException e) {
@@ -21,5 +49,5 @@
       }
     }
   }
-);
+;
 }
