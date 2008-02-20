@@ -1,0 +1,79 @@
+{
+  final PsiExpression enclosing=PsiTreeUtil.getContextOfType(position,PsiExpression.class,true);
+  final PsiReferenceParameterList contextOfType=PsiTreeUtil.getContextOfType(position,PsiReferenceParameterList.class,false);
+  if (contextOfType != null && item.getObject() instanceof PsiClass) {
+    final PsiTypeElement typeElement=PsiTreeUtil.getContextOfType(position,PsiTypeElement.class,false);
+    final PsiTypeElement[] elements=contextOfType.getTypeParameterElements();
+    int index=0;
+    while (index < elements.length) {
+      if (typeElement == elements[index++])       break;
+    }
+    if (index > 0) {
+      final PsiClass psiClass=(PsiClass)((PsiReference)contextOfType.getParent()).resolve();
+      if (psiClass != null && psiClass.getTypeParameters().length > index)       item.setTailType(TailType.COMMA);
+ else       item.setTailType(TailType.createSimpleTailType('>'));
+      return;
+    }
+  }
+  if (item.getObject() instanceof PsiClass && item.getAttribute(LookupItem.BRACKETS_COUNT_ATTR) == null && enclosing instanceof PsiNewExpression && !(position instanceof PsiParenthesizedExpression)) {
+    final PsiAnonymousClass anonymousClass=PsiTreeUtil.getParentOfType(position,PsiAnonymousClass.class);
+    if (anonymousClass == null || anonymousClass.getParent() != enclosing) {
+      final PsiClass psiClass=(PsiClass)item.getObject();
+      item.setAttribute(LookupItem.NEW_OBJECT_ATTR,"");
+      if (psiClass.hasModifierProperty(PsiModifier.ABSTRACT) || psiClass.isInterface()) {
+        item.setAttribute(LookupItem.GENERATE_ANONYMOUS_BODY_ATTR,"");
+        FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.completion.smarttype.anonymous");
+      }
+ else {
+        FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.completion.smarttype.afternew");
+      }
+    }
+  }
+  if (item.getTailType() == TailType.UNKNOWN || item.getTailType() == TailType.NONE) {
+    if (enclosing != null && item.getObject() instanceof PsiElement) {
+      final ExpectedTypeInfo[] infos=expectedTypeInfos;
+      if (infos != null) {
+        final PsiType type;
+        if (item.getAttribute(LookupItem.TYPE) != null) {
+          type=(PsiType)item.getAttribute(LookupItem.TYPE);
+        }
+ else {
+          final PsiSubstitutor substitutor=(PsiSubstitutor)item.getAttribute(LookupItem.SUBSTITUTOR);
+          if (substitutor != null)           type=substitutor.substitute(FilterUtil.getTypeByElement((PsiElement)item.getObject(),position));
+ else           type=FilterUtil.getTypeByElement((PsiElement)item.getObject(),position);
+        }
+        TailType cached=item.getTailType();
+        int cachedPrior=0;
+        if (type != null && type.isValid()) {
+          for (          ExpectedTypeInfo info : infos) {
+            final PsiType infoType=info.getType();
+            if (infoType.equals(type) && cachedPrior < 2) {
+              cachedPrior=2;
+              cached=info.getTailType();
+            }
+ else             if (cachedPrior == 2 && cached != info.getTailType()) {
+              cachedPrior=3;
+              cached=item.getTailType();
+            }
+ else             if (((infoType.isAssignableFrom(type) && info.getKind() == ExpectedTypeInfo.TYPE_OR_SUBTYPE) || (type.isAssignableFrom(infoType) && info.getKind() == ExpectedTypeInfo.TYPE_OR_SUPERTYPE)) && cachedPrior < 1) {
+              cachedPrior=1;
+              cached=info.getTailType();
+            }
+ else             if (cachedPrior == 1 && cached != info.getTailType()) {
+              cached=item.getTailType();
+            }
+          }
+        }
+ else {
+          if (infos.length == 1) {
+            cached=infos[0].getTailType();
+          }
+        }
+        item.setTailType(cached);
+      }
+    }
+    if (item.getTailType() == TailType.UNKNOWN) {
+      item.setTailType(TailType.NONE);
+    }
+  }
+}
