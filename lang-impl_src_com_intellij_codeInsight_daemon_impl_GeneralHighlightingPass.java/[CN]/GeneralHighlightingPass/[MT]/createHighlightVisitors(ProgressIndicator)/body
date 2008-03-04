@@ -1,20 +1,22 @@
 {
-  AtomicInteger count=myProject.getUserData(HIGHLIGHT_VISITOR_INSTANCE_COUNT);
-  if (count == null) {
-    count=((UserDataHolderEx)myProject).putUserDataIfAbsent(HIGHLIGHT_VISITOR_INSTANCE_COUNT,new AtomicInteger(0));
-  }
+  int oldCount=incVisitorUsageCount(1);
   HighlightVisitor[] highlightVisitors=Extensions.getExtensions(HighlightVisitor.EP_HIGHLIGHT_VISITOR,myProject);
-  if (count.getAndIncrement() != 0) {
+  if (oldCount != 0) {
     highlightVisitors=highlightVisitors.clone();
     for (int i=0; i < highlightVisitors.length; i++) {
       HighlightVisitor highlightVisitor=highlightVisitors[i];
       highlightVisitors[i]=highlightVisitor.clone();
     }
   }
-  for (  final HighlightVisitor highlightVisitor : highlightVisitors) {
+  for (int i=0; i < highlightVisitors.length; i++) {
+    HighlightVisitor highlightVisitor=highlightVisitors[i];
     if (!highlightVisitor.init(myUpdateAll,myFile)) {
       progress.cancel();
-      releaseHighlightVisitors(highlightVisitors,false);
+      for (int j=i - 1; j >= 0; j--) {
+        HighlightVisitor visitor=highlightVisitors[j];
+        visitor.cleanup(false,myFile);
+      }
+      incVisitorUsageCount(-1);
       ApplicationManager.getApplication().invokeLater(new Runnable(){
         public void run(){
           DaemonCodeAnalyzer.getInstance(myProject).restart();
