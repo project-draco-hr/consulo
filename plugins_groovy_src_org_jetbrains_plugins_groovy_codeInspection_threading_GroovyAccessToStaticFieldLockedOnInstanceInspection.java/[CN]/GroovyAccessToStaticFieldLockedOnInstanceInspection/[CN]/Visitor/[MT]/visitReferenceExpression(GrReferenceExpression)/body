@@ -1,0 +1,55 @@
+{
+  super.visitReferenceExpression(expression);
+  boolean isLockedOnInstance=false;
+  boolean isLockedOnClass=false;
+  final GrMethod containingMethod=PsiTreeUtil.getParentOfType(expression,GrMethod.class);
+  if (containingMethod != null && containingMethod.hasModifierProperty(PsiModifier.SYNCHRONIZED)) {
+    if (containingMethod.hasModifierProperty(PsiModifier.STATIC)) {
+      isLockedOnClass=true;
+    }
+ else {
+      isLockedOnInstance=true;
+    }
+  }
+  PsiElement elementToCheck=expression;
+  while (true) {
+    final GrSynchronizedStatement syncStatement=PsiTreeUtil.getParentOfType(elementToCheck,GrSynchronizedStatement.class);
+    if (syncStatement == null) {
+      break;
+    }
+    final GrExpression lockExpression=syncStatement.getMonitor();
+    if (lockExpression instanceof GrReferenceExpression) {
+      final GrReferenceExpression reference=(GrReferenceExpression)lockExpression;
+      final PsiElement referent=reference.resolve();
+      if (referent instanceof PsiField) {
+        final PsiField referentField=(PsiField)referent;
+        if (referentField.hasModifierProperty(PsiModifier.STATIC)) {
+          isLockedOnClass=true;
+        }
+ else {
+          isLockedOnInstance=true;
+        }
+      }
+    }
+ else     if (lockExpression instanceof GrThisReferenceExpression) {
+      isLockedOnInstance=true;
+    }
+    elementToCheck=syncStatement;
+  }
+  if (!isLockedOnInstance || isLockedOnClass) {
+    return;
+  }
+  final PsiElement referent=expression.resolve();
+  if (!(referent instanceof PsiField)) {
+    return;
+  }
+  final PsiField referredField=(PsiField)referent;
+  if (!referredField.hasModifierProperty(PsiModifier.STATIC) || isConstant(referredField)) {
+    return;
+  }
+  final PsiClass containingClass=referredField.getContainingClass();
+  if (!PsiTreeUtil.isAncestor(containingClass,expression,false)) {
+    return;
+  }
+  registerError(expression);
+}
