@@ -1,0 +1,40 @@
+{
+  if (context == null || !context.isValid())   return;
+  String prefix=context.getText().substring(0,completionContext.getStartOffset() - context.getTextRange().getStartOffset());
+  final int i=prefix.lastIndexOf('.');
+  String packagePrefix="";
+  if (i > 0) {
+    packagePrefix=prefix.substring(0,i);
+  }
+  final PsiManager manager=context.getManager();
+  final Set<String> qnames=new THashSet<String>();
+  final JavaPsiFacade facade=JavaPsiFacade.getInstance(manager.getProject());
+  final PsiShortNamesCache cache=facade.getShortNamesCache();
+  final GlobalSearchScope scope=context.getContainingFile().getResolveScope();
+  final String[] names=cache.getAllClassNames(true);
+  Arrays.sort(names,new Comparator<String>(){
+    public int compare(    final String o1,    final String o2){
+      return o1.compareToIgnoreCase(o2);
+    }
+  }
+);
+  boolean lookingForAnnotations=false;
+  final PsiElement prevSibling=context.getParent().getPrevSibling();
+  if (prevSibling instanceof PsiJavaToken && ((PsiJavaToken)prevSibling).getTokenType() == JavaTokenType.AT) {
+    lookingForAnnotations=true;
+  }
+  final CamelHumpMatcher matcher=new CamelHumpMatcher(completionContext.getPrefix());
+  for (  final String name : names) {
+    if (!matcher.prefixMatches(name))     continue;
+    for (    PsiClass psiClass : cache.getClassesByName(name,scope)) {
+      if (lookingForAnnotations && !psiClass.isAnnotationType())       continue;
+      if (JavaCompletionUtil.isInExcludedPackage(psiClass))       continue;
+      final String qualifiedName=psiClass.getQualifiedName();
+      if (qualifiedName == null || !qualifiedName.startsWith(packagePrefix))       continue;
+      if (!myFilter.isAcceptable(psiClass,context))       continue;
+      if (qnames.add(qualifiedName)) {
+        set.addElement(createLookupItem(psiClass));
+      }
+    }
+  }
+}
