@@ -2,12 +2,10 @@
   FileDocumentManager.getInstance().saveAllDocuments();
   LOG.assertTrue(antBuildListener != null);
   final AntCommandLineBuilder builder=new AntCommandLineBuilder();
-  final BuildProgressWindow progress;
   final AntBuildMessageView messageView;
   final GeneralCommandLine commandLine;
 synchronized (builder) {
     Project project=buildFile.getProject();
-    progress=!buildFile.isRunInBackground() ? new BuildProgressWindow(project) : null;
     try {
       builder.setBuildFile(buildFile.getAllOptions(),VfsUtil.virtualToIoFile(buildFile.getVirtualFile()));
       builder.calculateProperties(dataContext);
@@ -15,7 +13,6 @@ synchronized (builder) {
       messageView=prepareMessageView(buildMessageViewToReuse,buildFile,targets);
       commandLine=CommandLineBuilder.createFromJavaParameters(builder.getCommandLine());
       messageView.setBuildCommandLine(commandLine.getCommandLineString());
-      if (progress != null)       progress.start();
     }
  catch (    RunCanceledException e) {
       e.showMessage(project,AntBundle.message("run.ant.erorr.dialog.title"));
@@ -37,18 +34,20 @@ catch (    Throwable e) {
       return;
     }
   }
-  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
-    public void run(){
-synchronized (builder) {
-        try {
-          runBuild(progress,messageView,buildFile,antBuildListener,commandLine);
-        }
- catch (        Throwable e) {
-          LOG.error(e);
-          antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
-        }
+  final boolean startInBackground=buildFile.isRunInBackground();
+  new Task.Backgroundable(null,AntBundle.message("ant.build.progress.dialog.title"),true){
+    public boolean shouldStartInBackground(){
+      return startInBackground;
+    }
+    public void run(    @NotNull final ProgressIndicator indicator){
+      try {
+        runBuild(indicator,messageView,buildFile,antBuildListener,commandLine);
+      }
+ catch (      Throwable e) {
+        LOG.error(e);
+        antBuildListener.buildFinished(AntBuildListener.FAILED_TO_RUN,0);
       }
     }
   }
-);
+.queue();
 }
