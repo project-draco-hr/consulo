@@ -1,18 +1,18 @@
 {
   super.doOKAction();
   GrTypeElement typeElement=getEnteredTypeName();
-  DItemElement myDynamicElement;
+  final DItemElement dynamicElement;
   if (QuickfixUtil.isCall(myReferenceExpression)) {
     final String[] methodArgumentsNames=QuickfixUtil.getMethodArgumentsNames(((GrCallExpression)myReferenceExpression.getParent()));
     final String[] methodArgumentsTypes=QuickfixUtil.getMethodArgumentsTypes(((GrCallExpression)myReferenceExpression.getParent()));
     final List<MyPair> pairs=QuickfixUtil.swapArgumentsAndTypes(methodArgumentsNames,methodArgumentsTypes);
-    myDynamicElement=new DMethodElement(myReferenceExpression.getName(),null,pairs);
+    dynamicElement=new DMethodElement(myReferenceExpression.getName(),null,pairs);
   }
  else {
-    myDynamicElement=new DPropertyElement(myReferenceExpression.getName(),null);
+    dynamicElement=new DPropertyElement(myReferenceExpression.getName(),null);
   }
   if (typeElement == null) {
-    myDynamicElement.setType("java.lang.Object");
+    dynamicElement.setType("java.lang.Object");
   }
  else {
     PsiType type=typeElement.getType();
@@ -21,19 +21,35 @@
     }
     final String typeQualifiedName=type.getCanonicalText();
     if (typeQualifiedName != null) {
-      myDynamicElement.setType(typeQualifiedName);
+      dynamicElement.setType(typeQualifiedName);
     }
  else {
-      myDynamicElement.setType(type.getPresentableText());
+      dynamicElement.setType(type.getPresentableText());
     }
   }
   final DynamicManager dynamicManager=DynamicManager.getInstance(myProject);
   final DClassElement classElement=dynamicManager.getOrCreateClassElement(myProject,getEnteredContaningClass().getContainingClass().getQualifiedName());
-  if (myDynamicElement instanceof DMethodElement) {
-    dynamicManager.addMethod(classElement,((DMethodElement)myDynamicElement));
+  final Document document=PsiDocumentManager.getInstance(myProject).getDocument(myReferenceExpression.getContainingFile());
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      UndoManager.getInstance(myProject).undoableActionPerformed(new UndoableAction(){
+        public void undo() throws UnexpectedUndoException {
+          dynamicManager.removeItemElement(dynamicElement);
+          myDynamicManager.fireChange();
+        }
+        public void redo() throws UnexpectedUndoException {
+          addElement(dynamicElement,dynamicManager,classElement);
+        }
+        public DocumentReference[] getAffectedDocuments(){
+          return new DocumentReference[]{DocumentReferenceByDocument.createDocumentReference(document)};
+        }
+        public boolean isComplex(){
+          return true;
+        }
+      }
+);
+      addElement(dynamicElement,dynamicManager,classElement);
+    }
   }
- else {
-    dynamicManager.addProperty(classElement,((DPropertyElement)myDynamicElement));
-  }
-  myDynamicManager.fireChange();
+,"Add dynamic element",null);
 }
