@@ -1,53 +1,69 @@
 {
   final PatternMatcher matcher=new Perl5Matcher();
   final Pattern pattern=CompletionUtil.createCamelHumpsMatcher(myPrefix);
-  Object oldSelected=myList.getSelectedValue();
-  DefaultListModel model=new DefaultListModel();
-  ArrayList<LookupItem> array=new ArrayList<LookupItem>();
-  Set<LookupItem> first=new THashSet<LookupItem>();
+  Object oldSelected=myPreselectedItem != null ? null : myList.getSelectedValue();
+  DefaultListModel model=(DefaultListModel)myList.getModel();
+  model.clear();
+  ArrayList<LookupItem> allItems=new ArrayList<LookupItem>();
+  Set<LookupItem> firstItems=new THashSet<LookupItem>();
+  final boolean hasPreselectedItem=myPreselectedItem != null && myPreselectedItem != EMPTY_LOOKUP_ITEM;
+  boolean addPreselected=hasPreselectedItem;
   for (  final LookupItemWeightComparable comparable : myItemsMap.keySet()) {
-    final List<LookupItem> items=myItemsMap.get(comparable);
+    final SortedSet<LookupItem> items=myItemsMap.get(comparable);
     final List<LookupItem> suitable=new SmartList<LookupItem>();
     for (    final LookupItem item : items) {
       if (suits(item,matcher,pattern)) {
         suitable.add(item);
       }
     }
-    if (array.size() + suitable.size() > MAX_PREFERRED_COUNT)     break;
+    if (allItems.size() + suitable.size() + (addPreselected ? 1 : 0) > MAX_PREFERRED_COUNT)     break;
     for (    final LookupItem item : suitable) {
-      array.add(item);
-      first.add(item);
+      allItems.add(item);
+      firstItems.add(item);
       model.addElement(item);
-    }
-  }
-  myPreferredItemsCount=array.size();
-  for (  LookupItem<?> item : myItems) {
-    if (!first.contains(item) && suits(item,matcher,pattern)) {
-      model.addElement(item);
-      array.add(item);
-    }
-  }
-  boolean isEmpty=array.isEmpty();
-  if (isEmpty) {
-    LookupItem<String> item=new LookupItem<String>(LangBundle.message("completion.no.suggestions"),"");
-    item.setAttribute(EMPTY_ITEM_ATTRIBUTE,"");
-    model.addElement(item);
-    array.add(item);
-  }
-  myList.setModel(model);
-  myList.setVisibleRowCount(Math.min(myList.getModel().getSize(),CodeInsightSettings.getInstance().LOOKUP_HEIGHT));
-  if (!isEmpty) {
-    selectMostPreferableItem();
-    if (myIndex >= 0) {
-      ListScrollingUtil.selectItem(myList,myIndex);
-    }
- else {
-      if (oldSelected == null || !ListScrollingUtil.selectItem(myList,oldSelected)) {
-        ListScrollingUtil.selectItem(myList,0);
+      if (hasPreselectedItem && item == myPreselectedItem) {
+        addPreselected=false;
       }
     }
   }
-  LookupItem[] items=array.toArray(new LookupItem[array.size()]);
-  int maxWidth=myCellRenderer.getMaximumWidth(items);
-  myList.setFixedCellWidth(maxWidth);
+  if (addPreselected) {
+    allItems.add(myPreselectedItem);
+    firstItems.add(myPreselectedItem);
+    model.addElement(myPreselectedItem);
+  }
+  myPreferredItemsCount=allItems.size();
+  for (  LookupItem<?> item : myItems) {
+    if (!firstItems.contains(item) && suits(item,matcher,pattern)) {
+      model.addElement(item);
+      allItems.add(item);
+    }
+  }
+  boolean isEmpty=allItems.isEmpty();
+  if (isEmpty) {
+    LookupItem<String> item=new LookupItem<String>(myCalculating ? " " : LangBundle.message("completion.no.suggestions"),"                       ");
+    item.setAttribute(EMPTY_ITEM_ATTRIBUTE,"");
+    model.addElement(item);
+    allItems.add(item);
+  }
+  myList.setFixedCellHeight(myCellRenderer.getListCellRendererComponent(myList,myList.getModel().getElementAt(0),0,false,false).getPreferredSize().height);
+  myList.setVisibleRowCount(Math.min(myList.getModel().getSize(),CodeInsightSettings.getInstance().LOOKUP_HEIGHT));
+  if (!isEmpty) {
+    if (oldSelected != null) {
+      if (!ListScrollingUtil.selectItem(myList,oldSelected)) {
+        selectMostPreferableItem();
+      }
+    }
+ else {
+      if (myPreselectedItem == EMPTY_LOOKUP_ITEM) {
+        selectMostPreferableItem();
+        myPreselectedItem=getCurrentItem();
+      }
+ else       if (hasPreselectedItem) {
+        ListScrollingUtil.selectItem(myList,myPreselectedItem);
+      }
+ else {
+        selectMostPreferableItem();
+      }
+    }
+  }
 }

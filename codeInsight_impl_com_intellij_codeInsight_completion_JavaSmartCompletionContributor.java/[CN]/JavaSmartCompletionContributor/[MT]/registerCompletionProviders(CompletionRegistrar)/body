@@ -6,7 +6,46 @@
       final Set<CompletionVariant> keywordVariants=new HashSet<CompletionVariant>();
       final CompletionContext context=parameters.getPosition().getUserData(CompletionContext.COMPLETION_CONTEXT_KEY);
       context.setPrefix(identifierCopy,context.getStartOffset(),SMART_DATA);
-      PsiFile file=parameters.getOriginalFile();
+      final PsiFile file=parameters.getOriginalFile();
+      final DefaultInsertHandler defaultHandler=new DefaultInsertHandler();
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          if (JavaSmartCompletionData.AFTER_NEW.accepts(identifierCopy) && !JavaSmartCompletionData.AFTER_THROW_NEW.accepts(identifierCopy)) {
+            final PsiExpression expr=PsiTreeUtil.getContextOfType(parameters.getPosition(),PsiExpression.class,true);
+            if (expr != null) {
+              final ExpectedTypeInfo[] expectedInfos=ExpectedTypesProvider.getInstance(file.getProject()).getExpectedTypes(expr,true);
+              for (              final ExpectedTypeInfo info : expectedInfos) {
+                final PsiType type=info.getType();
+                if (type instanceof PsiClassType) {
+                  addExpectedType(result,defaultHandler,expectedInfos,type);
+                  final PsiType defaultType=info.getDefaultType();
+                  if (!defaultType.equals(type)) {
+                    addExpectedType(result,defaultHandler,expectedInfos,defaultType);
+                  }
+                  final PsiClassType.ClassResolveResult baseResult=JavaCompletionUtil.originalize((PsiClassType)type).resolveGenerics();
+                  final PsiClass baseClass=baseResult.getElement();
+                  final PsiSubstitutor baseSubstitutor=baseResult.getSubstitutor();
+                  final THashSet<PsiType> statVariants=new THashSet<PsiType>();
+                  final Processor<PsiClass> processor=CodeInsightUtil.createInheritorsProcessor(parameters.getPosition(),(PsiClassType)type,0,false,statVariants,baseClass,baseSubstitutor);
+                  final StatisticsInfo[] statisticsInfos=StatisticsManager.getInstance().getAllValues(JavaStatisticsManager.getMemberUseKey1(type));
+                  for (                  final StatisticsInfo statisticsInfo : statisticsInfos) {
+                    final String value=statisticsInfo.getValue();
+                    if (value.startsWith(JavaStatisticsManager.CLASS_PREFIX)) {
+                      final String qname=value.substring(JavaStatisticsManager.CLASS_PREFIX.length());
+                      final PsiClass[] classes=JavaPsiFacade.getInstance(file.getProject()).findClasses(qname,file.getResolveScope());
+                      ContainerUtil.process(classes,processor);
+                    }
+                  }
+                  for (                  final PsiType variant : statVariants) {
+                    addExpectedType(result,defaultHandler,expectedInfos,variant);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+);
       final PsiReference ref=identifierCopy.getContainingFile().findReferenceAt(identifierCopy.getTextRange().getStartOffset());
       if (ref != null) {
         SMART_DATA.completeReference(ref,set,identifierCopy,result.getPrefixMatcher(),file,context.getStartOffset());
@@ -15,17 +54,19 @@
       SMART_DATA.completeKeywordsBySet(set,keywordVariants,identifierCopy,result.getPrefixMatcher(),file);
       JavaCompletionUtil.highlightMembersOfContainer(set);
       final PsiExpression expr=PsiTreeUtil.getContextOfType(parameters.getPosition(),PsiExpression.class,true);
-      final ExpectedTypeInfo[] expectedInfos=expr != null ? ExpectedTypesProvider.getInstance(context.project).getExpectedTypes(expr,true) : null;
-      final DefaultInsertHandler defaultHandler=new DefaultInsertHandler();
+      final ExpectedTypeInfo[] expectedInfos=ApplicationManager.getApplication().runReadAction(new Computable<ExpectedTypeInfo[]>(){
+        public ExpectedTypeInfo[] compute(){
+          return expr != null ? ExpectedTypesProvider.getInstance(context.project).getExpectedTypes(expr,true) : null;
+        }
+      }
+);
       for (      final LookupItem item : set) {
         final Object o=item.getObject();
         InsertHandler oldHandler=item.getInsertHandler();
         if (oldHandler == null) {
           oldHandler=defaultHandler;
         }
-        item.setInsertHandler(new AnalyzingInsertHandler(o,expectedInfos,oldHandler));
-      }
-      for (      final LookupItem item : set) {
+        item.setInsertHandler(new AnalyzingInsertHandler(expectedInfos,oldHandler));
         result.addElement(item);
       }
     }

@@ -1,6 +1,11 @@
 {
   if (context == null || !context.isValid())   return;
-  String prefix=context.getText().substring(0,completionContext.getStartOffset() - context.getTextRange().getStartOffset());
+  String prefix=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+    public String compute(){
+      return context.getText().substring(0,completionContext.getStartOffset() - context.getTextRange().getStartOffset());
+    }
+  }
+);
   final int i=prefix.lastIndexOf('.');
   String packagePrefix="";
   if (i > 0) {
@@ -18,12 +23,6 @@
     }
   }
 );
-  Arrays.sort(names,new Comparator<String>(){
-    public int compare(    final String o1,    final String o2){
-      return o1.compareToIgnoreCase(o2);
-    }
-  }
-);
   boolean lookingForAnnotations=false;
   final PsiElement prevSibling=context.getParent().getPrevSibling();
   if (prevSibling instanceof PsiJavaToken && ((PsiJavaToken)prevSibling).getTokenType() == JavaTokenType.AT) {
@@ -33,14 +32,15 @@
   for (  final String name : names) {
     if (!matcher.prefixMatches(name))     continue;
     ProgressManager.getInstance().checkCanceled();
-    for (    PsiClass psiClass : cache.getClassesByName(name,scope)) {
+    final PsiClass[] classes=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass[]>(){
+      public PsiClass[] compute(){
+        return cache.getClassesByName(name,scope);
+      }
+    }
+);
+    for (    PsiClass psiClass : classes) {
       ProgressManager.getInstance().checkCanceled();
-      if (lookingForAnnotations && !psiClass.isAnnotationType())       continue;
-      if (JavaCompletionUtil.isInExcludedPackage(psiClass))       continue;
-      final String qualifiedName=psiClass.getQualifiedName();
-      if (qualifiedName == null || !qualifiedName.startsWith(packagePrefix))       continue;
-      if (!myFilter.isAcceptable(psiClass,context))       continue;
-      if (qnames.add(qualifiedName)) {
+      if (isSuitable(context,packagePrefix,qnames,lookingForAnnotations,psiClass)) {
         set.addElement(createLookupItem(psiClass,afterNew));
       }
     }

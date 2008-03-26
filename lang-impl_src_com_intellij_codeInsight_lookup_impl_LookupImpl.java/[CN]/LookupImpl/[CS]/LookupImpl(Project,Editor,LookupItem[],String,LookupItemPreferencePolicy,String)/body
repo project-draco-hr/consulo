@@ -2,89 +2,65 @@
   super(new JPanel(new BorderLayout()));
   myProject=project;
   myEditor=editor;
-  myItems=items;
   myItemPreferencePolicy=itemPreferencePolicy;
   myPrefix=StringUtil.notNullize(prefix);
   myInitialPrefix=myPrefix;
-  myItemsMap=initWeightMap();
-  myList=new JList();
+  final Document document=myEditor.getDocument();
+  final PsiFile psiFile=PsiDocumentManager.getInstance(myProject).getPsiFile(document);
+  myElement=psiFile == null ? null : psiFile.findElementAt(myEditor.getCaretModel().getOffset());
+  final PsiProximityComparator proximityComparator=new PsiProximityComparator(myElement == null ? psiFile : myElement);
+  myComparator=new Comparator<LookupItem>(){
+    public int compare(    LookupItem o1,    LookupItem o2){
+      double priority1=o1.getPriority();
+      double priority2=o2.getPriority();
+      if (priority1 > priority2)       return -1;
+      if (priority2 > priority1)       return 1;
+      int grouping1=o1.getGrouping();
+      int grouping2=o2.getGrouping();
+      if (grouping1 > grouping2)       return -1;
+      if (grouping2 > grouping1)       return 1;
+      int stringCompare=o1.getLookupString().compareToIgnoreCase(o2.getLookupString());
+      if (stringCompare != 0)       return stringCompare;
+      final int proximityCompare=proximityComparator.compare(o1.getObject(),o2.getObject());
+      if (proximityCompare != 0)       return proximityCompare;
+      return o1.hashCode() - o2.hashCode();
+    }
+  }
+;
+  myItems=new TreeSet<LookupItem>(myComparator);
+  myItemsMap=new TreeMap<LookupItemWeightComparable,SortedSet<LookupItem>>();
+  myProcessIcon=new AsyncProcessIcon("Completion progress");
+  myProcessIcon.setVisible(false);
+  myList=new JList(new DefaultListModel()){
+    public Dimension getPreferredScrollableViewportSize(){
+      return super.getPreferredScrollableViewportSize();
+    }
+    public Dimension getPreferredSize(){
+      return super.getPreferredSize();
+    }
+  }
+;
   myCellRenderer=new LookupCellRenderer(this);
   myList.setCellRenderer(myCellRenderer);
+  for (  final LookupItem item : items) {
+    addItem(item);
+  }
   updateList();
   myList.setFocusable(false);
   myList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
   myList.setBackground(LookupCellRenderer.BACKGROUND_COLOR);
   JScrollPane scrollPane=new JScrollPane(myList);
   scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-  getComponent().add(scrollPane,BorderLayout.CENTER);
+  getComponent().add(scrollPane,BorderLayout.NORTH);
   scrollPane.setBorder(null);
+  JPanel bottomPanel=new JPanel(new BorderLayout());
+  bottomPanel.add(myProcessIcon,BorderLayout.EAST);
+  final JComponent adComponent=HintUtil.createAdComponent(bottomText);
   if (StringUtil.isNotEmpty(bottomText)) {
-    getComponent().add(HintUtil.createAdComponent(bottomText),BorderLayout.SOUTH);
+    adComponent.setPreferredSize(new Dimension(adComponent.getPreferredSize().width,myProcessIcon.getPreferredSize().height));
   }
+  bottomPanel.add(adComponent,BorderLayout.CENTER);
+  getComponent().add(bottomPanel,BorderLayout.SOUTH);
   getComponent().setBorder(new BegPopupMenuBorder());
-  myEditorCaretListener=new CaretListener(){
-    public void caretPositionChanged(    CaretEvent e){
-      int curOffset=myEditor.getCaretModel().getOffset();
-      if (curOffset != getLookupStart() + myPrefix.length()) {
-        hide();
-      }
-    }
-  }
-;
-  myEditor.getCaretModel().addCaretListener(myEditorCaretListener);
-  myEditorMouseListener=new EditorMouseAdapter(){
-    public void mouseClicked(    EditorMouseEvent e){
-      e.consume();
-      hide();
-    }
-  }
-;
-  myEditor.addEditorMouseListener(myEditorMouseListener);
-  myEditor.getDocument().addDocumentListener(new DocumentAdapter(){
-    public void documentChanged(    DocumentEvent e){
-      if (!myLookupStartMarker.isValid()) {
-        hide();
-      }
-    }
-  }
-,this);
-  myList.addListSelectionListener(new ListSelectionListener(){
-    public void valueChanged(    ListSelectionEvent e){
-      LookupItem item=(LookupItem)myList.getSelectedValue();
-      if (item != null && item.getAttribute(EMPTY_ITEM_ATTRIBUTE) != null) {
-        item=null;
-      }
-      fireCurrentItemChanged(item);
-    }
-  }
-);
-  myList.addMouseListener(new MouseAdapter(){
-    public void mouseClicked(    MouseEvent e){
-      if (e.getClickCount() == 2) {
-        CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
-          public void run(){
-            finishLookup(NORMAL_SELECT_CHAR);
-          }
-        }
-,"",null);
-      }
-    }
-  }
-);
   selectMostPreferableItem();
-  final Application application=ApplicationManager.getApplication();
-  if (!application.isUnitTestMode()) {
-    application.invokeLater(new Runnable(){
-      public void run(){
-        if (myIndex >= 0 && myIndex < myList.getModel().getSize()) {
-          ListScrollingUtil.selectItem(myList,myIndex);
-        }
- else         if (myItems.length > 0) {
-          ListScrollingUtil.selectItem(myList,0);
-        }
-      }
-    }
-);
-  }
-  myEditor.putUserData(LOOKUP_IN_EDITOR_KEY,this);
 }

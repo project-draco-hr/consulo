@@ -1,0 +1,60 @@
+{
+  final Pair<CompletionContext,PsiElement> insertedInfo=new WriteCommandAction<Pair<CompletionContext,PsiElement>>(context.project){
+    protected void run(    Result<Pair<CompletionContext,PsiElement>> result) throws Throwable {
+      result.setResult(insertDummyIdentifier(context,dummyIdentifier));
+    }
+  }
+.execute().getResultObject();
+  final PsiElement insertedElement=insertedInfo.getSecond();
+  insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,insertedInfo.getFirst());
+  final CompletionParametersImpl parameters=new CompletionParametersImpl(insertedInfo.getSecond(),insertedInfo.getFirst().file,myCompletionType);
+  final String adText=CompletionService.getCompletionService().getAdvertisementText(myCompletionType,parameters);
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,adText,this,insertedInfo.getFirst());
+  final Runnable computeRunnable=new Runnable(){
+    public void run(){
+      ProgressManager.getInstance().runProcess(new Runnable(){
+        public void run(){
+          try {
+            final LookupData data=computeLookupData(insertedElement,insertedInfo.getFirst(),parameters,indicator);
+            insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,null);
+            if (data == null) {
+              indicator.cancel();
+              return;
+            }
+            final LookupItem[] items=data.items;
+            if (items.length == 0) {
+              indicator.cancel();
+              invokeAndWait(new Runnable(){
+                public void run(){
+                  handleEmptyLookup(context,data,adText);
+                }
+              }
+,context.editor);
+              return;
+            }
+            final String prefix=data.prefix;
+            context.setPrefix(data.prefix);
+            context.setStartOffset(offset1 - prefix.length());
+            if (shouldAutoComplete(items,context)) {
+              LookupItem item=items[0];
+              computingFinished(data,null,prefix,item.getLookupString(),item,false,indicator,offset2,context,offset1);
+            }
+ else {
+              computingFinished(data,items,prefix,null,null,true,indicator,offset2,context,offset1);
+            }
+          }
+ catch (          ProcessCanceledException e) {
+          }
+        }
+      }
+,indicator);
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    computeRunnable.run();
+  }
+ else {
+    ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
+  }
+}
