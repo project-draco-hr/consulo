@@ -10,43 +10,19 @@
   final CompletionParametersImpl parameters=new CompletionParametersImpl(insertedInfo.getSecond(),insertedInfo.getFirst().file,myCompletionType);
   final String adText=CompletionService.getCompletionService().getAdvertisementText(parameters);
   final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,adText,this,insertedInfo.getFirst());
+  final Semaphore startSemaphore=new Semaphore();
+  startSemaphore.down();
+  final Ref<LookupData> data=Ref.create(null);
   final Runnable computeRunnable=new Runnable(){
     public void run(){
       ProgressManager.getInstance().runProcess(new Runnable(){
         public void run(){
           try {
-            final LookupData data=computeLookupData(insertedElement,insertedInfo.getFirst(),parameters,indicator);
-            if (data == null) {
-              indicator.cancel();
-              return;
-            }
-            final LookupItem[] items=data.items;
-            if (items.length == 0) {
-              indicator.cancel();
-              invokeAndWait(new Runnable(){
-                public void run(){
-                  HintManager.getInstance().hideAllHints();
-                  handleEmptyLookup(context,data,parameters);
-                }
-              }
-,context.editor);
-              return;
-            }
-            final String prefix=data.prefix;
-            context.setPrefix(data.prefix);
-            context.setStartOffset(offset1 - prefix.length());
-            if (shouldAutoComplete(items,context)) {
-              LookupItem item=items[0];
-              computingFinished(data,null,prefix,item.getLookupString(),item,false,indicator,offset2,context,offset1);
-            }
- else {
-              computingFinished(data,items,prefix,null,null,true,indicator,offset2,context,offset1);
-            }
+            startSemaphore.up();
+            final LookupData value=computeLookupData(insertedElement,insertedInfo.getFirst(),parameters,indicator);
+            data.set(value);
           }
  catch (          ProcessCanceledException e) {
-          }
- finally {
-            insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,null);
           }
         }
       }
@@ -54,10 +30,27 @@
     }
   }
 ;
+  final Queue<AWTEvent> queue=new Queue<AWTEvent>(10);
   if (ApplicationManager.getApplication().isUnitTestMode()) {
     computeRunnable.run();
   }
  else {
     ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
+    startSemaphore.waitFor();
+    IdeEventQueue.getInstance().pumpEventsForHierarchy(indicator.getLookup().getComponent(),new Condition<AWTEvent>(){
+      public boolean value(      final AWTEvent object){
+        if (object instanceof KeyEvent && !indicator.isInitialized()) {
+          final KeyEvent event=(KeyEvent)object;
+          queue.addLast(new KeyEvent(event.getComponent(),event.getID(),event.getWhen(),event.getModifiers(),event.getKeyCode(),event.getKeyChar(),event.getKeyLocation()));
+        }
+ else         if (indicator.getLookup().isVisible()) {
+          flushQueue(queue);
+        }
+        return !indicator.isRunning();
+      }
+    }
+);
   }
+  computingFinished(data.get(),indicator,context,parameters,offset1,offset2);
+  flushQueue(queue);
 }
