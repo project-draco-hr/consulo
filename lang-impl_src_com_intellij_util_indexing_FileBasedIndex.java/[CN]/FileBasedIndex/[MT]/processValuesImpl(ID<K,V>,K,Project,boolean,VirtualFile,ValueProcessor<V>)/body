@@ -1,75 +1,60 @@
 {
-  try {
-    ensureUpToDate(indexId);
-    final UpdatableIndex<K,V,FileContent> index=getIndex(indexId);
-    if (index == null) {
-      return;
-    }
-    final Lock readLock=index.getReadLock();
-    readLock.lock();
+  for (int attempt=0; attempt < 2; attempt++) {
     try {
-      final ValueContainer<V> container=index.getData(dataKey);
-      if (restrictToFile != null) {
-        final int restrictedFileId=getFileId(restrictToFile);
-        if (CachesBasedRefSearcher.DEBUG) {
-          System.out.println("FileBasedIndex.processValuesImpl restricted");
-          System.out.println("indexId = " + indexId);
-          System.out.println("id = " + restrictedFileId);
-          System.out.println("file = " + restrictToFile.getPresentableUrl());
-          System.out.println("k = " + dataKey);
-          System.out.println("IndexInfrastructure.getIndexRootDir(indexId) = " + IndexInfrastructure.getIndexRootDir(indexId));
-        }
-        for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
-          final V value=valueIt.next();
-          if (container.isAssociated(value,restrictedFileId)) {
-            processor.process(restrictToFile,value);
+      ensureUpToDate(indexId);
+      final UpdatableIndex<K,V,FileContent> index=getIndex(indexId);
+      if (index == null) {
+        return;
+      }
+      final Lock readLock=index.getReadLock();
+      readLock.lock();
+      try {
+        final ValueContainer<V> container=index.getData(dataKey);
+        if (restrictToFile != null) {
+          final int restrictedFileId=getFileId(restrictToFile);
+          for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+            final V value=valueIt.next();
+            if (container.isAssociated(value,restrictedFileId)) {
+              processor.process(restrictToFile,value);
+            }
           }
         }
-      }
  else {
-        final DirectoryIndex dirIndex=DirectoryIndex.getInstance(project);
-        final PersistentFS fs=(PersistentFS)PersistentFS.getInstance();
-        for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
-          final V value=valueIt.next();
-          for (final ValueContainer.IntIterator inputIdsIterator=container.getInputIdsIterator(value); inputIdsIterator.hasNext(); ) {
-            final int id=inputIdsIterator.next();
-            if (CachesBasedRefSearcher.DEBUG) {
-              System.out.println("FileBasedIndex.processValuesImpl");
-              System.out.println("indexId = " + indexId);
-              System.out.println("id = " + id);
-              System.out.println("k = " + dataKey);
-              System.out.println("IndexInfrastructure.getIndexRootDir(indexId) = " + IndexInfrastructure.getIndexRootDir(indexId));
-            }
-            VirtualFile file=IndexInfrastructure.findFileById(dirIndex,fs,id);
-            if (file != null) {
-              if (CachesBasedRefSearcher.DEBUG) {
-                System.out.println("file = " + file.getPresentableUrl());
-              }
-              processor.process(file,value);
-              if (ensureValueProcessedOnce) {
-                break;
+          final DirectoryIndex dirIndex=DirectoryIndex.getInstance(project);
+          final PersistentFS fs=(PersistentFS)PersistentFS.getInstance();
+          for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+            final V value=valueIt.next();
+            for (final ValueContainer.IntIterator inputIdsIterator=container.getInputIdsIterator(value); inputIdsIterator.hasNext(); ) {
+              final int id=inputIdsIterator.next();
+              VirtualFile file=IndexInfrastructure.findFileById(dirIndex,fs,id);
+              if (file != null) {
+                processor.process(file,value);
+                if (ensureValueProcessedOnce) {
+                  break;
+                }
               }
             }
           }
         }
       }
-    }
   finally {
-      readLock.unlock();
+        readLock.unlock();
+      }
+      break;
     }
-  }
- catch (  StorageException e) {
-    requestRebuild(indexId);
-    LOG.error(e);
-  }
-catch (  RuntimeException e) {
-    final Throwable cause=e.getCause();
-    if (cause instanceof StorageException || cause instanceof IOException) {
+ catch (    StorageException e) {
       requestRebuild(indexId);
-      LOG.error(e);
+      LOG.info(e);
     }
+catch (    RuntimeException e) {
+      final Throwable cause=e.getCause();
+      if (cause instanceof StorageException || cause instanceof IOException) {
+        requestRebuild(indexId);
+        LOG.info(e);
+      }
  else {
-      throw e;
+        throw e;
+      }
     }
   }
 }
