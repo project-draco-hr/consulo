@@ -1,0 +1,73 @@
+{
+  final FileTemplateManager fileTemplateManager=FileTemplateManager.getInstance();
+  final FileTemplate template=fileTemplateManager.getTemplate(XSLT_TEMPLATE_NAME);
+  final VirtualFile file=VfsUtil.findFileByURL(XsltConfig.class.getResource(XSLT_TEMPLATE_LOCATION));
+  String templateText=null;
+  try {
+    if (file != null) {
+      templateText=new String(FileUtil.adaptiveLoadText(new InputStreamReader(file.getInputStream(),"UTF-8")));
+    }
+ else {
+      templateText=null;
+    }
+  }
+ catch (  IOException e) {
+    LOG.error("Error loading bundled XSLT template text",e);
+  }
+  if (ENABLED) {
+    ChooseByNameRegistry.getInstance().contributeToSymbols(new XsltChooseByNameContributor());
+    final Language xmlLang=StdFileTypes.XML.getLanguage();
+    final Language xpathLang=XPathFileType.XPATH.getLanguage();
+    final XsltAnnotator annotator=new XsltAnnotator();
+    LanguageAnnotators.INSTANCE.addExpicitExtension(xpathLang,annotator);
+    final XsltDocumentationProvider provider=new XsltDocumentationProvider();
+    LanguageDocumentation.INSTANCE.addExpicitExtension(xmlLang,provider);
+    LanguageDocumentation.INSTANCE.addExpicitExtension(xpathLang,provider);
+    final IntentionManager intentionManager=IntentionManager.getInstance();
+    intentionManager.registerIntentionAndMetaData(new AddOptionalArgumentsIntention(),CATEGORY);
+    intentionManager.registerIntentionAndMetaData(new ConvertIfToChooseIntention(),CATEGORY);
+    intentionManager.registerIntentionAndMetaData(new ReplaceWithXslAttribute(),CATEGORY);
+    intentionManager.registerIntentionAndMetaData(new InlineXslAttribute(),CATEGORY);
+    final XsltFormattingModelBuilder builder=new XsltFormattingModelBuilder(LanguageFormatting.INSTANCE.forLanguage(xmlLang));
+    LanguageFormatting.INSTANCE.addExpicitExtension(xmlLang,builder);
+    final ExternalResourceManagerEx erm=ExternalResourceManagerEx.getInstanceEx();
+    erm.addIgnoredResource(XsltSupport.PLUGIN_EXTENSIONS_NS);
+    if (REGISTER_SCHEMA) {
+      final String resourceLocation=erm.getResourceLocation(XsltSupport.XSLT_NS);
+      final Class<?> clazz=XsltConfig.class;
+      final URL resource=clazz.getResource(XSLT_SCHEMA_LOCATION);
+      LOG.info("Adding resource for '" + XsltSupport.XSLT_NS + "': "+ resource);
+      if (resourceLocation != XsltSupport.XSLT_NS && !resourceLocation.equals(resource.toExternalForm())) {
+        LOG.info("Warning: Resource for '" + XsltSupport.XSLT_NS + "' is already registered to: "+ resourceLocation);
+      }
+ else {
+        erm.addStdResource(XsltSupport.XSLT_NS,XSLT_SCHEMA_LOCATION,clazz);
+      }
+    }
+    if (REGISTER_TEMPLATE) {
+      final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
+      final FileType type=fileTypeManager.getFileTypeByExtension("xsl");
+      if (type == StdFileTypes.UNKNOWN) {
+        LOG.info("Registered extension 'xsl' with XML File Type");
+        fileTypeManager.associateExtension(StdFileTypes.XML,"xsl");
+      }
+ else       if (type != StdFileTypes.XML) {
+        LOG.info("Conflicting FileType registered for extension 'xsl': " + type.getDescription());
+        myExtensionConflict=true;
+      }
+      if (templateText != null) {
+        if (!myExtensionConflict && template == null) {
+          final FileTemplate fileTemplate=fileTemplateManager.addTemplate(XSLT_TEMPLATE_NAME,"xsl");
+          fileTemplate.setText(templateText);
+          fileTemplate.setAdjust(true);
+        }
+ else         if (template != null && template.getText().equals(templateText)) {
+          fileTemplateManager.removeTemplate(template,true);
+        }
+      }
+    }
+  }
+ else   if (template != null && template.getText().equals(templateText)) {
+    fileTemplateManager.removeTemplate(template,true);
+  }
+}
