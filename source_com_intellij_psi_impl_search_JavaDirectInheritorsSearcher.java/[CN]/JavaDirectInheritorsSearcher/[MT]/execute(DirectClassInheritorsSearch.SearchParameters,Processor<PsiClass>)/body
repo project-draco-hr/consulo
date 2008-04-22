@@ -1,13 +1,13 @@
 {
   final PsiClass aClass=p.getClassToProcess();
-  PsiManagerImpl psiManager=(PsiManagerImpl)PsiManager.getInstance(aClass.getProject());
+  final PsiManagerImpl psiManager=(PsiManagerImpl)PsiManager.getInstance(aClass.getProject());
   final SearchScope useScope=ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>(){
     public SearchScope compute(){
       return aClass.getUseScope();
     }
   }
 );
-  String qualifiedName=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+  final String qualifiedName=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
     public String compute(){
       return aClass.getQualifiedName();
     }
@@ -22,38 +22,29 @@
     }
 );
   }
-  final RepositoryManager repositoryManager=psiManager.getRepositoryManager();
-  final RepositoryElementsManager repositoryElementsManager=psiManager.getRepositoryElementsManager();
-  long[] candidateIds=ApplicationManager.getApplication().runReadAction(new Computable<long[]>(){
-    public long[] compute(){
-      RepositoryIndex repositoryIndex=repositoryManager.getIndex();
-      final VirtualFileFilter rootFilter;
-      if (useScope instanceof GlobalSearchScope) {
-        rootFilter=repositoryIndex.rootFilterBySearchScope((GlobalSearchScope)useScope);
-      }
- else {
-        rootFilter=null;
-      }
-      final String qName=aClass.getQualifiedName();
-      return repositoryIndex.getNameOccurrencesInExtendsLists(qName != null ? qName : aClass.getName(),rootFilter);
+  final GlobalSearchScope scope=useScope instanceof GlobalSearchScope ? (GlobalSearchScope)useScope : null;
+  final String searchKey=aClass.getName();
+  Collection<PsiReferenceList> candidates=ApplicationManager.getApplication().runReadAction(new Computable<Collection<PsiReferenceList>>(){
+    public Collection<PsiReferenceList> compute(){
+      return JavaSuperClassNameOccurenceIndex.getInstance().get(searchKey,psiManager.getProject(),scope);
     }
   }
 );
-  final boolean includeAnonymous=p.includeAnonymous();
-  final ClassView classView=repositoryManager.getClassView();
-  for (  final long candidateId : candidateIds) {
+  for (  PsiReferenceList referenceList : candidates) {
     ProgressManager.getInstance().checkCanceled();
-    PsiClass candidate=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>(){
-      public PsiClass compute(){
-        if (!includeAnonymous && classView.isAnonymous(candidateId))         return null;
-        final RepositoryPsiElement candidate=repositoryElementsManager.findOrCreatePsiElementById(candidateId);
-        LOG.assertTrue(candidate == null || candidate.isValid());
-        return (PsiClass)candidate;
+    PsiClass candidate=(PsiClass)referenceList.getParent();
+    if (!consumer.process(candidate))     return false;
+  }
+  if (p.includeAnonymous()) {
+    Collection<PsiAnonymousClass> anonymousCandidates=ApplicationManager.getApplication().runReadAction(new Computable<Collection<PsiAnonymousClass>>(){
+      public Collection<PsiAnonymousClass> compute(){
+        return JavaAnonymousClassBaseRefOccurenceIndex.getInstance().get(searchKey,psiManager.getProject(),scope);
       }
     }
 );
-    if (candidate != null && !consumer.process(candidate)) {
-      return false;
+    for (    PsiAnonymousClass candidate : anonymousCandidates) {
+      ProgressManager.getInstance().checkCanceled();
+      if (!consumer.process(candidate))       return false;
     }
   }
   return true;
