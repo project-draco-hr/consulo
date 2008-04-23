@@ -1,0 +1,132 @@
+{
+  super(project,true);
+  myProject=project;
+  myExecutors=executors;
+  myShowVcsCommit=showVcsCommit;
+  myVcs=singleVcs;
+  if (!myShowVcsCommit && ((myExecutors == null) || myExecutors.size() == 0)) {
+    throw new IllegalArgumentException("nothing found to execute commit with");
+  }
+  myAllOfDefaultChangeListChangesIncluded=changes.containsAll(defaultChangeList.getChanges());
+  myIsAlien=isAlien;
+  if (isAlien) {
+    AlienChangeListBrowser browser=new AlienChangeListBrowser(project,changeLists,changes,initialSelection,true,true,singleVcs);
+    myBrowser=browser;
+    myBrowserExtender=browser;
+  }
+ else {
+    MultipleChangeListBrowser browser=new MultipleChangeListBrowser(project,changeLists,changes,initialSelection,true,true);
+    myBrowser=browser;
+    myBrowserExtender=browser.getExtender();
+  }
+  myBrowserExtender.addToolbarActions(this);
+  myBrowserExtender.addSelectedListChangeListener(new SelectedListChangeListener(){
+    public void selectedListChanged(){
+      updateComment();
+      updateVcsOptionsVisibility();
+    }
+  }
+);
+  myBrowser.setDiffExtendUIFactory(new ShowDiffAction.DiffExtendUIFactory(){
+    public List<? extends AnAction> createActions(    final Change change){
+      return myBrowser.createDiffActions(change);
+    }
+    @Nullable public JComponent createBottomComponent(){
+      return new DiffCommitMessageEditor(CommitChangeListDialog.this);
+    }
+  }
+);
+  myCommitMessageArea=new CommitMessage();
+  setCommitMessage(VcsConfiguration.getInstance(project).LAST_COMMIT_MESSAGE);
+  myCommitMessageArea.init();
+  updateComment();
+  String messageFromVcs=getInitialMessageFromVcs();
+  if (messageFromVcs != null) {
+    myCommitMessageArea.setText(messageFromVcs);
+  }
+  myActionName=VcsBundle.message("commit.dialog.title");
+  myAdditionalOptionsPanel=new JPanel();
+  myAdditionalOptionsPanel.setLayout(new BorderLayout());
+  Box optionsBox=Box.createVerticalBox();
+  boolean hasVcsOptions=false;
+  Box vcsCommitOptions=Box.createVerticalBox();
+  final List<AbstractVcs> vcses=getAffectedVcses();
+  for (  AbstractVcs vcs : vcses) {
+    final CheckinEnvironment checkinEnvironment=vcs.getCheckinEnvironment();
+    if (checkinEnvironment != null) {
+      final RefreshableOnComponent options=checkinEnvironment.createAdditionalOptionsPanel(this);
+      if (options != null) {
+        JPanel vcsOptions=new JPanel(new BorderLayout());
+        vcsOptions.add(options.getComponent(),BorderLayout.CENTER);
+        vcsOptions.add(SeparatorFactory.createSeparator(vcs.getDisplayName(),null),BorderLayout.NORTH);
+        vcsCommitOptions.add(vcsOptions);
+        myPerVcsOptionsPanels.put(vcs,vcsOptions);
+        myAdditionalComponents.add(options);
+        hasVcsOptions=true;
+      }
+    }
+  }
+  if (hasVcsOptions) {
+    vcsCommitOptions.add(Box.createVerticalGlue());
+    optionsBox.add(vcsCommitOptions);
+  }
+  boolean beforeVisible=false;
+  boolean afterVisible=false;
+  Box beforeBox=Box.createVerticalBox();
+  Box afterBox=Box.createVerticalBox();
+  final List<CheckinHandlerFactory> handlerFactories=ProjectLevelVcsManager.getInstance(project).getRegisteredCheckinHandlerFactories();
+  for (  CheckinHandlerFactory factory : handlerFactories) {
+    final CheckinHandler handler=factory.createHandler(this);
+    myHandlers.add(handler);
+    final RefreshableOnComponent beforePanel=handler.getBeforeCheckinConfigurationPanel();
+    if (beforePanel != null) {
+      beforeBox.add(beforePanel.getComponent());
+      beforeVisible=true;
+      myAdditionalComponents.add(beforePanel);
+    }
+    final RefreshableOnComponent afterPanel=handler.getAfterCheckinConfigurationPanel();
+    if (afterPanel != null) {
+      afterBox.add(afterPanel.getComponent());
+      afterVisible=true;
+      myAdditionalComponents.add(afterPanel);
+    }
+  }
+  final String actionName=getCommitActionName();
+  final String borderTitleName=actionName.replace("_","");
+  if (beforeVisible) {
+    beforeBox.add(Box.createVerticalGlue());
+    beforeBox.add(SeparatorFactory.createSeparator(VcsBundle.message("border.standard.checkin.options.group",borderTitleName),null),0);
+    optionsBox.add(beforeBox);
+  }
+  if (afterVisible) {
+    afterBox.add(Box.createVerticalGlue());
+    afterBox.add(SeparatorFactory.createSeparator(VcsBundle.message("border.standard.after.checkin.options.group",borderTitleName),null),0);
+    optionsBox.add(afterBox);
+  }
+  if (hasVcsOptions || beforeVisible || afterVisible) {
+    optionsBox.add(Box.createVerticalGlue());
+    myAdditionalOptionsPanel.add(optionsBox,BorderLayout.NORTH);
+  }
+  setOKButtonText(actionName);
+  if (myShowVcsCommit) {
+    setTitle(myActionName);
+  }
+ else {
+    setTitle(trimEllipsis(myExecutors.get(0).getActionText()));
+  }
+  restoreState();
+  if (myExecutors != null) {
+    myExecutorActions=new Action[myExecutors.size()];
+    for (int i=0; i < myExecutors.size(); i++) {
+      final CommitExecutor commitExecutor=myExecutors.get(i);
+      myExecutorActions[i]=new CommitExecutorAction(commitExecutor,i == 0 && !myShowVcsCommit);
+    }
+  }
+ else {
+    myExecutorActions=null;
+  }
+  init();
+  updateButtons();
+  updateVcsOptionsVisibility();
+  myCommitMessageArea.requestFocusInMessage();
+}
