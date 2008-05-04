@@ -1,0 +1,55 @@
+{
+  if (parameters.getCompletionType() != CompletionType.BASIC)   return true;
+  if (parameters.getPosition().getContainingFile().getLanguage() == StdLanguages.JAVA) {
+    final PsiFile file=parameters.getOriginalFile();
+    final int startOffset=parameters.getOffset();
+    final PsiElement lastElement=file.findElementAt(startOffset - 1);
+    final PsiElement insertedElement=parameters.getPosition();
+    CompletionData completionData=ApplicationManager.getApplication().runReadAction(new Computable<CompletionData>(){
+      public CompletionData compute(){
+        return CompletionUtil.getCompletionData(lastElement,file,startOffset,getCompletionDataByElementInner(lastElement));
+      }
+    }
+);
+    result.setPrefixMatcher(completionData.findPrefix(insertedElement,startOffset));
+    final Set<LookupItem> lookupSet=new LinkedHashSet<LookupItem>();
+    final PsiReference ref=ApplicationManager.getApplication().runReadAction(new Computable<PsiReference>(){
+      public PsiReference compute(){
+        return insertedElement.getContainingFile().findReferenceAt(startOffset);
+      }
+    }
+);
+    if (ref != null) {
+      completionData.completeReference(ref,lookupSet,insertedElement,result.getPrefixMatcher(),parameters.getOriginalFile(),startOffset);
+    }
+    final Set<CompletionVariant> keywordVariants=new HashSet<CompletionVariant>();
+    completionData.addKeywordVariants(keywordVariants,insertedElement,parameters.getOriginalFile());
+    completionData.completeKeywordsBySet(lookupSet,keywordVariants,insertedElement,result.getPrefixMatcher(),parameters.getOriginalFile());
+    for (    final LookupItem item : lookupSet) {
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          JavaCompletionUtil.highlightMemberOfContainer(item);
+        }
+      }
+);
+      if (item.getInsertHandler() == null) {
+        item.setInsertHandler(new InsertHandler(){
+          public void handleInsert(          final CompletionContext context,          final int startOffset,          final LookupData data,          final LookupItem item,          final boolean signatureSelected,          final char completionChar){
+            analyzeItem(context,item,item.getObject(),parameters.getPosition());
+            new DefaultInsertHandler().handleInsert(context,startOffset,data,item,signatureSelected,completionChar);
+          }
+        }
+);
+      }
+      result.addElement(item);
+    }
+    return false;
+  }
+  final PsiElement parent=parameters.getPosition().getParent();
+  if (parent instanceof XmlAttributeValue) {
+    if (!XmlCompletionContributor.setNoneTailType(result,(XmlElement)parent,JavaClassReference.class,this,parameters)) {
+      return false;
+    }
+  }
+  return true;
+}

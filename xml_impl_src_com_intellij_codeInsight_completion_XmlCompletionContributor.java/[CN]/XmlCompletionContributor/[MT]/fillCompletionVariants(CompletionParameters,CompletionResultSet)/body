@@ -1,0 +1,72 @@
+{
+  final PsiElement element=parameters.getPosition();
+  if (parameters.getCompletionType() == CompletionType.BASIC) {
+    if (element.getParent() instanceof XmlAttributeValue) {
+      if (!setNoneTailType(result,(XmlElement)element.getParent(),FileReference.class,this,parameters)) {
+        return false;
+      }
+    }
+  }
+  if (parameters.getCompletionType() == CompletionType.CLASS_NAME) {
+    if (element.getParent() instanceof XmlAttributeValue) {
+      return CompletionService.getCompletionService().getVariantsFromContributors(EP_NAME,parameters,this,new Consumer<LookupElement>(){
+        public void consume(        final LookupElement lookupElement){
+          if (lookupElement.getTailType() == TailType.UNKNOWN) {
+            lookupElement.setTailType(EAT_QUOTE_TAIL_TYPE);
+          }
+          result.addElement(lookupElement);
+        }
+      }
+);
+    }
+    final ASTNode node=element.getNode();
+    if (node != null && node.getElementType() == XmlTokenType.XML_NAME) {
+      if (!(element.getParent() instanceof XmlTag)) {
+        return false;
+      }
+      final XmlTag parent=(XmlTag)element.getParent();
+      final String namespace=parent.getNamespace();
+      final XmlElementDescriptor parentDescriptor=ApplicationManager.getApplication().runReadAction(new Computable<XmlElementDescriptor>(){
+        public XmlElementDescriptor compute(){
+          return parent.getDescriptor();
+        }
+      }
+);
+      final String prefix=result.getPrefixMatcher().getPrefix();
+      final int pos=prefix.indexOf(':');
+      final String namespacePrefix=pos > 0 ? prefix.substring(0,pos) : null;
+      final PsiReference reference=parent.getReference();
+      if (reference != null && namespace.length() > 0 && parentDescriptor != null && !(parentDescriptor instanceof AnyXmlElementDescriptor)) {
+        final Set<LookupItem> set=new HashSet<LookupItem>();
+        new XmlCompletionData().completeReference(reference,set,element,result.getPrefixMatcher(),parameters.getOriginalFile(),parameters.getOffset());
+        for (        final LookupItem item : set) {
+          result.addElement(item);
+        }
+      }
+ else {
+        result.setPrefixMatcher(pos >= 0 ? prefix.substring(pos + 1) : prefix);
+        final XmlFile file=(XmlFile)parameters.getOriginalFile();
+        final List<Pair<String,String>> names=ApplicationManager.getApplication().runReadAction(new Computable<List<Pair<String,String>>>(){
+          public List<Pair<String,String>> compute(){
+            return XmlExtension.getExtension(file).getAvailableTagNames(file,parent);
+          }
+        }
+);
+        for (        Pair<String,String> pair : names) {
+          final String name=pair.getFirst();
+          final String ns=pair.getSecond();
+          final LookupItem item=new LookupItem<String>(name,name);
+          final XmlTagInsertHandler insertHandler=new ExtendedTagInsertHandler(name,ns,namespacePrefix);
+          item.setInsertHandler(insertHandler);
+          if (!StringUtil.isEmpty(ns)) {
+            item.setAttribute(LookupItem.TAIL_TEXT_ATTR," (" + ns + ")");
+            item.setAttribute(LookupItem.TAIL_TEXT_SMALL_ATTR,"");
+          }
+          result.addElement(item);
+        }
+      }
+      return false;
+    }
+  }
+  return true;
+}
