@@ -1,0 +1,45 @@
+{
+  MavenIndices.IndexData data=myIndicesData.get(index);
+  data.cache.close();
+  FileUtil.delete(getCacheDir(index));
+  data.cache=createCache(index);
+  Set<String> groupIds=new HashSet<String>();
+  Map<String,List<String>> artifactIds=new HashMap<String,List<String>>();
+  Map<String,List<String>> versions=new HashMap<String,List<String>>();
+  if (index.getKind() == MavenIndex.Kind.PROJECT) {
+    List<DomFileElement<MavenModel>> poms=PomDescriptor.collectProjectPoms(project);
+    for (    DomFileElement<MavenModel> each : poms) {
+      MavenId id=PomDescriptor.describe(each);
+      groupIds.add(id.groupId);
+      getOrCreate(artifactIds,id.groupId).add(id.artifactId);
+      getOrCreate(versions,id.groupId + ":" + id.artifactId).add(id.version);
+    }
+  }
+ else {
+    IndexReader r=data.context.getIndexReader();
+    for (int i=0; i < r.numDocs(); i++) {
+      Document doc=r.document(i);
+      String uinfo=doc.get(ArtifactInfo.UINFO);
+      if (uinfo == null)       continue;
+      List<String> parts=StringUtil.split(uinfo,"|");
+      String groupId=parts.get(0);
+      String artifactId=parts.get(1);
+      String version=parts.get(2);
+      groupIds.add(groupId);
+      getOrCreate(artifactIds,groupId).add(artifactId);
+      getOrCreate(versions,groupId + ":" + artifactId).add(version);
+    }
+  }
+  for (  String each : groupIds) {
+    data.cache.groupIds.enumerate(each);
+  }
+  for (  Map.Entry<String,List<String>> each : artifactIds.entrySet()) {
+    data.cache.artifactIds.put(each.getKey(),each.getValue());
+  }
+  for (  Map.Entry<String,List<String>> each : versions.entrySet()) {
+    data.cache.versions.put(each.getKey(),each.getValue());
+  }
+  data.cache.groupIds.flush();
+  data.cache.artifactIds.flush();
+  data.cache.versions.flush();
+}
