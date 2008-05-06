@@ -1,12 +1,92 @@
 {
-  extend(CompletionType.SMART,psiElement(),new CompletionProvider<CompletionParameters>(){
+  final DefaultInsertHandler defaultHandler=new DefaultInsertHandler();
+  final GeneratorFilter filter=new GeneratorFilter(AssignableGroupFilter.class,new ExpectedTypesGetter());
+  extend(CompletionType.SMART,PsiJavaPatterns.psiElement().afterLeaf(PsiJavaPatterns.psiElement().withText(".").afterLeaf(PsiJavaPatterns.psiElement().withParent(PsiJavaPatterns.psiElement().referencing(psiClass())))),new CompletionProvider<CompletionParameters>(){
+    public void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext context,    @NotNull final CompletionResultSet result){
+      try {
+        final PsiElement element=parameters.getPosition();
+        addKeyword(result,element,filter,PsiKeyword.CLASS,parameters);
+        addKeyword(result,element,filter,PsiKeyword.THIS,parameters);
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+    private void addKeyword(    final CompletionResultSet result,    final PsiElement element,    final GeneratorFilter filter,    final String s,    CompletionParameters parameters) throws IncorrectOperationException {
+      final PsiKeyword keyword=JavaPsiFacade.getInstance(element.getProject()).getElementFactory().createKeyword(s);
+      if (filter.isAcceptable(keyword,element)) {
+        result.addElement(LookupItemUtil.objectToLookupItem(keyword).setAutoCompletionPolicy(AutoCompletionPolicy.GIVE_CHANCE_TO_OVERWRITE).setInsertHandler(new AnalyzingInsertHandler(parameters,defaultHandler)));
+      }
+    }
+  }
+);
+  extend(CompletionType.SMART,PsiJavaPatterns.psiElement().inside(PsiJavaPatterns.psiElement(PsiDocTag.class).withName(string().oneOf(PsiKeyword.THROWS,JavaSmartCompletionData.EXCEPTION_TAG))),new CompletionProvider<CompletionParameters>(){
+    public void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext context,    @NotNull final CompletionResultSet result){
+      final PsiElement element=parameters.getPosition();
+      final CompletionContext completionContext=element.getUserData(CompletionContext.COMPLETION_CONTEXT_KEY);
+      for (      final Object object : new ThrowsListGetter().get(element,completionContext)) {
+        result.addElement(LookupItemUtil.objectToLookupItem(object).setInsertHandler(new AnalyzingInsertHandler(parameters,defaultHandler)).setTailType(TailType.SPACE));
+      }
+    }
+  }
+);
+  extend(CompletionType.SMART,PsiJavaPatterns.psiElement().withSuperParent(2,or(PsiJavaPatterns.psiElement(PsiConditionalExpression.class).withParent(PsiReturnStatement.class),PsiJavaPatterns.psiElement(PsiReturnStatement.class))),new CompletionProvider<CompletionParameters>(){
+    public void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext context,    @NotNull final CompletionResultSet result){
+      final ContextGetter chooser=new JavaSmartCompletionData.EmptyCollectionGetter();
+      final PsiElement element=parameters.getPosition();
+      final CompletionContext completionContext=element.getUserData(CompletionContext.COMPLETION_CONTEXT_KEY);
+      for (      final Object object : chooser.get(element,completionContext)) {
+        result.addElement(JavaAwareCompletionData.qualify(LookupItemUtil.objectToLookupItem(object).setAutoCompletionPolicy(AutoCompletionPolicy.NEVER_AUTOCOMPLETE).setTailType(TailType.NONE)).setInsertHandler(new AnalyzingInsertHandler(parameters,defaultHandler)));
+      }
+    }
+  }
+);
+  extend(CompletionType.SMART,or(PsiJavaPatterns.psiElement().withParent(PsiNameValuePair.class),PsiJavaPatterns.psiElement().withSuperParent(2,PsiNameValuePair.class)),new CompletionProvider<CompletionParameters>(){
+    public void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext context,    @NotNull final CompletionResultSet result){
+      final ContextGetter chooser=new ContextGetter(){
+        public Object[] get(        PsiElement element,        CompletionContext context){
+          final Set<Object> result=new THashSet<Object>();
+          final ExpectedTypesGetter expectedTypesGetter=new ExpectedTypesGetter();
+          final Object[] objects=expectedTypesGetter.get(element,context);
+          if (objects != null) {
+            for (            final Object object : objects) {
+              if (object instanceof PsiType) {
+                PsiType type=(PsiType)object;
+                if (type instanceof PsiArrayType) {
+                  type=((PsiArrayType)type).getComponentType();
+                }
+                if (type instanceof PsiClassType) {
+                  final PsiClass psiClass=((PsiClassType)type).resolve();
+                  if (psiClass != null && psiClass.isAnnotationType()) {
+                    result.add(psiClass);
+                  }
+                }
+              }
+            }
+          }
+          return result.toArray(new Object[result.size()]);
+        }
+      }
+;
+      final PsiElement element=parameters.getPosition();
+      final CompletionContext completionContext=element.getUserData(CompletionContext.COMPLETION_CONTEXT_KEY);
+      final ElementPattern<? extends PsiElement> leftNeighbor=PsiJavaPatterns.psiElement().afterLeaf(PsiJavaPatterns.psiElement().withText("."));
+      final boolean needQualify=leftNeighbor.accepts(element);
+      for (      final Object object : chooser.get(element,completionContext)) {
+        final LookupItem item=LookupItemUtil.objectToLookupItem(object).setTailType(TailType.NONE);
+        if (needQualify)         JavaAwareCompletionData.qualify(item);
+        result.addElement(item.setInsertHandler(new AnalyzingInsertHandler(parameters,defaultHandler)));
+      }
+    }
+  }
+);
+  extend(CompletionType.SMART,psiElement(),new CompletionProvider<CompletionParameters>(true,false){
     public void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext matchingContext,    @NotNull final CompletionResultSet result){
       final Set<LookupItem> set=new LinkedHashSet<LookupItem>();
       final PsiElement identifierCopy=parameters.getPosition();
       final Set<CompletionVariant> keywordVariants=new HashSet<CompletionVariant>();
       result.setPrefixMatcher(SMART_DATA.findPrefix(identifierCopy,parameters.getOffset()));
       final PsiFile file=parameters.getOriginalFile();
-      final DefaultInsertHandler defaultHandler=new DefaultInsertHandler();
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         public void run(){
           if (JavaSmartCompletionData.AFTER_NEW.accepts(identifierCopy) && !JavaSmartCompletionData.AFTER_THROW_NEW.accepts(identifierCopy)) {
@@ -58,20 +138,13 @@
       SMART_DATA.addKeywordVariants(keywordVariants,identifierCopy,file);
       SMART_DATA.completeKeywordsBySet(set,keywordVariants,identifierCopy,result.getPrefixMatcher(),file);
       JavaCompletionUtil.highlightMembersOfContainer(set);
-      final PsiExpression expr=PsiTreeUtil.getContextOfType(parameters.getPosition(),PsiExpression.class,true);
-      final ExpectedTypeInfo[] expectedInfos=ApplicationManager.getApplication().runReadAction(new Computable<ExpectedTypeInfo[]>(){
-        public ExpectedTypeInfo[] compute(){
-          return expr != null ? ExpectedTypesProvider.getInstance(parameters.getPosition().getProject()).getExpectedTypes(expr,true) : null;
-        }
-      }
-);
       for (      final LookupItem item : set) {
         final Object o=item.getObject();
         InsertHandler oldHandler=item.getInsertHandler();
         if (oldHandler == null) {
           oldHandler=defaultHandler;
         }
-        item.setInsertHandler(new AnalyzingInsertHandler(expectedInfos,oldHandler));
+        item.setInsertHandler(new AnalyzingInsertHandler(parameters,oldHandler));
         result.addElement(item);
       }
     }
