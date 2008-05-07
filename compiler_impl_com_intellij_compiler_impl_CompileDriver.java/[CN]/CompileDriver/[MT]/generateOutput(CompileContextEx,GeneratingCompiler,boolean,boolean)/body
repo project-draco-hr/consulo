@@ -1,51 +1,60 @@
 {
   final GeneratingCompiler.GenerationItem[] allItems=compiler.getGenerationItems(context);
   final List<GeneratingCompiler.GenerationItem> toGenerate=new ArrayList<GeneratingCompiler.GenerationItem>();
-  final StateCache<ValidityState> cache=getGeneratingCompilerCache(compiler);
-  final Set<String> pathsToRemove=new HashSet<String>(Arrays.asList(cache.getUrls()));
-  final Map<GeneratingCompiler.GenerationItem,String> itemToOutputPathMap=new HashMap<GeneratingCompiler.GenerationItem,String>();
-  ApplicationManager.getApplication().runReadAction(new Runnable(){
-    public void run(){
-      for (      final GeneratingCompiler.GenerationItem item : allItems) {
-        final Module itemModule=item.getModule();
-        final String outputDirPath=getGenerationOutputPath(compiler,itemModule,item.isTestSource());
-        final String outputPath=outputDirPath + "/" + item.getPath();
-        itemToOutputPathMap.put(item,outputPath);
-        final ValidityState savedState=cache.getState(outputPath);
-        if (forceGenerate || savedState == null || !savedState.equalsTo(item.getValidityState())) {
-          final String outputPathUrl=VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL,outputPath);
-          if (context.getCompileScope().belongs(outputPathUrl)) {
-            toGenerate.add(item);
-          }
- else {
-            pathsToRemove.remove(outputPath);
-          }
-        }
- else {
-          pathsToRemove.remove(outputPath);
-        }
-      }
-    }
-  }
-);
-  if (onlyCheckStatus) {
-    if ((toGenerate.isEmpty() && pathsToRemove.isEmpty())) {
-      return false;
-    }
-    if (LOG.isDebugEnabled()) {
-      if (!toGenerate.isEmpty()) {
-        LOG.debug("Found items to generate, compiler " + compiler.getDescription());
-      }
-      if (!pathsToRemove.isEmpty()) {
-        LOG.debug("Found paths to remove, compiler " + compiler.getDescription());
-      }
-    }
-    throw new ExitException(ExitStatus.CANCELLED);
-  }
   final List<File> filesToRefresh=new ArrayList<File>();
   final List<File> generatedFiles=new ArrayList<File>();
   final List<Module> affectedModules=new ArrayList<Module>();
   try {
+    final StateCache<ValidityState> cache=getGeneratingCompilerCache(compiler);
+    final Set<String> pathsToRemove=new HashSet<String>(cache.getUrls());
+    final Map<GeneratingCompiler.GenerationItem,String> itemToOutputPathMap=new HashMap<GeneratingCompiler.GenerationItem,String>();
+    final IOException[] ex=new IOException[]{null};
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (        final GeneratingCompiler.GenerationItem item : allItems) {
+          final Module itemModule=item.getModule();
+          final String outputDirPath=getGenerationOutputPath(compiler,itemModule,item.isTestSource());
+          final String outputPath=outputDirPath + "/" + item.getPath();
+          itemToOutputPathMap.put(item,outputPath);
+          try {
+            final ValidityState savedState=cache.getState(outputPath);
+            if (forceGenerate || savedState == null || !savedState.equalsTo(item.getValidityState())) {
+              final String outputPathUrl=VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL,outputPath);
+              if (context.getCompileScope().belongs(outputPathUrl)) {
+                toGenerate.add(item);
+              }
+ else {
+                pathsToRemove.remove(outputPath);
+              }
+            }
+ else {
+              pathsToRemove.remove(outputPath);
+            }
+          }
+ catch (          IOException e) {
+            ex[0]=e;
+          }
+        }
+      }
+    }
+);
+    if (ex[0] != null) {
+      throw ex[0];
+    }
+    if (onlyCheckStatus) {
+      if ((toGenerate.isEmpty() && pathsToRemove.isEmpty())) {
+        return false;
+      }
+      if (LOG.isDebugEnabled()) {
+        if (!toGenerate.isEmpty()) {
+          LOG.debug("Found items to generate, compiler " + compiler.getDescription());
+        }
+        if (!pathsToRemove.isEmpty()) {
+          LOG.debug("Found paths to remove, compiler " + compiler.getDescription());
+        }
+      }
+      throw new ExitException(ExitStatus.CANCELLED);
+    }
     if (!pathsToRemove.isEmpty()) {
       context.getProgressIndicator().pushState();
       context.getProgressIndicator().setText(CompilerBundle.message("progress.synchronizing.output.directory"));
@@ -99,7 +108,12 @@
       }
     }
   }
-  finally {
+ catch (  IOException e) {
+    LOG.info(e);
+    context.requestRebuildNextTime(e.getMessage());
+    throw new ExitException(ExitStatus.ERRORS);
+  }
+ finally {
     context.getProgressIndicator().pushState();
     CompilerUtil.refreshIOFiles(filesToRefresh);
     if (forceGenerate && !generatedFiles.isEmpty()) {
@@ -118,11 +132,6 @@
       }
 );
     }
-    if (cache.isDirty()) {
-      context.getProgressIndicator().setText(CompilerBundle.message("progress.saving.caches"));
-      cache.save();
-    }
-    context.getProgressIndicator().popState();
   }
   return !toGenerate.isEmpty() || !filesToRefresh.isEmpty();
 }

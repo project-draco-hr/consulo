@@ -8,33 +8,42 @@
   final CompileScope scope=context.getCompileScope();
   final List<FileProcessingCompiler.ProcessingItem> toProcess=new ArrayList<FileProcessingCompiler.ProcessingItem>();
   final Set<String> allUrls=new HashSet<String>();
+  final IOException[] ex=new IOException[]{null};
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
-      for (      FileProcessingCompiler.ProcessingItem item : items) {
-        final VirtualFile file=item.getFile();
-        if (file == null) {
-          LOG.assertTrue(false,"FileProcessingCompiler.ProcessingItem.getFile() must not return null: compiler " + adapter.getCompiler().getDescription());
-        }
-        final String url=file.getUrl();
-        allUrls.add(url);
-        if (!forceCompile && cache.getTimestamp(url) == file.getTimeStamp()) {
-          final ValidityState state=cache.getExtState(url);
-          final ValidityState itemState=item.getValidityState();
-          if (state != null ? state.equalsTo(itemState) : itemState == null) {
-            continue;
+      try {
+        for (        FileProcessingCompiler.ProcessingItem item : items) {
+          final VirtualFile file=item.getFile();
+          if (file == null) {
+            LOG.assertTrue(false,"FileProcessingCompiler.ProcessingItem.getFile() must not return null: compiler " + adapter.getCompiler().getDescription());
           }
+          final String url=file.getUrl();
+          allUrls.add(url);
+          if (!forceCompile && cache.getTimestamp(url) == file.getTimeStamp()) {
+            final ValidityState state=cache.getExtState(url);
+            final ValidityState itemState=item.getValidityState();
+            if (state != null ? state.equalsTo(itemState) : itemState == null) {
+              continue;
+            }
+          }
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Adding item to process: " + url + "; saved ts= "+ cache.getTimestamp(url)+ "; VFS ts="+ file.getTimeStamp());
+          }
+          toProcess.add(item);
         }
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Adding item to process: " + url + "; saved ts= "+ cache.getTimestamp(url)+ "; VFS ts="+ file.getTimeStamp());
-        }
-        toProcess.add(item);
+      }
+ catch (      IOException e) {
+        ex[0]=e;
       }
     }
   }
 );
-  final String[] urls=cache.getUrls();
+  if (ex[0] != null) {
+    throw ex[0];
+  }
+  final Collection<String> urls=cache.getUrls();
   final List<String> urlsToRemove=new ArrayList<String>();
-  if (urls.length > 0) {
+  if (urls.size() > 0) {
     context.getProgressIndicator().pushState();
     context.getProgressIndicator().setText(CompilerBundle.message("progress.processing.outdated.files"));
     ApplicationManager.getApplication().runReadAction(new Runnable(){
@@ -86,38 +95,37 @@
   if (processed.length > 0) {
     context.getProgressIndicator().pushState();
     context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
-    try {
-      List<VirtualFile> vFiles=new ArrayList<VirtualFile>(processed.length);
-      for (      FileProcessingCompiler.ProcessingItem aProcessed : processed) {
-        final VirtualFile file=aProcessed.getFile();
-        vFiles.add(file);
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("File processed by " + adapter.getCompiler().getDescription());
-          LOG.debug("\tFile processed " + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
-        }
-      }
-      LocalFileSystem.getInstance().refreshFiles(vFiles);
+    List<VirtualFile> vFiles=new ArrayList<VirtualFile>(processed.length);
+    for (    FileProcessingCompiler.ProcessingItem aProcessed : processed) {
+      final VirtualFile file=aProcessed.getFile();
+      vFiles.add(file);
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Files after VFS refresh:");
-        for (        VirtualFile file : vFiles) {
-          LOG.debug("\t" + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
-        }
+        LOG.debug("File processed by " + adapter.getCompiler().getDescription());
+        LOG.debug("\tFile processed " + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
       }
-      ApplicationManager.getApplication().runReadAction(new Runnable(){
-        public void run(){
+    }
+    LocalFileSystem.getInstance().refreshFiles(vFiles);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Files after VFS refresh:");
+      for (      VirtualFile file : vFiles) {
+        LOG.debug("\t" + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
+      }
+    }
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        try {
           for (          FileProcessingCompiler.ProcessingItem item : processed) {
             cache.update(item.getFile(),item.getValidityState());
           }
         }
+ catch (        IOException e) {
+          ex[0]=e;
+        }
       }
-);
     }
-  finally {
-      if (cache.isDirty()) {
-        context.getProgressIndicator().setText(CompilerBundle.message("progress.saving.caches"));
-        cache.save();
-      }
-      context.getProgressIndicator().popState();
+);
+    if (ex[0] != null) {
+      throw ex[0];
     }
   }
   return true;

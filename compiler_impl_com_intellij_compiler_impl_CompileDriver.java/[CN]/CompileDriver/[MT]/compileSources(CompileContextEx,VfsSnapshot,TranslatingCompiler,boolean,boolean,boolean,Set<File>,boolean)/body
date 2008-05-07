@@ -1,39 +1,48 @@
 {
-  final TranslatingCompilerStateCache cache=getTranslatingCompilerCache(compiler);
   final CompilerConfiguration compilerConfiguration=CompilerConfiguration.getInstance(myProject);
   context.getProgressIndicator().pushState();
   final boolean[] wereFilesDeleted=new boolean[]{false};
   final Set<VirtualFile> toCompile=new HashSet<VirtualFile>();
   try {
+    final TranslatingCompilerStateCache cache=getTranslatingCompilerCache(compiler);
     final Set<String> toDelete=new HashSet<String>();
     final Set<String> urlsWithSourceRemoved=new HashSet<String>();
+    final IOException[] ex=new IOException[]{null};
     ApplicationManager.getApplication().runReadAction(new Runnable(){
       public void run(){
-        findOutOfDateFiles(compiler,forceCompile,cache,toCompile,context,snapshot);
-        if (trackDependencies && !toCompile.isEmpty()) {
-          final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
-          final PsiManager psiManager=PsiManager.getInstance(myProject);
-          final VirtualFile[] filesToCompile=toCompile.toArray(new VirtualFile[toCompile.size()]);
-          Set<String> sourcesWithOutputRemoved=getSourcesWithOutputRemoved(cache);
-          for (          final VirtualFile file : filesToCompile) {
-            if (fileTypeManager.getFileTypeByFile(file) == StdFileTypes.JAVA) {
-              final PsiFile psiFile=psiManager.findFile(file);
-              if (psiFile != null) {
-                addDependentFiles(psiFile,toCompile,cache,sourcesWithOutputRemoved,compiler,context);
+        try {
+          findOutOfDateFiles(compiler,forceCompile,cache,toCompile,context,snapshot);
+          if (trackDependencies && !toCompile.isEmpty()) {
+            final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
+            final PsiManager psiManager=PsiManager.getInstance(myProject);
+            final VirtualFile[] filesToCompile=toCompile.toArray(new VirtualFile[toCompile.size()]);
+            Set<String> sourcesWithOutputRemoved=getSourcesWithOutputRemoved(cache);
+            for (            final VirtualFile file : filesToCompile) {
+              if (fileTypeManager.getFileTypeByFile(file) == StdFileTypes.JAVA) {
+                final PsiFile psiFile=psiManager.findFile(file);
+                if (psiFile != null) {
+                  addDependentFiles(psiFile,toCompile,cache,sourcesWithOutputRemoved,compiler,context);
+                }
               }
             }
           }
+          if (!isRebuild) {
+            final ProgressIndicator progressIndicator=context.getProgressIndicator();
+            progressIndicator.pushState();
+            progressIndicator.setText(CompilerBundle.message("progress.searching.for.files.to.delete"));
+            findFilesToDelete(compiler,snapshot,urlsWithSourceRemoved,cache,toCompile,context,toDelete,compilerConfiguration);
+            progressIndicator.popState();
+          }
         }
-        if (!isRebuild) {
-          final ProgressIndicator progressIndicator=context.getProgressIndicator();
-          progressIndicator.pushState();
-          progressIndicator.setText(CompilerBundle.message("progress.searching.for.files.to.delete"));
-          findFilesToDelete(compiler,snapshot,urlsWithSourceRemoved,cache,toCompile,context,toDelete,compilerConfiguration);
-          progressIndicator.popState();
+ catch (        IOException e) {
+          ex[0]=e;
         }
       }
     }
 );
+    if (ex[0] != null) {
+      throw ex[0];
+    }
     if (onlyCheckStatus) {
       if (toDelete.isEmpty() && toCompile.isEmpty()) {
         return false;
@@ -65,20 +74,10 @@
       updateInternalCaches(cache,context,exitStatus.getSuccessfullyCompiled(),exitStatus.getFilesToRecompile());
     }
   }
-  finally {
-    if (cache.isDirty()) {
-      context.getProgressIndicator().setText(CompilerBundle.message("progress.saving.caches"));
-      if (cache.isDirty()) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("--Saving translating cache for compiler " + compiler.getDescription());
-        }
-        cache.save();
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("--Done");
-        }
-      }
-    }
-    context.getProgressIndicator().popState();
+ catch (  IOException e) {
+    LOG.info(e);
+    context.requestRebuildNextTime(e.getMessage());
+    throw new ExitException(ExitStatus.ERRORS);
   }
   return !toCompile.isEmpty() || wereFilesDeleted[0];
 }
