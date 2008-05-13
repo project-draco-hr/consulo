@@ -1,0 +1,91 @@
+{
+synchronized (myTempPlaces) {
+    for (Iterator<Pair<SmartPsiElementPointer<PsiLanguageInjectionHost>,InjectedLanguage>> it=myTempPlaces.iterator(); it.hasNext(); ) {
+      final Pair<SmartPsiElementPointer<PsiLanguageInjectionHost>,InjectedLanguage> pair=it.next();
+      final PsiLanguageInjectionHost element=pair.first.getElement();
+      if (element == null) {
+        it.remove();
+      }
+ else       if (element == place) {
+        processor.process(pair.second.getLanguage(),Collections.singletonList(Trinity.create(element,pair.second,ElementManipulators.getManipulator(element).getRangeInElement(element))));
+        return;
+      }
+    }
+  }
+  final PsiElement child=place.getFirstChild();
+  if (child != null && child instanceof PsiJavaToken) {
+    if (((PsiJavaToken)child).getTokenType() == JavaTokenType.STRING_LITERAL) {
+      final PsiLiteralExpression firstLiteral=(PsiLiteralExpression)place;
+      if (!processAnnotationInjections(firstLiteral,processor)) {
+        final List<MethodParameterInjection> injections=myInjectionConfiguration.getParameterInjections();
+        for (        MethodParameterInjection injection : injections) {
+          if (injection.isApplicable(firstLiteral)) {
+            processInjectionWithContext(firstLiteral,injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),processor);
+            return;
+          }
+        }
+      }
+    }
+  }
+ else   if (place instanceof XmlTag) {
+    final XmlTag xmlTag=(XmlTag)place;
+    for (    final XmlTagInjection injection : myInjectionConfiguration.getTagInjections()) {
+      if (injection.isApplicable(xmlTag)) {
+        final Ref<Boolean> hasSubTags=Ref.create(Boolean.FALSE);
+        final List<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>> result=new ArrayList<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>>();
+        xmlTag.acceptChildren(new PsiElementVisitor(){
+          @Override public void visitElement(          final PsiElement element){
+            if (element instanceof XmlText) {
+              if (element.getTextLength() == 0)               return;
+              final List<TextRange> list=injection.getInjectedArea((XmlText)element);
+              final InjectedLanguage l=InjectedLanguage.create(injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),false);
+              for (              TextRange textRange : list) {
+                result.add(Trinity.create((PsiLanguageInjectionHost)element,l,textRange));
+              }
+            }
+ else             if (element instanceof XmlTag) {
+              hasSubTags.set(Boolean.TRUE);
+              if (injection.isApplyToSubTagTexts()) {
+                element.acceptChildren(this);
+              }
+            }
+          }
+        }
+);
+        if (!result.isEmpty()) {
+          final Language language=InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+          if (language == null)           continue;
+          result.get(0).first.putUserData(MultiHostInjector.HAS_UPARSABLE_FRAGMENTS,hasSubTags.get());
+          processor.process(language,result);
+        }
+        if (injection.isTerminal()) {
+          break;
+        }
+      }
+    }
+  }
+ else   if (place instanceof XmlAttributeValue) {
+    final XmlAttributeValue value=(XmlAttributeValue)place;
+    final PsiElement[] children=value.getChildren();
+    if (children.length < 3 || !(children[1] instanceof XmlToken) || ((XmlToken)children[1]).getTokenType() != XmlTokenType.XML_ATTRIBUTE_VALUE_TOKEN) {
+      return;
+    }
+    for (    XmlAttributeInjection injection : myInjectionConfiguration.getAttributeInjections()) {
+      if (injection.isApplicable(value)) {
+        final List<TextRange> ranges=injection.getInjectedArea(value);
+        if (ranges.isEmpty())         continue;
+        final Language language=InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+        if (language == null)         continue;
+        final List<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>> result=new ArrayList<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>>();
+        final InjectedLanguage l=InjectedLanguage.create(injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),false);
+        for (        TextRange textRange : ranges) {
+          result.add(Trinity.create((PsiLanguageInjectionHost)value,l,textRange));
+        }
+        processor.process(language,result);
+        if (injection.isTerminal()) {
+          break;
+        }
+      }
+    }
+  }
+}
