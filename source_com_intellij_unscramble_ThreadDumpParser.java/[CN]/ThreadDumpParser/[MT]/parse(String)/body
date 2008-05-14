@@ -1,0 +1,63 @@
+{
+  List<ThreadState> result=new ArrayList<ThreadState>();
+  StringBuilder lastThreadStack=new StringBuilder();
+  ThreadState lastThreadState=null;
+  boolean expectingThreadState=false;
+  boolean haveNonEmptyStackTrace=false;
+  for (  @NonNls String line : StringUtil.tokenize(threadDump,"\r\n")) {
+    if (line.startsWith("============") || line.contains("Java-level deadlock")) {
+      break;
+    }
+    ThreadState state=tryParseThreadStart(line);
+    if (state != null) {
+      if (lastThreadState != null) {
+        lastThreadState.setStackTrace(lastThreadStack.toString(),!haveNonEmptyStackTrace);
+      }
+      lastThreadState=state;
+      result.add(lastThreadState);
+      lastThreadStack.setLength(0);
+      haveNonEmptyStackTrace=false;
+      lastThreadStack.append(line).append("\n");
+      expectingThreadState=true;
+    }
+ else {
+      boolean parsedThreadState=false;
+      if (expectingThreadState) {
+        expectingThreadState=false;
+        parsedThreadState=tryParseThreadState(line,lastThreadState);
+      }
+      lastThreadStack.append(line).append("\n");
+      if (!parsedThreadState && line.trim().startsWith("at")) {
+        haveNonEmptyStackTrace=true;
+      }
+    }
+  }
+  if (lastThreadState != null) {
+    lastThreadState.setStackTrace(lastThreadStack.toString(),!haveNonEmptyStackTrace);
+  }
+  for (  ThreadState threadState : result) {
+    inferThreadStateDetail(threadState);
+    Matcher m=ourWaitingForLockPattern.matcher(threadState.getStackTrace());
+    if (m.find()) {
+      for (      ThreadState threadHoldingLock : result) {
+        if (threadHoldingLock == threadState)         continue;
+        String marker="- locked <" + m.group(2) + ">";
+        if (threadHoldingLock.getStackTrace().contains(marker)) {
+          if (threadState.isHoldingLock(threadHoldingLock)) {
+            threadState.addDeadlockedThread(threadHoldingLock);
+            threadHoldingLock.addDeadlockedThread(threadState);
+          }
+          threadHoldingLock.addWaitingThread(threadState);
+          break;
+        }
+      }
+    }
+  }
+  Collections.sort(result,new Comparator<ThreadState>(){
+    public int compare(    final ThreadState o1,    final ThreadState o2){
+      return getInterestLevel(o2) - getInterestLevel(o1);
+    }
+  }
+);
+  return result;
+}
