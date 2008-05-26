@@ -1,26 +1,35 @@
 {
   myVfManager=vfManager;
-  final FileBasedIndexExtension[] extensions=Extensions.getExtensions(FileBasedIndexExtension.EXTENSION_POINT_NAME);
-  for (  FileBasedIndexExtension<?,?> extension : extensions) {
-    myRebuildStatus.put(extension.getName(),new AtomicInteger(OK));
+  final File workInProgressFile=new File(IndexInfrastructure.getPersistenceRoot(),MARKER_FILE_NAME);
+  if (workInProgressFile.exists()) {
+    FileUtil.delete(IndexInfrastructure.getPersistenceRoot());
   }
-  for (  FileBasedIndexExtension<?,?> extension : extensions) {
-    registerIndexer(extension);
-  }
-  dropUnregisteredIndices();
-  for (  ID<?,?> indexId : myIndices.keySet()) {
-    if (myRebuildStatus.get(indexId).compareAndSet(REQUIRES_REBUILD,OK)) {
-      try {
-        clearIndex(indexId);
-      }
- catch (      StorageException e) {
-        requestRebuild(indexId);
-        LOG.error(e);
+  try {
+    final FileBasedIndexExtension[] extensions=Extensions.getExtensions(FileBasedIndexExtension.EXTENSION_POINT_NAME);
+    for (    FileBasedIndexExtension<?,?> extension : extensions) {
+      myRebuildStatus.put(extension.getName(),new AtomicInteger(OK));
+    }
+    for (    FileBasedIndexExtension<?,?> extension : extensions) {
+      registerIndexer(extension);
+    }
+    dropUnregisteredIndices();
+    for (    ID<?,?> indexId : myIndices.keySet()) {
+      if (myRebuildStatus.get(indexId).compareAndSet(REQUIRES_REBUILD,OK)) {
+        try {
+          clearIndex(indexId);
+        }
+ catch (        StorageException e) {
+          requestRebuild(indexId);
+          LOG.error(e);
+        }
       }
     }
+    myChangedFilesUpdater=new ChangedFilesUpdater();
+    vfManager.addVirtualFileListener(myChangedFilesUpdater);
+    vfManager.registerRefreshUpdater(myChangedFilesUpdater);
+    myFileContentAttic=new FileContentStorage(new File(IndexInfrastructure.getPersistenceRoot(),"updates.tmp"));
   }
-  myChangedFilesUpdater=new ChangedFilesUpdater();
-  vfManager.addVirtualFileListener(myChangedFilesUpdater);
-  vfManager.registerRefreshUpdater(myChangedFilesUpdater);
-  myFileContentAttic=new FileContentStorage(new File(IndexInfrastructure.getPersistenceRoot(),"updates.tmp"));
+  finally {
+    workInProgressFile.createNewFile();
+  }
 }
