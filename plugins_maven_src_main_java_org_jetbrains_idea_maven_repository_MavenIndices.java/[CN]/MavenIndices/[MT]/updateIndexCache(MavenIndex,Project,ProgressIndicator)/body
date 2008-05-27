@@ -1,8 +1,6 @@
 {
-  MavenIndices.IndexData data=myIndicesData.get(index);
-  data.cache.close();
-  FileUtil.delete(getCacheDir(index));
-  data.cache=createCache(index);
+  IndexData data=myIndicesData.get(index);
+  progress.setText2("Updating caches...");
   Set<String> groupIds=new HashSet<String>();
   Map<String,List<String>> artifactIds=new HashMap<String,List<String>>();
   Map<String,List<String>> versions=new HashMap<String,List<String>>();
@@ -17,7 +15,10 @@
   }
  else {
     IndexReader r=data.context.getIndexReader();
-    for (int i=0; i < r.numDocs(); i++) {
+    int total=r.numDocs();
+    for (int i=0; i < total; i++) {
+      progress.setFraction(i / total);
+      if (r.isDeleted(i))       continue;
       Document doc=r.document(i);
       String uinfo=doc.get(ArtifactInfo.UINFO);
       if (uinfo == null)       continue;
@@ -30,16 +31,26 @@
       getOrCreate(versions,groupId + ":" + artifactId).add(version);
     }
   }
-  for (  String each : groupIds) {
-    data.cache.groupIds.enumerate(each);
+  progress.startNonCancelableSection();
+  try {
+    progress.setText2("Saving caches...");
+    data.cache.close();
+    FileUtil.delete(getCacheDir(index));
+    data.cache=createCache(index);
+    for (    String each : groupIds) {
+      data.cache.groupIds.enumerate(each);
+    }
+    for (    Map.Entry<String,List<String>> each : artifactIds.entrySet()) {
+      data.cache.artifactIds.put(each.getKey(),each.getValue());
+    }
+    for (    Map.Entry<String,List<String>> each : versions.entrySet()) {
+      data.cache.versions.put(each.getKey(),each.getValue());
+    }
+    data.cache.groupIds.flush();
+    data.cache.artifactIds.flush();
+    data.cache.versions.flush();
   }
-  for (  Map.Entry<String,List<String>> each : artifactIds.entrySet()) {
-    data.cache.artifactIds.put(each.getKey(),each.getValue());
+  finally {
+    progress.finishNonCancelableSection();
   }
-  for (  Map.Entry<String,List<String>> each : versions.entrySet()) {
-    data.cache.versions.put(each.getKey(),each.getValue());
-  }
-  data.cache.groupIds.flush();
-  data.cache.artifactIds.flush();
-  data.cache.versions.flush();
 }
