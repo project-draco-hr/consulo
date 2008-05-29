@@ -5,46 +5,50 @@
   final PsiManager psiManager=PsiManager.getInstance(project);
   final List<Psi> result=new ArrayList<Psi>();
   final MyIndex<Key> index=(MyIndex<Key>)myIndices.get(indexKey);
-  final Lock lock=index.getReadLock();
-  lock.lock();
   try {
-    final ValueContainer<TIntArrayList> container=index.getData(key);
-    container.forEach(new ValueContainer.ContainerAction<TIntArrayList>(){
-      public void perform(      final int id,      final TIntArrayList value){
-        final VirtualFile file=IndexInfrastructure.findFileById(fs,id);
-        if (file != null && (scope == null || scope.contains(file))) {
-          final PsiFileWithStubSupport psiFile=(PsiFileWithStubSupport)psiManager.findFile(file);
-          if (psiFile != null) {
-            StubTree stubTree=psiFile.getStubTree();
-            if (stubTree == null) {
-              stubTree=StubTree.readFromVFile(file,project);
-              if (stubTree != null) {
-                final List<StubElement<?>> plained=stubTree.getPlainList();
-                for (int i=0; i < value.size(); i++) {
-                  final StubElement<?> stub=plained.get(value.get(i));
-                  final ASTNode tree=psiFile.findTreeForStub(stubTree,stub);
-                  if (tree != null) {
-                    if (tree.getElementType() == stub.getStubType()) {
-                      result.add((Psi)tree.getPsi());
-                    }
+    try {
+      index.getReadLock().lock();
+      final ValueContainer<TIntArrayList> container=index.getData(key);
+      container.forEach(new ValueContainer.ContainerAction<TIntArrayList>(){
+        public void perform(        final int id,        final TIntArrayList value){
+          final VirtualFile file=IndexInfrastructure.findFileById(fs,id);
+          if (file != null && (scope == null || scope.contains(file))) {
+            final PsiFileWithStubSupport psiFile=(PsiFileWithStubSupport)psiManager.findFile(file);
+            if (psiFile != null) {
+              StubTree stubTree=psiFile.getStubTree();
+              if (stubTree == null) {
+                stubTree=StubTree.readFromVFile(file,project);
+                if (stubTree != null) {
+                  final List<StubElement<?>> plained=stubTree.getPlainList();
+                  for (int i=0; i < value.size(); i++) {
+                    final StubElement<?> stub=plained.get(value.get(i));
+                    final ASTNode tree=psiFile.findTreeForStub(stubTree,stub);
+                    if (tree != null) {
+                      if (tree.getElementType() == stub.getStubType()) {
+                        result.add((Psi)tree.getPsi());
+                      }
  else {
-                      System.out.println("Oops");
+                        System.out.println("Oops");
+                      }
                     }
                   }
                 }
               }
-            }
  else {
-              final List<StubElement<?>> plained=stubTree.getPlainList();
-              for (int i=0; i < value.size(); i++) {
-                result.add((Psi)plained.get(value.get(i)).getPsi());
+                final List<StubElement<?>> plained=stubTree.getPlainList();
+                for (int i=0; i < value.size(); i++) {
+                  result.add((Psi)plained.get(value.get(i)).getPsi());
+                }
               }
             }
           }
         }
       }
-    }
 );
+    }
+  finally {
+      index.getReadLock().unlock();
+    }
   }
  catch (  StorageException e) {
     forceRebuild(e);
@@ -54,10 +58,9 @@ catch (  RuntimeException e) {
     if (cause instanceof IOException || cause instanceof StorageException) {
       forceRebuild(e);
     }
-    throw e;
-  }
- finally {
-    lock.unlock();
+ else {
+      throw e;
+    }
   }
   return result;
 }
