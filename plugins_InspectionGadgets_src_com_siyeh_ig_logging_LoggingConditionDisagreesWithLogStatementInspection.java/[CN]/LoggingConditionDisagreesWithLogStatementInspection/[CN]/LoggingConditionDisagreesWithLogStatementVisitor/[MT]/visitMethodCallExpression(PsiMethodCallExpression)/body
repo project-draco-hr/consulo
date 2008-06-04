@@ -1,0 +1,101 @@
+{
+  super.visitMethodCallExpression(expression);
+  final PsiReferenceExpression methodExpression=expression.getMethodExpression();
+  final String referenceName=methodExpression.getReferenceName();
+  if (!logMethodNames.contains(referenceName)) {
+    return;
+  }
+  final PsiMethod method=expression.resolveMethod();
+  if (method == null) {
+    return;
+  }
+  final PsiClass containingClass=method.getContainingClass();
+  final String qualifiedName=containingClass.getQualifiedName();
+  if (!"org.apache.log4j.Logger".equals(qualifiedName)) {
+    return;
+  }
+  final PsiElement parent=expression.getParent();
+  final PsiIfStatement ifStatement;
+  if (parent instanceof PsiCodeBlock) {
+    final PsiElement grandParent=parent.getParent();
+    if (!(grandParent instanceof PsiBlockStatement)) {
+      return;
+    }
+    final PsiElement greatGrandParent=grandParent.getParent();
+    if (!(greatGrandParent instanceof PsiIfStatement)) {
+      return;
+    }
+    ifStatement=(PsiIfStatement)greatGrandParent;
+  }
+ else   if (parent instanceof PsiIfStatement) {
+    ifStatement=(PsiIfStatement)parent;
+  }
+ else {
+    return;
+  }
+  final PsiExpression condition=ifStatement.getCondition();
+  if (!(condition instanceof PsiMethodCallExpression)) {
+    return;
+  }
+  final PsiExpression qualifier=methodExpression.getQualifierExpression();
+  if (!(qualifier instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)qualifier;
+  final PsiElement target=referenceExpression.resolve();
+  if (target == null) {
+    return;
+  }
+  final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)condition;
+  final PsiReferenceExpression conditionMethodExpression=methodCallExpression.getMethodExpression();
+  final PsiExpression conditionQualifier=conditionMethodExpression.getQualifierExpression();
+  if (!(conditionQualifier instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression conditionReferenceExpression=(PsiReferenceExpression)conditionQualifier;
+  final PsiElement conditionTarget=conditionReferenceExpression.resolve();
+  if (!target.equals(conditionTarget)) {
+    return;
+  }
+  final String methodName=conditionMethodExpression.getReferenceName();
+  Priority enabledFor;
+  if ("isDebugEnabled".equals(methodName)) {
+    enabledFor=Priority.DEBUG;
+  }
+ else   if ("isInfoEnabled".equals(methodName)) {
+    enabledFor=Priority.INFO;
+  }
+ else   if ("isEnabledFor".equals(methodName)) {
+    final PsiExpressionList argumentList=methodCallExpression.getArgumentList();
+    final PsiExpression[] arguments=argumentList.getExpressions();
+    for (    PsiExpression argument : arguments) {
+      if (!(argument instanceof PsiReferenceExpression)) {
+        continue;
+      }
+      final PsiReferenceExpression argumentReference=(PsiReferenceExpression)argument;
+      final PsiType type=argument.getType();
+      if (!(type instanceof PsiClassType)) {
+        continue;
+      }
+      final PsiClassType classType=(PsiClassType)type;
+      final PsiClass aClass=classType.resolve();
+      if (aClass == null) {
+        continue;
+      }
+      final String qName=aClass.getQualifiedName();
+      if (!"org.apache.log4j.Priority".equals(qName)) {
+        continue;
+      }
+      final PsiElement argumentTarget=argumentReference.resolve();
+      if (!(argumentTarget instanceof PsiField)) {
+        continue;
+      }
+      final PsiField field=(PsiField)argumentTarget;
+      final String name=field.getName();
+      enabledFor=Priority.valueOf(name);
+    }
+  }
+ else {
+    return;
+  }
+}
