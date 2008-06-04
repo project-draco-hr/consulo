@@ -1,2 +1,66 @@
 {
+  if (explicitlyInvoked && myCalculating)   return false;
+  if (!explicitlyInvoked && myDirty)   return false;
+  ListModel listModel=myList.getModel();
+  if (listModel.getSize() <= 1)   return false;
+  if (listModel.getSize() == 0)   return false;
+  final LookupItem firstItem=(LookupItem)listModel.getElementAt(0);
+  if (listModel.getSize() == 1 && firstItem.getAttribute(EMPTY_ITEM_ATTRIBUTE) != null)   return false;
+  final PrefixMatcher matcher=firstItem.getPrefixMatcher();
+  String lookupString=firstItem.getLookupString();
+  int div=divideString(lookupString,matcher);
+  if (div < 0)   return false;
+  String beforeCaret=lookupString.substring(0,div);
+  String afterCaret=lookupString.substring(div);
+  String presentPrefix=matcher.getPrefix();
+  for (int i=1; i < listModel.getSize(); i++) {
+    LookupItem item=(LookupItem)listModel.getElementAt(i);
+    if (!presentPrefix.equals(item.getPrefixMatcher().getPrefix()))     return false;
+    lookupString=item.getLookupString();
+    div=divideString(lookupString,item.getPrefixMatcher());
+    if (div < 0)     return false;
+    String _afterCaret=lookupString.substring(div);
+    if (beforeCaret != null) {
+      if (div != beforeCaret.length() || !lookupString.startsWith(beforeCaret))       beforeCaret=null;
+    }
+    while (afterCaret.length() > 0) {
+      if (_afterCaret.startsWith(afterCaret)) {
+        break;
+      }
+      afterCaret=afterCaret.substring(0,afterCaret.length() - 1);
+    }
+    if (afterCaret.length() == 0)     return false;
+  }
+  int offset=myEditor.getCaretModel().getOffset();
+  final int typedLength=myAdditionalPrefix.length();
+  if (typedLength > 0) {
+    myAdditionalPrefix="";
+    myEditor.getDocument().deleteString(offset - typedLength,offset);
+  }
+  EditorModificationUtil.deleteSelectedText(myEditor);
+  offset=myEditor.getCaretModel().getOffset();
+  if (beforeCaret != null) {
+    final int start=offset - presentPrefix.length();
+    myInitialOffset=start + beforeCaret.length();
+    myEditor.getDocument().replaceString(start,offset,beforeCaret);
+    presentPrefix=beforeCaret;
+  }
+  offset=myEditor.getCaretModel().getOffset();
+  int i=0;
+  final CharSequence text=myEditor.getDocument().getCharsSequence();
+  while (offset + i < text.length() && i < afterCaret.length() && text.charAt(offset + i) == afterCaret.charAt(i))   i++;
+  myEditor.getDocument().insertString(offset + i,afterCaret.substring(i));
+  final String newPrefix=presentPrefix + afterCaret;
+  for (Iterator<LookupItem> it=myItems.iterator(); it.hasNext(); ) {
+    LookupElement item=it.next();
+    if (!item.setPrefixMatcher(item.getPrefixMatcher().cloneWithPrefix(newPrefix))) {
+      it.remove();
+    }
+  }
+  myAdditionalPrefix="";
+  updateList();
+  offset+=afterCaret.length();
+  myInitialOffset=offset;
+  myEditor.getCaretModel().moveToOffset(offset);
+  return true;
 }
