@@ -3,6 +3,7 @@
   try {
     final boolean isTestMode=ApplicationManager.getApplication().isUnitTestMode();
     final Compiler[] allCompilers=CompilerManager.getInstance(myProject).getCompilers(Compiler.class);
+    final VirtualFile[] allSources=context.getProjectCompileScope().getFiles(null,true);
     context.getProgressIndicator().setText(CompilerBundle.message("progress.clearing.output"));
     for (    final Compiler compiler : allCompilers) {
       if (compiler instanceof GeneratingCompiler) {
@@ -22,24 +23,16 @@
  else       if (compiler instanceof FileProcessingCompiler) {
       }
  else       if (compiler instanceof TranslatingCompiler) {
-        try {
-          if (!myShouldClearOutputDirectory) {
-            final TranslatingCompilerStateCache cache=getTranslatingCompilerCache((TranslatingCompiler)compiler);
-            final Iterator<String> urlIterator=cache.getOutputUrlsIterator();
-            while (urlIterator.hasNext()) {
-              final String outputPath=urlIterator.next();
-              final String sourceUrl=cache.getSourceUrl(outputPath);
-              if (sourceUrl == null || !FileUtil.pathsEqual(outputPath,VirtualFileManager.extractPath(sourceUrl))) {
-                new File(outputPath).delete();
-                if (isTestMode) {
-                  CompilerManagerImpl.addDeletedPath(outputPath);
-                }
-              }
+        if (!myShouldClearOutputDirectory) {
+          final ArrayList<Trinity<File,String,Boolean>> toDelete=new ArrayList<Trinity<File,String,Boolean>>();
+          TranslatingCompilerFilesMonitor.getInstance().collectFiles(context,((TranslatingCompiler)compiler),Arrays.<VirtualFile>asList(allSources).iterator(),true,new ArrayList<VirtualFile>(),toDelete);
+          for (          Trinity<File,String,Boolean> trinity : toDelete) {
+            final File file=trinity.getFirst();
+            file.delete();
+            if (isTestMode) {
+              CompilerManagerImpl.addDeletedPath(FileUtil.toSystemIndependentName(file.getPath()));
             }
           }
-        }
- catch (        IOException e) {
-          LOG.info(e);
         }
       }
     }

@@ -1,0 +1,39 @@
+{
+  DeleteHelper deleteHelper=new DeleteHelper(outputDirectories);
+  int total=toDelete.size();
+  final DependencyCache dependencyCache=context.getDependencyCache();
+  final boolean isTestMode=ApplicationManager.getApplication().isUnitTestMode();
+  context.getProgressIndicator().pushState();
+  final List<File> filesToRefresh=new ArrayList<File>();
+  try {
+    context.getProgressIndicator().setText(CompilerBundle.message("progress.synchronizing.output.directory"));
+    int current=0;
+    boolean wereFilesDeleted=false;
+    for (    final Trinity<File,String,Boolean> trinity : toDelete) {
+      context.getProgressIndicator().setFraction(((double)(++current)) / total);
+      final File outputPath=trinity.getFirst();
+      if (deleteHelper.delete(outputPath)) {
+        wereFilesDeleted=true;
+        filesToRefresh.add(outputPath);
+        final String className=trinity.getSecond();
+        if (className != null) {
+          final int id=dependencyCache.getSymbolTable().getId(className);
+          dependencyCache.addTraverseRoot(id);
+          final boolean sourcePresent=trinity.getThird().booleanValue();
+          if (!sourcePresent) {
+            dependencyCache.markSourceRemoved(id);
+          }
+        }
+        if (isTestMode) {
+          CompilerManagerImpl.addDeletedPath(outputPath.getPath());
+        }
+      }
+    }
+    return wereFilesDeleted;
+  }
+  finally {
+    deleteHelper.finish();
+    CompilerUtil.refreshIOFiles(filesToRefresh);
+    context.getProgressIndicator().popState();
+  }
+}
