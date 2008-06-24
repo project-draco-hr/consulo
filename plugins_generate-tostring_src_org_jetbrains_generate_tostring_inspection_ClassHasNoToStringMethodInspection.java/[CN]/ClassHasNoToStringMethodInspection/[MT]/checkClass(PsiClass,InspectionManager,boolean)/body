@@ -1,0 +1,58 @@
+{
+  if (log.isDebugEnabled())   log.debug("checkClass: clazz=" + clazz + ", onTheFly="+ onTheFly+ ", onTheFlyEnabled="+ onTheFlyEnabled());
+  if (onTheFly && !onTheFlyEnabled())   return null;
+  if (clazz == null || clazz.getName() == null)   return null;
+  PsiAdapter psi=PsiAdapterFactory.getPsiAdapter();
+  List<ProblemDescriptor> problems=new ArrayList<ProblemDescriptor>();
+  if (excludeException && psi.isExceptionClass(clazz)) {
+    log.debug("This class is an exception");
+    return null;
+  }
+  if (excludeDeprecated && psi.isDeprecatedClass(clazz)) {
+    log.debug("Class is deprecated");
+    return null;
+  }
+  if (excludeEnum && psi.isEnumClass(clazz)) {
+    log.debug("Class is an enum");
+    return null;
+  }
+  if (excludeAbstract && psi.isAbstractClass(clazz)) {
+    log.debug("Class is abstract");
+    return null;
+  }
+  if (StringUtil.isNotEmpty(excludeClassNames)) {
+    String name=clazz.getName();
+    if (name != null && name.matches(excludeClassNames)) {
+      log.debug("This class is excluded");
+      return null;
+    }
+  }
+  PsiField[] fields=psi.getFields(clazz);
+  if (fields.length == 0) {
+    log.debug("Class does not have any fields");
+    return null;
+  }
+  Project project=im.getProject();
+  PsiManager manager=psi.getPsiManager(project);
+  fields=GenerateToStringUtils.filterAvailableFields(project,psi,clazz,GenerateToStringContext.getConfig().getFilterPattern());
+  PsiMethod[] methods=null;
+  if (GenerateToStringContext.getConfig().isEnableMethods()) {
+    methods=GenerateToStringUtils.filterAvailableMethods(psi,clazz,GenerateToStringContext.getConfig().getFilterPattern());
+  }
+  if (fields == null && methods == null)   return null;
+ else   if (Math.max(fields == null ? 0 : fields.length,methods == null ? 0 : methods.length) == 0)   return null;
+  PsiMethod toStringMethod=psi.findMethodByName(clazz,"toString");
+  if (toStringMethod == null) {
+    if (log.isDebugEnabled())     log.debug("Class does not overwrite toString() method: " + clazz.getQualifiedName());
+    ProblemDescriptor problem=im.createProblemDescriptor(clazz.getNameIdentifier(),"Class '" + clazz.getName() + "' does not overwrite toString() method",fix,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+    problems.add(problem);
+  }
+  if (problems.size() > 0) {
+    if (log.isDebugEnabled())     log.debug("Number of problems found: " + problems.size());
+    return problems.toArray(new ProblemDescriptor[problems.size()]);
+  }
+ else {
+    log.debug("No problems found");
+    return null;
+  }
+}
