@@ -2,16 +2,17 @@
   final Project project=context.getProject();
   final String projectId=getProjectId(project);
   final CompilerConfiguration configuration=CompilerConfiguration.getInstance(project);
+  final boolean _forceCompile=forceCompile || isRebuild;
 synchronized (mySourcesToRecompile) {
     final TIntHashSet pathsToRecompile=mySourcesToRecompile.get(projectId);
-    if (forceCompile || (pathsToRecompile != null && pathsToRecompile.size() > 0)) {
+    if (_forceCompile || (pathsToRecompile != null && pathsToRecompile.size() > 0)) {
       while (scopeSrcIterator.hasNext()) {
         final VirtualFile file=scopeSrcIterator.next();
         if (configuration.isExcludedFromCompilation(file) || !compiler.isCompilableFile(file,context)) {
           continue;
         }
         final int fileId=getFileId(file);
-        if (forceCompile) {
+        if (_forceCompile) {
           toCompile.add(file);
           if (pathsToRecompile == null || !pathsToRecompile.contains(fileId)) {
             addSourceForRecompilation(Collections.singletonList(projectId),file,null);
@@ -23,14 +24,20 @@ synchronized (mySourcesToRecompile) {
       }
     }
   }
-  final CompileScope compileScope=context.getCompileScope();
+  if (!isRebuild) {
+    final CompileScope compileScope=context.getCompileScope();
 synchronized (myOutputsToDelete) {
-    for (    String outputPath : myOutputsToDelete.keySet()) {
-      final SourceUrlClassNamePair classNamePair=myOutputsToDelete.get(outputPath);
-      final String sourceUrl=classNamePair.getSourceUrl();
-      if (compileScope.belongs(sourceUrl)) {
-        final boolean sourcePresent=VirtualFileManager.getInstance().findFileByUrl(sourceUrl) != null;
-        toDelete.add(new Trinity<File,String,Boolean>(new File(outputPath),classNamePair.getClassName(),Boolean.valueOf(sourcePresent)));
+      for (      String outputPath : myOutputsToDelete.keySet()) {
+        final SourceUrlClassNamePair classNamePair=myOutputsToDelete.get(outputPath);
+        final String sourceUrl=classNamePair.getSourceUrl();
+        if (compileScope.belongs(sourceUrl)) {
+          final VirtualFile srcFile=VirtualFileManager.getInstance().findFileByUrl(sourceUrl);
+          final boolean sourcePresent=srcFile != null;
+          if (sourcePresent && !compiler.isCompilableFile(srcFile,context)) {
+            continue;
+          }
+          toDelete.add(new Trinity<File,String,Boolean>(new File(outputPath),classNamePair.getClassName(),Boolean.valueOf(sourcePresent)));
+        }
       }
     }
   }
