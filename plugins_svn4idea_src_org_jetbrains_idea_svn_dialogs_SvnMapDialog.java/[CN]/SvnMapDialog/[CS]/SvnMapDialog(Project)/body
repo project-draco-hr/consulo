@@ -1,0 +1,77 @@
+{
+  super(project,true);
+  myProject=project;
+  setTitle(SvnBundle.message("dialog.show.svn.map.title"));
+  init();
+  final SvnVcs vcs=SvnVcs.getInstance(myProject);
+  myTableModel.setItems(vcs.getAllWcInfos());
+  myTableView.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    final ListSelectionEvent e){
+      final Collection<WCInfo> selected=myTableView.getSelection();
+      myChangeFormatButton.setEnabled((selected.size() == 1) && (!ProjectLevelVcsManager.getInstance(project).isBackgroundVcsOperationRunning()));
+    }
+  }
+);
+  myChangeFormatButton.addActionListener(new ActionListener(){
+    public void actionPerformed(    final ActionEvent e){
+      final Collection<WCInfo> selected=myTableView.getSelection();
+      if (selected.size() != 1) {
+        return;
+      }
+      final WCInfo wcInfo=selected.iterator().next();
+      final File path=new File(wcInfo.getPath());
+      ChangeFormatDialog dialog=new ChangeFormatDialog(project,path,false);
+      dialog.setData(true,wcInfo.getFormat().getOption());
+      dialog.show();
+      if (!dialog.isOK()) {
+        return;
+      }
+      final String newMode=dialog.getUpgradeMode();
+      if (!wcInfo.getFormat().getOption().equals(newMode)) {
+        final WorkingCopyFormat newFormat=WorkingCopyFormat.getInstance(newMode);
+        final Task.Backgroundable task=new Task.Backgroundable(project,SvnBundle.message("action.change.wcopy.format.task.title"),false,PerformInBackgroundOption.DEAF){
+          private Throwable myException;
+          @Override public void onCancel(){
+            onSuccess();
+          }
+          @Override public void onSuccess(){
+            ProjectLevelVcsManager.getInstance(project).stopBackgroundVcsOperation();
+            if (myException != null) {
+              AbstractVcsHelper.getInstance(myProject).showErrors(Collections.singletonList(new VcsException(myException)),SvnBundle.message("action.change.wcopy.format.task.title"));
+            }
+ else {
+              SvnConfiguration configuration=SvnConfiguration.getInstance(project);
+              String upgradeMode=configuration.getUpgradeMode();
+              final WorkingCopyFormat configurationFormat=WorkingCopyFormat.getInstance(upgradeMode);
+              if (newFormat.getFormat() < configurationFormat.getFormat()) {
+                final int result=Messages.showYesNoCancelDialog(SvnBundle.message("action.change.wcopy.format.after.change.settings",formatRepresentation(newFormat),formatRepresentation(wcInfo.getFormat())),SvnBundle.message("action.change.wcopy.format.task.title"),Messages.getWarningIcon());
+                if (result == OK_EXIT_CODE) {
+                  configuration.setUpgradeMode(newFormat.getOption());
+                }
+              }
+            }
+          }
+          public void run(          @NotNull final ProgressIndicator indicator){
+            ProjectLevelVcsManager.getInstance(project).startBackgroundVcsOperation();
+            indicator.setIndeterminate(true);
+            indicator.setText(SvnBundle.message("action.change.wcopy.format.task.progress.text",path.getAbsolutePath(),formatRepresentation(wcInfo.getFormat()),formatRepresentation(newFormat)));
+            final SvnVcs vcs=SvnVcs.getInstance(project);
+            final SVNWCClient wcClient=vcs.createWCClient();
+            try {
+              wcClient.doSetWCFormat(path,newFormat.getFormat());
+            }
+ catch (            Throwable e) {
+              myException=e;
+            }
+            ApplicationManager.getApplication().getMessageBus().syncPublisher(WC_CONVERTED).run();
+          }
+        }
+;
+        doOKAction();
+        ProgressManager.getInstance().run(task);
+      }
+    }
+  }
+);
+  myChangeFormatButton.setEnabled((myTableView.getSelection().size() == 1) && (!ProjectLevelVcsManager.getInstance(project).isBackgroundVcsOperationRunning()));
+}
