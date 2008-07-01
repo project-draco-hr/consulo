@@ -2,14 +2,42 @@
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
       final PsiElement element=parameters.getPosition();
-      final PsiReference reference=element.getContainingFile().findReferenceAt(parameters.getOffset());
+      final int offset=parameters.getOffset();
+      final PsiReference reference=element.getContainingFile().findReferenceAt(offset);
       if (reference != null) {
         final Pair<ElementFilter,TailType> pair=getReferenceFilter(element);
         if (pair != null) {
-          final THashSet<LookupItem> set=new THashSet<LookupItem>();
-          JavaSmartCompletionContributor.SMART_DATA.completeReference(reference,element,set,pair.second,result.getPrefixMatcher(),parameters.getOriginalFile(),pair.first,new CompletionVariant());
+          final PsiFile originalFile=parameters.getOriginalFile();
+          final TailType tailType=pair.second;
+          final ElementFilter filter=pair.first;
+          final THashSet<LookupItem> set=completeReference(element,reference,originalFile,tailType,filter,result);
           for (          final LookupItem item : set) {
             result.addElement(item);
+          }
+          if (parameters.getInvocationCount() >= 2) {
+            for (            final LookupItem qualifier : completeReference(element,reference,originalFile,tailType,TrueFilter.INSTANCE,result)) {
+              final String prefix=getItemText(qualifier.getObject());
+              if (prefix == null)               continue;
+              try {
+                final PsiElementFactory elementFactory=JavaPsiFacade.getInstance(element.getProject()).getElementFactory();
+                final PsiExpression ref=elementFactory.createExpressionFromText(prefix + ".xxx",element);
+                if (ref instanceof PsiReferenceExpression) {
+                  for (                  final LookupItem item : completeReference(element,(PsiReferenceExpression)ref,originalFile,tailType,filter,result)) {
+                    try {
+                      final String itemText=getItemText(item.getObject());
+                      if (StringUtil.isNotEmpty(itemText)) {
+                        final PsiExpression expr=elementFactory.createExpressionFromText(prefix + "." + itemText,element);
+                        result.addElement(LookupItemUtil.objectToLookupItem(expr).setTailType(tailType).setIcon(item.getObject() instanceof PsiVariable ? Icons.VARIABLE_ICON : Icons.METHOD_ICON));
+                      }
+                    }
+ catch (                    IncorrectOperationException e) {
+                    }
+                  }
+                }
+              }
+ catch (              IncorrectOperationException e) {
+              }
+            }
           }
         }
       }
