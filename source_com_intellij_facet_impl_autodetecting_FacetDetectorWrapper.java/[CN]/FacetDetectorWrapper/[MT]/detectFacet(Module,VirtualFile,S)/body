@@ -1,49 +1,32 @@
 {
-  if (!myAutodetectionFilter.isAutodetectionEnabled(module,myFacetType,virtualFile.getUrl())) {
+  String url=virtualFile.getUrl();
+  if (!myAutodetectionFilter.isAutodetectionEnabled(module,myFacetType,url)) {
     LOG.debug("Autodetection disabled for " + myFacetType.getPresentableName() + " facets in module "+ module.getName());
     return null;
   }
-  Facet underlyingFacet=null;
+  FacetInfo2<Module> underlyingFacet=null;
   FacetTypeId underlyingFacetType=myFacetType.getUnderlyingFacetType();
   if (underlyingFacetType != null) {
     if (myUnderlyingFacetSelector != null) {
-      Map<U,? extends Facet> underlyingFacets=collectFacets(module,underlyingFacetType);
-      FacetConfiguration undelyingConfiguration=myUnderlyingFacetSelector.selectUnderlyingFacet(virtualFile,Collections.unmodifiableCollection(underlyingFacets.keySet()));
+      Map<U,FacetInfo2<Module>> underlyingFacets=myDetectedFacetSet.getConfigurations(underlyingFacetType,module);
+      FacetConfiguration undelyingConfiguration=myUnderlyingFacetSelector.selectUnderlyingFacet(virtualFile,Collections.unmodifiableSet(underlyingFacets.keySet()));
       underlyingFacet=underlyingFacets.get(undelyingConfiguration);
     }
     if (underlyingFacet == null) {
-      LOG.debug("Underlying " + underlyingFacetType + " facet not found for "+ virtualFile.getUrl());
+      LOG.debug("Underlying " + underlyingFacetType + " facet not found for "+ url);
       return null;
     }
   }
-  Map<C,F> configurations=collectFacets(module,myFacetType.getId());
-  final C detectedConfiguration=myFacetDetector.detectFacet(source,Collections.unmodifiableCollection(configurations.keySet()));
+  Map<C,FacetInfo2<Module>> configurations=myDetectedFacetSet.getConfigurations(myFacetType.getId(),module);
+  final C detectedConfiguration=myFacetDetector.detectFacet(source,Collections.unmodifiableSet(configurations.keySet()));
   if (detectedConfiguration == null) {
     return null;
   }
   if (configurations.containsKey(detectedConfiguration)) {
     return configurations.get(detectedConfiguration);
   }
-  final String name=generateName(module);
-  final Facet underlyingFacet1=underlyingFacet;
-  return new WriteAction<Facet>(){
-    protected void run(    final Result<Facet> result){
-      final Facet facet=FacetManager.getInstance(module).createFacet(myFacetType,name,detectedConfiguration,underlyingFacet1);
-      facet.setImplicit(true);
-      ModifiableFacetModel model=FacetManager.getInstance(facet.getModule()).createModifiableModel();
-      ModifiableRootModel rootModel=ModuleRootManager.getInstance(module).getModifiableModel();
-      myFacetDetector.beforeFacetAdded(facet,model,rootModel);
-      model.addFacet(facet);
-      if (rootModel.isChanged()) {
-        rootModel.commit();
-      }
- else {
-        rootModel.dispose();
-      }
-      model.commit();
-      myFacetDetector.afterFacetAdded(facet);
-      result.setResult(facet);
-    }
-  }
-.execute().getResultObject();
+  final String name=myDetectedFacetSet.generateName(module,myFacetType);
+  FacetInfo2<Module> detected=myDetectedFacetSet.createInfo(module,url,underlyingFacet,detectedConfiguration,name,myFacetType,myFacetDetector.getId());
+  myDetectedFacetSet.addFacetInfo(detected);
+  return detected;
 }
