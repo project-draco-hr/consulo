@@ -15,8 +15,7 @@
             result.addElement(item);
           }
           if (parameters.getInvocationCount() >= 2) {
-            final PsiType componentType=PsiUtil.extractIterableTypeParameter(parameters.getExpectedType());
-            for (            final LookupItem<?> qualifier : completeReference(element,reference,originalFile,tailType,TrueFilter.INSTANCE,result)) {
+            for (            final LookupItem<?> qualifier : completeReference(element,reference,originalFile,tailType,filter,result)) {
               final Object object=qualifier.getObject();
               final String prefix=getItemText(object);
               if (prefix == null)               continue;
@@ -27,6 +26,10 @@
                 for (                final LookupItem<?> item : completeReference(element,(PsiReferenceExpression)ref,originalFile,tailType,filter,result)) {
                   if (item.getObject() instanceof PsiMethod) {
                     final PsiMethod method=(PsiMethod)item.getObject();
+                    final PsiClass collectionClass=JavaPsiFacade.getInstance(element.getProject()).findClass(CommonClassNames.JAVA_UTIL_COLLECTION,element.getResolveScope());
+                    if (method.getName().equals("toArray") && method.getParameterList().getParametersCount() == 1 && !method.hasModifierProperty(PsiModifier.STATIC) && !method.hasModifierProperty(PsiModifier.PRIVATE) && collectionClass != null && (collectionClass.equals(method.getContainingClass()) || method.getContainingClass().isInheritor(collectionClass,true))) {
+                      continue;
+                    }
                     final QualifiedMethodLookupItem newItem=new QualifiedMethodLookupItem(method,prefix);
                     final PsiSubstitutor newSubstitutor=(PsiSubstitutor)item.getAttribute(LookupItem.SUBSTITUTOR);
                     if (substitutor != null || newSubstitutor != null) {
@@ -40,15 +43,16 @@
                     result.addElement(item);
                   }
                 }
+                PsiType itemType=object instanceof PsiVariable ? ((PsiVariable)object).getType() : object instanceof PsiMethod ? ((PsiMethod)object).getReturnType() : null;
+                if (substitutor != null) {
+                  itemType=substitutor.substitute(itemType);
+                }
+                if (itemType == null)                 continue;
+                PsiType componentType=PsiUtil.extractIterableTypeParameter(parameters.getExpectedType());
                 if (componentType != null) {
-                  PsiType itemType=object instanceof PsiVariable ? ((PsiVariable)object).getType() : object instanceof PsiMethod ? ((PsiMethod)object).getReturnType() : null;
-                  if (substitutor != null) {
-                    itemType=substitutor.substitute(itemType);
-                  }
-                  if (itemType == null)                   continue;
                   if (itemType instanceof PsiArrayType) {
                     if (componentType.isAssignableFrom(((PsiArrayType)itemType).getComponentType())) {
-                      final PsiExpression conversion=elementFactory.createExpressionFromText(CommonClassNames.JAVA_UTIL_ARRAYS + ".asList(" + getSpace(element)+ prefix+ getSpace(element)+ ")",element);
+                      final PsiExpression conversion=elementFactory.createExpressionFromText(CommonClassNames.JAVA_UTIL_ARRAYS + ".asList(" + getSpace(CodeStyleSettingsManager.getSettings(element.getProject()).SPACE_WITHIN_METHOD_CALL_PARENTHESES)+ prefix+ getSpace(CodeStyleSettingsManager.getSettings(element.getProject()).SPACE_WITHIN_METHOD_CALL_PARENTHESES)+ ")",element);
                       final LookupItem item=LookupItemUtil.objectToLookupItem(conversion);
                       @NonNls final String presentable="Arrays.asList(" + prefix + ")";
                       item.setLookupString(presentable);
@@ -76,6 +80,34 @@
                       }
 );
                       result.addElement(item);
+                    }
+                  }
+                }
+                componentType=PsiUtil.substituteTypeParameter(itemType,CommonClassNames.JAVA_UTIL_COLLECTION,0);
+                if (componentType != null && parameters.getExpectedType() instanceof PsiArrayType) {
+                  final PsiArrayType type=(PsiArrayType)parameters.getExpectedType();
+                  if (type.getComponentType().isAssignableFrom(componentType)) {
+                    final String bracketSpace=getSpace(CodeStyleSettingsManager.getSettings(element.getProject()).SPACE_WITHIN_BRACKETS);
+                    final String callSpace=getSpace(CodeStyleSettingsManager.getSettings(element.getProject()).SPACE_WITHIN_METHOD_CALL_PARENTHESES);
+                    if (object instanceof PsiVariable) {
+                      final PsiVariable variable=(PsiVariable)object;
+                      addToArrayConversion(element,prefix,"new " + componentType.getCanonicalText() + "["+ bracketSpace+ variable.getName()+ ".size("+ callSpace+ ")"+ bracketSpace+ "]","new " + componentType.getPresentableText() + "["+ variable.getName()+ ".size()]",result);
+                    }
+ else {
+                      boolean hasEmptyArrayField=false;
+                      final PsiClass psiClass=PsiUtil.resolveClassInType(type);
+                      if (psiClass != null) {
+                        for (                        final PsiField field : psiClass.getAllFields()) {
+                          if (field.hasModifierProperty(PsiModifier.STATIC) && field.hasModifierProperty(PsiModifier.FINAL) && JavaPsiFacade.getInstance(field.getProject()).getResolveHelper().isAccessible(field,parameters.getPosition(),null)&& type.isAssignableFrom(field.getType())&& isEmptyArrayInitializer(field.getInitializer())) {
+                            boolean needQualify=!field.isEquivalentTo(((PsiReferenceExpression)elementFactory.createExpressionFromText(field.getName(),element)).resolve());
+                            addToArrayConversion(element,prefix,(needQualify ? field.getContainingClass().getQualifiedName() + "." : "") + field.getName(),(needQualify ? field.getContainingClass().getName() + "." : "") + field.getName(),result);
+                            hasEmptyArrayField=true;
+                          }
+                        }
+                      }
+                      if (!hasEmptyArrayField) {
+                        addToArrayConversion(element,prefix,"new " + componentType.getCanonicalText() + "["+ bracketSpace+ "0"+ bracketSpace+ "]","new " + componentType.getPresentableText() + "[0]",result);
+                      }
                     }
                   }
                 }
