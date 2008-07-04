@@ -15,8 +15,10 @@
             result.addElement(item);
           }
           if (parameters.getInvocationCount() >= 2) {
+            final PsiType componentType=PsiUtil.extractIterableTypeParameter(parameters.getExpectedType());
             for (            final LookupItem<?> qualifier : completeReference(element,reference,originalFile,tailType,TrueFilter.INSTANCE,result)) {
-              final String prefix=getItemText(qualifier.getObject());
+              final Object object=qualifier.getObject();
+              final String prefix=getItemText(object);
               if (prefix == null)               continue;
               final PsiSubstitutor substitutor=(PsiSubstitutor)qualifier.getAttribute(LookupItem.SUBSTITUTOR);
               try {
@@ -36,6 +38,45 @@
                     item.setAttribute(JavaCompletionUtil.QUALIFIER_PREFIX_ATTRIBUTE,prefix + ".");
                     item.setLookupString(prefix + "." + item.getLookupString());
                     result.addElement(item);
+                  }
+                }
+                if (componentType != null) {
+                  PsiType itemType=object instanceof PsiVariable ? ((PsiVariable)object).getType() : object instanceof PsiMethod ? ((PsiMethod)object).getReturnType() : null;
+                  if (substitutor != null) {
+                    itemType=substitutor.substitute(itemType);
+                  }
+                  if (itemType == null)                   continue;
+                  if (itemType instanceof PsiArrayType) {
+                    if (componentType.isAssignableFrom(((PsiArrayType)itemType).getComponentType())) {
+                      final PsiExpression conversion=elementFactory.createExpressionFromText(CommonClassNames.JAVA_UTIL_ARRAYS + ".asList(" + getSpace(element)+ prefix+ getSpace(element)+ ")",element);
+                      final LookupItem item=LookupItemUtil.objectToLookupItem(conversion);
+                      @NonNls final String presentable="Arrays.asList(" + prefix + ")";
+                      item.setLookupString(presentable);
+                      item.setPresentableText(presentable);
+                      item.addLookupStrings(prefix,presentable,"asList(" + prefix + ")");
+                      item.setIcon(Icons.METHOD_ICON);
+                      item.setInsertHandler(new SimpleInsertHandler(){
+                        public int handleInsert(                        final Editor editor,                        final int startOffset,                        final LookupElement item,                        final LookupElement[] allItems,                        final TailType tailType,                        final char completionChar) throws IncorrectOperationException {
+                          final Document document=editor.getDocument();
+                          final int tailOffset=startOffset + item.getLookupString().length();
+                          RangeMarker tail=document.createRangeMarker(tailOffset,tailOffset);
+                          document.insertString(startOffset,"java.util.");
+                          final Project project=editor.getProject();
+                          PsiDocumentManager.getInstance(project).commitDocument(document);
+                          final PsiFile file=PsiDocumentManager.getInstance(project).getPsiFile(document);
+                          try {
+                            JavaCodeStyleManager.getInstance(project).shortenClassReferences(file,startOffset,startOffset + CommonClassNames.JAVA_UTIL_ARRAYS.length());
+                          }
+ catch (                          IncorrectOperationException e) {
+                            LOG.error(e);
+                          }
+                          PostprocessReformattingAspect.getInstance(project).doPostponedFormatting();
+                          return tail.getEndOffset();
+                        }
+                      }
+);
+                      result.addElement(item);
+                    }
                   }
                 }
               }
