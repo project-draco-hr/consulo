@@ -6,7 +6,7 @@
   if (list != null) {
     myParameterInfoController=ParameterInfoController.findControllerAtOffset(editor,list.getTextRange().getStartOffset());
   }
-  PsiElement originalElement=file != null ? file.findElementAt(editor.getCaretModel().getOffset()) : null;
+  final PsiElement originalElement=file != null ? file.findElementAt(editor.getCaretModel().getOffset()) : null;
   PsiElement element=findTargetElement(editor,file,originalElement);
   if (element == null && myParameterInfoController != null) {
     final Object[] objects=myParameterInfoController.getSelectedElements();
@@ -24,22 +24,19 @@
     if (comment == null)     return null;
     element=comment.getParent();
   }
-  AbstractPopup oldHint=(AbstractPopup)getDocInfoHint();
-  if (oldHint != null) {
-    DocumentationComponent component=(DocumentationComponent)oldHint.getComponent();
-    PsiElement element1=component.getElement();
-    if (Comparing.equal(element,element1)) {
-      if (requestFocus) {
-        component.getComponent().requestFocus();
-      }
-      return oldHint;
-    }
-    oldHint.cancel();
-  }
-  final DocumentationComponent component=new DocumentationComponent(this);
   storeOriginalElement(project,originalElement,element);
-  final PopupUpdateProcessor updateProcessor=new PopupUpdateProcessor(new Condition<PsiElement>(){
-    public boolean value(    final PsiElement element){
+  final PopupUpdateProcessor updateProcessor=new PopupUpdateProcessor(){
+    public void updatePopup(    Object lookupIteObject){
+      if (lookupIteObject instanceof PsiElement) {
+        doShowJavaDocInfo((PsiElement)lookupIteObject,false,false,this);
+        return;
+      }
+      DocumentationProvider documentationProvider=getProviderFromElement(file);
+      PsiElement element=null;
+      if (documentationProvider != null) {
+        element=documentationProvider.getDocumentationElementForLookupItem(PsiManager.getInstance(myProject),lookupIteObject,originalElement);
+      }
+      if (element == null)       return;
       if (myEditor != null) {
         final PsiFile file=element.getContainingFile();
         if (file != null) {
@@ -49,28 +46,10 @@
         }
       }
  else {
-        showJavaDocInfo(element);
+        doShowJavaDocInfo(element,false,false,this);
       }
-      return false;
     }
   }
-);
-  final JBPopup hint=JBPopupFactory.getInstance().createComponentPopupBuilder(component,component).setRequestFocusCondition(project,NotLookupOrSearchCondition.INSTANCE).setProject(project).addListener(updateProcessor).addUserData(updateProcessor).setForceHeavyweight(false).setDimensionServiceKey(project,JAVADOC_LOCATION_AND_SIZE,false).setResizable(true).setMovable(true).setTitle(getTitle(element)).setCancelCallback(new Computable<Boolean>(){
-    public Boolean compute(){
-      if (fromQuickSearch()) {
-        ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).unregisterHint();
-      }
-      Disposer.dispose(component);
-      myEditor=null;
-      myPreviouslyFocused=null;
-      myParameterInfoController=null;
-      return Boolean.TRUE;
-    }
-  }
-).createPopup();
-  component.setHint(hint);
-  fetchDocInfo(getDefaultCollector(element),component);
-  myDocInfoHintRef=new WeakReference<JBPopup>(hint);
-  myPreviouslyFocused=WindowManagerEx.getInstanceEx().getFocusedComponent(project);
-  return hint;
+;
+  return doShowJavaDocInfo(element,false,requestFocus,updateProcessor);
 }
