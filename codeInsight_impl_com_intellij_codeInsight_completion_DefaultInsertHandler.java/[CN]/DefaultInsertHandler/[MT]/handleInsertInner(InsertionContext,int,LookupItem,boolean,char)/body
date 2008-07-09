@@ -1,0 +1,81 @@
+{
+  LOG.assertTrue(CommandProcessor.getInstance().getCurrentCommand() != null);
+  PsiDocumentManager.getInstance(context.getProject()).commitDocument(context.editor.getDocument());
+  myContext=context;
+  myLookupItem=item;
+  myProject=myContext.getProject();
+  myFile=myContext.file;
+  myEditor=myContext.editor;
+  myDocument=myEditor.getDocument();
+  if (isTemplateToBeCompleted(myLookupItem)) {
+    handleTemplate(startOffset,signatureSelected,completionChar);
+    return false;
+  }
+  TailType tailType=getTailType(completionChar);
+  myState=new InsertHandlerState(myContext.getSelectionEndOffset(),myContext.getSelectionEndOffset());
+  final boolean needLeftParenth=isToInsertParenth();
+  final boolean hasParams=needLeftParenth && hasParams();
+  if (CompletionUtil.isOverwrite(item,completionChar))   removeEndOfIdentifier(needLeftParenth && hasParams);
+ else   if (myContext.getOffsetMap().getOffset(CompletionInitializationContext.IDENTIFIER_END_OFFSET) != myContext.getSelectionEndOffset())   JavaCompletionUtil.resetParensInfo(context.getOffsetMap());
+  handleParenses(hasParams,needLeftParenth,tailType);
+  handleBrackets();
+  if (myLookupItem.getObject() instanceof PsiVariable) {
+    if (completionChar == '!' && PsiType.BOOLEAN.isAssignableFrom(((PsiVariable)myLookupItem.getObject()).getType())) {
+      PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+      final PsiReferenceExpression ref=PsiTreeUtil.findElementOfClassAtOffset(myFile,myState.tailOffset - 1,PsiReferenceExpression.class,false);
+      if (ref != null) {
+        FeatureUsageTracker.getInstance().triggerFeatureUsed(CodeCompletionFeatures.EXCLAMATION_FINISH);
+        myDocument.insertString(ref.getTextRange().getStartOffset(),"!");
+        myState.caretOffset++;
+        myState.tailOffset++;
+      }
+    }
+  }
+  RangeMarker saveMaker=null;
+  final boolean generateAnonymousBody=myLookupItem.getAttribute(LookupItem.GENERATE_ANONYMOUS_BODY_ATTR) != null;
+  if (generateAnonymousBody) {
+    saveMaker=myDocument.createRangeMarker(myState.caretOffset,myState.caretOffset);
+    myDocument.insertString(myState.tailOffset,"{}");
+    myState.caretOffset=myState.tailOffset + 1;
+    myState.tailOffset+=2;
+  }
+  myState.caretOffset=processTail(tailType,myState.caretOffset,myState.tailOffset);
+  myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  myEditor.getSelectionModel().removeSelection();
+  qualifyIfNeeded();
+  if (needLeftParenth && hasParams) {
+    AutoPopupController.getInstance(myProject).autoPopupParameterInfo(myEditor,null);
+  }
+  if (tailType == TailType.DOT) {
+    AutoPopupController.getInstance(myProject).autoPopupMemberLookup(myEditor,null);
+  }
+  if (generateAnonymousBody) {
+    generateAnonymousBody();
+    if (hasParams) {
+      int offset=saveMaker.getStartOffset();
+      myEditor.getCaretModel().moveToOffset(offset);
+      myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+      myEditor.getSelectionModel().removeSelection();
+    }
+    return false;
+  }
+  if (insertingAnnotation()) {
+    final Document document=context.editor.getDocument();
+    PsiDocumentManager.getInstance(context.getProject()).commitDocument(document);
+    PsiElement elementAt=myFile.findElementAt(myContext.getStartOffset());
+    final PsiElement parentElement=elementAt != null ? elementAt.getParent() : null;
+    if (elementAt instanceof PsiIdentifier && (PsiTreeUtil.getParentOfType(elementAt,PsiAnnotationParameterList.class) != null || parentElement instanceof PsiErrorElement && parentElement.getParent() instanceof PsiJavaFile) && isAtTokenNeeded()) {
+      PsiElement parent=PsiTreeUtil.getParentOfType(elementAt,PsiModifierListOwner.class,PsiCodeBlock.class);
+      if (parent == null && parentElement instanceof PsiErrorElement) {
+        PsiElement nextElement=parentElement.getNextSibling();
+        if (nextElement instanceof PsiWhiteSpace)         nextElement=nextElement.getNextSibling();
+        if (nextElement instanceof PsiClass)         parent=nextElement;
+      }
+      if (parent instanceof PsiModifierListOwner) {
+        int expectedOffsetForAtToken=elementAt.getTextRange().getStartOffset();
+        document.insertString(expectedOffsetForAtToken,"@");
+      }
+    }
+  }
+  return true;
+}
