@@ -2,12 +2,14 @@
   boolean foundRename=false;
   final SVNStatus copiedStatus=copiedFile.getStatus();
   final String copyFromURL=copiedFile.getCopyFromURL();
+  final FilePath copiedToPath=copiedFile.getFilePath();
+  final Set<SvnChangedFile> deletedToDelete=new HashSet<SvnChangedFile>();
   for (Iterator<SvnChangedFile> iterator=context.getDeletedFiles().iterator(); iterator.hasNext(); ) {
     SvnChangedFile deletedFile=iterator.next();
     final SVNStatus deletedStatus=deletedFile.getStatus();
     if (copyFromURL.equals(deletedStatus.getURL().toString())) {
       builder.processChange(new Change(createBeforeRevision(deletedFile),CurrentContentRevision.create(copiedFile.getFilePath())));
-      iterator.remove();
+      deletedToDelete.add(deletedFile);
       for (Iterator<SvnChangedFile> iterChild=context.getDeletedFiles().iterator(); iterChild.hasNext(); ) {
         SvnChangedFile deletedChild=iterChild.next();
         final String childURL=deletedChild.getStatus().getURL().toString();
@@ -15,13 +17,19 @@
           String relativePath=childURL.substring(copyFromURL.length());
           File newPath=new File(copiedFile.getFilePath().getIOFile(),relativePath);
           FilePath newFilePath=myFactory.createFilePathOn(newPath);
-          builder.processChange(new Change(createBeforeRevision(deletedChild),CurrentContentRevision.create(newFilePath)));
-          iterChild.remove();
+          if (!context.isDeleted(newFilePath)) {
+            builder.processChange(new Change(createBeforeRevision(deletedChild),CurrentContentRevision.create(newFilePath)));
+            deletedToDelete.add(deletedChild);
+          }
         }
       }
       foundRename=true;
       break;
     }
+  }
+  final List<SvnChangedFile> deletedFiles=context.getDeletedFiles();
+  for (  SvnChangedFile file : deletedToDelete) {
+    deletedFiles.remove(file);
   }
   if (!foundRename && copiedStatus.getURL() != null) {
     File wcPath=guessWorkingCopyPath(copiedStatus.getFile(),copiedStatus.getURL(),copyFromURL);
