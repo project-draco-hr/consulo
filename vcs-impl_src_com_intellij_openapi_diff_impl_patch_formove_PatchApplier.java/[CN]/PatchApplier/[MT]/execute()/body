@@ -1,0 +1,41 @@
+{
+  final PathsVerifier verifier=new PathsVerifier(myProject,myBaseDirectory,myPatches);
+  myRemainingPatches.addAll(myPatches);
+  final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(ApplyPatchStatus.FAILURE);
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+        public void run(){
+          if (!verifier.execute()) {
+            return;
+          }
+          if (!makeWritable(verifier.getWritableFiles())) {
+            return;
+          }
+          final List<Pair<VirtualFile,FilePatch>> textPatches=verifier.getTextPatches();
+          if (!fileTypesAreOk(textPatches)) {
+            return;
+          }
+          final ApplyPatchStatus status=actualApply(verifier);
+          showApplyStatus(status);
+          if (status != null) {
+            refStatus.set(status);
+          }
+        }
+      }
+,VcsBundle.message("patch.apply.command"),null);
+    }
+  }
+);
+  final List<VirtualFile> directlyAffected=verifier.getDirectlyAffected();
+  final List<VirtualFile> indirectlyAffected=verifier.getAllAffected();
+  if ((myTargetChangeList != null) && (!directlyAffected.isEmpty())) {
+    ApplyPatchAction.moveChangesOfVsToList(myProject,directlyAffected,myTargetChangeList);
+  }
+ else {
+    final ChangeListManager changeListManager=ChangeListManager.getInstance(myProject);
+    changeListManager.scheduleUpdate();
+  }
+  refreshIndirectlyAffected(indirectlyAffected);
+  return refStatus.get();
+}
