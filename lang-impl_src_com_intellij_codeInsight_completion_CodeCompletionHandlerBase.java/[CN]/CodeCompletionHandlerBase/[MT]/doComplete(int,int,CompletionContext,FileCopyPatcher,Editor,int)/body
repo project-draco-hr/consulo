@@ -1,0 +1,73 @@
+{
+  final Pair<CompletionContext,PsiElement> insertedInfo=new WriteCommandAction<Pair<CompletionContext,PsiElement>>(context.project){
+    protected void run(    Result<Pair<CompletionContext,PsiElement>> result) throws Throwable {
+      result.setResult(insertDummyIdentifier(context,patcher));
+    }
+  }
+.execute().getResultObject();
+  final PsiElement insertedElement=insertedInfo.getSecond();
+  insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,insertedInfo.getFirst());
+  final CompletionParameters parameters=new CompletionParameters(insertedInfo.getSecond(),insertedInfo.getFirst().file,myCompletionType,insertedInfo.getFirst().getStartOffset(),invocationCount);
+  final String adText=getAdvertisementText(parameters);
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,adText,this,insertedInfo.getFirst(),context);
+  final Semaphore startSemaphore=new Semaphore();
+  startSemaphore.down();
+  final Ref<LookupData> data=Ref.create(null);
+  final Runnable computeRunnable=new Runnable(){
+    public void run(){
+      ProgressManager.getInstance().runProcess(new Runnable(){
+        public void run(){
+          try {
+            startSemaphore.up();
+            final Collection<LookupElement> lookupSet=new LinkedHashSet<LookupElement>();
+            CompletionService.getCompletionService().getVariantsFromContributors(CompletionContributor.EP_NAME,parameters,null,new Consumer<LookupElement>(){
+              public void consume(              final LookupElement lookupElement){
+                ApplicationManager.getApplication().runReadAction(new Runnable(){
+                  public void run(){
+                    if (lookupSet.add(lookupElement)) {
+                      indicator.addItem((LookupItem)lookupElement);
+                    }
+                  }
+                }
+);
+              }
+            }
+);
+            final LookupItem[] items=lookupSet.toArray(new LookupItem[lookupSet.size()]);
+            final LookupData data1=new LookupData(items);
+            data.set(data1);
+          }
+ catch (          ProcessCanceledException e) {
+          }
+        }
+      }
+,indicator);
+    }
+  }
+;
+  final Queue<AWTEvent> queue=new Queue<AWTEvent>(10);
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    computeRunnable.run();
+  }
+ else {
+    ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
+    startSemaphore.waitFor();
+    IdeEventQueue.getInstance().pumpEventsForHierarchy(indicator.getLookup().getComponent(),new Condition<AWTEvent>(){
+      public boolean value(      final AWTEvent object){
+        if (object instanceof KeyEvent && !indicator.isInitialized()) {
+          final KeyEvent event=(KeyEvent)object;
+          queue.addLast(new KeyEvent(event.getComponent(),event.getID(),event.getWhen(),event.getModifiers(),event.getKeyCode(),event.getKeyChar(),event.getKeyLocation()));
+        }
+ else         if (indicator.getLookup().isVisible()) {
+          flushQueue(queue);
+        }
+        return !indicator.isRunning() || indicator.isCanceled();
+      }
+    }
+);
+  }
+  if (!indicator.isCanceled()) {
+    computingFinished(data.get(),indicator,context,parameters,offset1,offset2);
+  }
+  flushQueue(queue);
+}
