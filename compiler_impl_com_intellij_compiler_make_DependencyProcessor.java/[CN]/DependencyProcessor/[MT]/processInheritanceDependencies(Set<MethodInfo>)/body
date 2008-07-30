@@ -4,6 +4,19 @@
   final boolean becameFinal=!CacheUtils.isFinal(oldCache,myQName) && CacheUtils.isFinal(newCache,myQName);
   final SymbolTable symbolTable=myDependencyCache.getSymbolTable();
   final Set<MemberInfo> removedConcreteMethods=fetchNonAbstractMethods(myRemovedMembers);
+  final Set<MethodInfo> removedOverridableMethods;
+  if (!removedMethods.isEmpty()) {
+    removedOverridableMethods=new HashSet<MethodInfo>(removedMethods);
+    for (Iterator<MethodInfo> it=removedOverridableMethods.iterator(); it.hasNext(); ) {
+      final MethodInfo method=it.next();
+      if (method.isFinal() || method.isStatic() || method.isPrivate()|| method.isConstructor()) {
+        it.remove();
+      }
+    }
+  }
+ else {
+    removedOverridableMethods=Collections.emptySet();
+  }
   myDependencyCache.getCacheNavigator().walkSubClasses(myQName,new ClassInfoProcessor(){
     public boolean process(    final int subclassQName) throws CacheCorruptedException {
       if (myDependencyCache.isClassInfoMarked(subclassQName)) {
@@ -13,7 +26,7 @@
       if (subclassId == Cache.UNKNOWN) {
         return true;
       }
-      if (hasRemovedMethods && myIsRemoteInterface && !CacheUtils.isInterface(oldCache,subclassQName)) {
+      if (!removedMethods.isEmpty() && myIsRemoteInterface && !CacheUtils.isInterface(oldCache,subclassQName)) {
         if (myDependencyCache.markClass(subclassQName)) {
           if (LOG.isDebugEnabled()) {
             LOG.debug("Mark dependent class " + myDependencyCache.resolve(subclassQName) + "; reason: methods were removed from remote interface: "+ myDependencyCache.resolve(myQName));
@@ -158,14 +171,22 @@
           return true;
         }
       }
-      if (hasRemovedMethods) {
-        if (myDependencyCache.hasOverrideAnnotatedMethods(subclassQName,myProject)) {
-          if (myDependencyCache.markClass(subclassQName)) {
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("Mark dependent subclass " + myDependencyCache.resolve(subclassQName) + "; reason: the class has methods annotated with @Override and some methods were changed or removed in a base class"+ myDependencyCache.resolve(myQName));
+      if (!removedOverridableMethods.isEmpty() && !myDependencyCache.isClassInfoMarked(subclassQName) && myDependencyCache.getNewClassesCache().getClassId(subclassQName) == Cache.UNKNOWN) {
+        final Cache cache=myDependencyCache.getCache();
+        final int[] subclassMethods=cache.getMethodIds(cache.getClassDeclarationId(subclassQName));
+        for (        int subclassMethodId : subclassMethods) {
+          if (!cache.isConstructor(subclassMethodId)) {
+            for (            MethodInfo removedMethod : removedOverridableMethods) {
+              if (removedMethod.getName() == cache.getMethodName(subclassMethodId)) {
+                if (myDependencyCache.markClass(subclassQName)) {
+                  if (LOG.isDebugEnabled()) {
+                    LOG.debug("Mark dependent subclass " + myDependencyCache.resolve(subclassQName) + "; reason: the class has methods annotated with @Override and some methods were changed or removed in a base class"+ myDependencyCache.resolve(myQName));
+                  }
+                }
+                return true;
+              }
             }
           }
-          return true;
         }
       }
       return true;
