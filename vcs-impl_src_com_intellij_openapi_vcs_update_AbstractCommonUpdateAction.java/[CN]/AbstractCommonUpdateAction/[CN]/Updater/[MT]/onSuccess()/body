@@ -1,0 +1,69 @@
+{
+  boolean continueChain=false;
+  for (  SequentialUpdatesContext context : myContextInfo.values()) {
+    continueChain|=context != null;
+  }
+  final boolean continueChainFinal=continueChain;
+  final boolean someSessionWasCancelled=someSessionWasCanceled(myUpdateSessions);
+  if (!someSessionWasCancelled) {
+    for (    final UpdateSession updateSession : myUpdateSessions) {
+      updateSession.onRefreshFilesCompleted();
+    }
+  }
+  myProjectLevelVcsManager.stopBackgroundVcsOperation();
+  if (myActionInfo.canChangeFileStatus()) {
+    final VcsDirtyScopeManager myManager=VcsDirtyScopeManager.getInstance(myProject);
+    UpdateFilesHelper.iterateFileGroupFiles(myUpdatedFiles,new UpdateFilesHelper.Callback(){
+      public void onFile(      final String filePath,      final String groupId){
+        @NonNls final String path=VfsUtil.pathToUrl(filePath.replace(File.separatorChar,'/'));
+        final VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(path);
+        if (file != null) {
+          myManager.fileDirty(file);
+        }
+      }
+    }
+);
+  }
+  final boolean updateSuccess=(!someSessionWasCancelled) && (myVcsExceptions.isEmpty());
+  if (!someSessionWasCancelled) {
+    ApplicationManager.getApplication().invokeLater(new Runnable(){
+      public void run(){
+        if (!myVcsExceptions.isEmpty()) {
+          if (continueChainFinal) {
+            myVcsExceptions.add(contextInterruptedMessages());
+          }
+          AbstractVcsHelper.getInstance(myProject).showErrors(myVcsExceptions,VcsBundle.message("message.title.vcs.update.errors",getTemplatePresentation().getText()));
+        }
+ else {
+          final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+          if (indicator != null) {
+            indicator.setText(VcsBundle.message("progress.text.updating.done"));
+          }
+        }
+        if (myUpdatedFiles.isEmpty() && myVcsExceptions.isEmpty()) {
+          Messages.showMessageDialog(getAllFilesAreUpToDateMessage(myRoots),getTemplatePresentation().getText(),Messages.getInformationIcon());
+        }
+ else         if (!myUpdatedFiles.isEmpty()) {
+          showUpdateTree();
+          final CommittedChangesCache cache=CommittedChangesCache.getInstance(myProject);
+          cache.processUpdatedFiles(myUpdatedFiles);
+        }
+        ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+        if (continueChainFinal && updateSuccess) {
+          if (!myUpdatedFiles.getGroupById(FileGroup.MERGED_WITH_CONFLICT_ID).isEmpty()) {
+            showContextInterruptedError();
+          }
+ else {
+            reset();
+            ProgressManager.getInstance().run(Updater.this);
+          }
+        }
+      }
+    }
+);
+  }
+ else   if (continueChain) {
+    showContextInterruptedError();
+    ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+  }
+}
