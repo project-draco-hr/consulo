@@ -5,7 +5,7 @@
   PsiType returnType=callSubstitutor.substitute(myMethod.getReturnType());
   String resultName=null;
   final int applicabilityLevel=PsiUtil.getApplicabilityLevel(myMethod,callSubstitutor,argumentList);
-  if (returnType != null && returnType != PsiType.VOID) {
+  if (returnType != null && returnType != PsiType.VOID && tailCallType == InlineMethodHandler.TailCallType.None) {
     resultName=myJavaCodeStyle.propertyNameToVariableName("result",VariableKind.LOCAL_VARIABLE);
     resultName=myJavaCodeStyle.suggestUniqueVariableName(resultName,block.getFirstChild(),true);
     PsiDeclarationStatement declaration=myFactory.createVariableDeclarationStatement(resultName,returnType,null);
@@ -69,14 +69,26 @@
       originalStatement.delete();
     }
   }
-  if (resultName != null) {
+  if (resultName != null || tailCallType == InlineMethodHandler.TailCallType.Simple) {
     PsiReturnStatement[] returnStatements=RefactoringUtil.findReturnStatements(myMethodCopy);
     for (    PsiReturnStatement returnStatement : returnStatements) {
-      if (returnStatement.getReturnValue() == null)       continue;
-      PsiStatement statement=myFactory.createStatementFromText(resultName + "=0;",null);
-      statement=(PsiStatement)myCodeStyleManager.reformat(statement);
-      PsiAssignmentExpression assignment=(PsiAssignmentExpression)((PsiExpressionStatement)statement).getExpression();
-      assignment.getRExpression().replace(returnStatement.getReturnValue());
+      final PsiExpression returnValue=returnStatement.getReturnValue();
+      if (returnValue == null)       continue;
+      PsiStatement statement;
+      if (tailCallType == InlineMethodHandler.TailCallType.Simple) {
+        if (returnValue instanceof PsiCallExpression) {
+          PsiExpressionStatement exprStatement=(PsiExpressionStatement)myFactory.createStatementFromText("a;",null);
+          exprStatement.getExpression().replace(returnValue);
+          returnStatement.getParent().addBefore(exprStatement,returnStatement);
+        }
+        statement=myFactory.createStatementFromText("return;",null);
+      }
+ else {
+        statement=myFactory.createStatementFromText(resultName + "=0;",null);
+        statement=(PsiStatement)myCodeStyleManager.reformat(statement);
+        PsiAssignmentExpression assignment=(PsiAssignmentExpression)((PsiExpressionStatement)statement).getExpression();
+        assignment.getRExpression().replace(returnValue);
+      }
       returnStatement.replace(statement);
     }
   }
