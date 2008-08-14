@@ -1,63 +1,107 @@
 {
-  ColumnInfo[] columnInfos={new MyColumnInfo(myColumnNames[0]){
-    public Class getColumnClass(){
-      return TreeTableModel.class;
-    }
-    public boolean isCellEditable(    Object o){
-      return true;
-    }
-  }
-,new MyColumnInfo(myColumnNames[1]),new ActivationStateColumnInfo(myColumnNames[2])};
-  myTreeRoot=new DefaultMutableTreeNode();
-  myTreeTableModel=new ListTreeTableModelOnColumns(myTreeRoot,columnInfos);
-  myTreeTable=new MyTable((ListTreeTableModelOnColumns)myTreeTableModel);
-  myTreeTable.setRootVisible(false);
-  myTreeTable.setDefaultRenderer(Boolean.class,new BooleanTableCellRenderer());
-  myTreeTable.getTree().setShowsRootHandles(true);
-  myTreeTable.getTableHeader().setReorderingAllowed(false);
-  myTreeTable.setTreeCellRenderer(new ColoredTreeCellRenderer(){
-    public void customizeCellRenderer(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+  myTreeRoot=new CheckedTreeNode(null);
+  myTree=new CheckboxTree(new CheckboxTree.CheckboxTreeCellRenderer(){
+    public void customizeCellRenderer(    final JTree tree,    Object value,    final boolean selected,    final boolean expanded,    final boolean leaf,    final int row,    final boolean hasFocus){
       value=((DefaultMutableTreeNode)value).getUserObject();
-      setPaintFocusBorder(false);
       if (value instanceof TemplateImpl) {
-        setIcon(TEMPLATE_ICON);
-        append(((TemplateImpl)value).getKey(),SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        getTextRenderer().append(((TemplateImpl)value).getKey(),SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        String description=((TemplateImpl)value).getDescription();
+        if (description != null && description.length() > 0) {
+          getTextRenderer().append(" (" + description + ")",SimpleTextAttributes.GRAY_ATTRIBUTES);
+        }
       }
  else       if (value instanceof TemplateGroup) {
-        setIcon(TEMPLATE_GROUP_ICON);
-        append(((TemplateGroup)value).getName(),SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        getTextRenderer().append(((TemplateGroup)value).getName(),SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+      }
+    }
+  }
+,myTreeRoot){
+    @Override protected void onNodeStateChanged(    final CheckedTreeNode node){
+      Object obj=node.getUserObject();
+      if (obj instanceof TemplateImpl) {
+        ((TemplateImpl)obj).setDeactivated(!node.isChecked());
+      }
+    }
+  }
+;
+  myTree.setRootVisible(false);
+  myTree.setShowsRootHandles(true);
+  DefaultTreeSelectionModel selModel=new DefaultTreeSelectionModel();
+  myTree.setSelectionModel(selModel);
+  selModel.setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+  myTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    final TreeSelectionEvent e){
+      boolean enableEditButton=false;
+      boolean enableRemoveButton=false;
+      boolean enableCopyButton=false;
+      boolean enableExportButton=false;
+      int selected=getSelectedIndex();
+      if (selected >= 0 && selected < myTree.getRowCount()) {
+        TemplateSettings templateSettings=TemplateSettings.getInstance();
+        TemplateImpl template=getTemplate(selected);
+        if (template != null) {
+          templateSettings.setLastSelectedTemplateKey(template.getKey());
+        }
+ else {
+          templateSettings.setLastSelectedTemplateKey(null);
+        }
+        DefaultMutableTreeNode node=(DefaultMutableTreeNode)myTree.getPathForRow(selected).getLastPathComponent();
+        enableExportButton=false;
+        enableEditButton=false;
+        enableCopyButton=false;
+        if (node.getUserObject() instanceof TemplateImpl) {
+          enableCopyButton=true;
+          TemplateGroup group=getTemplateGroup(template.getGroupName());
+          if (group != null && !getSchemesManager().isShared(group)) {
+            enableEditButton=true;
+            enableRemoveButton=true;
+          }
+        }
+        if (node.getUserObject() instanceof TemplateGroup) {
+          enableRemoveButton=true;
+          TemplateGroup group=(TemplateGroup)node.getUserObject();
+          enableExportButton=!getSchemesManager().isShared(group);
+        }
+      }
+      updateTemplateTextArea();
+      myEditor.getComponent().setEnabled(enableEditButton);
+      if (myCopyButton != null) {
+        myCopyButton.setEnabled(enableCopyButton);
+        myEditButton.setEnabled(enableEditButton);
+        myRemoveButton.setEnabled(enableRemoveButton);
+      }
+      if (myExportButton != null) {
+        myExportButton.setEnabled(enableExportButton);
+      }
+      if (myImportButton != null) {
+        myImportButton.setEnabled(true);
       }
     }
   }
 );
-  myTreeTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-  myTreeTable.setPreferredScrollableViewportSize(new Dimension(300,myTreeTable.getRowHeight() * 10));
-  myTreeTable.getColumn(myColumnNames[0]).setPreferredWidth(80);
-  myTreeTable.getColumn(myColumnNames[1]).setPreferredWidth(260);
-  myTreeTable.getColumn(myColumnNames[2]).setPreferredWidth(12);
-  myTreeTable.registerKeyboardAction(new ActionListener(){
+  myTree.registerKeyboardAction(new ActionListener(){
     public void actionPerformed(    ActionEvent event){
       addRow();
     }
   }
 ,KeyStroke.getKeyStroke(KeyEvent.VK_INSERT,0),JComponent.WHEN_FOCUSED);
-  myTreeTable.registerKeyboardAction(new ActionListener(){
+  myTree.registerKeyboardAction(new ActionListener(){
     public void actionPerformed(    ActionEvent event){
       removeRow();
     }
   }
 ,KeyStroke.getKeyStroke(KeyEvent.VK_DELETE,0),JComponent.WHEN_FOCUSED);
-  myTreeTable.addMouseListener(new MouseAdapter(){
+  myTree.addMouseListener(new MouseAdapter(){
     public void mouseClicked(    MouseEvent e){
-      if (e.getClickCount() == 2 && myTreeTable.columnAtPoint(e.getPoint()) != 2) {
+      if (e.getClickCount() == 2) {
         edit();
       }
     }
   }
 );
-  JScrollPane scrollpane=ScrollPaneFactory.createScrollPane(myTreeTable);
+  JScrollPane scrollpane=ScrollPaneFactory.createScrollPane(myTree);
   if (myTemplateGroups.size() > 0) {
-    myTreeTable.setRowSelectionInterval(0,0);
+    myTree.setSelectionInterval(0,0);
   }
   scrollpane.setPreferredSize(new Dimension(600,400));
   return scrollpane;
