@@ -1,0 +1,54 @@
+{
+  final PsiManager manager=sourceClass.getManager();
+  final Project project=sourceClass.getProject();
+  final ExtractedClassBuilder extractedClassBuilder=new ExtractedClassBuilder();
+  final CodeStyleSettingsManager settingsManager=CodeStyleSettingsManager.getInstance(project);
+  final CodeStyleSettings settings=settingsManager.getCurrentSettings();
+  extractedClassBuilder.setCodeStyleSettings(settings);
+  extractedClassBuilder.setClassName(newClassName);
+  extractedClassBuilder.setPackageName(newPackageName);
+  extractedClassBuilder.setOriginalClassName(sourceClass.getQualifiedName());
+  extractedClassBuilder.setRequiresBackPointer(requiresBackpointer);
+  for (  PsiField field : fields) {
+    final boolean getterRequired=fieldsRequiringGetters.contains(field);
+    final boolean setterRequired=fieldsRequiringSetters.contains(field);
+    extractedClassBuilder.addField(field,getterRequired,setterRequired);
+  }
+  for (  PsiMethod method : methods) {
+    extractedClassBuilder.addMethod(method);
+  }
+  for (  PsiClass innerClass : innerClasses) {
+    extractedClassBuilder.addInnerClass(innerClass,innerClassesToMakePublic.contains(innerClass));
+  }
+  for (  PsiClassInitializer initializer : initializersToMove) {
+    extractedClassBuilder.addInitializer(initializer);
+  }
+  extractedClassBuilder.setTypeArguments(typeParams);
+  final List<PsiClass> interfaces=calculateInterfacesSupported();
+  extractedClassBuilder.setInterfaces(interfaces);
+  final String classString;
+  try {
+    classString=extractedClassBuilder.buildBeanClass();
+  }
+ catch (  IOException e) {
+    logger.error(e);
+    return;
+  }
+  try {
+    final PsiElementFactory elementFactory=JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
+    final PsiFile containingFile=sourceClass.getContainingFile();
+    final PsiDirectory containingDirectory=containingFile.getContainingDirectory();
+    final Module module=ModuleUtil.findModuleForPsiElement(containingFile);
+    final PsiDirectory directory=PackageUtil.findOrCreateDirectoryForPackage(module,newPackageName,containingDirectory,true);
+    if (directory != null) {
+      final PsiFile newFile=PsiFileFactory.getInstance(project).createFileFromText(newClassName + ".java",classString);
+      final PsiElement addedFile=directory.add(newFile);
+      final CodeStyleManager codeStyleManager=manager.getCodeStyleManager();
+      final PsiElement shortenedFile=JavaCodeStyleManager.getInstance(project).shortenClassReferences(addedFile);
+      codeStyleManager.reformat(shortenedFile);
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    logger.error(e);
+  }
+}
