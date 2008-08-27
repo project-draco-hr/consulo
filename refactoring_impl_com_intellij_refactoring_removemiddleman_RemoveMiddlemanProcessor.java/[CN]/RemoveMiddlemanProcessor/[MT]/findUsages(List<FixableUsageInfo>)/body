@@ -1,28 +1,24 @@
 {
-  final Set<PsiMethod> methods=DelegationUtils.getDelegatingMethodsForField(field);
-  for (  final PsiMethod method : methods) {
+  for (  final MemberInfo memberInfo : myDelegateMethodInfos) {
+    if (!memberInfo.isChecked())     return;
+    final PsiMethod method=(PsiMethod)memberInfo.getMember();
     final Project project=method.getProject();
     final String getterName=PropertyUtil.suggestGetterName(project,field);
     final int[] paramPermutation=DelegationUtils.getParameterPermutation(method);
     final PsiMethod delegatedMethod=DelegationUtils.getDelegatedMethod(method);
-    final String delegatedMethodName=delegatedMethod.getName();
-    final Set<PsiMethod> siblingMethods=MethodInheritanceUtils.calculateSiblingMethods(method);
-    for (    PsiMethod siblingMethod : siblingMethods) {
-      processUsagesForMethod(siblingMethod,paramPermutation,getterName,delegatedMethodName,usages);
+    LOG.assertTrue(!DelegationUtils.isAbstract(method));
+    @Modifier String visibility=PsiModifier.PRIVATE;
+    visibility=processUsagesForMethod(memberInfo.isToAbstract(),method,paramPermutation,getterName,delegatedMethod,visibility,usages);
+    final PsiMethod[] deepestSuperMethods=method.findDeepestSuperMethods();
+    for (    PsiMethod superMethod : deepestSuperMethods) {
+      visibility=processUsagesForMethod(memberInfo.isToAbstract(),superMethod,paramPermutation,getterName,delegatedMethod,visibility,usages);
     }
     final PsiClass delegateClass=delegatedMethod.getContainingClass();
-    if (!delegateClass.hasModifierProperty(PsiModifier.PUBLIC)) {
-      usages.add(new MakeClassPublic(delegateClass));
+    if (VisibilityUtil.compare(visibility,VisibilityUtil.getVisibilityModifier(delegateClass.getModifierList())) < 0) {
+      usages.add(new ChangeClassVisibilityUsageInfo(delegateClass,visibility));
     }
-    if (!delegateClass.isInterface() && !delegatedMethod.hasModifierProperty(PsiModifier.PUBLIC)) {
-      usages.add(new MakeMethodPublic(delegatedMethod));
-    }
-    final PsiMethod[] superMethods=delegatedMethod.findSuperMethods();
-    for (    PsiMethod superMethod : superMethods) {
-      final PsiClass containingSuperClass=superMethod.getContainingClass();
-      if (!containingSuperClass.isInterface() && !superMethod.hasModifierProperty(PsiModifier.PUBLIC)) {
-        usages.add(new MakeMethodPublic(superMethod));
-      }
+    if (!delegateClass.isInterface() && VisibilityUtil.compare(visibility,VisibilityUtil.getVisibilityModifier(delegatedMethod.getModifierList())) < 0) {
+      usages.add(new ChangeMethodVisibilityUsageInfo(delegatedMethod,visibility));
     }
   }
 }
