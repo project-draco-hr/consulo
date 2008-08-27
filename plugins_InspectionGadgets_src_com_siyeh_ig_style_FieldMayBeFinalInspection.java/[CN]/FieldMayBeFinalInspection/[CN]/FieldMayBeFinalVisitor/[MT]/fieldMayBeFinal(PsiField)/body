@@ -3,14 +3,17 @@
   final PsiExpression intializer=field.getInitializer();
   final PsiClassInitializer[] classInitializers=aClass.getInitializers();
   boolean assignedInInitializer=intializer != null;
+  boolean isInitialized=assignedInInitializer;
   for (  PsiClassInitializer classInitializer : classInitializers) {
     if (classInitializer.hasModifierProperty(PsiModifier.STATIC)) {
       continue;
     }
-    final PsiCodeBlock block=classInitializer.getBody();
-    if (InitializationUtils.blockAssignsVariableOrFails(block,field)) {
+    if (VariableAccessUtils.variableIsAssigned(field,classInitializer,false)) {
       if (assignedInInitializer) {
         return false;
+      }
+ else       if (InitializationUtils.classInitializerAssignsVariableOrFails(classInitializer,field)) {
+        isInitialized=true;
       }
       assignedInInitializer=true;
     }
@@ -18,18 +21,26 @@
   final PsiMethod[] methods=aClass.getMethods();
   for (  PsiMethod method : methods) {
     if (method.isConstructor() && !assignedInInitializer) {
-      if (!InitializationUtils.methodAssignsVariableOrFails(method,field)) {
+      if (!VariableAccessUtils.variableIsAssigned(field,method,false)) {
         return false;
+      }
+ else       if (InitializationUtils.methodAssignsVariableOrFails(method,field)) {
+        isInitialized=true;
       }
       continue;
     }
-    if (InitializationUtils.methodAssignsVariableOrFails(method,field)) {
+    if (VariableAccessUtils.variableIsAssigned(field,method,false)) {
       return false;
     }
   }
-  final PsiClass[] innerClasses=aClass.getInnerClasses();
-  for (  PsiClass innerClass : innerClasses) {
-    if (VariableAccessUtils.variableIsAssigned(field,innerClass)) {
+  if (!isInitialized) {
+    return false;
+  }
+  final PsiElement[] children=aClass.getChildren();
+  final ClassVisitor visitor=new ClassVisitor(field);
+  for (  PsiElement child : children) {
+    child.accept(visitor);
+    if (visitor.isVariableAssignedInClass()) {
       return false;
     }
   }
