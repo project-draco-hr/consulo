@@ -4,6 +4,7 @@
   final PsiResolveHelper resolveHelper=facade.getResolveHelper();
   final PsiSubstitutor superClassSubstitutor=TypeConversionUtil.getSuperClassSubstitutor(mySuperClass,myTargetClass,PsiSubstitutor.EMPTY);
   final PsiClassType targetClassType=elementFactory.createType(myTargetClass,superClassSubstitutor);
+  final String[] targetClassVisibility=new String[1];
   ReferencesSearch.search(mySuperClass).forEach(new Processor<PsiReference>(){
     public boolean process(    final PsiReference reference){
       final PsiElement element=reference.getElement();
@@ -16,11 +17,11 @@
           final PsiElement parent=element.getParent();
           if (parent instanceof PsiTypeElement) {
             final PsiType superClassType=((PsiTypeElement)parent).getType();
-            PsiSubstitutor subst=PsiSubstitutor.EMPTY;
-            for (            PsiTypeParameter typeParameter : PsiUtil.typeParametersIterable(myTargetClass)) {
-              subst=subst.put(typeParameter,resolveHelper.getSubstitutionForTypeParameter(typeParameter,targetClassType,superClassType,false,PsiUtil.getLanguageLevel(parent)));
-            }
+            PsiSubstitutor subst=getSuperClassSubstitutor(superClassType,targetClassType,resolveHelper);
             usages.add(new ReplaceWithSubtypeUsageInfo(((PsiTypeElement)parent),elementFactory.createType(myTargetClass,subst)));
+            if (!PsiUtil.isAccessible(myTargetClass,parent,null)) {
+              checkVisibility(VisibilityUtil.getPossibleVisibility(myTargetClass,parent),targetClassVisibility);
+            }
           }
  else           if (parent instanceof PsiReferenceList) {
             final PsiElement pparent=parent.getParent();
@@ -31,10 +32,35 @@
               }
             }
           }
+ else           if (parent instanceof PsiNewExpression) {
+            final PsiClassType newType=elementFactory.createType(myTargetClass,getSuperClassSubstitutor(((PsiNewExpression)parent).getType(),targetClassType,resolveHelper));
+            usages.add(new ReplaceConstructorUsageInfo(((PsiNewExpression)parent),myTargetClass,newType));
+          }
         }
       }
       return true;
     }
   }
 );
+  if (targetClassVisibility[0] != null) {
+    usages.add(new ReplaceVisibilityUsageInfo(myTargetClass,mySuperClass,myTargetClass,targetClassVisibility[0]));
+  }
+  for (  MemberInfo info : myMemberInfos) {
+    final PsiMember member=info.getMember();
+    final String[] memberVisibility=new String[1];
+    int effectiveAccessLevel=PsiUtil.getAccessLevel(member.getModifierList());
+    if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PROTECTED || effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PACKAGE_LOCAL) {
+      ReferencesSearch.search(member).forEach(new Processor<PsiReference>(){
+        public boolean process(        final PsiReference psiReference){
+          if (facade.arePackagesTheSame(myTargetClass,psiReference.getElement()))           return true;
+          checkVisibility(PsiModifier.PUBLIC,memberVisibility);
+          return true;
+        }
+      }
+);
+      if (memberVisibility[0] != null) {
+        usages.add(new ReplaceVisibilityUsageInfo(member,mySuperClass,myTargetClass,memberVisibility[0]));
+      }
+    }
+  }
 }
