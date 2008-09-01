@@ -1,0 +1,52 @@
+{
+  List<Trinity<IElementType,PsiLanguageInjectionHost,TextRange>> tokens=new ArrayList<Trinity<IElementType,PsiLanguageInjectionHost,TextRange>>(10);
+  SyntaxHighlighter syntaxHighlighter=SyntaxHighlighterFactory.getSyntaxHighlighter(language,project,(VirtualFile)virtualFile);
+  Lexer lexer=syntaxHighlighter.getHighlightingLexer();
+  lexer.start(outChars,0,outChars.length(),0);
+  int hostNum=-1;
+  int prevHostEndOffset=0;
+  PsiLanguageInjectionHost host=null;
+  LiteralTextEscaper<? extends PsiLanguageInjectionHost> escaper=null;
+  int prefixLength=0;
+  int suffixLength=0;
+  TextRange rangeInsideHost=null;
+  int shredEndOffset=-1;
+  for (IElementType tokenType=lexer.getTokenType(); tokenType != null; lexer.advance(), tokenType=lexer.getTokenType()) {
+    TextRange range=new ProperTextRange(lexer.getTokenStart(),lexer.getTokenEnd());
+    while (range != null && !range.isEmpty()) {
+      if (range.getStartOffset() >= shredEndOffset) {
+        hostNum++;
+        shredEndOffset=shreds.get(hostNum).range.getEndOffset();
+        prevHostEndOffset=range.getStartOffset();
+        host=shreds.get(hostNum).host;
+        escaper=escapers.get(hostNum);
+        rangeInsideHost=shreds.get(hostNum).getRangeInsideHost();
+        prefixLength=shreds.get(hostNum).prefix.length();
+        suffixLength=shreds.get(hostNum).suffix.length();
+      }
+      if (range.getStartOffset() < prevHostEndOffset + prefixLength) {
+        range=new TextRange(prevHostEndOffset + prefixLength,range.getEndOffset());
+      }
+      TextRange spilled=null;
+      if (range.getEndOffset() >= shredEndOffset - suffixLength) {
+        spilled=new TextRange(shredEndOffset,range.getEndOffset());
+        range=new TextRange(range.getStartOffset(),shredEndOffset);
+      }
+      if (!range.isEmpty()) {
+        int start=escaper.getOffsetInHost(range.getStartOffset() - prevHostEndOffset - prefixLength,rangeInsideHost);
+        int end=escaper.getOffsetInHost(range.getEndOffset() - prevHostEndOffset - prefixLength,rangeInsideHost);
+        if (end == -1) {
+          end=rangeInsideHost.getEndOffset();
+          tokens.add(Trinity.<IElementType,PsiLanguageInjectionHost,TextRange>create(tokenType,host,new ProperTextRange(start,end)));
+          prevHostEndOffset=shredEndOffset;
+        }
+ else {
+          TextRange rangeInHost=new ProperTextRange(start,end);
+          tokens.add(Trinity.create(tokenType,host,rangeInHost));
+        }
+      }
+      range=spilled;
+    }
+  }
+  return tokens;
+}

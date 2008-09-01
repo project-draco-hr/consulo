@@ -5,7 +5,7 @@
     PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(documentRange);
     if (file == null)     continue;
     PsiElement context=file.getContext();
-    if (context != null && context.isValid() && !file.getProject().isDisposed() && (myUpdateAll || new TextRange(myStartOffset,myEndOffset).intersects(context.getTextRange()))) {
+    if (context != null && context.isValid() && !file.getProject().isDisposed() && (myUpdateAll || new ProperTextRange(myStartOffset,myEndOffset).intersects(context.getTextRange()))) {
       hosts.add(context);
     }
   }
@@ -23,6 +23,7 @@
   JobUtil.invokeConcurrentlyForAll(injectedFiles,new Processor<PsiFile>(){
     public boolean process(    final PsiFile injectedPsi){
       AnnotationHolderImpl annotationHolder=createAnnotationHolder();
+      InjectedLanguageManager injectedLanguageManager=InjectedLanguageManager.getInstance(myProject);
       highlightInjectedIn(injectedPsi,annotationHolder,errorFilters);
       DocumentWindow documentWindow=(DocumentWindow)PsiDocumentManager.getInstance(myProject).getCachedDocument(injectedPsi);
       for (      Annotation annotation : annotationHolder) {
@@ -32,7 +33,7 @@
         if (textRange == null) {
           textRange=findNearestTextRange(documentWindow,startOffset);
           final boolean isBefore=startOffset < textRange.getStartOffset();
-          fixedTextRange=new TextRange(isBefore ? textRange.getStartOffset() - 1 : textRange.getEndOffset(),isBefore ? textRange.getStartOffset() : textRange.getEndOffset() + 1);
+          fixedTextRange=new ProperTextRange(isBefore ? textRange.getStartOffset() - 1 : textRange.getEndOffset(),isBefore ? textRange.getStartOffset() : textRange.getEndOffset() + 1);
         }
  else {
           fixedTextRange=null;
@@ -42,12 +43,13 @@
       }
       Collection<HighlightInfo> todos=highlightTodos(injectedPsi,injectedPsi.getText(),0,injectedPsi.getTextLength());
       for (      HighlightInfo info : todos) {
-        TextRange editable=documentWindow.intersectWithEditable(new TextRange(info.startOffset,info.endOffset));
-        if (editable == null)         continue;
-        TextRange hostRange=documentWindow.injectedToHost(editable);
-        HighlightInfo patched=HighlightInfo.createHighlightInfo(info.type,hostRange,info.description,info.forcedTextAttributes);
-        patched.toolTip=info.toolTip;
-        addHighlightInfo(hostRange,patched);
+        List<TextRange> editables=injectedLanguageManager.intersectWithAllEditableFragments(injectedPsi,new ProperTextRange(info.startOffset,info.endOffset));
+        for (        TextRange editable : editables) {
+          TextRange hostRange=documentWindow.injectedToHost(editable);
+          HighlightInfo patched=HighlightInfo.createHighlightInfo(info.type,hostRange,info.description,info.forcedTextAttributes);
+          patched.toolTip=info.toolTip;
+          addHighlightInfo(hostRange,patched);
+        }
       }
       return true;
     }
