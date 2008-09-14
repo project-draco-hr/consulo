@@ -3,6 +3,8 @@
   SearchScope searchScope=p.getScope();
   PsiManager psiManager=PsiManager.getInstance(method.getProject());
   final boolean isStrictSignatureSearch=p.isStrictSignatureSearch();
+  final PsiClass aClass=method.getContainingClass();
+  if (aClass == null)   return true;
   if (method.isConstructor()) {
     final ConstructorReferencesSearchHelper helper=new ConstructorReferencesSearchHelper(psiManager);
     if (!helper.processConstructorReferences(consumer,method,searchScope,!isStrictSignatureSearch,isStrictSignatureSearch)) {
@@ -32,47 +34,7 @@
     }
   }
 );
-  final TextOccurenceProcessor processor1=new TextOccurenceProcessor(){
-    public boolean execute(    PsiElement element,    int offsetInElement){
-      final PsiClass aClass=method.getContainingClass();
-      if (aClass == null)       return true;
-      final PsiReference[] refs=element.getReferences();
-      for (      PsiReference ref : refs) {
-        if (ref.getRangeInElement().contains(offsetInElement)) {
-          for (          PsiMethod method : methods) {
-            if (ref instanceof ResolvingHint && !((ResolvingHint)ref).canResolveTo(method)) {
-              return true;
-            }
-            if (ref.isReferenceTo(method)) {
-              return consumer.process(ref);
-            }
-            PsiElement refElement=ref.resolve();
-            if (refElement instanceof PsiMethod) {
-              PsiMethod refMethod=(PsiMethod)refElement;
-              PsiClass refMethodClass=refMethod.getContainingClass();
-              if (refMethodClass == null)               continue;
-              if (!refMethod.hasModifierProperty(PsiModifier.STATIC)) {
-                PsiSubstitutor substitutor=TypeConversionUtil.getClassSubstitutor(aClass,refMethodClass,PsiSubstitutor.EMPTY);
-                if (substitutor != null) {
-                  if (refMethod.getSignature(PsiSubstitutor.EMPTY).equals(method.getSignature(substitutor))) {
-                    if (!consumer.process(ref))                     return false;
-                  }
-                }
-              }
-              if (!isStrictSignatureSearch) {
-                PsiManager manager=method.getManager();
-                if (manager.areElementsEquivalent(refMethodClass,aClass)) {
-                  if (!consumer.process(ref))                   return false;
-                }
-              }
-            }
-          }
-        }
-      }
-      return true;
-    }
-  }
-;
+  final TextOccurenceProcessor processor1=new MethodTextOccurenceProcessor(consumer,aClass,isStrictSignatureSearch,methods);
   searchScope=searchScope.intersectWith(accessScope);
   short searchContext=UsageSearchContext.IN_CODE | UsageSearchContext.IN_COMMENTS | UsageSearchContext.IN_FOREIGN_LANGUAGES;
   boolean toContinue=psiManager.getSearchHelper().processElementsWithWord(processor1,searchScope,text,searchContext,true);
