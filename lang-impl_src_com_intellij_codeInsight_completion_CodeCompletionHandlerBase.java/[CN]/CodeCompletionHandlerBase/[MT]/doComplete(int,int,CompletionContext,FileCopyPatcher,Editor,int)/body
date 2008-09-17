@@ -1,4 +1,7 @@
 {
+  if (!ApplicationManager.getApplication().isUnitTestMode() && context.editor.getComponent().getRootPane() == null) {
+    LOG.assertTrue(false,"null root pane");
+  }
   final Pair<CompletionContext,PsiElement> insertedInfo=new WriteCommandAction<Pair<CompletionContext,PsiElement>>(context.project){
     protected void run(    Result<Pair<CompletionContext,PsiElement>> result) throws Throwable {
       result.setResult(insertDummyIdentifier(context,patcher));
@@ -9,16 +12,15 @@
   insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,insertedInfo.getFirst());
   final CompletionParameters parameters=new CompletionParameters(insertedInfo.getSecond(),insertedInfo.getFirst().file,myCompletionType,insertedInfo.getFirst().getStartOffset(),invocationCount);
   final String adText=getAdvertisementText(parameters);
-  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,adText,this,insertedInfo.getFirst(),context);
-  final Semaphore startSemaphore=new Semaphore();
-  startSemaphore.down();
-  final Ref<LookupData> data=Ref.create(null);
+  final Semaphore freezeSemaphore=new Semaphore();
+  freezeSemaphore.down();
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,adText,this,insertedInfo.getFirst(),context,freezeSemaphore);
+  final Ref<LookupElement[]> data=Ref.create(null);
   final Runnable computeRunnable=new Runnable(){
     public void run(){
       ProgressManager.getInstance().runProcess(new Runnable(){
         public void run(){
           try {
-            startSemaphore.up();
             final Collection<LookupElement> lookupSet=new LinkedHashSet<LookupElement>();
             CompletionService.getCompletionService().getVariantsFromContributors(CompletionContributor.EP_NAME,parameters,null,new Consumer<LookupElement>(){
               public void consume(              final LookupElement lookupElement){
@@ -33,9 +35,22 @@
               }
             }
 );
+            indicator.getLookup().setCalculating(false);
             final LookupElement[] items=lookupSet.toArray(new LookupElement[lookupSet.size()]);
-            final LookupData data1=new LookupData(items);
-            data.set(data1);
+            data.set(items);
+            freezeSemaphore.up();
+            if (items.length == 0) {
+              ApplicationManager.getApplication().invokeLater(new Runnable(){
+                public void run(){
+                  if (indicator != CompletionProgressIndicator.getCurrentCompletion())                   return;
+                  indicator.closeAndFinish();
+                  HintManager.getInstance().hideAllHints();
+                  handleEmptyLookup(context,parameters,indicator);
+                }
+              }
+);
+              return;
+            }
           }
  catch (          ProcessCanceledException e) {
           }
@@ -45,29 +60,18 @@
     }
   }
 ;
-  final Queue<AWTEvent> queue=new Queue<AWTEvent>(10);
   if (ApplicationManager.getApplication().isUnitTestMode()) {
     computeRunnable.run();
+    if (data.get().length == 0) {
+      indicator.closeAndFinish();
+    }
   }
  else {
     ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
-    startSemaphore.waitFor();
-    IdeEventQueue.getInstance().pumpEventsForHierarchy(indicator.getLookup().getComponent(),new Condition<AWTEvent>(){
-      public boolean value(      final AWTEvent object){
-        if (object instanceof KeyEvent && !indicator.isInitialized()) {
-          final KeyEvent event=(KeyEvent)object;
-          queue.addLast(new KeyEvent(event.getComponent(),event.getID(),event.getWhen(),event.getModifiers(),event.getKeyCode(),event.getKeyChar(),event.getKeyLocation()));
-        }
- else         if (indicator.getLookup().isVisible()) {
-          flushQueue(queue);
-        }
-        return !indicator.isRunning() || indicator.isCanceled();
-      }
+    if (!freezeSemaphore.waitFor(2000) || data.isNull()) {
+      indicator.showLookup();
+      return;
     }
-);
   }
-  if (!indicator.isCanceled()) {
-    computingFinished(data.get(),indicator,context,parameters,offset1,offset2);
-  }
-  flushQueue(queue);
+  completionFinished(offset1,offset2,context,indicator,data.get());
 }
