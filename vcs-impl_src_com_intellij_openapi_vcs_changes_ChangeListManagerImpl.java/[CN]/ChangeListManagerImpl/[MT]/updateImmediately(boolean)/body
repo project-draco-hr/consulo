@@ -1,219 +1,72 @@
 {
-  final Collection<Runnable> updateWaiters=new ArrayList<Runnable>();
+  FileHolderComposite composite;
+  ChangeListWorker changeListWorker;
+  final VcsDirtyScopeManagerImpl dirtyScopeManager;
   try {
-synchronized (myPendingUpdatesLock) {
-      myUpdateInProgress=true;
-      updateWaiters.addAll(myWaitingUpdateCompletionQueue);
-      checkIfDisposed();
-    }
-    final VcsDirtyScopeManagerImpl dirtyScopeManager=((VcsDirtyScopeManagerImpl)VcsDirtyScopeManager.getInstanceChecked(myProject));
-    final boolean wasEverythingDirty=dirtyScopeManager.isEverythingDirty();
-    final List<VcsDirtyScope> scopes=dirtyScopeManager.retrieveScopes();
-    final VirtualFileHolder unversionedHolder;
-    final VirtualFileHolder modifiedWithoutEditingHolder;
-    final VirtualFileHolder ignoredHolder;
-    final DeletedFilesHolder deletedHolder;
-    final SwitchedFileHolder switchedHolder;
-    final VirtualFileHolder lockedFoldersHolder;
-    if (wasEverythingDirty) {
-      myUpdateException=null;
-    }
-    if (updateUnversionedFiles) {
-      unversionedHolder=myUnversionedFilesHolder.copy();
-      deletedHolder=myDeletedFilesHolder.copy();
-      modifiedWithoutEditingHolder=myModifiedWithoutEditingHolder.copy();
-      ignoredHolder=myIgnoredFilesHolder.copy();
-      lockedFoldersHolder=myLockedFoldersHolder.copy();
-      switchedHolder=mySwitchedFilesHolder.copy();
+    dirtyScopeManager=((VcsDirtyScopeManagerImpl)VcsDirtyScopeManager.getInstanceChecked(myProject));
+  }
+ catch (  Exception ex) {
+    LOG.error(ex);
+    return;
+  }
+  final boolean wasEverythingDirty=dirtyScopeManager.isEverythingDirty();
+  final List<VcsDirtyScope> scopes=dirtyScopeManager.retrieveScopes();
+  if ((!wasEverythingDirty) && scopes.isEmpty()) {
+    return;
+  }
+  try {
+    checkIfDisposed();
+synchronized (myDataLock) {
+      changeListWorker=myWorker.copy();
+      composite=updateUnversionedFiles ? (FileHolderComposite)myComposite.copy() : myComposite;
+      myModifier.enterUpdate();
       if (wasEverythingDirty) {
-        unversionedHolder.cleanAll();
-        deletedHolder.cleanAll();
-        modifiedWithoutEditingHolder.cleanAll();
-        ignoredHolder.cleanAll();
-        lockedFoldersHolder.cleanAll();
-        switchedHolder.cleanAll();
+        myUpdateException=null;
+      }
+      if (updateUnversionedFiles && wasEverythingDirty) {
+        composite.cleanAll();
+      }
+      if (wasEverythingDirty) {
+        changeListWorker.notifyStartProcessingChanges(null);
+      }
+      ChangesViewManager.getInstance(myProject).scheduleRefresh();
+    }
+    final UpdatingChangeListBuilder builder=new UpdatingChangeListBuilder(changeListWorker,composite,new Getter<Boolean>(){
+      public Boolean get(){
+        return myUpdater.isStopped();
       }
     }
- else {
-      unversionedHolder=myUnversionedFilesHolder;
-      deletedHolder=myDeletedFilesHolder;
-      modifiedWithoutEditingHolder=myModifiedWithoutEditingHolder;
-      ignoredHolder=myIgnoredFilesHolder;
-      lockedFoldersHolder=myLockedFoldersHolder;
-      switchedHolder=mySwitchedFilesHolder;
-    }
-    if (wasEverythingDirty) {
-      notifyStartProcessingChanges(null);
-    }
+,updateUnversionedFiles,myIgnoredIdeaLevel);
     for (    final VcsDirtyScope scope : scopes) {
       final AbstractVcs vcs=scope.getVcs();
       if (vcs == null)       continue;
-      myCurrentlyUpdatingScope=scope;
       ChangesViewManager.getInstance(myProject).updateProgressText(VcsBundle.message("changes.update.progress.message",vcs.getDisplayName()),false);
       if (!wasEverythingDirty) {
-        notifyStartProcessingChanges(scope);
+        changeListWorker.notifyStartProcessingChanges(scope);
       }
       if (updateUnversionedFiles && !wasEverythingDirty) {
-        unversionedHolder.cleanScope(scope);
-        deletedHolder.cleanScope(scope);
-        modifiedWithoutEditingHolder.cleanScope(scope);
-        ignoredHolder.cleanScope(scope);
-        lockedFoldersHolder.cleanScope(scope);
-        switchedHolder.cleanScope(scope);
+        composite.cleanScope(scope);
       }
-      try {
-        final ChangeProvider changeProvider=vcs.getChangeProvider();
-        if (changeProvider != null) {
-          final FoldersCutDownWorker foldersCutDownWorker=new FoldersCutDownWorker();
-          try {
-            myUpdateChangesProgressIndicator=new EmptyProgressIndicator(){
-              @Override public boolean isCanceled(){
-                checkIfDisposed();
-                return false;
-              }
-            }
-;
-            changeProvider.getChanges(scope,new ChangelistBuilder(){
-              public void processChange(              final Change change){
-                processChangeInList(change,(ChangeList)null);
-              }
-              public void processChangeInList(              final Change change,              final String changeListName){
-                checkIfDisposed();
-                LocalChangeList list=null;
-                if (changeListName != null) {
-                  list=findChangeList(changeListName);
-                  if (list == null) {
-                    list=addChangeList(changeListName,null);
-                  }
-                }
-                processChangeInList(change,list);
-              }
-              public void processChangeInList(              final Change change,              final ChangeList changeList){
-                checkIfDisposed();
-                final String fileName=ChangesUtil.getFilePath(change).getName();
-                if (FileTypeManager.getInstance().isFileIgnored(fileName))                 return;
-                ApplicationManager.getApplication().runReadAction(new Runnable(){
-                  public void run(){
-                    if (isUnder(change,scope)) {
-                      try {
-synchronized (myChangeLists) {
-                          if (changeList instanceof LocalChangeListImpl) {
-                            ((LocalChangeListImpl)changeList).addChange(change);
-                          }
- else {
-                            for (                            LocalChangeList list : myChangeLists) {
-                              if (list == myDefaultChangelist)                               continue;
-                              if (((LocalChangeListImpl)list).processChange(change))                               return;
-                            }
-                            myDefaultChangelist.processChange(change);
-                          }
-                        }
-                      }
-  finally {
-                        ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                      }
-                    }
-                  }
-                }
-);
-              }
-              public void processUnversionedFile(              VirtualFile file){
-                if (file == null || !updateUnversionedFiles)                 return;
-                checkIfDisposed();
-                if (ExcludedFileIndex.getInstance(myProject).isExcludedFile(file))                 return;
-                if (scope.belongsTo(new FilePathImpl(file))) {
-                  if (isIgnoredFile(file)) {
-                    ignoredHolder.addFile(file);
-                  }
- else {
-                    unversionedHolder.addFile(file);
-                  }
-                  switchedHolder.removeFile(file);
-                  ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                }
-              }
-              public void processLockedFolder(              final VirtualFile file){
-                if (file == null)                 return;
-                checkIfDisposed();
-                if (scope.belongsTo(new FilePathImpl(file))) {
-                  if (foldersCutDownWorker.addCurrent(file)) {
-                    lockedFoldersHolder.addFile(file);
-                  }
-                  ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                }
-              }
-              public void processLocallyDeletedFile(              FilePath file){
-                if (!updateUnversionedFiles)                 return;
-                checkIfDisposed();
-                if (FileTypeManager.getInstance().isFileIgnored(file.getName()))                 return;
-                if (scope.belongsTo(file)) {
-                  deletedHolder.addFile(file);
-                  ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                }
-              }
-              public void processModifiedWithoutCheckout(              VirtualFile file){
-                if (file == null || !updateUnversionedFiles)                 return;
-                checkIfDisposed();
-                if (ExcludedFileIndex.getInstance(myProject).isExcludedFile(file))                 return;
-                if (scope.belongsTo(new FilePathImpl(file))) {
-                  modifiedWithoutEditingHolder.addFile(file);
-                  ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                }
-              }
-              public void processIgnoredFile(              VirtualFile file){
-                if (file == null || !updateUnversionedFiles)                 return;
-                checkIfDisposed();
-                if (ExcludedFileIndex.getInstance(myProject).isExcludedFile(file))                 return;
-                if (scope.belongsTo(new FilePathImpl(file))) {
-                  ignoredHolder.addFile(file);
-                  ChangesViewManager.getInstance(myProject).scheduleRefresh();
-                }
-              }
-              public void processSwitchedFile(              final VirtualFile file,              final String branch,              final boolean recursive){
-                if (file == null || !updateUnversionedFiles)                 return;
-                checkIfDisposed();
-                if (ExcludedFileIndex.getInstance(myProject).isExcludedFile(file))                 return;
-                if (scope.belongsTo(new FilePathImpl(file))) {
-                  switchedHolder.addFile(file,branch,recursive);
-                }
-              }
-              public boolean isUpdatingUnversionedFiles(){
-                return updateUnversionedFiles;
-              }
-            }
-,myUpdateChangesProgressIndicator);
-          }
- catch (          VcsException e) {
-            LOG.info(e);
-            if (myUpdateException == null) {
-              myUpdateException=e;
-            }
-          }
-          switchedHolder.calculateChildren();
+      actualUpdate(wasEverythingDirty,composite,builder,scope,vcs,changeListWorker);
+    }
+synchronized (myDataLock) {
+      myModifier.exitUpdate();
+      myModifier.apply(changeListWorker);
+      myModifier.clearQueue();
+      myWorker.takeData(changeListWorker);
+      if (wasEverythingDirty) {
+        changeListWorker.notifyDoneProcessingChanges(myListeners);
+      }
+      if (updateUnversionedFiles) {
+        boolean statusChanged=myComposite.equals(composite);
+        myComposite=composite;
+        if (statusChanged) {
+          myListeners.getMulticaster().unchangedFileStatusChanged();
         }
       }
-  finally {
-        myCurrentlyUpdatingScope=null;
-        if (!myDisposed && !wasEverythingDirty) {
-          notifyDoneProcessingChanges();
-        }
-      }
+      updateIgnoredFiles();
     }
-    if (wasEverythingDirty) {
-      notifyDoneProcessingChanges();
-    }
-    if (updateUnversionedFiles) {
-      boolean statusChanged=(!myUnversionedFilesHolder.equals(unversionedHolder)) || (!myDeletedFilesHolder.equals(deletedHolder)) || (!myModifiedWithoutEditingHolder.equals(modifiedWithoutEditingHolder))|| (!myIgnoredFilesHolder.equals(ignoredHolder))|| (!myLockedFoldersHolder.equals(lockedFoldersHolder))|| (!mySwitchedFilesHolder.equals(switchedHolder));
-      myUnversionedFilesHolder=unversionedHolder;
-      myDeletedFilesHolder=deletedHolder;
-      myModifiedWithoutEditingHolder=modifiedWithoutEditingHolder;
-      myIgnoredFilesHolder=ignoredHolder;
-      myLockedFoldersHolder=lockedFoldersHolder;
-      mySwitchedFilesHolder=switchedHolder;
-      if (statusChanged) {
-        myListeners.getMulticaster().unchangedFileStatusChanged();
-      }
-    }
+    ChangesViewManager.getInstance(myProject).scheduleRefresh();
   }
  catch (  DisposedException e) {
   }
@@ -226,14 +79,9 @@ catch (  AssertionError ex) {
     LOG.error(ex);
   }
  finally {
-    myListeners.getMulticaster().changeListUpdateDone();
-synchronized (myPendingUpdatesLock) {
-      myUpdateInProgress=false;
-      myWaitingUpdateCompletionQueue.removeAll(updateWaiters);
-      for (      Runnable updateWaiter : updateWaiters) {
-        updateWaiter.run();
-      }
-      myPendingUpdatesLock.notifyAll();
+synchronized (myDataLock) {
+      myListeners.getMulticaster().changeListUpdateDone();
+      ChangesViewManager.getInstance(myProject).scheduleRefresh();
     }
   }
 }
