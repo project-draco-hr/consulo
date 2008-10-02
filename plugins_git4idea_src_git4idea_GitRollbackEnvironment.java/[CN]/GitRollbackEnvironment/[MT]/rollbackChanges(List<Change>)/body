@@ -1,0 +1,57 @@
+{
+  List<VcsException> result=new ArrayList<VcsException>();
+  HashMap<VirtualFile,List<FilePath>> toUnindex=new HashMap<VirtualFile,List<FilePath>>();
+  HashMap<VirtualFile,List<FilePath>> toRevert=new HashMap<VirtualFile,List<FilePath>>();
+  List<FilePath> toDelete=new ArrayList<FilePath>();
+  for (  Change c : changes) {
+switch (c.getType()) {
+case NEW:
+      registerFile(project,toUnindex,c.getAfterRevision().getFile());
+    break;
+case MOVED:
+  registerFile(project,toRevert,c.getBeforeRevision().getFile());
+registerFile(project,toUnindex,c.getAfterRevision().getFile());
+toDelete.add(c.getAfterRevision().getFile());
+break;
+case MODIFICATION:
+registerFile(project,toUnindex,c.getBeforeRevision().getFile());
+registerFile(project,toRevert,c.getBeforeRevision().getFile());
+break;
+case DELETED:
+registerFile(project,toRevert,c.getBeforeRevision().getFile());
+break;
+}
+}
+for (Map.Entry<VirtualFile,List<FilePath>> entry : toUnindex.entrySet()) {
+GitCommand cmd=new GitCommand(project,settings,entry.getKey());
+try {
+cmd.unindex(entry.getValue());
+}
+ catch (VcsException e) {
+result.add(e);
+}
+}
+for (FilePath file : toDelete) {
+try {
+final File ioFile=file.getIOFile();
+if (ioFile.exists()) {
+if (!ioFile.delete()) {
+result.add(new VcsException("Unable to delete file: " + file));
+}
+}
+}
+ catch (Exception e) {
+result.add(new VcsException("Unable to delete file: " + file,e));
+}
+}
+for (Map.Entry<VirtualFile,List<FilePath>> entry : toRevert.entrySet()) {
+GitCommand cmd=new GitCommand(project,settings,entry.getKey());
+try {
+cmd.revert(entry.getValue());
+}
+ catch (VcsException e) {
+result.add(e);
+}
+}
+return result;
+}
