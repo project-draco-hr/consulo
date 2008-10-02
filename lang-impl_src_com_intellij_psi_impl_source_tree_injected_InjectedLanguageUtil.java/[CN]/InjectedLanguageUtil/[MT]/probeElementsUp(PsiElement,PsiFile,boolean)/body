@@ -6,25 +6,34 @@
   for (PsiElement current=element; current != null && current != hostPsiFile; current=current.getParent()) {
     if ("EL".equals(current.getLanguage().getID()))     break;
     ParameterizedCachedValue<Places,PsiElement> data=current.getUserData(INJECTED_PSI_KEY);
-    if (data != null) {
-      Places value=data.getValue(current);
-      if (value != null) {
-        return value;
+    Places places;
+    if (data == null) {
+      places=InjectedPsiProvider.doCompute(current,injectedManager,project,hostPsiFile);
+      if (places != null) {
+        ParameterizedCachedValue<Places,PsiElement> cachedValue=psiManager.getCachedValuesManager().createParameterizedCachedValue(INJECTED_PSI_PROVIDER,false);
+        Document hostDocument=hostPsiFile.getViewProvider().getDocument();
+        CachedValueProvider.Result<Places> result=new CachedValueProvider.Result<Places>(places,PsiModificationTracker.MODIFICATION_COUNT,hostDocument);
+        ((ParameterizedCachedValueImpl<Places,PsiElement>)cachedValue).setValue(result);
+        for (        Place place : places) {
+          for (          PsiLanguageInjectionHost.Shred pair : place.myShreds) {
+            pair.host.putUserData(INJECTED_PSI_KEY,cachedValue);
+          }
+        }
+        current.putUserData(INJECTED_PSI_KEY,cachedValue);
       }
     }
-    Places places=InjectedPsiProvider.doCompute(current,injectedManager,project,hostPsiFile);
+ else {
+      places=data.getValue(current);
+    }
     if (places != null) {
-      ParameterizedCachedValue<Places,PsiElement> cachedValue=psiManager.getCachedValuesManager().createParameterizedCachedValue(INJECTED_PSI_PROVIDER,false);
-      Document hostDocument=hostPsiFile.getViewProvider().getDocument();
-      CachedValueProvider.Result<Places> result=new CachedValueProvider.Result<Places>(places,PsiModificationTracker.MODIFICATION_COUNT,hostDocument);
-      ((ParameterizedCachedValueImpl<Places,PsiElement>)cachedValue).setValue(result);
+      TextRange elementRange=element.getTextRange();
       for (      Place place : places) {
-        for (        PsiLanguageInjectionHost.Shred pair : place.myShreds) {
-          pair.host.putUserData(INJECTED_PSI_KEY,cachedValue);
+        for (        PsiLanguageInjectionHost.Shred shred : place.myShreds) {
+          if (shred.host.getTextRange().intersects(elementRange)) {
+            return places;
+          }
         }
       }
-      current.putUserData(INJECTED_PSI_KEY,cachedValue);
-      return places;
     }
     if (!probeUp)     break;
   }
