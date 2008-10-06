@@ -1,0 +1,59 @@
+{
+  assertIsDispatchThread();
+  if (myExceptionalThreadWithReadAccessRunnable != null || ApplicationManager.getApplication().isUnitTestMode() || ApplicationManager.getApplication().isHeadlessEnvironment()) {
+    try {
+      ProgressManager.getInstance().runProcess(process,new EmptyProgressIndicator());
+    }
+ catch (    ProcessCanceledException e) {
+    }
+    return true;
+  }
+  final ProgressWindow progress;
+  if (parentComponent != null) {
+    progress=new ProgressWindow(canBeCanceled,false,project,parentComponent,null);
+  }
+ else {
+    progress=new ProgressWindow(canBeCanceled,project);
+  }
+  progress.setTitle(progressTitle);
+  try {
+    myExceptionalThreadWithReadAccessRunnable=process;
+    final boolean[] threadStarted=new boolean[]{false};
+    SwingUtilities.invokeLater(new Runnable(){
+      public void run(){
+        if (myExceptionalThreadWithReadAccessRunnable != process) {
+          LOG.error("myExceptionalThreadWithReadAccessRunnable != process, process = " + myExceptionalThreadWithReadAccessRunnable);
+        }
+        executeOnPooledThread(new Runnable(){
+          public void run(){
+            if (myExceptionalThreadWithReadAccessRunnable != process) {
+              LOG.error("myExceptionalThreadWithReadAccessRunnable != process, process = " + myExceptionalThreadWithReadAccessRunnable);
+            }
+            final boolean old=setExceptionalThreadWithReadAccessFlag(true);
+            LOG.assertTrue(isReadAccessAllowed());
+            try {
+              ProgressManager.getInstance().runProcess(process,progress);
+            }
+ catch (            ProcessCanceledException e) {
+            }
+ finally {
+              setExceptionalThreadWithReadAccessFlag(old);
+              makeChangesVisibleToEDT();
+            }
+          }
+        }
+);
+        threadStarted[0]=true;
+      }
+    }
+);
+    progress.startBlocking();
+    LOG.assertTrue(threadStarted[0]);
+    LOG.assertTrue(!progress.isRunning());
+  }
+  finally {
+    myExceptionalThreadWithReadAccessRunnable=null;
+    makeChangesVisibleToEDT();
+  }
+  return !progress.isCanceled();
+}
