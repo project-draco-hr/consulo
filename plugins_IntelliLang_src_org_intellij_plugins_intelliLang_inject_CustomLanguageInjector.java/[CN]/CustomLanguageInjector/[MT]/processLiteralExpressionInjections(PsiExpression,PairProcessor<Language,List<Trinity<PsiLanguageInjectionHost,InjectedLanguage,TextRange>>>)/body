@@ -1,10 +1,41 @@
 {
-  if (!processAnnotationInjections(place,processor)) {
-    final Pair<Trinity<String,Integer,Integer>,PsiMethod> info=MethodParameterInjection.getParameterInfo(place);
-    final Collection<MethodParameterInjection> injections=info == null ? null : getMethodCache().get(info.first);
+  final PsiElement topBlock=PsiUtil.getTopLevelEnclosingCodeBlock(place,null);
+  final LocalSearchScope searchScope=new LocalSearchScope(new PsiElement[]{topBlock instanceof PsiCodeBlock ? topBlock : place.getContainingFile()},"",true);
+  final LinkedList<PsiExpression> places=new LinkedList<PsiExpression>();
+  places.add(place);
+  while (!places.isEmpty()) {
+    final PsiExpression curPlace=places.removeFirst();
+    final PsiModifierListOwner owner=AnnotationUtilEx.getAnnotatedElementFor(curPlace,AnnotationUtilEx.LookupType.PREFER_CONTEXT);
+    if (owner == null)     continue;
+    if (processAnnotationInjections(place,owner,processor))     return;
+    final PsiMethod psiMethod;
+    final Trinity<String,Integer,Integer> trin;
+    if (owner instanceof PsiParameter) {
+      psiMethod=PsiTreeUtil.getParentOfType(owner,PsiMethod.class,false);
+      if (psiMethod == null)       continue;
+      trin=Trinity.create(psiMethod.getName(),psiMethod.getParameterList().getParametersCount(),psiMethod.getParameterList().getParameterIndex((PsiParameter)owner));
+    }
+ else     if (owner instanceof PsiMethod) {
+      psiMethod=(PsiMethod)owner;
+      trin=Trinity.create(psiMethod.getName(),psiMethod.getParameterList().getParametersCount(),-1);
+    }
+ else     if (owner instanceof PsiVariable) {
+      final PsiVariable variable=(PsiVariable)owner;
+      for (      PsiReference psiReference : ReferencesSearch.search(variable,searchScope).findAll()) {
+        final PsiElement element=psiReference.getElement();
+        if (element instanceof PsiExpression) {
+          places.add((PsiExpression)element);
+        }
+      }
+      continue;
+    }
+ else {
+      continue;
+    }
+    final Collection<MethodParameterInjection> injections=getMethodCache().get(trin);
     if (injections == null)     return;
     for (    MethodParameterInjection injection : injections) {
-      if (injection.isApplicable(info.second)) {
+      if (injection.isApplicable(psiMethod)) {
         processInjection(place,injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),processor);
         return;
       }
