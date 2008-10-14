@@ -5,24 +5,37 @@
     final int startOffset=parameters.getOffset();
     final PsiElement lastElement=file.findElementAt(startOffset - 1);
     final PsiElement insertedElement=parameters.getPosition();
-    final CompletionData completionData=ApplicationManager.getApplication().runReadAction(new Computable<CompletionData>(){
-      public CompletionData compute(){
+    final JavaAwareCompletionData completionData=ApplicationManager.getApplication().runReadAction(new Computable<JavaAwareCompletionData>(){
+      public JavaAwareCompletionData compute(){
         return getCompletionDataByElementInner(lastElement);
       }
     }
 );
     final CompletionResultSet result=_result.withPrefixMatcher(completionData.findPrefix(insertedElement,startOffset));
     insertedElement.putUserData(PREFIX_MATCHER,result.getPrefixMatcher());
+    final boolean checkAccess=parameters.getInvocationCount() == 1;
     final Set<LookupElement> lookupSet=new LinkedHashSet<LookupElement>();
-    final PsiReference ref=ApplicationManager.getApplication().runReadAction(new Computable<PsiReference>(){
-      public PsiReference compute(){
-        return insertedElement.getContainingFile().findReferenceAt(startOffset);
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        final PsiReference ref=insertedElement.getContainingFile().findReferenceAt(startOffset);
+        if (ref != null) {
+          final boolean[] hasApplicableVariants=new boolean[]{false};
+          for (          final CompletionVariant variant : completionData.findVariants(insertedElement,file)) {
+            variant.processReferenceCompletions(new PairConsumer<ElementFilter,TailType>(){
+              public void consume(              final ElementFilter elementFilter,              final TailType tailType){
+                hasApplicableVariants[0]=true;
+                completionData.completeReference(ref,insertedElement,lookupSet,tailType,file,elementFilter,variant,checkAccess);
+              }
+            }
+);
+          }
+          if (!hasApplicableVariants[0]) {
+            completionData.completeReference(ref,insertedElement,lookupSet,TailType.NONE,file,TrueFilter.INSTANCE,completionData.myGenericVariant,checkAccess);
+          }
+        }
       }
     }
 );
-    if (ref != null) {
-      completionData.completeReference(ref,lookupSet,insertedElement,parameters.getOriginalFile(),startOffset);
-    }
     final Set<CompletionVariant> keywordVariants=new HashSet<CompletionVariant>();
     completionData.addKeywordVariants(keywordVariants,insertedElement,parameters.getOriginalFile());
     completionData.completeKeywordsBySet(lookupSet,keywordVariants,insertedElement,result.getPrefixMatcher(),parameters.getOriginalFile());
