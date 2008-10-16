@@ -1,21 +1,25 @@
 {
+  FileDocumentManager.getInstance().saveAllDocuments();
+  final MavenConsole console=createConsole(myMavenCore.getState(),Pair.create(parameters,settings));
   try {
-    FileDocumentManager.getInstance().saveAllDocuments();
-    ConsoleAdapter console=openConsoleToolWindow(myMavenCore.getState());
-    myExecutor=createExecutor(parameters,myMavenCore.getState(),settings,console);
-    ProgressManager.getInstance().run(new Task.Backgroundable(myProject,myExecutor.getCaption(),true){
+    final MavenExecutor[] executor=new MavenExecutor[]{createExecutor(parameters,myMavenCore.getState(),settings,console)};
+    ProgressManager.getInstance().run(new Task.Backgroundable(myProject,executor[0].getCaption(),true){
       public void run(      @NotNull ProgressIndicator indicator){
-        List<MavenProject> processedProjects=new ArrayList<MavenProject>();
         try {
-          if (myExecutor.execute(processedProjects,indicator)) {
-            if (onComplete != null)             onComplete.run();
+          List<MavenProject> processedProjects=new ArrayList<MavenProject>();
+          try {
+            if (executor[0].execute(processedProjects,indicator)) {
+              if (onComplete != null)               onComplete.run();
+            }
           }
+ catch (          ProcessCanceledException ignore) {
+          }
+          executor[0]=null;
+          updateProjectFolders(processedProjects);
         }
- catch (        ProcessCanceledException ignore) {
+  finally {
+          console.finish();
         }
-        myExecutor=null;
-        myLastRunnerParametersAndSettings=Pair.create(parameters,settings);
-        updateProjectFolders(processedProjects);
       }
       @Nullable public NotificationInfo getNotificationInfo(){
         return new NotificationInfo("Maven","Maven Task Finished","");
@@ -33,7 +37,8 @@
 );
   }
  catch (  Exception e) {
-    MavenLog.LOG.error(e);
-    Messages.showErrorDialog(myProject,e.getMessage(),"Maven execution error");
+    MavenConsoleHelper.printException(console,e);
+    console.finish();
+    MavenLog.LOG.warn(e);
   }
 }
