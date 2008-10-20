@@ -1,36 +1,35 @@
 {
-  final String key;
   final ClassLoader loader=aClass.getClassLoader();
-  final StringBuilder builder=StringBuilderSpinAllocator.alloc();
-  try {
-    builder.append(aClass.getName());
-    if (loader != null) {
-      builder.append("_");
-      builder.append(loader.hashCode());
-    }
-    key=builder.toString();
-  }
-  finally {
-    StringBuilderSpinAllocator.dispose(builder);
-  }
   Object result=null;
 synchronized (ourCache) {
-    final SoftReference<Object> ref=ourCache.tryKey(key);
-    result=(ref == null) ? null : ref.get();
-    if (result == null && ref != null) {
-      ourCache.remove(key);
-    }
+    result=ourCache.get(aClass);
   }
   if (result == null) {
-    final Class<?> helperClass=loader != null ? loader.loadClass(IntrospectionHelper.class.getName()) : IntrospectionHelper.class;
-    final Method getHelperMethod=helperClass.getMethod("getHelper",Class.class);
-    result=getHelperMethod.invoke(null,aClass);
-    if (result != null) {
+    result=ourNullObject;
+    Class<?> helperClass=null;
+    try {
+      helperClass=loader != null ? loader.loadClass(IntrospectionHelper.class.getName()) : IntrospectionHelper.class;
+      final Method getHelperMethod=helperClass.getMethod("getHelper",Class.class);
+      result=getHelperMethod.invoke(null,aClass);
+    }
+ catch (    ClassNotFoundException e) {
+      LOG.info(e);
+    }
+catch (    NoSuchMethodException e) {
+      LOG.info(e);
+    }
+catch (    IllegalAccessException e) {
+      LOG.info(e);
+    }
+catch (    InvocationTargetException ignored) {
+    }
 synchronized (ourCache) {
+      if (helperClass != null) {
         clearAntStaticCache(helperClass);
-        ourCache.cacheObject(key,new SoftReference<Object>(result));
       }
+      ourCache.put(aClass,result);
     }
   }
-  return result;
+  scheduleCacheCleaning();
+  return result == ourNullObject ? null : result;
 }
