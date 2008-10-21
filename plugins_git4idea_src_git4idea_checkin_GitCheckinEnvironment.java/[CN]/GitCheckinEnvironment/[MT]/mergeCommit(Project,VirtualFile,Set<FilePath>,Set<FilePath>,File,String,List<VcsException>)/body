@@ -1,0 +1,89 @@
+{
+  HashSet<FilePath> realAdded=new HashSet<FilePath>();
+  HashSet<FilePath> realRemoved=new HashSet<FilePath>();
+  GitSimpleHandler diff=new GitSimpleHandler(project,root,"diff");
+  diff.setNoSSH(true);
+  diff.setSilent(true);
+  diff.addParameters("--diff-filter=ADMRUX","--name-status","HEAD");
+  diff.endOptions();
+  String output;
+  try {
+    output=diff.run();
+  }
+ catch (  VcsException ex) {
+    exceptions.add(ex);
+    return false;
+  }
+  String rootPath=root.getPath();
+  for (StringTokenizer lines=new StringTokenizer(output,"\n",false); lines.hasMoreTokens(); ) {
+    String line=lines.nextToken().trim();
+    if (line.length() == 0) {
+      continue;
+    }
+    String[] tk=line.split("[ \t]+");
+switch (tk[0].charAt(0)) {
+case 'M':
+case 'A':
+      realAdded.add(VcsUtil.getFilePath(rootPath + "/" + tk[tk.length - 1]));
+    break;
+case 'D':
+  realRemoved.add(VcsUtil.getFilePathForDeletedFile(rootPath + "/" + tk[tk.length - 1],false));
+break;
+default :
+throw new IllegalStateException("Unexpected status: " + line);
+}
+}
+realAdded.removeAll(added);
+realRemoved.removeAll(removed);
+if (realAdded.size() != 0 || realRemoved.size() != 0) {
+TreeSet<String> files=new TreeSet<String>();
+for (FilePath f : realAdded) {
+files.add(f.getPresentableUrl());
+}
+for (FilePath f : realRemoved) {
+files.add(f.getPresentableUrl());
+}
+final StringBuilder fileList=new StringBuilder();
+for (String f : files) {
+fileList.append("<li>");
+fileList.append(StringUtil.escapeXml(f));
+fileList.append("</li>");
+}
+final int[] rc=new int[1];
+try {
+EventQueue.invokeAndWait(new Runnable(){
+public void run(){
+rc[0]=Messages.showOkCancelDialog(project,GitBundle.message("commit.partial.merge.message",fileList.toString()),GitBundle.getString("commit.partial.merge.title"),null);
+}
+}
+);
+}
+ catch (RuntimeException ex) {
+throw ex;
+}
+catch (Exception ex) {
+throw new RuntimeException("Unable to invoke a message box on awt thread",ex);
+}
+if (rc[0] != 0) {
+return false;
+}
+if (!updateIndex(project,root,realAdded,realRemoved,exceptions)) {
+return false;
+}
+}
+try {
+GitSimpleHandler handler=new GitSimpleHandler(project,root,"commit");
+handler.setNoSSH(true);
+handler.addParameters("-F",messageFile.getAbsolutePath());
+if (author != null) {
+handler.addParameters("--author=" + author);
+}
+handler.endOptions();
+handler.run();
+}
+ catch (VcsException ex) {
+exceptions.add(ex);
+return false;
+}
+return true;
+}

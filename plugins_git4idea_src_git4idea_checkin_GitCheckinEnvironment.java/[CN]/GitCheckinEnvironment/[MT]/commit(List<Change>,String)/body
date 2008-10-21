@@ -7,32 +7,44 @@
       for (      Map.Entry<VirtualFile,List<Change>> entry : sortedChanges.entrySet()) {
         Set<FilePath> files=new HashSet<FilePath>();
         final VirtualFile root=entry.getKey();
+        final Set<FilePath> added=new HashSet<FilePath>();
+        final Set<FilePath> removed=new HashSet<FilePath>();
         for (        Change change : entry.getValue()) {
 switch (change.getType()) {
 case NEW:
 case MODIFICATION:
-            files.add(change.getAfterRevision().getFile());
+            added.add(change.getAfterRevision().getFile());
           break;
 case DELETED:
-        files.add(change.getBeforeRevision().getFile());
+        removed.add(change.getBeforeRevision().getFile());
       break;
 case MOVED:
-    files.add(change.getAfterRevision().getFile());
-  files.add(change.getBeforeRevision().getFile());
+    added.add(change.getAfterRevision().getFile());
+  removed.add(change.getBeforeRevision().getFile());
 break;
 default :
 throw new IllegalStateException("Unknown change type: " + change.getType());
 }
 }
 try {
-if (updateIndex(myProject,root,files,exceptions)) {
+if (updateIndex(myProject,root,added,removed,exceptions)) {
+try {
+files.addAll(added);
+files.addAll(removed);
 commit(myProject,root,files,messageFile,myNextCommitAuthor).run();
+}
+ catch (VcsException ex) {
+if (!isMergeCommit(ex)) {
+throw ex;
+}
+if (!mergeCommit(myProject,root,added,removed,messageFile,myNextCommitAuthor,exceptions)) {
+throw ex;
+}
+}
 }
 if (myNextCommitIsPushed != null && myNextCommitIsPushed.booleanValue()) {
 Collection<VcsException> problems=GitHandlerUtil.doSynchronouslyWithExceptions(GitPushUtils.preparePush(myProject,root));
-for (VcsException ex : problems) {
-exceptions.add(ex);
-}
+exceptions.addAll(problems);
 }
 }
  catch (VcsException e) {
