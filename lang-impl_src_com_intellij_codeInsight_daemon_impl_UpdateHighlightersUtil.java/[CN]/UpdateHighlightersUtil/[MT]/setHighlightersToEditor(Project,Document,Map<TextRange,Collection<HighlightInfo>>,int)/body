@@ -1,6 +1,7 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
-  cleanFileLevelHighlights(project,document,group);
+  PsiFile psiFile=PsiDocumentManager.getInstance(project).getPsiFile(document);
+  cleanFileLevelHighlights(project,group,psiFile);
   List<TextRange> ranges=new ArrayList<TextRange>(infos.keySet());
   Collections.sort(ranges,BY_START_OFFSET);
   for (int i=1; i < ranges.size(); i++) {
@@ -18,15 +19,16 @@
       i--;
     }
   }
-  HighlightInfo[] oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
+  List<HighlightInfo> oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
   List<HighlightInfo> result=new ArrayList<HighlightInfo>();
+  Map<HighlightInfo,HighlightInfo> infosToRemove=new THashMap<HighlightInfo,HighlightInfo>(BY_RANGE_MARKER_OFFSET_FIRST);
   boolean changed=false;
   if (oldHighlights != null) {
     for (    HighlightInfo info : oldHighlights) {
       RangeHighlighter highlighter=info.highlighter;
       boolean toRemove=!highlighter.isValid() || info.group == group && Collections.binarySearch(ranges,new TextRange(highlighter.getStartOffset(),highlighter.getEndOffset()),BY_START_OFFSET_OR_CONTAINS) >= 0;
       if (toRemove) {
-        document.getMarkupModel(project).removeHighlighter(highlighter);
+        infosToRemove.put(info,info);
         changed=true;
       }
  else {
@@ -34,30 +36,33 @@
       }
     }
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Removed segment highlighters:" + (oldHighlights.length - result.size()));
+      LOG.debug("Removed segment highlighters:" + (oldHighlights.size() - result.size()));
     }
   }
-  Map<TextRange,RangeMarker> ranges2markers=new THashMap<TextRange,RangeMarker>();
-  final PsiFile psiFile=PsiDocumentManager.getInstance(project).getPsiFile(document);
+  MarkupModel markup=document.getMarkupModel(project);
+  for (  HighlightInfo info : getHighlightsToRemove(markup)) {
+    infosToRemove.put(info,info);
+  }
+  List<HighlightInfo> reallyRemoved=new ArrayList<HighlightInfo>();
+  Map<TextRange,RangeMarker> ranges2markersCache=new THashMap<TextRange,RangeMarker>(oldHighlights == null ? 10 : oldHighlights.size());
   for (  TextRange range : ranges) {
-    Collection<HighlightInfo> highlights=infos.get(range);
-    int startOffset=range.getStartOffset();
-    int endOffset=range.getEndOffset();
+    int rangeStartOffset=range.getStartOffset();
+    int rangeEndOffset=range.getEndOffset();
+    List<HighlightInfo> highlights=new ArrayList<HighlightInfo>(infos.get(range));
+    Collections.sort(highlights,new Comparator<HighlightInfo>(){
+      public int compare(      HighlightInfo o1,      HighlightInfo o2){
+        return o1.startOffset - o2.startOffset;
+      }
+    }
+);
     for (    HighlightInfo info : highlights) {
+      if (info.isFileLevelAnnotation && psiFile != null && psiFile.getViewProvider().isPhysical()) {
+        addFileLevelHighlight(project,group,info,psiFile);
+        continue;
+      }
       int infoStartOffset=info.startOffset;
       int infoEndOffset=info.endOffset;
-      if (infoStartOffset < startOffset || infoEndOffset > endOffset)       continue;
-      HighlightSeverity severity=info.getSeverity();
-      int layer;
-      if (severity == HighlightSeverity.WARNING) {
-        layer=HighlighterLayer.WARNING;
-      }
- else       if (SeverityRegistrar.getInstance(project).compare(severity,HighlightSeverity.ERROR) >= 0) {
-        layer=HighlighterLayer.ERROR;
-      }
- else {
-        layer=HighlighterLayer.ADDITIONAL_SYNTAX;
-      }
+      if (infoStartOffset < rangeStartOffset || infoEndOffset > rangeEndOffset)       continue;
       if (infoEndOffset == infoStartOffset) {
         infoEndOffset++;
       }
@@ -68,47 +73,37 @@
         }
         infoEndOffset=docLength;
       }
-      if (info.isFileLevelAnnotation) {
-        if (psiFile != null) {
-          if (psiFile.getViewProvider().isPhysical()) {
-            addFileLevelHighlight(project,group,info,psiFile);
-            continue;
-          }
-        }
-      }
-      RangeHighlighterEx highlighter=(RangeHighlighterEx)document.getMarkupModel(project).addRangeHighlighter(infoStartOffset,infoEndOffset,layer,info.getTextAttributes(psiFile),HighlighterTargetArea.EXACT_RANGE);
-      info.highlighter=highlighter;
-      highlighter.setAfterEndOfLine(info.isAfterEndOfLine);
       info.text=document.getCharsSequence().subSequence(infoStartOffset,infoEndOffset).toString();
       info.group=group;
-      highlighter.setErrorStripeMarkColor(info.getErrorStripeMarkColor(psiFile));
-      highlighter.setErrorStripeTooltip(info);
-      highlighter.setGutterIconRenderer(info.getGutterIconRenderer());
-      ranges2markers.clear();
-      ranges2markers.put(new TextRange(infoStartOffset,infoEndOffset),info.highlighter);
-      if (info.quickFixActionRanges != null) {
-        info.quickFixActionMarkers=new ArrayList<Pair<HighlightInfo.IntentionActionDescriptor,RangeMarker>>(info.quickFixActionRanges.size());
-        for (        Pair<HighlightInfo.IntentionActionDescriptor,TextRange> pair : info.quickFixActionRanges) {
-          TextRange textRange=pair.second;
-          RangeMarker marker=ranges2markers.get(textRange);
-          if (marker == null) {
-            marker=document.createRangeMarker(textRange.getStartOffset(),textRange.getEndOffset());
-            ranges2markers.put(textRange,marker);
-          }
-          info.quickFixActionMarkers.add(Pair.create(pair.first,marker));
-        }
+      HighlightInfo toRemove=infosToRemove.remove(info);
+      if (toRemove != null) {
+        info.highlighter=toRemove.highlighter;
+        info.fixMarker=toRemove.fixMarker;
+        info.quickFixActionMarkers=toRemove.quickFixActionMarkers;
+        reallyRemoved.add(toRemove);
       }
-      info.fixMarker=ranges2markers.get(new TextRange(info.fixStartOffset,info.fixEndOffset));
-      if (info.fixMarker == null) {
-        info.fixMarker=document.createRangeMarker(info.fixStartOffset,info.fixEndOffset);
+ else {
+        createRangeHighlighter(project,document,ranges2markersCache,psiFile,info,infoStartOffset,infoEndOffset,markup);
+        changed=true;
       }
-      changed=true;
       result.add(info);
+    }
+    for (    HighlightInfo info : infosToRemove.values()) {
+      int infoStartOffset=info.getActualStartOffset();
+      int infoEndOffset=info.getActualEndOffset();
+      if (info.highlighter.isValid()) {
+        if (infoStartOffset < rangeStartOffset || infoEndOffset > rangeEndOffset)         continue;
+        if (info.group != group)         continue;
+      }
+      markup.removeHighlighter(info.highlighter);
+      changed=true;
+      reallyRemoved.add(info);
     }
   }
   if (changed) {
-    HighlightInfo[] newHighlights=result.toArray(new HighlightInfo[result.size()]);
-    DaemonCodeAnalyzerImpl.setHighlights(document,newHighlights,project);
+    List<HighlightInfo> toRemove=getHighlightsToRemove(markup);
+    toRemove.removeAll(reallyRemoved);
+    DaemonCodeAnalyzerImpl.setHighlights(document,result,project);
     clearWhiteSpaceOptimizationFlag(document);
   }
 }

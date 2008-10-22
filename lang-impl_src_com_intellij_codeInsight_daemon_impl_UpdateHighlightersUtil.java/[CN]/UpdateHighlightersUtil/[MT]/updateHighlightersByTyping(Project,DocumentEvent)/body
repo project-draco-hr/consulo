@@ -1,8 +1,9 @@
 {
+  ApplicationManager.getApplication().assertIsDispatchThread();
   Document document=e.getDocument();
   if (document instanceof DocumentEx && ((DocumentEx)document).isInBulkUpdate())   return;
-  HighlightInfo[] highlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
-  if (highlights == null || highlights.length == 0)   return;
+  List<HighlightInfo> highlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
+  if (highlights == null || highlights.isEmpty())   return;
   int offset=e.getOffset();
   Editor[] editors=EditorFactory.getInstance().getEditors(document,project);
   if (editors.length == 0)   return;
@@ -15,8 +16,10 @@
     if (iterator.atEnd())     return;
   }
   int end=iterator.getEnd();
-  List<HighlightInfo> array=new ArrayList<HighlightInfo>(highlights.length);
+  List<HighlightInfo> infosToRemove=new ArrayList<HighlightInfo>(highlights.size());
   boolean highlightersChanged=false;
+  boolean highlightersRemoved=false;
+  List<HighlightInfo> result=new ArrayList<HighlightInfo>(highlights.size());
   boolean documentChangedInsideHighlighter=false;
   for (  HighlightInfo info : highlights) {
     RangeHighlighter highlighter=info.highlighter;
@@ -39,31 +42,31 @@
         LOG.assertTrue(0 <= highlighterStart);
         LOG.assertTrue(highlighterStart < document.getTextLength());
         documentChangedInsideHighlighter=true;
-        HighlighterIterator iterator1=((EditorEx)editor).getHighlighter().createIterator(highlighterStart);
-        int start1=iterator1.getStart();
-        while (iterator1.getEnd() < highlighterEnd) {
-          iterator1.advance();
-        }
-        int end1=iterator1.getEnd();
-        CharSequence chars=document.getCharsSequence();
-        if (start1 != highlighterStart || end1 != highlighterEnd || !CharArrayUtil.regionMatches(chars,start1,end1,info.text)) {
-          toRemove=true;
-        }
+        toRemove=true;
       }
     }
     if (toRemove) {
-      document.getMarkupModel(project).removeHighlighter(highlighter);
+      if (info.type.equals(HighlightInfoType.WRONG_REF)) {
+        document.getMarkupModel(project).removeHighlighter(highlighter);
+        highlightersRemoved=true;
+      }
+ else {
+        infosToRemove.add(info);
+        result.add(info);
+      }
       highlightersChanged=true;
     }
  else {
-      array.add(info);
+      result.add(info);
     }
+  }
+  if (highlightersRemoved) {
+    DaemonCodeAnalyzerImpl.setHighlights(document,result,project);
   }
   if (highlightersChanged || documentChangedInsideHighlighter) {
     disableWhiteSpaceOptimization(document);
   }
   if (highlightersChanged) {
-    HighlightInfo[] newHighlights=array.toArray(new HighlightInfo[array.size()]);
-    DaemonCodeAnalyzerImpl.setHighlights(document,newHighlights,project);
+    setHighlightsToRemove(infosToRemove,document.getMarkupModel(project));
   }
 }
