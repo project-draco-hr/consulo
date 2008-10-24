@@ -1,0 +1,56 @@
+{
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      FileDocumentManager.getInstance().saveAllDocuments();
+    }
+  }
+);
+  DataContext dataContext=e.getDataContext();
+  final Project project=(Project)dataContext.getData(PlatformDataKeys.PROJECT.getName());
+  if (project == null) {
+    return;
+  }
+  GitVcs vcs=GitVcs.getInstance(project);
+  final VirtualFile[] contentRoots=ProjectLevelVcsManager.getInstance(project).getRootsUnderVcs(vcs);
+  if (contentRoots == null || contentRoots.length == 0) {
+    return;
+  }
+  final List<VirtualFile> roots=new ArrayList<VirtualFile>(GitUtil.gitRoots(Arrays.asList(contentRoots)));
+  Collections.sort(roots,new Comparator<VirtualFile>(){
+    public int compare(    final VirtualFile o1,    final VirtualFile o2){
+      return o1.getPresentableUrl().compareTo(o2.getPresentableUrl());
+    }
+  }
+);
+  final VirtualFile[] vFiles=e.getData(PlatformDataKeys.VIRTUAL_FILE_ARRAY);
+  VirtualFile defaultRootVar=null;
+  if (vFiles != null) {
+    for (    VirtualFile file : vFiles) {
+      final VirtualFile root=GitUtil.getGitRoot(file);
+      if (root != null) {
+        defaultRootVar=root;
+        break;
+      }
+    }
+  }
+  if (defaultRootVar == null) {
+    defaultRootVar=roots.get(0);
+  }
+  final VirtualFile defaultRoot=defaultRootVar;
+  final Set<VirtualFile> affectedRoots=new HashSet<VirtualFile>();
+  String actionName=getActionName(vcs);
+  AbstractVcsHelper helper=AbstractVcsHelper.getInstance(project);
+  List<VcsException> exceptions=helper.runTransactionRunnable(vcs,new TransactionRunnable(){
+    public void run(    List<VcsException> exceptions){
+      try {
+        perform(project,roots,defaultRoot,affectedRoots,exceptions);
+      }
+ catch (      VcsException e) {
+        exceptions.add(e);
+      }
+      GitUtil.refreshFiles(project,affectedRoots);
+    }
+  }
+,null);
+  vcs.showErrors(exceptions,actionName);
+}
