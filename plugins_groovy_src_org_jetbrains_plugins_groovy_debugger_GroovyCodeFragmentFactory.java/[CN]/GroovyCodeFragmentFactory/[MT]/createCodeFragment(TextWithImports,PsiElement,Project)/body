@@ -4,12 +4,28 @@
   final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(project);
   final GroovyFile toEval=factory.createGroovyFile(text,false,context);
   final Set<String> namesList=new HashSet<String>();
+  final GrClosableBlock closure=PsiTreeUtil.getParentOfType(context,GrClosableBlock.class);
+  final Set<String> valList=new HashSet<String>();
   toEval.accept(new GroovyRecursiveElementVisitor(){
     public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
       super.visitReferenceExpression(referenceExpression);
       PsiElement resolved=referenceExpression.resolve();
       if (resolved instanceof GrVariableBase && !(resolved instanceof GrField) && !PsiTreeUtil.isAncestor(toEval,resolved,false)) {
-        namesList.add(((GrVariableBase)resolved).getName());
+        final String name=((GrVariableBase)resolved).getName();
+        namesList.add(name);
+        if (closure != null && PsiTreeUtil.findCommonParent(resolved,closure) != closure && !(resolved instanceof ClosureSyntheticParameter)) {
+          valList.add("this." + name);
+        }
+ else {
+          valList.add(name);
+        }
+      }
+    }
+    @Override public void visitThisExpression(    final GrThisReferenceExpression thisExpression){
+      super.visitThisExpression(thisExpression);
+      if (closure != null && !(thisExpression.getParent() instanceof GrReferenceExpression)) {
+        final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(thisExpression.getProject());
+        thisExpression.replaceWithExpression(factory.createExpressionFromText("delegate"),false);
       }
     }
     public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
@@ -33,6 +49,7 @@
 );
   text=toEval.getText();
   String[] names=namesList.toArray(new String[namesList.size()]);
+  String[] vals=valList.toArray(new String[valList.size()]);
   PsiClass contextClass=PsiUtil.getContextClass(context);
   boolean isStatic=isStaticContext(context);
   StringBuffer javaText=new StringBuffer();
@@ -57,12 +74,13 @@
     javaText.append("groovy.lang.GroovySystem.getMetaClassRegistry().setMetaClass(clazz, emc);\n");
   }
   javaText.append("emc.initialize();\n");
+  javaText.append(unwrapVals(vals));
   if (!isStatic) {
-    javaText.append("Object res = ((groovy.lang.MetaClassImpl)emc).invokeMethod(this, \"").append(EVAL_NAME).append("\", new Object[]{").append(getCommaSeparatedNamesList(names)).append("});\n");
+    javaText.append("java.lang.Object res = ((groovy.lang.MetaClassImpl)emc).invokeMethod(this, \"").append(EVAL_NAME).append("\", ").append("resVals").append(");\n");
     javaText.append("((groovy.lang.GroovyObject)this).setMetaClass(mc);");
   }
  else {
-    javaText.append("Object res = ((groovy.lang.MetaClassImpl)emc).invokeStaticMethod(clazz, \"").append(EVAL_NAME).append("\", new Object[]{").append(getCommaSeparatedNamesList(names)).append("});\n");
+    javaText.append("java.lang.Object res = ((groovy.lang.MetaClassImpl)emc).invokeStaticMethod(clazz, \"").append(EVAL_NAME).append("\", ").append("resVals").append(");\n");
     javaText.append("groovy.lang.GroovySystem.getMetaClassRegistry().setMetaClass(clazz, mc);\n");
   }
   javaText.append("res");
