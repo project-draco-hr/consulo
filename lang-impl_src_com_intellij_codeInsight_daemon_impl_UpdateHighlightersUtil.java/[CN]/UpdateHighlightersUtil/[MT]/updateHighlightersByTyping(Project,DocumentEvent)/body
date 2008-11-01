@@ -2,8 +2,9 @@
   ApplicationManager.getApplication().assertIsDispatchThread();
   Document document=e.getDocument();
   if (document instanceof DocumentEx && ((DocumentEx)document).isInBulkUpdate())   return;
-  List<HighlightInfo> highlights=DaemonCodeAnalyzerImpl.getHighlights(document,project);
-  if (highlights == null || highlights.isEmpty())   return;
+  MarkupModel markup=document.getMarkupModel(project);
+  List<HighlightInfo> oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(markup);
+  if (oldHighlights == null || oldHighlights.isEmpty())   return;
   int offset=e.getOffset();
   Editor[] editors=EditorFactory.getInstance().getEditors(document,project);
   if (editors.length == 0)   return;
@@ -16,12 +17,11 @@
     if (iterator.atEnd())     return;
   }
   int end=iterator.getEnd();
-  List<HighlightInfo> infosToRemove=new ArrayList<HighlightInfo>(highlights.size());
+  List<HighlightInfo> infosToRemove=new ArrayList<HighlightInfo>(DaemonCodeAnalyzerImpl.getHighlightsToRemove(markup));
   boolean highlightersChanged=false;
-  boolean highlightersRemoved=false;
-  List<HighlightInfo> result=new ArrayList<HighlightInfo>(highlights.size());
+  List<HighlightInfo> result=new ArrayList<HighlightInfo>(oldHighlights.size());
   boolean documentChangedInsideHighlighter=false;
-  for (  HighlightInfo info : highlights) {
+  for (  HighlightInfo info : oldHighlights) {
     RangeHighlighter highlighter=info.highlighter;
     boolean toRemove=false;
     if (info.needUpdateOnTyping()) {
@@ -47,12 +47,10 @@
     }
     if (toRemove) {
       if (info.type.equals(HighlightInfoType.WRONG_REF)) {
-        document.getMarkupModel(project).removeHighlighter(highlighter);
-        highlightersRemoved=true;
+        markup.removeHighlighter(highlighter);
       }
  else {
         infosToRemove.add(info);
-        result.add(info);
       }
       highlightersChanged=true;
     }
@@ -60,13 +58,11 @@
       result.add(info);
     }
   }
-  if (highlightersRemoved) {
-    DaemonCodeAnalyzerImpl.setHighlights(document,result,project);
+  if (highlightersChanged) {
+    DaemonCodeAnalyzerImpl.setHighlights(markup,project,result,infosToRemove);
   }
+  DaemonCodeAnalyzerImpl.assertMarkupConsistent(markup,result,infosToRemove);
   if (highlightersChanged || documentChangedInsideHighlighter) {
     disableWhiteSpaceOptimization(document);
-  }
-  if (highlightersChanged) {
-    setHighlightsToRemove(infosToRemove,document.getMarkupModel(project));
   }
 }

@@ -3,7 +3,7 @@
   myDaemonCodeAnalyzer=daemonCodeAnalyzer;
   final MessageBusConnection connection=myProject.getMessageBus().connect();
   EditorEventMulticaster eventMulticaster=EditorFactory.getInstance().getEventMulticaster();
-  myDocumentListener=new DocumentAdapter(){
+  eventMulticaster.addDocumentListener(new DocumentAdapter(){
     public void beforeDocumentChange(    final DocumentEvent e){
       if (!worthBothering(e.getDocument())) {
         return;
@@ -12,9 +12,8 @@
       UpdateHighlightersUtil.updateHighlightersByTyping(myProject,e);
     }
   }
-;
-  eventMulticaster.addDocumentListener(myDocumentListener);
-  myCaretListener=new CaretListener(){
+,this);
+  eventMulticaster.addCaretListener(new CaretListener(){
     public void caretPositionChanged(    CaretEvent e){
       Editor editor=e.getEditor();
       if (!worthBothering(editor.getDocument())) {
@@ -24,10 +23,9 @@
       myDaemonCodeAnalyzer.setLastIntentionHint(null);
     }
   }
-;
-  eventMulticaster.addCaretListener(myCaretListener);
-  eventMulticaster.addEditorMouseMotionListener(myEditorMouseMotionListener);
-  eventMulticaster.addEditorMouseListener(myEditorMouseListener);
+,this);
+  eventMulticaster.addEditorMouseMotionListener(new MyEditorMouseMotionListener(),this);
+  eventMulticaster.addEditorMouseListener(new MyEditorMouseListener(),this);
   myEditorTracker=editorTracker;
   myEditorTrackerListener=new EditorTrackerListener(){
     public void activeEditorsChanged(    List<Editor> editors){
@@ -50,7 +48,10 @@
   }
 ;
   EditorFactory.getInstance().addEditorFactoryListener(myEditorFactoryListener);
-  PsiManager.getInstance(myProject).addPsiTreeChangeListener(new PsiChangeHandler(myProject,daemonCodeAnalyzer,connection));
+  PsiDocumentManagerImpl documentManager=(PsiDocumentManagerImpl)PsiDocumentManager.getInstance(myProject);
+  PsiChangeHandler changeHandler=new PsiChangeHandler(myProject,daemonCodeAnalyzer,documentManager,EditorFactory.getInstance(),connection);
+  Disposer.register(this,changeHandler);
+  PsiManager.getInstance(myProject).addPsiTreeChangeListener(changeHandler,changeHandler);
   connection.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootListener(){
     public void beforeRootsChange(    ModuleRootEvent event){
     }
@@ -71,13 +72,13 @@
     }
   }
 );
-  CommandProcessor.getInstance().addCommandListener(myCommandListener);
+  CommandProcessor.getInstance().addCommandListener(new MyCommandListener(),this);
   ApplicationManager.getApplication().addApplicationListener(myApplicationListener);
   EditorColorsManager.getInstance().addEditorColorsListener(myEditorColorsListener);
-  InspectionProfileManager.getInstance().addProfileChangeListener(myProfileChangeListener);
+  InspectionProfileManager.getInstance().addProfileChangeListener(new MyProfileChangeListener(),this);
   TodoConfiguration.getInstance().addPropertyChangeListener(myTodoListener);
-  ActionManagerEx.getInstanceEx().addAnActionListener(myAnActionListener);
-  myVirtualFileListener=new VirtualFileAdapter(){
+  ActionManagerEx.getInstanceEx().addAnActionListener(new MyAnActionListener(),this);
+  VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileAdapter(){
     public void propertyChanged(    VirtualFilePropertyEvent event){
       if (VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
         myDaemonCodeAnalyzer.restart();
@@ -91,8 +92,7 @@
       }
     }
   }
-;
-  VirtualFileManager.getInstance().addVirtualFileListener(myVirtualFileListener);
+,this);
   myErrorStripeHandler=new ErrorStripeHandler(myProject);
   ((EditorEventMulticasterEx)eventMulticaster).addErrorStripeListener(myErrorStripeHandler);
   final NamedScopesHolder[] holders=NamedScopesHolder.getAllNamedScopeHolders(project);
