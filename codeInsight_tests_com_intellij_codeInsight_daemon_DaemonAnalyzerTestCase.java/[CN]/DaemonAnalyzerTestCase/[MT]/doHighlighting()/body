@@ -1,34 +1,19 @@
 {
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-  final List<HighlightInfo> result=new ArrayList<HighlightInfo>();
-  if (doTestLineMarkers()) {
-    collectLineMarkersForFile(getFile(),getEditor(),result);
+  TIntArrayList toIgnore=new TIntArrayList();
+  if (!doTestLineMarkers()) {
+    toIgnore.add(Pass.UPDATE_OVERRIDEN_MARKERS);
+    toIgnore.add(Pass.VISIBLE_LINE_MARKERS);
+    toIgnore.add(Pass.LINE_MARKERS);
   }
-  result.addAll(collectHighlighInfos(getFile(),getEditor()));
-  boolean isToLaunchExternal=true;
-  for (  HighlightInfo info : result) {
-    if (info.getSeverity() == HighlightSeverity.ERROR) {
-      isToLaunchExternal=false;
-      break;
-    }
+  MockProgressIndicator progress=new MockProgressIndicator();
+  List<TextEditorHighlightingPass> passes=TextEditorHighlightingPassRegistrarEx.getInstanceEx(getProject()).instantiatePasses(getFile(),getEditor(),toIgnore.toNativeArray());
+  for (  TextEditorHighlightingPass pass : passes) {
+    pass.collectInformation(progress);
   }
-  if (doTestCustomPass()) {
-    TextEditorHighlightingPass pass=getCustomPass(getFile(),getEditor());
-    if (pass != null) {
-      pass.collectInformation(new MockProgressIndicator());
-      pass.applyInformationToEditor();
-      result.addAll(pass.getHighlights());
-    }
-  }
-  if (forceExternalValidation()) {
-    result.clear();
-  }
-  if (isToLaunchExternal && doExternalValidation() || forceExternalValidation()) {
-    ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(myProject)).getFileStatusMap().setErrorFoundFlag(getDocument(getFile()),false);
-    ExternalToolPass pass=new ExternalToolPass(getFile(),getEditor(),0,getEditor().getDocument().getTextLength());
-    pass.collectInformation(new MockProgressIndicator());
+  for (  TextEditorHighlightingPass pass : passes) {
     pass.applyInformationToEditor();
-    result.addAll(pass.getHighlights());
   }
-  return result;
+  List<HighlightInfo> infos=DaemonCodeAnalyzerImpl.getHighlights(getEditor().getDocument(),getProject());
+  return infos == null ? Collections.<HighlightInfo>emptyList() : new ArrayList<HighlightInfo>(infos);
 }
