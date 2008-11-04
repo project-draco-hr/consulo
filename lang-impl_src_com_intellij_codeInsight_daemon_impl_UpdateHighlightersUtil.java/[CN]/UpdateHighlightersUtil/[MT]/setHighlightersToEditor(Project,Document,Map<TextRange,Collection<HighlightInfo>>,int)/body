@@ -1,2 +1,128 @@
 {
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  PsiFile psiFile=PsiDocumentManager.getInstance(project).getPsiFile(document);
+  cleanFileLevelHighlights(project,group,psiFile);
+  List<TextRange> ranges=new ArrayList<TextRange>(infos.keySet());
+  Collections.sort(ranges,BY_START_OFFSET);
+  for (int i=1; i < ranges.size(); i++) {
+    TextRange range=ranges.get(i);
+    TextRange prev=ranges.get(i - 1);
+    if (prev.intersects(range)) {
+      ranges.remove(i);
+      TextRange union=prev.union(range);
+      Collection<HighlightInfo> collection=infos.get(prev);
+      collection.addAll(infos.get(range));
+      infos.remove(prev);
+      infos.remove(range);
+      infos.put(union,collection);
+      ranges.set(i - 1,union);
+      i--;
+    }
+  }
+  MarkupModel markup=document.getMarkupModel(project);
+  List<HighlightInfo> oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(markup);
+  List<HighlightInfo> highlightsToRemove=DaemonCodeAnalyzerImpl.getHighlightsToRemove(markup);
+  DaemonCodeAnalyzerImpl.assertMarkupConsistent(markup,oldHighlights,highlightsToRemove);
+  List<HighlightInfo> result=new ArrayList<HighlightInfo>();
+  Map<HighlightInfo,HighlightInfo> infosToRemove=new THashMap<HighlightInfo,HighlightInfo>(DISTINQUISH_INVALID_MARKERS);
+  boolean changed=false;
+  if (oldHighlights != null) {
+    for (    HighlightInfo info : oldHighlights) {
+      RangeHighlighter highlighter=info.highlighter;
+      boolean toRemove=!highlighter.isValid() || info.group == group && Collections.binarySearch(ranges,new TextRange(highlighter.getStartOffset(),highlighter.getEndOffset()),BY_START_OFFSET_OR_CONTAINS) >= 0;
+      if (toRemove) {
+        infosToRemove.put(info,info);
+        changed=true;
+      }
+ else {
+        result.add(info);
+      }
+    }
+  }
+  for (  HighlightInfo info : highlightsToRemove) {
+    infosToRemove.put(info,info);
+  }
+  changed|=!highlightsToRemove.isEmpty();
+  boolean removed=result.removeAll(infosToRemove.keySet());
+  changed|=removed;
+  Map<TextRange,RangeMarker> ranges2markersCache=new THashMap<TextRange,RangeMarker>(oldHighlights == null ? 10 : oldHighlights.size());
+  for (  TextRange range : ranges) {
+    int rangeStartOffset=range.getStartOffset();
+    int rangeEndOffset=range.getEndOffset();
+    List<HighlightInfo> highlights=new ArrayList<HighlightInfo>(infos.get(range));
+    Collections.sort(highlights,new Comparator<HighlightInfo>(){
+      public int compare(      HighlightInfo o1,      HighlightInfo o2){
+        return o1.startOffset - o2.startOffset;
+      }
+    }
+);
+    for (    HighlightInfo info : highlights) {
+      if (info.isFileLevelAnnotation && psiFile != null && psiFile.getViewProvider().isPhysical()) {
+        addFileLevelHighlight(project,group,info,psiFile);
+        continue;
+      }
+      int infoStartOffset=info.startOffset;
+      int infoEndOffset=info.endOffset;
+      if (infoStartOffset < rangeStartOffset || infoEndOffset > rangeEndOffset)       continue;
+      if (infoEndOffset == infoStartOffset) {
+        infoEndOffset++;
+      }
+      final int docLength=document.getTextLength();
+      if (infoEndOffset > docLength) {
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Invalid HighlightInfo created: (" + infoStartOffset + ":"+ infoEndOffset+ ")"+ info.description);
+        }
+        infoEndOffset=docLength;
+      }
+      info.text=document.getCharsSequence().subSequence(infoStartOffset,infoEndOffset).toString();
+      info.group=group;
+      HighlightInfo toRemove=infosToRemove.remove(info);
+      RangeHighlighterEx highlighter;
+      if (toRemove != null && toRemove.highlighter.isValid()) {
+        highlighter=toRemove.highlighter;
+      }
+ else {
+        highlighter=createRangeHighlighter(project,psiFile,info,infoStartOffset,infoEndOffset,markup);
+      }
+      changed=true;
+      info.highlighter=highlighter;
+      highlighter.setAfterEndOfLine(info.isAfterEndOfLine);
+      Color color=info.getErrorStripeMarkColor(psiFile);
+      if (!Comparing.equal(color,highlighter.getErrorStripeMarkColor())) {
+        highlighter.setErrorStripeMarkColor(color);
+      }
+      highlighter.setErrorStripeTooltip(info);
+      GutterIconRenderer renderer=info.getGutterIconRenderer();
+      if (!Comparing.equal(renderer,highlighter.getGutterIconRenderer())) {
+        highlighter.setGutterIconRenderer(renderer);
+      }
+      ranges2markersCache.put(new TextRange(infoStartOffset,infoEndOffset),info.highlighter);
+      if (info.quickFixActionRanges != null) {
+        info.quickFixActionMarkers=new ArrayList<Pair<HighlightInfo.IntentionActionDescriptor,RangeMarker>>(info.quickFixActionRanges.size());
+        for (        Pair<HighlightInfo.IntentionActionDescriptor,TextRange> pair : info.quickFixActionRanges) {
+          TextRange textRange=pair.second;
+          RangeMarker marker=getOrCreate(document,ranges2markersCache,textRange);
+          info.quickFixActionMarkers.add(Pair.create(pair.first,marker));
+        }
+      }
+      info.fixMarker=getOrCreate(document,ranges2markersCache,new TextRange(info.fixStartOffset,info.fixEndOffset));
+      result.add(info);
+    }
+    for (Iterator<Map.Entry<HighlightInfo,HighlightInfo>> it=infosToRemove.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<HighlightInfo,HighlightInfo> entry=it.next();
+      HighlightInfo info=entry.getKey();
+      if (info.highlighter.isValid()) {
+        if (info.group != group || info.getActualStartOffset() < rangeStartOffset || info.getActualEndOffset() > rangeEndOffset)         continue;
+      }
+      markup.removeHighlighter(info.highlighter);
+      changed=true;
+      it.remove();
+    }
+  }
+  List<HighlightInfo> listToRemove=infosToRemove.isEmpty() ? Collections.<HighlightInfo>emptyList() : new ArrayList<HighlightInfo>(infosToRemove.keySet());
+  if (changed) {
+    DaemonCodeAnalyzerImpl.setHighlights(markup,project,result,listToRemove);
+    clearWhiteSpaceOptimizationFlag(document);
+  }
+  DaemonCodeAnalyzerImpl.assertMarkupConsistent(markup,result,listToRemove);
 }
