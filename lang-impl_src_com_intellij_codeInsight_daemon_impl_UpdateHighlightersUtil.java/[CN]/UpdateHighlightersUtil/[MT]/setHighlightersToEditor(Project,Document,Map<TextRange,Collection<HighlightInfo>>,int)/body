@@ -22,24 +22,16 @@
   MarkupModel markup=document.getMarkupModel(project);
   List<HighlightInfo> oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(markup);
   List<HighlightInfo> highlightsToRemove=DaemonCodeAnalyzerImpl.getHighlightsToRemove(markup);
-  assertMarkupConsistent(markup,oldHighlights,highlightsToRemove);
+  DaemonCodeAnalyzerImpl.assertMarkupConsistent(markup,oldHighlights,highlightsToRemove);
   List<HighlightInfo> result=new ArrayList<HighlightInfo>();
-  MultiMap<HighlightInfo,HighlightInfo> infosToRemove=new MultiMap<HighlightInfo,HighlightInfo>(){
-    @Override protected Map<HighlightInfo,Collection<HighlightInfo>> createMap(){
-      return new THashMap<HighlightInfo,Collection<HighlightInfo>>(DISTINQUISH_INVALID_MARKERS);
-    }
-    @Override protected Collection<HighlightInfo> createCollection(){
-      return new ArrayList<HighlightInfo>();
-    }
-  }
-;
+  Map<HighlightInfo,HighlightInfo> infosToRemove=new THashMap<HighlightInfo,HighlightInfo>(DISTINQUISH_INVALID_MARKERS);
   boolean changed=false;
   if (oldHighlights != null) {
     for (    HighlightInfo info : oldHighlights) {
       RangeHighlighter highlighter=info.highlighter;
       boolean toRemove=!highlighter.isValid() || info.group == group && Collections.binarySearch(ranges,new TextRange(highlighter.getStartOffset(),highlighter.getEndOffset()),BY_START_OFFSET_OR_CONTAINS) >= 0;
       if (toRemove) {
-        infosToRemove.putValue(info,info);
+        infosToRemove.put(info,info);
         changed=true;
       }
  else {
@@ -48,10 +40,11 @@
     }
   }
   for (  HighlightInfo info : highlightsToRemove) {
-    infosToRemove.putValue(info,info);
-    result.remove(info);
-    changed=true;
+    infosToRemove.put(info,info);
   }
+  changed|=!highlightsToRemove.isEmpty();
+  boolean removed=result.removeAll(infosToRemove.keySet());
+  changed|=removed;
   Map<TextRange,RangeMarker> ranges2markersCache=new THashMap<TextRange,RangeMarker>(oldHighlights == null ? 10 : oldHighlights.size());
   for (  TextRange range : ranges) {
     int rangeStartOffset=range.getStartOffset();
@@ -83,8 +76,7 @@
       }
       info.text=document.getCharsSequence().subSequence(infoStartOffset,infoEndOffset).toString();
       info.group=group;
-      List<HighlightInfo> values=(List<HighlightInfo>)infosToRemove.get(info);
-      HighlightInfo toRemove=values.isEmpty() ? null : values.remove(0);
+      HighlightInfo toRemove=infosToRemove.remove(info);
       RangeHighlighterEx highlighter;
       if (toRemove != null && toRemove.highlighter.isValid()) {
         highlighter=toRemove.highlighter;
@@ -116,23 +108,21 @@
       info.fixMarker=getOrCreate(document,ranges2markersCache,new TextRange(info.fixStartOffset,info.fixEndOffset));
       result.add(info);
     }
-    for (Iterator<HighlightInfo> it=infosToRemove.keySet().iterator(); it.hasNext(); ) {
-      HighlightInfo info=it.next();
+    for (Iterator<Map.Entry<HighlightInfo,HighlightInfo>> it=infosToRemove.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<HighlightInfo,HighlightInfo> entry=it.next();
+      HighlightInfo info=entry.getKey();
       if (info.highlighter.isValid()) {
         if (info.group != group || info.getActualStartOffset() < rangeStartOffset || info.getActualEndOffset() > rangeEndOffset)         continue;
       }
-      Collection<HighlightInfo> values=infosToRemove.get(info);
-      for (      HighlightInfo value : values) {
-        markup.removeHighlighter(value.highlighter);
-      }
+      markup.removeHighlighter(info.highlighter);
       changed=true;
       it.remove();
     }
   }
-  List<HighlightInfo> listToRemove=infosToRemove.isEmpty() ? Collections.<HighlightInfo>emptyList() : new ArrayList<HighlightInfo>(infosToRemove.values());
+  List<HighlightInfo> listToRemove=infosToRemove.isEmpty() ? Collections.<HighlightInfo>emptyList() : new ArrayList<HighlightInfo>(infosToRemove.keySet());
   if (changed) {
     DaemonCodeAnalyzerImpl.setHighlights(markup,project,result,listToRemove);
     clearWhiteSpaceOptimizationFlag(document);
   }
-  assertMarkupConsistent(markup,result,listToRemove);
+  DaemonCodeAnalyzerImpl.assertMarkupConsistent(markup,result,listToRemove);
 }
