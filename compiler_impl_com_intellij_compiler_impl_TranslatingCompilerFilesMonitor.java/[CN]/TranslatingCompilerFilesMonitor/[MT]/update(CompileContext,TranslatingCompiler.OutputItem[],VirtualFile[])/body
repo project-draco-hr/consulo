@@ -1,2 +1,83 @@
 {
+  final Project project=context.getProject();
+  final int projectId=getProjectId(project);
+  final LocalFileSystem lfs=LocalFileSystem.getInstance();
+  final IOException[] _ex=new IOException[]{null};
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      try {
+        final Map<VirtualFile,SourceFileInfo> compiledSources=new HashMap<VirtualFile,SourceFileInfo>();
+        final Set<VirtualFile> forceRecompile=new HashSet<VirtualFile>();
+        for (        TranslatingCompiler.OutputItem item : successfullyCompiled) {
+          final VirtualFile sourceFile=item.getSourceFile();
+          final boolean isSourceValid=sourceFile.isValid();
+          SourceFileInfo srcInfo=compiledSources.get(sourceFile);
+          if (isSourceValid && srcInfo == null) {
+            srcInfo=loadSourceInfo(sourceFile);
+            if (srcInfo != null) {
+              srcInfo.clearPaths(projectId);
+            }
+ else {
+              srcInfo=new SourceFileInfo();
+            }
+            compiledSources.put(sourceFile,srcInfo);
+          }
+          final String outputPath=item.getOutputPath();
+          if (outputPath != null) {
+            final VirtualFile outputFile=lfs.findFileByPath(outputPath);
+            if (outputFile != null) {
+              if (!sourceFile.equals(outputFile)) {
+                final String outputRoot=item.getOutputRootDirectory();
+                final String className=MakeUtil.relativeClassPathToQName(outputPath.substring(outputRoot.length()),'/');
+                if (isSourceValid) {
+                  srcInfo.addOutputPath(projectId,outputPath);
+                  saveOutputInfo(outputFile,new OutputFileInfo(sourceFile.getPath(),className));
+                }
+ else {
+                  markOutputPathForDeletion(projectId,outputPath,className,sourceFile.getUrl());
+                }
+              }
+            }
+ else {
+              LOG.warn("TranslatingCompilerFilesMonitor.update():  Virtual file was not found for \"" + outputPath + "\"");
+              if (isSourceValid) {
+                forceRecompile.add(sourceFile);
+              }
+            }
+          }
+        }
+        final long compilationStartStamp=((CompileContextEx)context).getStartCompilationStamp();
+        for (        Map.Entry<VirtualFile,SourceFileInfo> entry : compiledSources.entrySet()) {
+          final SourceFileInfo info=entry.getValue();
+          final VirtualFile file=entry.getKey();
+          final long fileStamp=file.getTimeStamp();
+          info.updateTimestamp(projectId,fileStamp);
+          saveSourceInfo(file,info);
+          removeSourceForRecompilation(projectId,getFileId(file));
+          if (fileStamp > compilationStartStamp || forceRecompile.contains(file)) {
+            addSourceForRecompilation(projectId,file,info);
+          }
+        }
+      }
+ catch (      IOException e) {
+        _ex[0]=e;
+      }
+    }
+  }
+);
+  if (_ex[0] != null) {
+    throw _ex[0];
+  }
+  if (filesToRecompile.length > 0) {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (        VirtualFile file : filesToRecompile) {
+          if (file.isValid()) {
+            addSourceForRecompilation(projectId,file,null);
+          }
+        }
+      }
+    }
+);
+  }
 }
