@@ -1,85 +1,71 @@
 {
   final Cache cache=getCache();
-  final int classId=cache.getClassId(classQName);
-  final int genericSignature=cache.getGenericSignature(classId);
+  final int genericSignature=cache.getGenericSignature(classQName);
   if (genericSignature != -1) {
     final String genericClassSignature=resolve(genericSignature);
     final int[] bounds=findBounds(genericClassSignature);
     for (    int boundClassQName : bounds) {
-      cache.addClassReferencer(cache.getClassDeclarationId(boundClassQName),classQName);
-      cache.addReferencedClass(classId,boundClassQName);
+      cache.addClassReferencer(boundClassQName,classQName);
+      cache.addReferencedClass(classQName,boundClassQName);
     }
   }
-  buildAnnotationDependencies(classQName,cache.getRuntimeVisibleAnnotations(classId));
-  buildAnnotationDependencies(classQName,cache.getRuntimeInvisibleAnnotations(classId));
+  buildAnnotationDependencies(classQName,cache.getRuntimeVisibleAnnotations(classQName));
+  buildAnnotationDependencies(classQName,cache.getRuntimeInvisibleAnnotations(classQName));
   for (  final ReferenceInfo refInfo : references) {
     final int declaringClassName=getActualDeclaringClassForReference(refInfo);
     if (declaringClassName == Cache.UNKNOWN) {
       continue;
     }
-    final int declaringClassId=cache.getClassDeclarationId(declaringClassName);
     if (refInfo instanceof MemberReferenceInfo) {
       final MemberInfo memberInfo=((MemberReferenceInfo)refInfo).getMemberInfo();
       if (memberInfo instanceof FieldInfo) {
-        int fieldId=cache.findField(declaringClassId,memberInfo.getName(),memberInfo.getDescriptor());
-        if (fieldId == Cache.UNKNOWN) {
-          fieldId=cache.putMember(declaringClassId,Cache.UNKNOWN,memberInfo);
-        }
-        cache.addFieldReferencer(fieldId,classQName);
+        cache.addFieldReferencer(declaringClassName,memberInfo.getName(),classQName);
       }
  else       if (memberInfo instanceof MethodInfo) {
-        int methodId=cache.findMethod(declaringClassId,memberInfo.getName(),memberInfo.getDescriptor());
-        if (methodId == Cache.UNKNOWN) {
-          methodId=cache.putMember(declaringClassId,Cache.UNKNOWN,memberInfo);
-        }
-        cache.addMethodReferencer(methodId,classQName);
+        cache.addMethodReferencer(declaringClassName,memberInfo.getName(),memberInfo.getDescriptor(),classQName);
       }
  else {
         LOG.error("Unknown member info class: " + memberInfo.getClass().getName());
       }
     }
  else {
-      cache.addClassReferencer(declaringClassId,classQName);
+      cache.addClassReferencer(declaringClassName,classQName);
     }
-    cache.addReferencedClass(classId,declaringClassName);
+    cache.addReferencedClass(classQName,declaringClassName);
   }
   final SymbolTable symbolTable=getSymbolTable();
-  final int classDeclarationId=cache.getClassDeclarationId(classQName);
-  final int[] fieldIds=cache.getFieldIds(classDeclarationId);
-  for (  final int fieldId : fieldIds) {
-    buildAnnotationDependencies(classQName,cache.getFieldRuntimeVisibleAnnotations(fieldId));
-    buildAnnotationDependencies(classQName,cache.getFieldRuntimeInvisibleAnnotations(fieldId));
-    final int signature=cache.getFieldDescriptor(fieldId);
-    String className=MakeUtil.parseObjectType(symbolTable.getSymbol(signature),0);
+  for (  final FieldInfo fieldInfo : cache.getFieldIds(classQName)) {
+    buildAnnotationDependencies(classQName,fieldInfo.getRuntimeVisibleAnnotations());
+    buildAnnotationDependencies(classQName,fieldInfo.getRuntimeInvisibleAnnotations());
+    String className=MakeUtil.parseObjectType(symbolTable.getSymbol(fieldInfo.getDescriptor()),0);
     if (className == null) {
       continue;
     }
     final int cls=symbolTable.getId(className);
-    cache.addClassReferencer(cache.getClassDeclarationId(cls),classQName);
-    cache.addReferencedClass(classId,cls);
+    cache.addClassReferencer(cls,classQName);
+    cache.addReferencedClass(classQName,cls);
   }
-  final int[] methods=cache.getMethodIds(classDeclarationId);
-  for (  final int methodId : methods) {
-    buildAnnotationDependencies(classQName,cache.getMethodRuntimeVisibleAnnotations(methodId));
-    buildAnnotationDependencies(classQName,cache.getMethodRuntimeInvisibleAnnotations(methodId));
-    buildAnnotationDependencies(classQName,cache.getMethodRuntimeVisibleParamAnnotations(methodId));
-    buildAnnotationDependencies(classQName,cache.getMethodRuntimeInvisibleParamAnnotations(methodId));
-    if (cache.isConstructor(methodId)) {
+  for (  final MethodInfo methodInfo : cache.getMethodIds(classQName)) {
+    buildAnnotationDependencies(classQName,methodInfo.getRuntimeVisibleAnnotations());
+    buildAnnotationDependencies(classQName,methodInfo.getRuntimeInvisibleAnnotations());
+    buildAnnotationDependencies(classQName,methodInfo.getRuntimeVisibleParameterAnnotations());
+    buildAnnotationDependencies(classQName,methodInfo.getRuntimeInvisibleParameterAnnotations());
+    if (methodInfo.isConstructor()) {
       continue;
     }
-    final String returnTypeClassName=MakeUtil.parseObjectType(CacheUtils.getMethodReturnTypeDescriptor(cache,methodId,symbolTable),0);
+    final String returnTypeClassName=MakeUtil.parseObjectType(methodInfo.getReturnTypeDescriptor(symbolTable),0);
     if (returnTypeClassName != null) {
-      final int returnTypeClassId=symbolTable.getId(returnTypeClassName);
-      cache.addClassReferencer(cache.getClassDeclarationId(returnTypeClassId),classQName);
-      cache.addReferencedClass(classId,returnTypeClassId);
+      final int returnTypeClassQName=symbolTable.getId(returnTypeClassName);
+      cache.addClassReferencer(returnTypeClassQName,classQName);
+      cache.addReferencedClass(classQName,returnTypeClassQName);
     }
-    String[] parameterSignatures=CacheUtils.getParameterSignatures(cache,methodId,symbolTable);
+    String[] parameterSignatures=CacheUtils.getParameterSignatures(methodInfo,symbolTable);
     for (    String parameterSignature : parameterSignatures) {
       String paramClassName=MakeUtil.parseObjectType(parameterSignature,0);
       if (paramClassName != null) {
         final int paramClassId=symbolTable.getId(paramClassName);
-        cache.addClassReferencer(cache.getClassDeclarationId(paramClassId),classQName);
-        cache.addReferencedClass(classId,paramClassId);
+        cache.addClassReferencer(paramClassId,classQName);
+        cache.addReferencedClass(classQName,paramClassId);
       }
     }
   }

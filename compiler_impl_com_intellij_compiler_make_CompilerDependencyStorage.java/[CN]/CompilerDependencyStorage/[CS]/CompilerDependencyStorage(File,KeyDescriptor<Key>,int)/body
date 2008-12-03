@@ -1,0 +1,64 @@
+{
+  myMap=new PersistentHashMap<Key,int[]>(file,keyDescriptor,new DataExternalizer<int[]>(){
+    public void save(    DataOutput out,    int[] array) throws IOException {
+      out.writeInt(array.length);
+      for (      int value : array) {
+        out.writeInt(value);
+      }
+    }
+    public int[] read(    DataInput in) throws IOException {
+      final TIntHashSet set=new TIntHashSet();
+      DataInputStream stream=(DataInputStream)in;
+      while (stream.available() > 0) {
+        final int size=stream.readInt();
+        final int _size=Math.abs(size);
+        for (int idx=0; idx < _size; idx++) {
+          if (size > 0) {
+            set.add(stream.readInt());
+          }
+ else {
+            set.remove(stream.readInt());
+          }
+        }
+      }
+      return set.toArray();
+    }
+  }
+);
+  myCache=new SLRUCache<Key,IntSet>(cacheSize * 2,cacheSize){
+    @NotNull public IntSet createValue(    Key key){
+      return new IntSet(key);
+    }
+    protected void onDropFromCache(    Key key,    final IntSet set){
+      if (key == myKeyToRemove || !set.isDirty()) {
+        return;
+      }
+      try {
+        if (set.needsCompacting()) {
+          myMap.put(key,set.getValues());
+        }
+ else {
+          myMap.appendData(key,new PersistentHashMap.ValueDataAppender(){
+            public void append(            DataOutput out) throws IOException {
+              final int[] removed=set.getRemovedValued();
+              out.writeInt(-removed.length);
+              for (              int value : removed) {
+                out.writeInt(value);
+              }
+              final int[] added=set.getAddedValues();
+              out.writeInt(added.length);
+              for (              int value : added) {
+                out.writeInt(value);
+              }
+            }
+          }
+);
+        }
+      }
+ catch (      IOException e) {
+        LOG.error(e);
+      }
+    }
+  }
+;
+}

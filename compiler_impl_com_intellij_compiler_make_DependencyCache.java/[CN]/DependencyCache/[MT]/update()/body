@@ -6,56 +6,38 @@
   final Cache cache=getCache();
   final Cache newCache=getNewClassesCache();
   final DependencyCacheNavigator navigator=getCacheNavigator();
-  final TIntHashSet toClean=new TIntHashSet();
-  toClean.addAll(namesToUpdate);
-  toClean.addAll(myClassesWithSourceRemoved.toArray());
-  for (  final int qName : toClean.toArray()) {
-    final int oldClassId=cache.getClassId(qName);
-    if (oldClassId == Cache.UNKNOWN) {
-      continue;
-    }
-    final int[] referencedClasses=cache.getReferencedClassQNames(oldClassId);
-    for (    int referencedClassQName : referencedClasses) {
-      final int referencedClassDeclarationId=cache.getClassDeclarationId(referencedClassQName);
-      if (referencedClassDeclarationId == Cache.UNKNOWN) {
+  for (  final int qName : namesToUpdate) {
+    for (    int referencedClassQName : cache.getReferencedClassQNames(qName)) {
+      if (!cache.containsClass(referencedClassQName)) {
         continue;
       }
-      cache.removeClassReferencer(referencedClassDeclarationId,qName);
-      final int[] fieldIds=cache.getFieldIds(referencedClassDeclarationId);
-      for (      int fieldId : fieldIds) {
-        cache.removeFieldReferencer(fieldId,qName);
+      cache.removeClassReferencer(referencedClassQName,qName);
+      for (      FieldInfo fieldId : cache.getFieldIds(referencedClassQName)) {
+        cache.removeFieldReferencer(referencedClassQName,fieldId.getName(),qName);
       }
-      final int[] methodIds=cache.getMethodIds(referencedClassDeclarationId);
-      for (      int methodId : methodIds) {
-        cache.removeMethodReferencer(methodId,qName);
+      for (      MethodInfo methodId : cache.getMethodIds(referencedClassQName)) {
+        cache.removeMethodReferencer(referencedClassQName,methodId.getName(),methodId.getDescriptor(),qName);
       }
     }
     navigator.walkSuperClasses(qName,new ClassInfoProcessor(){
       public boolean process(      int classQName) throws CacheCorruptedException {
-        final int classId=cache.getClassId(classQName);
-        cache.removeSubclass(classId,qName);
+        cache.removeSubclass(classQName,qName);
         return true;
       }
     }
 );
   }
   for (  final int qName : namesToUpdate) {
-    final int newInfoId=newCache.getClassId(qName);
-    if (newInfoId == Cache.UNKNOWN) {
-      continue;
-    }
     cache.importClassInfo(newCache,qName);
   }
   final SymbolTable symbolTable=getSymbolTable();
   for (  final int qName : namesToUpdate) {
-    final int newClassId=newCache.getClassId(qName);
-    if (newClassId == Cache.UNKNOWN) {
+    if (!newCache.containsClass(qName)) {
       continue;
     }
-    buildForwardDependencies(qName,newCache.getReferences(newClassId));
+    buildForwardDependencies(qName,newCache.getReferences(qName));
     boolean isRemote=false;
-    final int classId=cache.getClassId(qName);
-    final int[] superInterfaces=cache.getSuperInterfaces(classId);
+    final int[] superInterfaces=cache.getSuperInterfaces(qName);
     if (superInterfaces.length > 0) {
       final int remoteInterfaceName=symbolTable.getId(REMOTE_INTERFACE_NAME);
       for (      int superInterface : superInterfaces) {
@@ -65,17 +47,20 @@
         }
       }
     }
-    final boolean wasRemote=cache.isRemote(classId);
+    final boolean wasRemote=cache.isRemote(qName);
     if (wasRemote && !isRemote) {
 synchronized (myPreviouslyRemoteClasses) {
         myPreviouslyRemoteClasses.add(qName);
       }
     }
-    cache.setRemote(classId,isRemote);
+    cache.setRemote(qName,isRemote);
   }
   for (  final int qName : namesToUpdate) {
-    final int classId=cache.getClassId(qName);
+    final int classId=qName;
     buildSubclassDependencies(getCache(),qName,classId);
+  }
+  for (  final int qName : myClassesWithSourceRemoved.toArray()) {
+    cache.removeClass(qName);
   }
   myToUpdate=new TIntHashSet();
 }
