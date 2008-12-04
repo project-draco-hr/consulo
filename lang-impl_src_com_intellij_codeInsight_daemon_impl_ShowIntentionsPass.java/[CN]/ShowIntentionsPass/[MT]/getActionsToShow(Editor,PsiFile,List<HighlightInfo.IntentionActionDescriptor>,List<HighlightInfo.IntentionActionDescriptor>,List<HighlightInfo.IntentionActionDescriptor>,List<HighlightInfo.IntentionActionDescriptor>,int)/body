@@ -1,0 +1,50 @@
+{
+  final PsiElement psiElement=psiFile.findElementAt(editor.getCaretModel().getOffset());
+  LOG.assertTrue(psiElement == null || psiElement.isValid(),psiElement);
+  final boolean isInProject=psiFile.getManager().isInProject(psiFile);
+  int offset=editor.getCaretModel().getOffset();
+  Project project=psiFile.getProject();
+  for (  IntentionAction action : IntentionManager.getInstance().getIntentionActions()) {
+    if (action instanceof PsiElementBaseIntentionAction) {
+      if (!isInProject || !((PsiElementBaseIntentionAction)action).isAvailable(project,editor,psiElement))       continue;
+    }
+ else     if (!action.isAvailable(project,editor,psiFile)) {
+      continue;
+    }
+    List<IntentionAction> enableDisableIntentionAction=new ArrayList<IntentionAction>();
+    enableDisableIntentionAction.add(new IntentionHintComponent.EnableDisableIntentionAction(action));
+    intentionsToShow.add(new HighlightInfo.IntentionActionDescriptor(action,enableDisableIntentionAction,null));
+  }
+  List<HighlightInfo.IntentionActionDescriptor> actions=QuickFixAction.getAvailableActions(editor,psiFile,passIdToShowIntentionsFor);
+  final DaemonCodeAnalyzer codeAnalyzer=DaemonCodeAnalyzer.getInstance(project);
+  final Document document=editor.getDocument();
+  HighlightInfo infoAtCursor=((DaemonCodeAnalyzerImpl)codeAnalyzer).findHighlightByOffset(document,offset,true);
+  if (infoAtCursor == null || infoAtCursor.getSeverity() == HighlightSeverity.ERROR) {
+    errorFixesToShow.addAll(actions);
+  }
+ else {
+    inspectionFixesToShow.addAll(actions);
+  }
+  final int line=document.getLineNumber(offset);
+  final HighlightInfo[] infoList=DaemonCodeAnalyzerImpl.getHighlights(document,HighlightSeverity.INFORMATION,project,document.getLineStartOffset(line),document.getLineEndOffset(line));
+  for (  HighlightInfo info : infoList) {
+    final GutterIconRenderer renderer=info.getGutterIconRenderer();
+    if (renderer != null) {
+      final AnAction action=renderer.getClickAction();
+      if (action != null) {
+        final String text=renderer.getTooltipText();
+        final IntentionAction actionAdapter=new AbstractIntentionAction(){
+          public void invoke(          @NotNull Project project,          Editor editor,          PsiFile file) throws IncorrectOperationException {
+            final RelativePoint relativePoint=PopupFactoryImpl.getInstance().guessBestPopupLocation(editor);
+            action.actionPerformed(new AnActionEvent(relativePoint.toMouseEvent(),DataManager.getInstance().getDataContext(),text,new Presentation(),ActionManager.getInstance(),0));
+          }
+          @NotNull public String getText(){
+            return text;
+          }
+        }
+;
+        guttersToShow.add(new HighlightInfo.IntentionActionDescriptor(actionAdapter,Collections.<IntentionAction>emptyList(),text,renderer.getIcon()));
+      }
+    }
+  }
+}
