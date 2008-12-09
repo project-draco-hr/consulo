@@ -1,0 +1,45 @@
+{
+  final Map<String,IgnoredFileInfo> map=myIgnoredInfo.get(project);
+  if (map != null) {
+    final SvnVcs vcs=SvnVcs.getInstance(project);
+    final ProgressManager progressManager=ProgressManager.getInstance();
+    final Runnable prepare=new Runnable(){
+      public void run(){
+        for (Iterator<String> iterator=map.keySet().iterator(); iterator.hasNext(); ) {
+          final String key=iterator.next();
+          final IgnoredFileInfo info=map.get(key);
+          info.calculatePatterns(vcs);
+          if (info.getPatterns().isEmpty()) {
+            iterator.remove();
+          }
+        }
+      }
+    }
+;
+    progressManager.runProcessWithProgressSynchronously(prepare,SvnBundle.message("gather.ignore.patterns.info.progress.title"),false,project);
+    final SelectIgnorePatternsToRemoveOnDeleteDialog dialog=new SelectIgnorePatternsToRemoveOnDeleteDialog(project,map);
+    dialog.show();
+    final Collection<IgnoredFileInfo> result=dialog.getResult();
+    if ((dialog.getExitCode() == DialogWrapper.OK_EXIT_CODE) && (!result.isEmpty())) {
+      final List<VcsException> exceptions=new ArrayList<VcsException>(0);
+      final Runnable deletePatterns=new Runnable(){
+        public void run(){
+          for (          IgnoredFileInfo info : result) {
+            try {
+              info.getOldPatterns().removeAll(info.getPatterns());
+              SvnPropertyService.setIgnores(vcs,info.getOldPatterns(),info.getFile());
+            }
+ catch (            SVNException e) {
+              exceptions.add(new VcsException(e));
+            }
+          }
+        }
+      }
+;
+      progressManager.runProcessWithProgressSynchronously(deletePatterns,"Removing selected 'svn:ignore' patterns",false,project);
+      if (!exceptions.isEmpty()) {
+        AbstractVcsHelper.getInstance(project).showErrors(exceptions,SvnBundle.message("remove.ignore.patterns.errors.title"));
+      }
+    }
+  }
+}
