@@ -1,8 +1,9 @@
 {
   final String moduleChunkName=moduleChunk.getName();
-  final Tag compilerArgs=new Tag("compilerarg",new Pair[]{new Pair<String,String>("line",BuildProperties.propertyRef(BuildProperties.getModuleChunkCompilerArgsProperty(moduleChunkName)))});
-  final Tag classpathTag=new Tag("classpath",new Pair[]{new Pair<String,String>("refid",BuildProperties.getClasspathProperty(moduleChunkName))});
-  final Tag bootclasspathTag=new Tag("bootclasspath",new Pair[]{new Pair<String,String>("refid",BuildProperties.getBootClasspathProperty(moduleChunkName))});
+  final Tag compilerArgs=new Tag("compilerarg",Pair.create("line",BuildProperties.propertyRef(BuildProperties.getModuleChunkCompilerArgsProperty(moduleChunkName))));
+  final Pair<String,String> classpathRef=Pair.create("refid",BuildProperties.getClasspathProperty(moduleChunkName));
+  final Tag classpathTag=new Tag("classpath",classpathRef);
+  final Tag bootclasspathTag=new Tag("bootclasspath",Pair.create("refid",BuildProperties.getBootClasspathProperty(moduleChunkName)));
   final PatternSetRef compilerExcludes=new PatternSetRef(BuildProperties.getExcludedFromCompilationProperty(moduleChunkName));
   final String mainTargetName=BuildProperties.getCompileTargetName(moduleChunkName);
   final @NonNls String productionTargetName=mainTargetName + ".production";
@@ -11,28 +12,40 @@
   myMainTarget=new Target(mainTargetName,productionTargetName + "," + testsTargetName,CompilerBundle.message("generated.ant.build.compile.modules.main.target.comment",modulesCount,moduleChunkName),null);
   myProductionTarget=new Target(productionTargetName,getChunkDependenciesString(moduleChunk),CompilerBundle.message("generated.ant.build.compile.modules.production.classes.target.comment",modulesCount,moduleChunkName),null);
   myTestsTarget=new Target(testsTargetName,productionTargetName,CompilerBundle.message("generated.ant.build.compile.modules.tests.target.comment",modulesCount,moduleChunkName),BuildProperties.PROPERTY_SKIP_TESTS);
+  final ChunkCustomCompilerExtension[] customCompilers=moduleChunk.getCustomCompilers();
   if (sourceRoots.length > 0) {
     final String outputPathRef=BuildProperties.propertyRef(BuildProperties.getOutputPathProperty(moduleChunkName));
+    final Tag srcTag=new Tag("src",Pair.create("refid",BuildProperties.getSourcepathProperty(moduleChunkName)));
     myProductionTarget.add(new Mkdir(outputPathRef));
-    final Javac javac=new Javac(genOptions,moduleChunkName,outputPathRef);
-    javac.add(compilerArgs);
-    javac.add(bootclasspathTag);
-    javac.add(classpathTag);
-    javac.add(new Tag("src",new Pair[]{new Pair<String,String>("refid",BuildProperties.getSourcepathProperty(moduleChunkName))}));
-    javac.add(compilerExcludes);
-    myProductionTarget.add(javac);
+    createCustomCompilerTasks(project,moduleChunk,genOptions,false,customCompilers,compilerArgs,bootclasspathTag,classpathTag,compilerExcludes,srcTag,outputPathRef);
+    if (customCompilers.length == 0 || genOptions.enableFormCompiler) {
+      final Javac javac=new Javac(genOptions,moduleChunkName,outputPathRef);
+      javac.add(compilerArgs);
+      javac.add(bootclasspathTag);
+      javac.add(classpathTag);
+      javac.add(srcTag);
+      javac.add(compilerExcludes);
+      myProductionTarget.add(javac);
+    }
     myProductionTarget.add(createCopyTask(project,moduleChunk,sourceRoots,outputPathRef,baseDir,genOptions));
   }
   if (testSourceRoots.length > 0) {
     final String testOutputPathRef=BuildProperties.propertyRef(BuildProperties.getOutputPathForTestsProperty(moduleChunkName));
+    final Tag srcTag=new Tag("src",Pair.create("refid",BuildProperties.getTestSourcepathProperty(moduleChunkName)));
+    final Tag testClassPath=new Tag("classpath");
+    testClassPath.add(new Tag("path",classpathRef));
+    testClassPath.add(new Tag("path",Pair.create("location",BuildProperties.propertyRef(BuildProperties.getOutputPathProperty(moduleChunkName)))));
     myTestsTarget.add(new Mkdir(testOutputPathRef));
-    final Javac javac=new Javac(genOptions,moduleChunkName,testOutputPathRef);
-    javac.add(compilerArgs);
-    javac.add(classpathTag);
-    javac.add(new Tag("classpath",new Pair[]{new Pair<String,String>("location",BuildProperties.propertyRef(BuildProperties.getOutputPathProperty(moduleChunkName)))}));
-    javac.add(new Tag("src",new Pair[]{new Pair<String,String>("refid",BuildProperties.getTestSourcepathProperty(moduleChunkName))}));
-    javac.add(compilerExcludes);
-    myTestsTarget.add(javac);
+    createCustomCompilerTasks(project,moduleChunk,genOptions,true,customCompilers,compilerArgs,bootclasspathTag,testClassPath,compilerExcludes,srcTag,testOutputPathRef);
+    if (customCompilers.length == 0 || genOptions.enableFormCompiler) {
+      final Javac javac=new Javac(genOptions,moduleChunkName,testOutputPathRef);
+      javac.add(compilerArgs);
+      javac.add(classpathTag);
+      javac.add(testClassPath);
+      javac.add(srcTag);
+      javac.add(compilerExcludes);
+      myTestsTarget.add(javac);
+    }
     myTestsTarget.add(createCopyTask(project,moduleChunk,testSourceRoots,testOutputPathRef,baseDir,genOptions));
   }
   add(myMainTarget);
