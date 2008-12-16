@@ -12,17 +12,35 @@
       textChanges.add(change);
     }
   }
-  File patchPath=getPatchPath(commitMessage);
-  final List<FilePatch> patches=PatchBuilder.buildPatch(textChanges,myProject.getBaseDir().getPresentableUrl(),true,false);
-  myFileProcessor.savePathFile(new CompoundShelfFileProcesor.ContentProvider(){
-    public void writeContentTo(    final Writer writer) throws IOException {
-      UnifiedDiffWriter.write(patches,writer,"\n");
+  final ProgressIndicator ind=ProgressManager.getInstance().getProgressIndicator();
+  final ShelvedChangeList changeList;
+  try {
+    File patchPath=getPatchPath(commitMessage);
+    if (ind != null && ind.isCanceled()) {
+      throw new ProcessCanceledException();
     }
-  }
+    final List<FilePatch> patches=PatchBuilder.buildPatch(textChanges,myProject.getBaseDir().getPresentableUrl(),true,false);
+    if (ind != null && ind.isCanceled()) {
+      throw new ProcessCanceledException();
+    }
+    myFileProcessor.savePathFile(new CompoundShelfFileProcesor.ContentProvider(){
+      public void writeContentTo(      final Writer writer) throws IOException {
+        UnifiedDiffWriter.write(patches,writer,"\n");
+      }
+    }
 ,patchPath);
-  new RollbackWorker(myProject,false).doRollback(changes,true,null,VcsBundle.message("shelve.changes.action"));
-  final ShelvedChangeList changeList=new ShelvedChangeList(patchPath.toString(),commitMessage.replace('\n',' '),binaryFiles);
-  myShelvedChangeLists.add(changeList);
-  notifyStateChanged();
+    changeList=new ShelvedChangeList(patchPath.toString(),commitMessage.replace('\n',' '),binaryFiles);
+    myShelvedChangeLists.add(changeList);
+    if (ind != null && ind.isCanceled()) {
+      throw new ProcessCanceledException();
+    }
+    new RollbackWorker(myProject,false).doRollback(changes,true,null,VcsBundle.message("shelve.changes.action"));
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+ finally {
+    notifyStateChanged();
+  }
   return changeList;
 }
