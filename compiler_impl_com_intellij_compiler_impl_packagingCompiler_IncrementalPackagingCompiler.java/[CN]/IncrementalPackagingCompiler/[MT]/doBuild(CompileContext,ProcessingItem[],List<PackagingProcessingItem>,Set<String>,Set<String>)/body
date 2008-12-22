@@ -8,10 +8,16 @@
   }
   final DeploymentUtil deploymentUtil=DeploymentUtil.getInstance();
   final FileFilter fileFilter=new IgnoredFileFilter();
-  Map<ExplodedDestinationInfo,BuildParticipant> destinationOwners=context.getUserData(DESTINATION_OWNERS_KEY);
+  final ProcessingItemsBuilderContext builderContext=context.getUserData(BUILDER_CONTEXT_KEY);
+  Set<JarInfo> changedJars=new THashSet<JarInfo>();
+  for (  String deletedJar : deletedJars) {
+    final Collection<JarInfo> infos=builderContext.getJarInfos(deletedJar);
+    if (infos != null) {
+      changedJars.addAll(infos);
+    }
+  }
   Set<BuildParticipant> affectedParticipants=new HashSet<BuildParticipant>();
   try {
-    Set<JarInfo> changedJars=new HashSet<JarInfo>();
     for (    ProcessingItem item0 : items) {
       if (item0 instanceof MockProcessingItem)       continue;
       context.getProgressIndicator().checkCanceled();
@@ -25,7 +31,7 @@
           if (fromFile.exists()) {
             deploymentUtil.copyFile(fromFile,toFile,context,writtenPaths,fileFilter);
           }
-          affectedParticipants.add(destinationOwners.get(explodedDestination));
+          affectedParticipants.add(builderContext.getDestinationOwner(explodedDestination));
         }
  else {
           changedJars.add(((JarDestinationInfo)destination).getJarInfo());
@@ -33,13 +39,12 @@
       }
       processedItems.add(item);
     }
-    createManifestFiles(context.getUserData(MANIFEST_FILES_KEY));
+    createManifestFiles(builderContext.getManifestFiles());
     JarsBuilder builder=new JarsBuilder(changedJars,fileFilter,context);
     final boolean processed=builder.buildJars(writtenPaths);
     if (!processed) {
       return false;
     }
-    Map<VirtualFile,PackagingProcessingItem> itemsBySource=context.getUserData(ITEMS_BY_SOURCE_KEY);
     Set<VirtualFile> recompiledSources=new HashSet<VirtualFile>();
     for (    JarInfo info : builder.getJarsToBuild()) {
       for (      Pair<String,VirtualFile> pair : info.getPackedFiles()) {
@@ -50,12 +55,12 @@
       recompiledSources.remove(processedItem.getFile());
     }
     for (    VirtualFile source : recompiledSources) {
-      PackagingProcessingItem item=itemsBySource.get(source);
+      PackagingProcessingItem item=builderContext.getItemBySource(source);
       LOG.assertTrue(item != null,source);
       processedItems.add(item);
     }
     for (    ExplodedDestinationInfo destination : builder.getJarsDestinations()) {
-      affectedParticipants.add(destinationOwners.get(destination));
+      affectedParticipants.add(builderContext.getDestinationOwner(destination));
     }
     context.putUserData(AFFECTED_PARTICIPANTS_KEY,affectedParticipants.toArray(new BuildParticipant[affectedParticipants.size()]));
     for (    BuildParticipant participant : affectedParticipants) {
