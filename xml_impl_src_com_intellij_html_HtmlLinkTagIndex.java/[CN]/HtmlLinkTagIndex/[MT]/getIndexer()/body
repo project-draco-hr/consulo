@@ -21,29 +21,40 @@
           if (XmlElementType.XML_TAG_NAME == tokenType) {
             final String tagName=data.subSequence(lexer.getTokenStart(),lexer.getTokenEnd()).toString();
             linkTag=LINK.equalsIgnoreCase(tagName);
-            if (BODY_TAG.equalsIgnoreCase(tagName)) {
-              break;
-            }
           }
           if (linkTag && XmlElementType.XML_NAME == tokenType) {
-            final String attrName=data.subSequence(lexer.getTokenStart(),lexer.getTokenEnd()).toString();
-            if (HREF_ATTR.equalsIgnoreCase(attrName)) {
-              lexer.advance();
-              tokenType=lexer.getTokenType();
-              if (XmlElementType.XML_EQ == tokenType) {
-                lexer.advance();
-                tokenType=lexer.getTokenType();
-                if (tokenType == XmlElementType.XML_ATTRIBUTE_VALUE_START_DELIMITER) {
-                  lexer.advance();
-                  tokenType=lexer.getTokenType();
-                  final int identOffset=lexer.getTokenStart();
-                  if (XmlElementType.XML_ATTRIBUTE_VALUE_TOKEN == tokenType) {
-                    final String value=data.subSequence(lexer.getTokenStart(),lexer.getTokenEnd()).toString();
-                    addResult(result,id,identOffset,value,false);
-                  }
+            int linkTagOffset=lexer.getTokenStart();
+            String href=null;
+            String type=null;
+            String media=null;
+            String rel=null;
+            String title=null;
+            while (true) {
+              if (tokenType == null || tokenType == XmlTokenType.XML_END_TAG_START || tokenType == XmlTokenType.XML_EMPTY_ELEMENT_END || tokenType == XmlTokenType.XML_START_TAG_START) {
+                break;
+              }
+              if (XmlElementType.XML_NAME == tokenType) {
+                final String attrName=data.subSequence(lexer.getTokenStart(),lexer.getTokenEnd()).toString();
+                if (HREF_ATTR.equalsIgnoreCase(attrName)) {
+                  href=parseAttributeValue(lexer,data);
+                }
+ else                 if (MEDIA_ATTR.equalsIgnoreCase(attrName)) {
+                  media=parseAttributeValue(lexer,data);
+                }
+ else                 if (TYPE_ATTR.equalsIgnoreCase(attrName)) {
+                  type=parseAttributeValue(lexer,data);
+                }
+ else                 if (REL_ATTR.equalsIgnoreCase(attrName)) {
+                  rel=parseAttributeValue(lexer,data);
+                }
+ else                 if (TITLE_ATTR.equalsIgnoreCase(attrName)) {
+                  title=parseAttributeValue(lexer,data);
                 }
               }
+              lexer.advance();
+              tokenType=lexer.getTokenType();
             }
+            addResult(result,id,linkTagOffset,href,media,type,rel,title,false);
           }
           lexer.advance();
           tokenType=lexer.getTokenType();
@@ -55,10 +66,12 @@
         final FileViewProviderFactory viewProviderFactory=LanguageFileViewProviders.INSTANCE.forLanguage(language);
         if (viewProviderFactory != null) {
           final FileViewProvider viewProvider=viewProviderFactory.createFileViewProvider(lightVirtualFile,language,PsiManager.getInstance(project),false);
-          final PsiFile psiFile;
+          PsiFile psiFile=null;
           if (viewProvider instanceof TemplateLanguageFileViewProvider) {
             final Language dataLanguage=((TemplateLanguageFileViewProvider)viewProvider).getTemplateDataLanguage();
-            psiFile=viewProvider.getPsi(dataLanguage);
+            if (dataLanguage == HTMLLanguage.INSTANCE || dataLanguage == XHTMLLanguage.INSTANCE) {
+              psiFile=viewProvider.getPsi(dataLanguage);
+            }
           }
  else {
             psiFile=viewProvider.getPsi(viewProvider.getBaseLanguage());
@@ -67,21 +80,12 @@
             final XmlRecursiveElementVisitor visitor=new XmlRecursiveElementVisitor(){
               @Override public void visitXmlTag(              XmlTag tag){
                 if (LINK.equalsIgnoreCase(tag.getLocalName())) {
-                  final XmlAttribute href=tag.getAttribute(HREF_ATTR);
-                  if (href != null) {
-                    final XmlAttributeValue value=href.getValueElement();
-                    if (value != null) {
-                      if (PsiTreeUtil.getChildOfType(value,OuterLanguageElement.class) == null) {
-                        final String textValue=value.getValue();
-                        if (textValue != null && textValue.length() > 0) {
-                          addResult(result,id,value.getTextOffset(),textValue,false);
-                        }
-                      }
- else {
-                        addResult(result,id,value.getTextOffset(),null,true);
-                      }
-                    }
-                  }
+                  final String href=getAttributeValue(tag,HREF_ATTR);
+                  final String media=getAttributeValue(tag,MEDIA_ATTR);
+                  final String type=getAttributeValue(tag,TYPE_ATTR);
+                  final String rel=getAttributeValue(tag,REL_ATTR);
+                  final String title=getAttributeValue(tag,TITLE_ATTR);
+                  addResult(result,id,tag.getTextOffset(),href,media,type,rel,title,isHrefScripted(tag));
                 }
                 super.visitXmlTag(tag);
               }
