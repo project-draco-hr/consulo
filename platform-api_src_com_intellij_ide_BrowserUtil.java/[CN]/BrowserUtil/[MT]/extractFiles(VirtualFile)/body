@@ -1,0 +1,74 @@
+{
+  try {
+    JarFileSystem jarFileSystem=(JarFileSystem)file.getFileSystem();
+    VirtualFile jarVirtualFile=jarFileSystem.getVirtualFileForJar(file);
+    String targetFilePath=file.getPath();
+    String targetFileRelativePath=targetFilePath.substring(targetFilePath.indexOf(JarFileSystem.JAR_SEPARATOR) + JarFileSystem.JAR_SEPARATOR.length());
+    String jarVirtualFileLocationHash=jarVirtualFile.getName() + Integer.toHexString(jarVirtualFile.getUrl().hashCode());
+    final File outputDir=new File(getExtractedFilesDir(),jarVirtualFileLocationHash);
+    final String currentTimestamp=String.valueOf(new File(jarVirtualFile.getPath()).lastModified());
+    final File timestampFile=new File(outputDir,".idea.timestamp");
+    String previousTimestamp=null;
+    if (timestampFile.exists()) {
+      previousTimestamp=new String(FileUtil.loadFileText(timestampFile));
+    }
+    if (!currentTimestamp.equals(previousTimestamp)) {
+      ConfirmExtractDialog dialog=new ConfirmExtractDialog();
+      if (dialog.isToBeShown()) {
+        dialog.show();
+        if (!dialog.isOK())         return null;
+      }
+      final ZipFile jarFile=jarFileSystem.getJarFile(file);
+      ZipEntry entry=jarFile.getEntry(targetFileRelativePath);
+      if (entry == null)       return null;
+      InputStream is=jarFile.getInputStream(entry);
+      try {
+        ZipUtil.extractEntry(entry,is,outputDir);
+      }
+  finally {
+        is.close();
+      }
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          new Task.Backgroundable(null,"Extracting files...",true){
+            public void run(            @NotNull final ProgressIndicator indicator){
+              final int size=jarFile.size();
+              final int[] counter=new int[]{0};
+class MyFilter implements FilenameFilter {
+                private final Set<File> myImportantDirs=new HashSet<File>(Arrays.asList(outputDir,new File(outputDir,"resources")));
+                private boolean myImportantOnly;
+                private MyFilter(                boolean importantOnly){
+                  myImportantOnly=importantOnly;
+                }
+                public boolean accept(                File dir,                String name){
+                  indicator.checkCanceled();
+                  boolean result=myImportantOnly == myImportantDirs.contains(dir);
+                  if (result) {
+                    indicator.setFraction(((double)counter[0]) / size);
+                    counter[0]++;
+                  }
+                  return result;
+                }
+              }
+              try {
+                ZipUtil.extract(jarFile,outputDir,new MyFilter(true));
+                ZipUtil.extract(jarFile,outputDir,new MyFilter(false));
+                FileUtil.writeToFile(timestampFile,currentTimestamp.getBytes());
+              }
+ catch (              IOException ignore) {
+              }
+            }
+          }
+.queue();
+        }
+      }
+);
+    }
+    return VfsUtil.pathToUrl(FileUtil.toSystemIndependentName(new File(outputDir,targetFileRelativePath).getPath()));
+  }
+ catch (  IOException e) {
+    LOG.warn(e);
+    Messages.showErrorDialog("Cannot extract files: " + e.getMessage(),"Error");
+    return null;
+  }
+}
