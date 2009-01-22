@@ -3,16 +3,14 @@
   FoldingModelEx foldingModel=(FoldingModelEx)myEditor.getFoldingModel();
   FoldRegion[] foldRegions=foldingModel.getAllFoldRegions();
   HashMap<TextRange,Boolean> rangeToExpandStatusMap=new HashMap<TextRange,Boolean>();
+  List<FoldRegion> toRemove=CollectionFactory.arrayList();
   for (  FoldRegion region : foldRegions) {
     PsiElement element=info.getPsiElement(region);
     if (element != null && myElementsToFoldMap.containsKey(element)) {
-      TextRange range=myElementsToFoldMap.get(element);
-      boolean toRemove=!region.isValid() || region.getStartOffset() != range.getStartOffset() || region.getEndOffset() != range.getEndOffset();
-      if (toRemove) {
-        boolean isExpanded=region.isExpanded();
-        rangeToExpandStatusMap.put(range,isExpanded ? Boolean.TRUE : Boolean.FALSE);
-        foldingModel.removeFoldRegion(region);
-        info.removeRegion(region);
+      final FoldingDescriptor descriptor=myElementsToFoldMap.get(element);
+      if (!region.isValid() || descriptor.getGroup() != null || region.getGroup() != null || region.getStartOffset() != descriptor.getRange().getStartOffset() || region.getEndOffset() != descriptor.getRange().getEndOffset() || !region.getPlaceholderText().equals(descriptor.getPlaceholderText())) {
+        rangeToExpandStatusMap.put(descriptor.getRange(),region.isExpanded());
+        toRemove.add(region);
       }
  else {
         myElementsToFoldMap.remove(element);
@@ -24,27 +22,34 @@
         rangeToExpandStatusMap.put(new TextRange(region.getStartOffset(),region.getEndOffset()),isExpanded ? Boolean.TRUE : Boolean.FALSE);
       }
  else {
-        foldingModel.removeFoldRegion(region);
-        info.removeRegion(region);
+        toRemove.add(region);
       }
     }
   }
-  for (  final Map.Entry<PsiElement,TextRange> entry : myElementsToFoldMap.entrySet()) {
+  for (  final FoldRegion region : toRemove) {
+    foldingModel.removeFoldRegion(region);
+    info.removeRegion(region);
+  }
+  Map<FoldRegion,Boolean> shouldExpand=CollectionFactory.newTroveMap();
+  for (  final Map.Entry<PsiElement,FoldingDescriptor> entry : myElementsToFoldMap.entrySet()) {
     ProgressManager.getInstance().checkCanceled();
     PsiElement element=entry.getKey();
-    TextRange range=entry.getValue();
-    String foldingText=FoldingPolicy.getFoldingText(element);
-    FoldRegion region=foldingModel.addFoldRegion(range.getStartOffset(),range.getEndOffset(),foldingText);
-    if (region == null)     continue;
+    final FoldingDescriptor descriptor=entry.getValue();
+    TextRange range=descriptor.getRange();
+    FoldRegion region=new FoldRegionImpl(myEditor,range.getStartOffset(),range.getEndOffset(),descriptor.getPlaceholderText(),descriptor.getGroup());
+    if (!foldingModel.addFoldRegion(region))     continue;
     info.addRegion(region,element);
     if (myApplyDefaultState) {
-      region.setExpanded(!FoldingPolicy.isCollapseByDefault(element) || FoldingUtil.caretInsideRange(myEditor,range));
+      shouldExpand.put(region,!FoldingPolicy.isCollapseByDefault(element) || FoldingUtil.caretInsideRange(myEditor,range));
     }
  else {
-      Boolean status=rangeToExpandStatusMap.get(range);
-      if (status != null) {
-        region.setExpanded(status.booleanValue());
-      }
+      shouldExpand.put(region,rangeToExpandStatusMap.get(range));
+    }
+  }
+  for (  final FoldRegion region : shouldExpand.keySet()) {
+    final Boolean expanded=shouldExpand.get(region);
+    if (expanded != null) {
+      region.setExpanded(expanded.booleanValue());
     }
   }
 }

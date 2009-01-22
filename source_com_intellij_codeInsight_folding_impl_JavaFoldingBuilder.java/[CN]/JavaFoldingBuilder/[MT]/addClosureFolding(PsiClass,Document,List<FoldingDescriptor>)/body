@@ -1,0 +1,88 @@
+{
+  boolean isClosure=false;
+  if (aClass instanceof PsiAnonymousClass) {
+    final PsiAnonymousClass anonymousClass=(PsiAnonymousClass)aClass;
+    final PsiElement element=anonymousClass.getParent();
+    if (element instanceof PsiNewExpression) {
+      final PsiNewExpression expression=(PsiNewExpression)element;
+      final PsiExpressionList argumentList=expression.getArgumentList();
+      if (argumentList != null && argumentList.getExpressions().length == 0) {
+        final PsiClass baseClass=anonymousClass.getBaseClassType().resolve();
+        final PsiMethod[] methods=anonymousClass.getMethods();
+        if (baseClass != null && methods.length == 1 && anonymousClass.getFields().length == 0 && seemsLikeLambda(baseClass)) {
+          final PsiMethod method=methods[0];
+          final PsiCodeBlock body=method.getBody();
+          if (body != null) {
+            isClosure=true;
+            int rangeStart=body.getTextRange().getStartOffset();
+            int rangeEnd=body.getTextRange().getEndOffset();
+            final PsiJavaToken lbrace=body.getLBrace();
+            if (lbrace != null)             rangeStart=lbrace.getTextRange().getEndOffset();
+            final PsiJavaToken rbrace=body.getRBrace();
+            if (rbrace != null)             rangeEnd=rbrace.getTextRange().getStartOffset();
+            final CharSequence seq=document.getCharsSequence();
+            final PsiJavaToken classRBrace=anonymousClass.getRBrace();
+            if (classRBrace != null && rbrace != null) {
+              final int methodEndLine=document.getLineNumber(rangeEnd);
+              final int methodEndLineStart=document.getLineStartOffset(methodEndLine);
+              if ("}".equals(seq.subSequence(methodEndLineStart,document.getLineEndOffset(methodEndLine)).toString().trim())) {
+                int classEndStart=classRBrace.getTextRange().getStartOffset();
+                int classEndCol=classEndStart - document.getLineStartOffset(document.getLineNumber(classEndStart));
+                rangeEnd=classEndCol + methodEndLineStart;
+              }
+            }
+            final CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(aClass.getProject());
+            int firstLineStart=CharArrayUtil.shiftForward(seq,rangeStart," \t");
+            if (firstLineStart < seq.length() - 1 && seq.charAt(firstLineStart) == '\n')             firstLineStart++;
+            int lastLineEnd=CharArrayUtil.shiftBackward(seq,rangeEnd - 1," \t");
+            if (lastLineEnd > 0 && seq.charAt(lastLineEnd) == '\n')             lastLineEnd--;
+            if (lastLineEnd < firstLineStart)             return false;
+            if (lastLineEnd >= seq.length() || firstLineStart >= seq.length() || firstLineStart < 0) {
+              LOG.assertTrue(false,"llE=" + lastLineEnd + "; fLS="+ firstLineStart+ "; len="+ seq.length()+ "rE="+ rangeEnd+ "; class="+ baseClass.getName());
+            }
+            boolean oneLine=false;
+            String contents=seq.subSequence(firstLineStart,lastLineEnd).toString();
+            if (contents.indexOf('\n') < 0) {
+              final int beforeLength=rangeStart - document.getLineStartOffset(document.getLineNumber(rangeStart));
+              final int afterLength=document.getLineEndOffset(document.getLineNumber(rangeEnd)) - rangeEnd;
+              final int resultLineLength=beforeLength + contents.length() + afterLength;
+              if (resultLineLength <= settings.RIGHT_MARGIN) {
+                rangeStart=CharArrayUtil.shiftForward(seq,rangeStart," \n\t");
+                rangeEnd=CharArrayUtil.shiftBackward(seq,rangeEnd - 1," \n\t") + 1;
+                oneLine=true;
+              }
+            }
+ else {
+            }
+            if (rangeStart >= rangeEnd)             return false;
+            FoldingGroup group=FoldingGroup.newGroup("lambda");
+            final String params=StringUtil.join(method.getParameterList().getParameters(),new Function<PsiParameter,String>(){
+              public String fun(              final PsiParameter psiParameter){
+                return psiParameter.getType().getPresentableText() + " " + psiParameter.getName();
+              }
+            }
+,", ");
+            final String prettySpace=oneLine ? " " : "";
+            @NonNls final String lambdas=baseClass.getName() + "(" + params+ ") {"+ prettySpace;
+            foldElements.add(new FoldingDescriptor(expression.getNode(),new TextRange(expression.getTextRange().getStartOffset(),rangeStart),group){
+              @Override public String getPlaceholderText(){
+                return lambdas;
+              }
+            }
+);
+            if (rbrace != null) {
+              foldElements.add(new FoldingDescriptor(rbrace.getNode(),new TextRange(rangeEnd,expression.getTextRange().getEndOffset()),group){
+                @Override public String getPlaceholderText(){
+                  return prettySpace + "}";
+                }
+              }
+);
+            }
+            addCodeBlockFolds(body,foldElements,document);
+          }
+        }
+      }
+    }
+  }
+  return isClosure;
+}
