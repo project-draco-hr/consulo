@@ -5,30 +5,35 @@
   }
   final Set<Document> documents=getUnsavedOrTransactedDocuments();
   if (!documents.isEmpty()) {
-    setDataBufferingEnabled(true);
-    final Semaphore semaphore=myUnsavedDataIndexingSemaphores.get(indexId);
-    semaphore.down();
+    final Lock storageLock=setDataBufferingEnabled(true);
     try {
-      for (      Document document : documents) {
-        indexUnsavedDocument(document,indexId);
-      }
-    }
- catch (    StorageException e) {
-      setDataBufferingEnabled(false);
-      throw e;
-    }
-catch (    ProcessCanceledException e) {
-      setDataBufferingEnabled(false);
-      throw e;
-    }
- finally {
-      semaphore.up();
-      while (!semaphore.waitFor(500)) {
-        if (Thread.holdsLock(PsiLock.LOCK)) {
-          break;
+      final Semaphore semaphore=myUnsavedDataIndexingSemaphores.get(indexId);
+      semaphore.down();
+      try {
+        for (        Document document : documents) {
+          indexUnsavedDocument(document,indexId);
         }
       }
-      myUpToDateIndices.add(indexId);
+ catch (      StorageException e) {
+        setDataBufferingEnabled(false).unlock();
+        throw e;
+      }
+catch (      ProcessCanceledException e) {
+        setDataBufferingEnabled(false).unlock();
+        throw e;
+      }
+ finally {
+        semaphore.up();
+        while (!semaphore.waitFor(500)) {
+          if (Thread.holdsLock(PsiLock.LOCK)) {
+            break;
+          }
+        }
+        myUpToDateIndices.add(indexId);
+      }
+    }
+  finally {
+      storageLock.unlock();
     }
   }
 }
