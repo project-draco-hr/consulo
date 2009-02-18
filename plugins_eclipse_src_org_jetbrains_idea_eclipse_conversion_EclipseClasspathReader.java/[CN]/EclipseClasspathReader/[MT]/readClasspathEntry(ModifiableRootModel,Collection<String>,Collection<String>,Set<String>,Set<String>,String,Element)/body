@@ -1,0 +1,123 @@
+{
+  String kind=element.getAttributeValue(EclipseXml.KIND_ATTR);
+  if (kind == null) {
+    throw new ConversionException("Missing classpathentry/@kind");
+  }
+  String path=element.getAttributeValue(EclipseXml.PATH_ATTR);
+  if (path == null) {
+    throw new ConversionException("Missing classpathentry/@path");
+  }
+  final boolean exported=EclipseXml.TRUE_VALUE.equals(element.getAttributeValue(EclipseXml.EXPORTED_ATTR));
+  if (kind.equals(EclipseXml.SRC_KIND)) {
+    if (path.startsWith("/")) {
+      final String moduleName=path.substring(1);
+      refsToModules.add(moduleName);
+      rootModel.addInvalidModuleEntry(moduleName).setExported(exported);
+    }
+ else {
+      getContentEntry(rootModel).addSourceFolder(VfsUtil.pathToUrl(myRootPath + "/" + path),testPattern != null && path.matches(testPattern));
+    }
+  }
+ else   if (kind.equals(EclipseXml.OUTPUT_KIND)) {
+    final CompilerModuleExtension compilerModuleExtension=rootModel.getModuleExtension(CompilerModuleExtension.class);
+    compilerModuleExtension.setCompilerOutputPath(VfsUtil.pathToUrl(myRootPath + "/" + path));
+    compilerModuleExtension.inheritCompilerOutputPath(false);
+  }
+ else   if (kind.equals(EclipseXml.LIB_KIND)) {
+    final Library library=rootModel.getModuleLibraryTable().getModifiableModel().createLibrary(getPresentableName(path));
+    final Library.ModifiableModel modifiableModel=library.getModifiableModel();
+    modifiableModel.addRoot(getUrl(path),OrderRootType.CLASSES);
+    final String sourcePath=element.getAttributeValue(EclipseXml.SOURCEPATH_ATTR);
+    if (sourcePath != null) {
+      modifiableModel.addRoot(getUrl(sourcePath),OrderRootType.SOURCES);
+    }
+    final List<String> docPaths=getClasspathEntryAttribute(element);
+    if (docPaths != null) {
+      for (      String docPath : docPaths) {
+        modifiableModel.addRoot(docPath,JavadocOrderRootType.getInstance());
+      }
+    }
+    modifiableModel.commit();
+  }
+ else   if (kind.equals(EclipseXml.VAR_KIND)) {
+    int slash=path.indexOf("/");
+    if (slash == 0) {
+      throw new ConversionException("Incorrect 'classpathentry/var@path' format");
+    }
+    final Library library=rootModel.getModuleLibraryTable().getModifiableModel().createLibrary(getPresentableName(path));
+    final Library.ModifiableModel modifiableModel=library.getModifiableModel();
+    final String clsVar;
+    final String clsPath;
+    if (slash > 0) {
+      clsVar=path.substring(0,slash);
+      clsPath=path.substring(slash + 1);
+    }
+ else {
+      clsVar=path;
+      clsPath=null;
+    }
+    usedVariables.add(clsVar);
+    modifiableModel.addRoot(PathMacroManager.getInstance(rootModel.getModule()).expandPath(getVariableRelatedPath(clsVar,clsPath)),OrderRootType.CLASSES);
+    final String srcPathAttr=element.getAttributeValue(EclipseXml.SOURCEPATH_ATTR);
+    if (srcPathAttr != null) {
+      final String srcVar;
+      final String srcPath;
+      final int varStart=srcPathAttr.startsWith("/") ? 1 : 0;
+      int slash2=srcPathAttr.indexOf("/",varStart);
+      if (slash2 > 0) {
+        srcVar=srcPathAttr.substring(varStart,slash2);
+        srcPath=srcPathAttr.substring(slash2 + 1);
+      }
+ else {
+        srcVar=srcPathAttr.substring(varStart);
+        srcPath=null;
+      }
+      usedVariables.add(srcVar);
+      modifiableModel.addRoot(PathMacroManager.getInstance(rootModel.getModule()).expandPath(getVariableRelatedPath(srcVar,srcPath)),OrderRootType.SOURCES);
+    }
+    final List<String> docPaths=getClasspathEntryAttribute(element);
+    if (docPaths != null) {
+      for (      String docPath : docPaths) {
+        modifiableModel.addRoot(docPath,JavadocOrderRootType.getInstance());
+      }
+    }
+    modifiableModel.commit();
+  }
+ else   if (kind.equals(EclipseXml.CON_KIND)) {
+    if (path.equals(EclipseXml.ECLIPSE_PLATFORM)) {
+      addNamedLibrary(rootModel,unknownLibraries,exported,IdeaXml.ECLIPSE_LIBRARY);
+    }
+ else     if (path.startsWith(EclipseXml.JRE_CONTAINER)) {
+      final String jdkName=getLastPathComponent(path);
+      if (jdkName == null) {
+        rootModel.inheritSdk();
+      }
+ else {
+        final Sdk moduleJdk=ProjectJdkTable.getInstance().findJdk(jdkName);
+        if (moduleJdk != null) {
+          rootModel.setSdk(moduleJdk);
+        }
+ else {
+          rootModel.setInvalidSdk(jdkName,IdeaXml.JAVA_SDK_TYPE);
+          unknownJdks.add(jdkName);
+        }
+      }
+      OrderEntry[] orderEntries=rootModel.getOrderEntries();
+      orderEntries=ArrayUtil.append(orderEntries,orderEntries[0]);
+      rootModel.rearrangeOrderEntries(ArrayUtil.remove(orderEntries,0));
+    }
+ else     if (path.startsWith(EclipseXml.USER_LIBRARY)) {
+      addNamedLibrary(rootModel,unknownLibraries,exported,getPresentableName(path));
+    }
+ else     if (path.startsWith(EclipseXml.JUNIT_CONTAINER)) {
+      final String junitName=IdeaXml.JUNIT + getPresentableName(path);
+      final Library library=rootModel.getModuleLibraryTable().getModifiableModel().createLibrary(junitName);
+      final Library.ModifiableModel modifiableModel=library.getModifiableModel();
+      modifiableModel.addRoot(getJunitClsUrl(junitName.contains("4")),OrderRootType.CLASSES);
+      modifiableModel.commit();
+    }
+  }
+ else {
+    throw new ConversionException("Unknown classpathentry/@kind: " + kind);
+  }
+}
