@@ -1,0 +1,60 @@
+{
+  final PersistentHashMap<Key,ValueContainer<Value>> map=new PersistentHashMap<Key,ValueContainer<Value>>(myStorageFile,myKeyDescriptor,myValueContainerExternalizer);
+  myCache=new SLRUCache<Key,ChangeTrackingValueContainer<Value>>(myCacheSize,(int)(Math.ceil(myCacheSize * 0.25))){
+    @NotNull public ChangeTrackingValueContainer<Value> createValue(    final Key key){
+      return new ChangeTrackingValueContainer<Value>(new ChangeTrackingValueContainer.Initializer<Value>(){
+        public Object getLock(){
+          return map;
+        }
+        public ValueContainer<Value> compute(){
+          ValueContainer<Value> value=null;
+          try {
+            value=map.get(key);
+            if (value == null) {
+              value=new ValueContainerImpl<Value>();
+            }
+          }
+ catch (          IOException e) {
+            throw new RuntimeException(e);
+          }
+          return value;
+        }
+      }
+);
+    }
+    protected void onDropFromCache(    final Key key,    final ChangeTrackingValueContainer<Value> valueContainer){
+      if (key.equals(myKeyBeingRemoved) || !valueContainer.isDirty()) {
+        return;
+      }
+      try {
+        if (!valueContainer.needsCompacting()) {
+          final ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+          final DataOutputStream _out=new DataOutputStream(bytes);
+          final ValueContainer<Value> toRemove=valueContainer.getRemovedDelta();
+          if (toRemove.size() > 0) {
+            myValueContainerExternalizer.saveAsRemoved(_out,toRemove);
+          }
+          final ValueContainer<Value> toAppend=valueContainer.getAddedDelta();
+          if (toAppend.size() > 0) {
+            myValueContainerExternalizer.save(_out,toAppend);
+          }
+          map.appendData(key,new PersistentHashMap.ValueDataAppender(){
+            public void append(            final DataOutput out) throws IOException {
+              final byte[] barr=bytes.toByteArray();
+              out.write(barr);
+            }
+          }
+);
+        }
+ else {
+          map.put(key,valueContainer);
+        }
+      }
+ catch (      IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+;
+  myMap=map;
+}
