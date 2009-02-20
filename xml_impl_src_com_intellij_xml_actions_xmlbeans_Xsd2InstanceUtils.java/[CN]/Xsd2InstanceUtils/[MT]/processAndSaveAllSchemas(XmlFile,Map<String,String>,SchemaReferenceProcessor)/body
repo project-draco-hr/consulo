@@ -1,0 +1,47 @@
+{
+  final String fileName=file.getName();
+  String previous=scannedToFileName.get(fileName);
+  if (previous != null)   return previous;
+  scannedToFileName.put(fileName,fileName);
+  final StringBuilder result=new StringBuilder();
+  file.acceptChildren(new XmlRecursiveElementVisitor(){
+    @Override public void visitElement(    PsiElement psiElement){
+      super.visitElement(psiElement);
+      if (psiElement instanceof LeafPsiElement) {
+        final String text=psiElement.getText();
+        result.append(text);
+      }
+    }
+    @Override public void visitXmlAttribute(    XmlAttribute xmlAttribute){
+      boolean replaced=false;
+      if (xmlAttribute.isNamespaceDeclaration()) {
+        replaced=true;
+        final String value=xmlAttribute.getValue();
+        result.append(xmlAttribute.getText()).append(" ");
+        if (!scannedToFileName.containsKey(value)) {
+          final XmlNSDescriptor nsDescriptor=xmlAttribute.getParent().getNSDescriptor(value,true);
+          if (nsDescriptor != null) {
+            processAndSaveAllSchemas(nsDescriptor.getDescriptorFile(),scannedToFileName,schemaReferenceProcessor);
+          }
+        }
+      }
+ else       if ("schemaLocation".equals(xmlAttribute.getName())) {
+        final PsiReference[] references=xmlAttribute.getValueElement().getReferences();
+        if (references.length > 0) {
+          PsiElement psiElement=references[0].resolve();
+          if (psiElement instanceof XmlFile) {
+            final String s=processAndSaveAllSchemas(((XmlFile)psiElement),scannedToFileName,schemaReferenceProcessor);
+            if (s != null) {
+              result.append(xmlAttribute.getName()).append("='").append(s).append('\'');
+              replaced=true;
+            }
+          }
+        }
+      }
+      if (!replaced)       result.append(xmlAttribute.getText());
+    }
+  }
+);
+  schemaReferenceProcessor.processSchema(fileName,result.toString());
+  return fileName;
+}
