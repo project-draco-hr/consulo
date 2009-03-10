@@ -1,0 +1,82 @@
+{
+  FindManager findManager=FindManager.getInstance(project);
+  model=(FindModel)model.clone();
+  int occurrences=0;
+  List<TextRange> rangesToChange=new ArrayList<TextRange>();
+  List<String> replacer=new ArrayList<String>();
+  boolean replaced=false;
+  int offset=caretOffset;
+  while (offset >= 0 && offset < editor.getDocument().getTextLength()) {
+    caretOffset=offset;
+    FindResult result=doSearch(project,editor,offset,!replaced,model,toPrompt);
+    if (result == null) {
+      break;
+    }
+    int startResultOffset=result.getStartOffset();
+    model.setFromCursor(true);
+    if (toPrompt) {
+      int promptResult=findManager.showPromptDialog(model,FindBundle.message("find.replace.dialog.title"));
+      if (promptResult == FindManager.PromptResult.SKIP) {
+        offset=model.isForward() ? result.getEndOffset() : startResultOffset;
+        continue;
+      }
+      if (promptResult == FindManager.PromptResult.CANCEL) {
+        break;
+      }
+      if (promptResult == FindManager.PromptResult.ALL) {
+        toPrompt=false;
+        ((DocumentEx)document).setInBulkUpdate(true);
+      }
+    }
+    int startOffset=result.getStartOffset();
+    int endOffset=result.getEndOffset();
+    String foundString=document.getCharsSequence().subSequence(startOffset,endOffset).toString();
+    String toReplace=findManager.getStringToReplace(foundString,model);
+    if (toReplace == null)     break;
+    boolean reallyReplace=toPrompt;
+    TextRange textRange=doReplace(project,document,model,result,toReplace,reallyReplace);
+    if (!reallyReplace) {
+      rangesToChange.add(textRange);
+      replacer.add(toReplace);
+    }
+    offset=model.isForward() ? textRange.getEndOffset() : textRange.getStartOffset();
+    occurrences++;
+    if (!replaced) {
+      editor.getCaretModel().moveToOffset(0);
+    }
+    replaced=true;
+  }
+  if (replaced) {
+    if (!toPrompt) {
+      int offsetBefore=0;
+      CharSequence text=document.getCharsSequence();
+      final StringBuilder newText=new StringBuilder(document.getTextLength());
+      for (int i=0; i < rangesToChange.size(); i++) {
+        TextRange range=rangesToChange.get(i);
+        String replace=replacer.get(i);
+        newText.append(text,offsetBefore,range.getStartOffset());
+        newText.append(replace);
+        offsetBefore=range.getEndOffset();
+        if (offsetBefore < caretOffset) {
+          caretOffset+=replace.length() - range.getLength();
+        }
+      }
+      newText.append(text,offsetBefore,text.length());
+      CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+        public void run(){
+          ApplicationManager.getApplication().runWriteAction(new Runnable(){
+            public void run(){
+              document.setText(newText);
+            }
+          }
+);
+        }
+      }
+,null,document);
+      if (caretOffset > document.getTextLength())       caretOffset=document.getTextLength();
+    }
+    editor.getCaretModel().moveToOffset(caretOffset);
+  }
+  ReplaceInProjectManager.reportNumberReplacedOccurences(project,occurrences);
+  return replaced;
+}
