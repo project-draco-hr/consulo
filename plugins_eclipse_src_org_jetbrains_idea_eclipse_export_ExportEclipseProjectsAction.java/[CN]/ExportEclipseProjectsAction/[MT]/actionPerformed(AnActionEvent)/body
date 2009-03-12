@@ -2,16 +2,29 @@
   final Project project=e.getData(PlatformDataKeys.PROJECT);
   if (project == null)   return;
   project.save();
-  List<Module> modules=new ArrayList<Module>();
+  final List<Module> modules=new ArrayList<Module>();
+  final List<Module> incompatibleModules=new ArrayList<Module>();
   for (  Module module : ModuleManager.getInstance(project).getModules()) {
-    if (!EclipseClasspathStorageProvider.ID.equals(ClasspathStorage.getStorageType(module)) && EclipseClasspathStorageProvider.isCompatible(ModuleRootManager.getInstance(module)) && EclipseClasspathStorageProvider.hasIncompatibleLibrary(ModuleRootManager.getInstance(module)) == null) {
-      modules.add(module);
+    if (!EclipseClasspathStorageProvider.ID.equals(ClasspathStorage.getStorageType(module))) {
+      try {
+        ClasspathStorage.getProvider(EclipseClasspathStorageProvider.ID).assertCompatible(ModuleRootManager.getInstance(module).getModifiableModel());
+        modules.add(module);
+      }
+ catch (      ConfigurationException e1) {
+        incompatibleModules.add(module);
+      }
     }
   }
-  if (modules.isEmpty()) {
+  if (!incompatibleModules.isEmpty()) {
+    if (Messages.showOkCancelDialog(project,"Eclipse incompatible modules found. Would you like to proceed and possibly loose your configurations?","Eclipse Incompatible Modules Found",Messages.getWarningIcon()) != DialogWrapper.OK_EXIT_CODE) {
+      return;
+    }
+  }
+ else   if (modules.isEmpty()) {
     Messages.showInfoMessage(project,EclipseBundle.message("eclipse.export.nothing.to.do"),EclipseBundle.message("eclipse.export.dialog.title"));
     return;
   }
+  modules.addAll(incompatibleModules);
   final ExportEclipseProjectsDialog dialog=new ExportEclipseProjectsDialog(project,modules);
   dialog.show();
   if (dialog.isOK()) {
@@ -25,7 +38,8 @@
  else {
       for (      Module module : dialog.getSelectedModules()) {
         final ModifiableRootModel model=ModuleRootManager.getInstance(module).getModifiableModel();
-        final String storageRoot=ClasspathStorage.getStorageRootFromOptions(module);
+        final VirtualFile[] contentRoots=model.getContentRoots();
+        final String storageRoot=contentRoots.length == 1 ? contentRoots[0].getPath() : ClasspathStorage.getStorageRootFromOptions(module);
         try {
           final Element classpathEleemnt=new Element(EclipseXml.CLASSPATH_TAG);
           final EclipseClasspathWriter classpathWriter=new EclipseClasspathWriter(model);
@@ -62,6 +76,7 @@
  catch (          JDOMException e1) {
             LOG.error(e1);
           }
+          EclipseUserLibrariesHelper.appendProjectLibraries(project,VfsUtil.virtualToIoFile(project.getBaseDir()));
         }
  catch (        ConversionException e1) {
           LOG.error(e1);
