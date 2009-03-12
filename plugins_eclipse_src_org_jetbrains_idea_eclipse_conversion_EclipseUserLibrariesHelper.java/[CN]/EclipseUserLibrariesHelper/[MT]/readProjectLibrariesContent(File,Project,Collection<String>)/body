@@ -1,50 +1,38 @@
 {
-  final File parentPrefs=getPathToUserLibsFile(workspace);
-  final LibraryTable libraryTable=ProjectLibraryTable.getInstance(project);
-  if (parentPrefs.isDirectory()) {
-    final File prefs=new File(parentPrefs,ORG_ECLIPSE_JDT_CORE_PREFS);
-    if (prefs.exists()) {
-      final Properties properties=new Properties();
-      FileInputStream inputStream=new FileInputStream(prefs);
-      try {
-        properties.load(inputStream);
+  if (!workspace.isDirectory())   return;
+  final File exportedFile=new File(workspace,project.getName() + ".userlibraries");
+  if (exportedFile.exists()) {
+    final LibraryTable libraryTable=ProjectLibraryTable.getInstance(project);
+    final Element rootElement=JDOMUtil.loadDocument(exportedFile).getRootElement();
+    for (    Object o : rootElement.getChildren("library")) {
+      final Element libElement=(Element)o;
+      final String libName=libElement.getAttributeValue("name");
+      Library libraryByName=libraryTable.getLibraryByName(libName);
+      if (libraryByName == null) {
+        final LibraryTable.ModifiableModel model=libraryTable.getModifiableModel();
+        libraryByName=model.createLibrary(libName);
+        model.commit();
       }
-  finally {
-        inputStream.close();
-      }
-      for (      Object prop : properties.keySet()) {
-        if (((String)prop).startsWith(ORG_ECLIPSE_JDT_CORE_USER_LIBRARY)) {
-          final String libName=((String)prop).substring(ORG_ECLIPSE_JDT_CORE_USER_LIBRARY.length());
-          Library libraryByName=libraryTable.getLibraryByName(libName);
-          if (libraryByName == null) {
-            final LibraryTable.ModifiableModel model=libraryTable.getModifiableModel();
-            libraryByName=model.createLibrary(libName);
-            model.commit();
+      if (libraryByName != null) {
+        final Library.ModifiableModel model=libraryByName.getModifiableModel();
+        for (        Object a : libElement.getChildren("archive")) {
+          String rootPath=((Element)a).getAttributeValue("path");
+          if (rootPath.startsWith("/")) {
+            rootPath=project.getBaseDir().getPath() + rootPath;
           }
-          if (libraryByName != null) {
-            final Library.ModifiableModel model=libraryByName.getModifiableModel();
-            final String libDescriptor=properties.getProperty((String)prop);
-            final Document document=JDOMUtil.loadDocument(libDescriptor);
-            for (            Object o : document.getRootElement().getChildren("archive")) {
-              String rootPath=((Element)o).getAttributeValue("path");
-              if (rootPath.startsWith("/")) {
-                rootPath=project.getBaseDir().getPath() + rootPath;
-              }
-              String url=VfsUtil.pathToUrl(rootPath);
-              final VirtualFile localFile=VirtualFileManager.getInstance().findFileByUrl(url);
-              if (localFile != null) {
-                final VirtualFile jarFile=JarFileSystem.getInstance().getJarRootForLocalFile(localFile);
-                if (jarFile != null) {
-                  url=jarFile.getUrl();
-                }
-              }
-              model.addRoot(url,OrderRootType.CLASSES);
+          String url=VfsUtil.pathToUrl(rootPath);
+          final VirtualFile localFile=VirtualFileManager.getInstance().findFileByUrl(url);
+          if (localFile != null) {
+            final VirtualFile jarFile=JarFileSystem.getInstance().getJarRootForLocalFile(localFile);
+            if (jarFile != null) {
+              url=jarFile.getUrl();
             }
-            model.commit();
           }
-          unknownLibraries.remove(libName);
+          model.addRoot(url,OrderRootType.CLASSES);
         }
+        model.commit();
       }
+      unknownLibraries.remove(libName);
     }
   }
 }
