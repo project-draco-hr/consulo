@@ -9,7 +9,7 @@
   try {
     List<String> words=StringUtil.getWordsIn(searcher.getPattern());
     if (words.isEmpty())     return true;
-    Set<PsiFile> fileSet=new THashSet<PsiFile>();
+    final Set<PsiFile> fileSet=new THashSet<PsiFile>();
     final Application application=ApplicationManager.getApplication();
     for (    final String word : words) {
       List<PsiFile> psiFiles=application.runReadAction(new Computable<List<PsiFile>>(){
@@ -26,47 +26,41 @@
       }
       if (fileSet.isEmpty())       break;
     }
-    final PsiFile[] files=fileSet.toArray(new PsiFile[fileSet.size()]);
     if (progress != null) {
       progress.setText(PsiBundle.message("psi.search.for.word.progress",searcher.getPattern()));
     }
     final AtomicInteger counter=new AtomicInteger(0);
     final AtomicBoolean canceled=new AtomicBoolean(false);
     final AtomicBoolean pceThrown=new AtomicBoolean(false);
-    boolean completed=JobUtil.invokeConcurrentlyForAll(files,new Processor<PsiFile>(){
+    boolean completed=JobUtil.invokeConcurrentlyUnderMyProgress(fileSet,new Processor<PsiFile>(){
       public boolean process(      final PsiFile file){
         if (file instanceof PsiBinaryFile)         return true;
-        ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(new Runnable(){
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
           public void run(){
-            ApplicationManager.getApplication().runReadAction(new Runnable(){
-              public void run(){
-                try {
-                  PsiElement[] psiRoots=file.getPsiRoots();
-                  Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
-                  for (                  PsiElement psiRoot : psiRoots) {
-                    ProgressManager.getInstance().checkCanceled();
-                    if (!processed.add(psiRoot))                     continue;
-                    if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher,false)) {
-                      canceled.set(true);
-                      return;
-                    }
-                  }
-                  if (progress != null) {
-                    double fraction=(double)counter.incrementAndGet() / files.length;
-                    progress.setFraction(fraction);
-                  }
-                  myManager.dropResolveCaches();
-                }
- catch (                ProcessCanceledException e) {
+            try {
+              PsiElement[] psiRoots=file.getPsiRoots();
+              Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
+              for (              PsiElement psiRoot : psiRoots) {
+                ProgressManager.getInstance().checkCanceled();
+                if (!processed.add(psiRoot))                 continue;
+                if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher,false)) {
                   canceled.set(true);
-                  pceThrown.set(true);
+                  return;
                 }
               }
+              if (progress != null) {
+                double fraction=(double)counter.incrementAndGet() / fileSet.size();
+                progress.setFraction(fraction);
+              }
+              myManager.dropResolveCaches();
             }
-);
+ catch (            ProcessCanceledException e) {
+              canceled.set(true);
+              pceThrown.set(true);
+            }
           }
         }
-,progress);
+);
         return !canceled.get();
       }
     }
