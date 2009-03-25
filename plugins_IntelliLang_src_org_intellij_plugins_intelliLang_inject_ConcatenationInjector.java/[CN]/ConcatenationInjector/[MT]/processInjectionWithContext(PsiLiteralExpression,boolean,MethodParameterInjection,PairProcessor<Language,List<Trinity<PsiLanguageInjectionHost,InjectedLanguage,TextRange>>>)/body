@@ -1,0 +1,57 @@
+{
+  final Language language=InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+  if (language == null)   return;
+  final boolean separateFiles=!injection.isSingleFile() && StringUtil.isNotEmpty(injection.getValuePattern());
+  final Ref<Boolean> unparsableRef=Ref.create(unparsable);
+  final List<Object> objects=ContextComputationProcessor.collectOperands(place,injection.getPrefix(),injection.getSuffix(),unparsableRef);
+  if (objects.isEmpty())   return;
+  final List<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>> result=new ArrayList<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>>();
+  final int len=objects.size();
+  for (int i=0; i < len; i++) {
+    String curPrefix=null;
+    Object o=objects.get(i);
+    if (o instanceof String) {
+      curPrefix=(String)o;
+      if (i == len - 1)       return;
+      o=objects.get(++i);
+    }
+    String curSuffix=null;
+    PsiLanguageInjectionHost curHost=null;
+    if (o instanceof PsiLanguageInjectionHost) {
+      curHost=(PsiLanguageInjectionHost)o;
+      if (i == len - 2) {
+        final Object next=objects.get(i + 1);
+        if (next instanceof String) {
+          i++;
+          curSuffix=(String)next;
+        }
+      }
+    }
+    if (curHost == null) {
+      unparsableRef.set(Boolean.TRUE);
+    }
+ else {
+      if (!(curHost instanceof PsiLiteralExpression)) {
+        result.add(Trinity.create(curHost,InjectedLanguage.create(injection.getInjectedLanguageId(),curPrefix,curSuffix,true),ElementManipulators.getManipulator(curHost).getRangeInElement(curHost)));
+      }
+ else {
+        for (        TextRange textRange : injection.getInjectedArea(((PsiLiteralExpression)curHost))) {
+          result.add(Trinity.create(curHost,InjectedLanguage.create(injection.getInjectedLanguageId(),curPrefix,curSuffix,true),textRange));
+        }
+      }
+    }
+  }
+  if (!result.isEmpty()) {
+    if (separateFiles) {
+      for (      Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange> trinity : result) {
+        processor.process(language,Collections.singletonList(trinity));
+      }
+    }
+ else {
+      for (      Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange> trinity : result) {
+        trinity.first.putUserData(CustomLanguageInjector.HAS_UNPARSABLE_FRAGMENTS,unparsableRef.get());
+      }
+      processor.process(language,result);
+    }
+  }
+}
