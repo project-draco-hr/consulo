@@ -21,37 +21,60 @@
  else {
       endOffset=CharArrayUtil.shiftBackward(chars,endOffset," \t");
     }
-    final int suffixLen=suffix.length();
-    final int prefixLen=prefix.length();
-    if (endOffset - offset > prefixLen + suffixLen) {
-      boolean insertPrefix=false;
-      boolean haveWelformedComment=false;
-      int i=endOffset - suffixLen;
-      while (i >= offset) {
-        if (insertPrefix) {
-          if (CharArrayUtil.regionMatches(chars,i,prefix)) {
-            i-=suffixLen;
-            insertPrefix=false;
-            haveWelformedComment=true;
-            continue;
-          }
-          if (CharArrayUtil.regionMatches(chars,i,suffix)) {
-            myDocument.insertString(i + suffixLen,prefix);
-          }
-        }
- else {
-          if (!CharArrayUtil.regionMatches(chars,i,suffix)) {
-            myDocument.insertString(i + suffixLen,suffix);
-          }
-          haveWelformedComment=false;
-          insertPrefix=true;
-        }
-        --i;
+    final String text=myDocument.getCharsSequence().subSequence(offset,endOffset).toString();
+    final IntArrayList prefixes=new IntArrayList();
+    final IntArrayList suffixes=new IntArrayList();
+    final String commentedSuffix=commenter.getCommentedBlockCommentSuffix();
+    final String commentedPrefix=commenter.getCommentedBlockCommentPrefix();
+    for (int position=0; position < text.length(); ) {
+      int nearestPrefix=text.indexOf(prefix,position);
+      if (nearestPrefix == -1) {
+        nearestPrefix=text.length();
       }
-      if (!haveWelformedComment)       myDocument.insertString(offset,prefix);
-    }
+      int nearestSuffix=text.indexOf(suffix,position);
+      if (nearestSuffix == -1) {
+        nearestSuffix=text.length();
+      }
+      if (Math.min(nearestPrefix,nearestSuffix) == text.length()) {
+        break;
+      }
+      if (nearestPrefix < nearestSuffix) {
+        prefixes.add(nearestPrefix);
+        position=nearestPrefix + prefix.length();
+      }
  else {
+        suffixes.add(nearestSuffix);
+        position=nearestSuffix + suffix.length();
+      }
+    }
+    if (!(commentedSuffix == null && !suffixes.isEmpty() && offset + suffixes.get(suffixes.size() - 1) + suffix.length() >= endOffset)) {
       myDocument.insertString(endOffset,suffix);
+    }
+    int nearestPrefix=prefixes.size() - 1;
+    int nearestSuffix=suffixes.size() - 1;
+    while (nearestPrefix >= 0 || nearestSuffix >= 0) {
+      if (nearestSuffix == -1 || nearestPrefix != -1 && prefixes.get(nearestPrefix) > suffixes.get(nearestSuffix)) {
+        final int position=prefixes.get(nearestPrefix);
+        nearestPrefix--;
+        if (commentedPrefix != null) {
+          myDocument.replaceString(offset + position,offset + position + prefix.length(),commentedPrefix);
+        }
+ else         if (position != 0) {
+          myDocument.insertString(offset + position,suffix);
+        }
+      }
+ else {
+        final int position=suffixes.get(nearestSuffix);
+        nearestSuffix--;
+        if (commentedSuffix != null) {
+          myDocument.replaceString(offset + position,offset + position + suffix.length(),commentedSuffix);
+        }
+ else         if (offset + position + suffix.length() < endOffset) {
+          myDocument.insertString(offset + position + suffix.length(),prefix);
+        }
+      }
+    }
+    if (!(commentedPrefix == null && !prefixes.isEmpty() && prefixes.get(0) == 0)) {
       myDocument.insertString(offset,prefix);
     }
   }
