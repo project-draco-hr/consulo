@@ -1,0 +1,83 @@
+{
+  myProject=project;
+  mySemService=semService;
+  myConverterManager=(ConverterManagerImpl)converterManager;
+  myApplicationComponent=applicationComponent;
+  myAnnotationsManager=(DomElementAnnotationsManagerImpl)annotationsManager;
+  pomModel.addModelListener(new PomModelListener(){
+    public void modelChanged(    PomModelEvent event){
+      final XmlChangeSet changeSet=(XmlChangeSet)event.getChangeSet(xmlAspect);
+      if (changeSet != null) {
+        if (!myChanging) {
+          new ExternalChangeProcessor(DomManagerImpl.this,changeSet).processChanges();
+        }
+      }
+    }
+    public boolean isAspectChangeInteresting(    PomModelAspect aspect){
+      return xmlAspect.equals(aspect);
+    }
+  }
+,project);
+  myFileFactory=PsiFileFactory.getInstance(project);
+  final Runnable setupVfsListeners=new Runnable(){
+    public void run(){
+      final VirtualFileAdapter listener=new VirtualFileAdapter(){
+        private final List<XmlFile> myDeletedFiles=new SmartList<XmlFile>();
+        public void contentsChanged(        VirtualFileEvent event){
+          if (event.isFromSave())           return;
+          processVfsChange(event.getFile());
+        }
+        public void fileCreated(        VirtualFileEvent event){
+          processVfsChange(event.getFile());
+        }
+        public void beforeFileDeletion(        final VirtualFileEvent event){
+          beforeFileDeletion(event.getFile());
+        }
+        private void beforeFileDeletion(        final VirtualFile file){
+          if (project.isDisposed())           return;
+          if (file.isDirectory() && file instanceof NewVirtualFile) {
+            for (            final VirtualFile child : ((NewVirtualFile)file).getCachedChildren()) {
+              beforeFileDeletion(child);
+            }
+            return;
+          }
+          if (StdFileTypes.XML.equals(file.getFileType())) {
+            final PsiFile psiFile=psiManager.findFile(file);
+            if (psiFile instanceof XmlFile) {
+              myDeletedFiles.add((XmlFile)psiFile);
+            }
+          }
+        }
+        public void fileDeleted(        VirtualFileEvent event){
+          if (!myDeletedFiles.isEmpty()) {
+            if (!project.isDisposed()) {
+              for (              final XmlFile file : myDeletedFiles) {
+                processXmlFileChange(file,true);
+              }
+            }
+            myDeletedFiles.clear();
+          }
+        }
+        public void propertyChanged(        VirtualFilePropertyEvent event){
+          final VirtualFile file=event.getFile();
+          if (!file.isDirectory() && VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
+            processVfsChange(file);
+          }
+        }
+      }
+;
+      virtualFileManager.addVirtualFileListener(listener,project);
+    }
+  }
+;
+  if (!((StartupManagerEx)startupManager).startupActivityPassed()) {
+    startupManager.registerStartupActivity(setupVfsListeners);
+  }
+ else {
+    setupVfsListeners.run();
+  }
+  myFileIndex=projectRootManager.getFileIndex();
+  for (  final DomFileDescription description : Extensions.getExtensions(DomFileDescription.EP_NAME)) {
+    _registerFileDescription(description);
+  }
+}
