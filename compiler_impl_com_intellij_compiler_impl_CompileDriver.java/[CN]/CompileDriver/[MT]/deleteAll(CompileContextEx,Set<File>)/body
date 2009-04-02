@@ -2,51 +2,50 @@
   context.getProgressIndicator().pushState();
   try {
     final boolean isTestMode=ApplicationManager.getApplication().isUnitTestMode();
-    final Compiler[] allCompilers=CompilerManager.getInstance(myProject).getCompilers(Compiler.class);
     final VirtualFile[] allSources=context.getProjectCompileScope().getFiles(null,true);
     context.getProgressIndicator().setText(CompilerBundle.message("progress.clearing.output"));
-    for (    final Compiler compiler : allCompilers) {
-      if (compiler instanceof GeneratingCompiler) {
-        try {
-          if (!myShouldClearOutputDirectory) {
-            final StateCache<ValidityState> cache=getGeneratingCompilerCache((GeneratingCompiler)compiler);
-            final Iterator<String> urlIterator=cache.getUrlsIterator();
-            while (urlIterator.hasNext()) {
-              deleteFile(new File(VirtualFileManager.extractPath(urlIterator.next())));
-            }
-          }
-        }
- catch (        IOException e) {
-          LOG.info(e);
-        }
-      }
- else       if (compiler instanceof FileProcessingCompiler) {
-      }
- else       if (compiler instanceof TranslatingCompiler) {
-        if (!myShouldClearOutputDirectory) {
-          final ArrayList<Trinity<File,String,Boolean>> toDelete=new ArrayList<Trinity<File,String,Boolean>>();
-          ApplicationManager.getApplication().runReadAction(new Runnable(){
-            public void run(){
-              TranslatingCompilerFilesMonitor.getInstance().collectFiles(context,(TranslatingCompiler)compiler,Arrays.<VirtualFile>asList(allSources).iterator(),true,false,new ArrayList<VirtualFile>(),toDelete);
-            }
-          }
-);
-          for (          Trinity<File,String,Boolean> trinity : toDelete) {
-            final File file=trinity.getFirst();
-            final boolean deleted=deleteFile(file);
-            if (isTestMode && deleted) {
-              CompilerManagerImpl.addDeletedPath(FileUtil.toSystemIndependentName(file.getPath()));
-            }
-          }
-        }
-      }
-    }
     if (myShouldClearOutputDirectory) {
       clearOutputDirectories(outputDirectories);
     }
  else {
-      pruneEmptyDirectories(outputDirectories);
-      CompilerUtil.refreshIODirectories(outputDirectories);
+      try {
+        for (        final Compiler compiler : CompilerManager.getInstance(myProject).getCompilers(Compiler.class)) {
+          try {
+            if (compiler instanceof GeneratingCompiler) {
+              final StateCache<ValidityState> cache=getGeneratingCompilerCache((GeneratingCompiler)compiler);
+              final Iterator<String> urlIterator=cache.getUrlsIterator();
+              while (urlIterator.hasNext()) {
+                context.getProgressIndicator().checkCanceled();
+                deleteFile(new File(VirtualFileManager.extractPath(urlIterator.next())));
+              }
+            }
+ else             if (compiler instanceof TranslatingCompiler) {
+              final ArrayList<Trinity<File,String,Boolean>> toDelete=new ArrayList<Trinity<File,String,Boolean>>();
+              ApplicationManager.getApplication().runReadAction(new Runnable(){
+                public void run(){
+                  TranslatingCompilerFilesMonitor.getInstance().collectFiles(context,(TranslatingCompiler)compiler,Arrays.<VirtualFile>asList(allSources).iterator(),true,false,new ArrayList<VirtualFile>(),toDelete);
+                }
+              }
+);
+              for (              Trinity<File,String,Boolean> trinity : toDelete) {
+                context.getProgressIndicator().checkCanceled();
+                final File file=trinity.getFirst();
+                final boolean deleted=deleteFile(file);
+                if (isTestMode && deleted) {
+                  CompilerManagerImpl.addDeletedPath(FileUtil.toSystemIndependentName(file.getPath()));
+                }
+              }
+            }
+          }
+ catch (          IOException e) {
+            LOG.info(e);
+          }
+        }
+        pruneEmptyDirectories(context.getProgressIndicator(),outputDirectories);
+      }
+  finally {
+        CompilerUtil.refreshIODirectories(outputDirectories);
+      }
     }
     dropScopesCaches();
     clearCompilerSystemDirectory(context);
