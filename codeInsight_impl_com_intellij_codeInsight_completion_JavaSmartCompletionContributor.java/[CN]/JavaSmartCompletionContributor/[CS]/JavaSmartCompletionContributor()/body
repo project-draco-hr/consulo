@@ -1,7 +1,7 @@
 {
   extend(CompletionType.SMART,psiElement().afterLeaf(psiElement().withText("(").withParent(PsiTypeCastExpression.class)),new CompletionProvider<CompletionParameters>(){
     protected void addCompletions(    @NotNull final CompletionParameters parameters,    final ProcessingContext context,    @NotNull final CompletionResultSet result){
-      for (      final ExpectedTypeInfo type : getExpectedTypes(parameters.getPosition())) {
+      for (      final ExpectedTypeInfo type : getExpectedTypes(parameters)) {
         final LookupItem item=PsiTypeLookupItem.createLookupItem(type.getDefaultType()).setTailType(TailTypes.CAST_RPARENTH).setAutoCompletionPolicy(AutoCompletionPolicy.ALWAYS_AUTOCOMPLETE);
         item.putUserData(TYPE_CAST,Boolean.TRUE);
         result.addElement(item);
@@ -41,9 +41,26 @@
   extend(CompletionType.SMART,INSIDE_EXPRESSION,new ExpectedTypeBasedCompletionProvider(true){
     protected void addCompletions(    final CompletionParameters params,    final CompletionResultSet result,    final Collection<ExpectedTypeInfo> infos){
       final PsiElement position=params.getPosition();
-      for (      final ExpectedTypeInfo type : infos) {
-        final JavaSmartCompletionParameters parameters=new JavaSmartCompletionParameters(params,type);
-        final ElementFilter filter=new ReturnTypeFilter(new AssignableFromFilter(type.getType()));
+      for (      final ExpectedTypeInfo info : infos) {
+        final JavaSmartCompletionParameters parameters=new JavaSmartCompletionParameters(params,info);
+        final PsiType type=info.getType();
+        final boolean isVoid=type == PsiType.VOID;
+        final AssignableFromFilter assignableFromFilter=new AssignableFromFilter(type);
+        final ElementFilter filter=new ReturnTypeFilter(new ElementFilter(){
+          public boolean isAcceptable(          Object element,          PsiElement context){
+            if (isVoid) {
+              return element instanceof PsiMethod;
+            }
+            return assignableFromFilter.isAcceptable(element,context);
+          }
+          public boolean isClassAcceptable(          Class hintClass){
+            if (isVoid && !ReflectionCache.isAssignable(PsiMethod.class,hintClass)) {
+              return false;
+            }
+            return true;
+          }
+        }
+);
         CompletionService.getCompletionService().getVariantsFromContributors(ExpressionSmartCompletionContributor.CONTRIBUTORS,parameters,null,new Consumer<LookupElement>(){
           public void consume(          final LookupElement lookupElement){
             final Object object=lookupElement.getObject();
