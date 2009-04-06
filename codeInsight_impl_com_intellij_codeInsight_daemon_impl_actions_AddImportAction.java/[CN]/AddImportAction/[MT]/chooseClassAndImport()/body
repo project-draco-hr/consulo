@@ -1,15 +1,48 @@
 {
   Arrays.sort(myTargetClasses,new PsiProximityComparator(myReference.getElement()));
-  final JList list=new JList(myTargetClasses);
-  list.setCellRenderer(new FQNameCellRenderer());
-  Runnable runnable=new Runnable(){
-    public void run(){
-      int index=list.getSelectedIndex();
-      if (index < 0)       return;
-      PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-      addImport(myReference,myTargetClasses[index]);
+  final BaseListPopupStep<PsiClass> step=new BaseListPopupStep<PsiClass>(QuickFixBundle.message("class.to.import.chooser.title"),myTargetClasses){
+    @Override public PopupStep onChosen(    PsiClass selectedValue,    boolean finalChoice){
+      if (selectedValue == null) {
+        return FINAL_CHOICE;
+      }
+      if (finalChoice) {
+        PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+        addImport(myReference,selectedValue);
+        return FINAL_CHOICE;
+      }
+      String qname=selectedValue.getQualifiedName();
+      List<String> toExclude=new ArrayList<String>();
+      while (true) {
+        toExclude.add(qname);
+        final int i=qname.lastIndexOf('.');
+        if (i < 0 || i == qname.indexOf('.'))         break;
+        qname=qname.substring(0,i);
+      }
+      return new BaseListPopupStep<String>(null,toExclude){
+        @NotNull @Override public String getTextFor(        String value){
+          return "Exclude '" + value + "' from auto-import";
+        }
+        @Override public PopupStep onChosen(        String selectedValue,        boolean finalChoice){
+          if (finalChoice) {
+            final LinkedHashSet<String> strings=new LinkedHashSet<String>(Arrays.asList(CodeInsightSettings.getInstance().EXCLUDED_PACKAGES));
+            strings.add(selectedValue);
+            CodeInsightSettings.getInstance().EXCLUDED_PACKAGES=strings.toArray(new String[strings.size()]);
+          }
+          return super.onChosen(selectedValue,finalChoice);
+        }
+      }
+;
+    }
+    @Override public boolean hasSubstep(    PsiClass selectedValue){
+      return true;
+    }
+    @NotNull @Override public String getTextFor(    PsiClass value){
+      return ObjectUtils.assertNotNull(value.getQualifiedName());
+    }
+    @Override public Icon getIconFor(    PsiClass aValue){
+      return aValue.getIcon(0);
     }
   }
 ;
-  new PopupChooserBuilder(list).setTitle(QuickFixBundle.message("class.to.import.chooser.title")).setItemChoosenCallback(runnable).createPopup().showInBestPositionFor(myEditor);
+  JBPopupFactory.getInstance().createListPopup(step).showInBestPositionFor(myEditor);
 }
