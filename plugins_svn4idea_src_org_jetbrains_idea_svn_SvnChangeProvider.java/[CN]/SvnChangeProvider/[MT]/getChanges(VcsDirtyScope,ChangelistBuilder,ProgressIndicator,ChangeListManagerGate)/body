@@ -1,12 +1,29 @@
 {
+  final SvnScopeZipper zipper=new SvnScopeZipper(dirtyScope);
+  zipper.run();
+  final Map<String,SvnScopeZipper.MyDirNonRecursive> nonRecursiveMap=zipper.getNonRecursiveDirs();
+  final Map<String,Map> preparedMap=new HashMap<String,Map>();
+  for (  SvnScopeZipper.MyDirNonRecursive item : nonRecursiveMap.values()) {
+    final Map result=new HashMap();
+    for (    FilePath path : item.getChildrenList()) {
+      result.put(path.getName(),path.getIOFile());
+    }
+    preparedMap.put(item.getDir().getIOFile().getAbsolutePath(),result);
+  }
+  final ISVNStatusFileProvider fileProvider=new ISVNStatusFileProvider(){
+    public Map getChildrenFiles(    File parent){
+      return preparedMap.get(parent.getAbsolutePath());
+    }
+  }
+;
   try {
     final SvnChangeProviderContext context=new SvnChangeProviderContext(myVcs,builder,progress);
-    for (    FilePath path : dirtyScope.getRecursivelyDirtyDirectories()) {
-      processFile(path,context,null,true,context.getClient());
+    for (    FilePath path : zipper.getRecursiveDirs()) {
+      processFile(path,context,null,SVNDepth.INFINITY,context.getClient());
     }
-    for (    FilePath path : dirtyScope.getDirtyFiles()) {
-      FileStatus status=getParentStatus(context,path);
-      processFile(path,context,status,false,context.getClient());
+    context.getClient().setFilesProvider(fileProvider);
+    for (    SvnScopeZipper.MyDirNonRecursive item : nonRecursiveMap.values()) {
+      processFile(item.getDir(),context,null,SVNDepth.FILES,context.getClient());
     }
     for (    SvnChangedFile copiedFile : context.getCopiedFiles()) {
       if (context.isCanceled()) {
