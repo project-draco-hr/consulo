@@ -3,12 +3,12 @@
   final List<GeneratingCompiler.GenerationItem> toGenerate=new ArrayList<GeneratingCompiler.GenerationItem>();
   final List<File> filesToRefresh=new ArrayList<File>();
   final List<File> generatedFiles=new ArrayList<File>();
-  final List<Module> affectedModules=new ArrayList<Module>();
+  final Set<Module> affectedModules=new THashSet<Module>();
   try {
     final StateCache<ValidityState> cache=getGeneratingCompilerCache(compiler);
     final Set<String> pathsToRemove=new HashSet<String>(cache.getUrls());
     final Map<GeneratingCompiler.GenerationItem,String> itemToOutputPathMap=new HashMap<GeneratingCompiler.GenerationItem,String>();
-    final IOException[] ex=new IOException[]{null};
+    final IOException[] ex={null};
     ApplicationManager.getApplication().runReadAction(new Runnable(){
       public void run(){
         for (        final GeneratingCompiler.GenerationItem item : allItems) {
@@ -56,56 +56,58 @@
       throw new ExitException(ExitStatus.CANCELLED);
     }
     if (!pathsToRemove.isEmpty()) {
-      context.getProgressIndicator().pushState();
-      context.getProgressIndicator().setText(CompilerBundle.message("progress.synchronizing.output.directory"));
-      for (      final String path : pathsToRemove) {
-        final File file=new File(path);
-        final boolean deleted=deleteFile(file);
-        if (deleted) {
-          cache.remove(path);
-          filesToRefresh.add(file);
+      runInContext(context,CompilerBundle.message("progress.synchronizing.output.directory"),new ThrowableRunnable<IOException>(){
+        public void run() throws IOException {
+          for (          final String path : pathsToRemove) {
+            final File file=new File(path);
+            final boolean deleted=deleteFile(file);
+            if (deleted) {
+              cache.remove(path);
+              filesToRefresh.add(file);
+            }
+          }
         }
       }
-      context.getProgressIndicator().popState();
+);
     }
-    Map<Module,Set<GeneratingCompiler.GenerationItem>> moduleToItemMap=buildModuleToGenerationItemMap(toGenerate.toArray(new GeneratingCompiler.GenerationItem[toGenerate.size()]));
+    final Map<Module,Set<GeneratingCompiler.GenerationItem>> moduleToItemMap=buildModuleToGenerationItemMap(toGenerate.toArray(new GeneratingCompiler.GenerationItem[toGenerate.size()]));
     List<Module> modules=new ArrayList<Module>(moduleToItemMap.size());
     for (    final Module module : moduleToItemMap.keySet()) {
       modules.add(module);
     }
     ModuleCompilerUtil.sortModules(myProject,modules);
     for (    final Module module : modules) {
-      context.getProgressIndicator().pushState();
-      try {
-        final Set<GeneratingCompiler.GenerationItem> items=moduleToItemMap.get(module);
-        if (items != null && !items.isEmpty()) {
-          final GeneratingCompiler.GenerationItem[][] productionAndTestItems=splitGenerationItems(items);
-          boolean moduleAffected=false;
-          for (          GeneratingCompiler.GenerationItem[] _items : productionAndTestItems) {
-            if (_items.length > 0) {
-              final VirtualFile outputDir=getGenerationOutputDir(compiler,module,_items[0].isTestSource());
-              final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,_items,outputDir);
-              context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
-              if (successfullyGenerated.length > 0) {
-                moduleAffected=true;
-              }
-              for (              final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
-                final String fullOutputPath=itemToOutputPathMap.get(item);
-                cache.update(fullOutputPath,item.getValidityState());
-                final File file=new File(fullOutputPath);
-                filesToRefresh.add(file);
-                generatedFiles.add(file);
+      runInContext(context,"Generating output from " + compiler.getDescription(),new ThrowableRunnable<IOException>(){
+        public void run() throws IOException {
+          final Set<GeneratingCompiler.GenerationItem> items=moduleToItemMap.get(module);
+          if (items != null && !items.isEmpty()) {
+            final GeneratingCompiler.GenerationItem[][] productionAndTestItems=splitGenerationItems(items);
+            for (            GeneratingCompiler.GenerationItem[] _items : productionAndTestItems) {
+              if (_items.length > 0) {
+                final VirtualFile outputDir=getGenerationOutputDir(compiler,module,_items[0].isTestSource());
+                final GeneratingCompiler.GenerationItem[] successfullyGenerated=compiler.generate(context,_items,outputDir);
+                context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
+                runInContext(context,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<IOException>(){
+                  public void run() throws IOException {
+                    if (successfullyGenerated.length > 0) {
+                      affectedModules.add(module);
+                    }
+                    for (                    final GeneratingCompiler.GenerationItem item : successfullyGenerated) {
+                      final String fullOutputPath=itemToOutputPathMap.get(item);
+                      cache.update(fullOutputPath,item.getValidityState());
+                      final File file=new File(fullOutputPath);
+                      filesToRefresh.add(file);
+                      generatedFiles.add(file);
+                    }
+                  }
+                }
+);
               }
             }
           }
-          if (moduleAffected) {
-            affectedModules.add(module);
-          }
         }
       }
-  finally {
-        context.getProgressIndicator().popState();
-      }
+);
     }
   }
  catch (  IOException e) {
@@ -114,7 +116,6 @@
     throw new ExitException(ExitStatus.ERRORS);
   }
  finally {
-    context.getProgressIndicator().pushState();
     CompilerUtil.refreshIOFiles(filesToRefresh);
     if (!generatedFiles.isEmpty()) {
       List<VirtualFile> vFiles=ApplicationManager.getApplication().runReadAction(new Computable<List<VirtualFile>>(){
