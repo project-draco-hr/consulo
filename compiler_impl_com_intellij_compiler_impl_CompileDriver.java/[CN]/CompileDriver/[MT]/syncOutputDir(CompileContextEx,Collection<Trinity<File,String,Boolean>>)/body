@@ -1,0 +1,47 @@
+{
+  int total=toDelete.size();
+  final DependencyCache dependencyCache=context.getDependencyCache();
+  final boolean isTestMode=ApplicationManager.getApplication().isUnitTestMode();
+  context.getProgressIndicator().pushState();
+  final List<File> filesToRefresh=new ArrayList<File>();
+  try {
+    context.getProgressIndicator().setText(CompilerBundle.message("progress.synchronizing.output.directory"));
+    int current=0;
+    boolean wereFilesDeleted=false;
+    for (    final Trinity<File,String,Boolean> trinity : toDelete) {
+      context.getProgressIndicator().setFraction(((double)(++current)) / total);
+      context.getProgressIndicator().checkCanceled();
+      final File outputPath=trinity.getFirst();
+      filesToRefresh.add(outputPath);
+      if (deleteFile(outputPath)) {
+        wereFilesDeleted=true;
+        final String outputDir=myOutputFinder.lookupOutputPath(outputPath);
+        if (outputDir != null) {
+          try {
+            context.updateZippedOuput(outputDir,FileUtil.toSystemIndependentName(outputPath.getPath()).substring(outputDir.length() + 1));
+          }
+ catch (          IOException e) {
+            LOG.info(e);
+          }
+        }
+        final String className=trinity.getSecond();
+        if (className != null) {
+          final int id=dependencyCache.getSymbolTable().getId(className);
+          dependencyCache.addTraverseRoot(id);
+          final boolean sourcePresent=trinity.getThird().booleanValue();
+          if (!sourcePresent) {
+            dependencyCache.markSourceRemoved(id);
+          }
+        }
+        if (isTestMode) {
+          CompilerManagerImpl.addDeletedPath(outputPath.getPath());
+        }
+      }
+    }
+    return wereFilesDeleted;
+  }
+  finally {
+    CompilerUtil.refreshIOFiles(filesToRefresh);
+    context.getProgressIndicator().popState();
+  }
+}

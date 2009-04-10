@@ -1,0 +1,45 @@
+{
+  boolean didSomething=false;
+  final TranslatingCompiler[] translators=compilerManager.getCompilers(TranslatingCompiler.class);
+  final Set<FileType> generatedTypes=new HashSet<FileType>();
+  VirtualFile[] snapshot=null;
+  for (  final TranslatingCompiler translator : translators) {
+    if (context.getProgressIndicator().isCanceled()) {
+      throw new ExitException(ExitStatus.CANCELLED);
+    }
+    if (snapshot == null || ModuleCompilerUtil.intersects(generatedTypes,compilerManager.getRegisteredInputTypes(translator))) {
+      snapshot=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
+        public VirtualFile[] compute(){
+          return context.getCompileScope().getFiles(null,true);
+        }
+      }
+);
+    }
+    final CompileContextEx _context;
+    if (translator instanceof IntermediateOutputCompiler) {
+      final IntermediateOutputCompiler _translator=(IntermediateOutputCompiler)translator;
+      _context=new CompileContextExProxy(context){
+        public VirtualFile getModuleOutputDirectory(        final Module module){
+          return getGenerationOutputDir(_translator,module,false);
+        }
+        public VirtualFile getModuleOutputDirectoryForTests(        final Module module){
+          return getGenerationOutputDir(_translator,module,true);
+        }
+      }
+;
+    }
+ else {
+      _context=context;
+    }
+    final boolean compiledSomething=compileSources(_context,snapshot,translator,forceCompile,isRebuild,trackDependencies,onlyCheckStatus);
+    if (compiledSomething) {
+      generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(translator));
+    }
+    dropDependencyCache(context);
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      throw new ExitException(ExitStatus.ERRORS);
+    }
+    didSomething|=compiledSomething;
+  }
+  return didSomething;
+}

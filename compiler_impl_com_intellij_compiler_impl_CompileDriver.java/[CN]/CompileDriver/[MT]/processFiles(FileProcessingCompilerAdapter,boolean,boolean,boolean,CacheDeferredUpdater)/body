@@ -1,5 +1,5 @@
 {
-  final CompileContext context=adapter.getCompileContext();
+  final CompileContextEx context=(CompileContextEx)adapter.getCompileContext();
   final FileProcessingCompilerStateCache cache=getFileProcessingCompilerCache(adapter.getCompiler());
   final FileProcessingCompiler.ProcessingItem[] items=adapter.getProcessingItems();
   if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
@@ -8,14 +8,14 @@
   final CompileScope scope=context.getCompileScope();
   final List<FileProcessingCompiler.ProcessingItem> toProcess=new ArrayList<FileProcessingCompiler.ProcessingItem>();
   final Set<String> allUrls=new HashSet<String>();
-  final IOException[] ex={null};
+  final IOException[] ex=new IOException[]{null};
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
       try {
         for (        FileProcessingCompiler.ProcessingItem item : items) {
           final VirtualFile file=item.getFile();
           if (file == null) {
-            LOG.error("FileProcessingCompiler.ProcessingItem.getFile() must not return null: compiler " + adapter.getCompiler().getDescription());
+            LOG.assertTrue(false,"FileProcessingCompiler.ProcessingItem.getFile() must not return null: compiler " + adapter.getCompiler().getDescription());
           }
           final String url=file.getUrl();
           allUrls.add(url);
@@ -44,29 +44,27 @@
   final Collection<String> urls=cache.getUrls();
   final List<String> urlsToRemove=new ArrayList<String>();
   if (!urls.isEmpty()) {
-    runInContext(context,CompilerBundle.message("progress.processing.outdated.files"),new ThrowableRunnable<IOException>(){
-      public void run() throws IOException {
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          public void run(){
-            for (            final String url : urls) {
-              if (!allUrls.contains(url)) {
-                if (!checkScope || scope.belongs(url)) {
-                  urlsToRemove.add(url);
-                }
-              }
+    context.getProgressIndicator().pushState();
+    context.getProgressIndicator().setText(CompilerBundle.message("progress.processing.outdated.files"));
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (        final String url : urls) {
+          if (!allUrls.contains(url)) {
+            if (!checkScope || scope.belongs(url)) {
+              urlsToRemove.add(url);
             }
-          }
-        }
-);
-        if (!onlyCheckStatus && !urlsToRemove.isEmpty()) {
-          for (          final String url : urlsToRemove) {
-            adapter.processOutdatedItem(context,url,cache.getExtState(url));
-            cache.remove(url);
           }
         }
       }
     }
 );
+    if (!onlyCheckStatus && !urlsToRemove.isEmpty()) {
+      for (      final String url : urlsToRemove) {
+        adapter.processOutdatedItem(context,url,cache.getExtState(url));
+        cache.remove(url);
+      }
+    }
+    context.getProgressIndicator().popState();
   }
   if (onlyCheckStatus) {
     if (urlsToRemove.isEmpty() && toProcess.isEmpty()) {
@@ -91,32 +89,36 @@
   if (toProcess.isEmpty()) {
     return false;
   }
+  context.getProgressIndicator().pushState();
   final FileProcessingCompiler.ProcessingItem[] processed=adapter.process(toProcess.toArray(new FileProcessingCompiler.ProcessingItem[toProcess.size()]));
+  context.getProgressIndicator().popState();
   if (processed.length > 0) {
-    runInContext(context,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<RuntimeException>(){
-      public void run(){
-        List<VirtualFile> vFiles=new ArrayList<VirtualFile>(processed.length);
-        for (        FileProcessingCompiler.ProcessingItem aProcessed : processed) {
-          final VirtualFile file=aProcessed.getFile();
-          vFiles.add(file);
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("File processed by " + adapter.getCompiler().getDescription());
-            LOG.debug("\tFile processed " + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
-          }
-        }
-        LocalFileSystem.getInstance().refreshFiles(vFiles);
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Files after VFS refresh:");
-          for (          VirtualFile file : vFiles) {
-            LOG.debug("\t" + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
-          }
-        }
-        for (        FileProcessingCompiler.ProcessingItem item : processed) {
-          cacheUpdater.addFileForUpdate(item,cache);
-        }
+    context.getProgressIndicator().pushState();
+    context.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
+    final List<VirtualFile> vFiles=new ArrayList<VirtualFile>(processed.length);
+    for (    FileProcessingCompiler.ProcessingItem aProcessed : processed) {
+      final VirtualFile file=aProcessed.getFile();
+      vFiles.add(file);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("File processed by " + adapter.getCompiler().getDescription());
+        LOG.debug("\tFile processed " + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
+      }
+      final String path=file.getPath();
+      final String outputDir=myOutputFinder.lookupOutputPath(path);
+      if (outputDir != null) {
+        context.updateZippedOuput(outputDir,path.substring(outputDir.length() + 1));
       }
     }
-);
+    LocalFileSystem.getInstance().refreshFiles(vFiles);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Files after VFS refresh:");
+      for (      VirtualFile file : vFiles) {
+        LOG.debug("\t" + file.getPresentableUrl() + "; ts="+ file.getTimeStamp());
+      }
+    }
+    for (    FileProcessingCompiler.ProcessingItem item : processed) {
+      cacheUpdater.addFileForUpdate(item,cache);
+    }
   }
   return true;
 }
