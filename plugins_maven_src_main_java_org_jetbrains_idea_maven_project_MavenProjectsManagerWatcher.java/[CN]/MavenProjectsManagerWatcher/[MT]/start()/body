@@ -2,6 +2,34 @@
   myBusConnection=myProject.getMessageBus().connect();
   myBusConnection.subscribe(VirtualFileManager.VFS_CHANGES,new MyFileChangeListener());
   myBusConnection.subscribe(ProjectTopics.PROJECT_ROOTS,new MyRootChangesListener());
+  myDocumentListener=new DocumentAdapter(){
+    public void documentChanged(    DocumentEvent event){
+      Document doc=event.getDocument();
+      VirtualFile file=FileDocumentManager.getInstance().getFile(doc);
+      if (file == null)       return;
+      boolean isMavenFile=file.getName().equals(MavenConstants.POM_XML) || file.getName().equals(MavenConstants.PROFILES_XML) || isSettingsFile(file);
+      if (!isMavenFile)       return;
+      myChangedDocumentsAlarm.cancelAllRequests();
+synchronized (myChangedDocuments) {
+        myChangedDocuments.add(doc);
+      }
+      myChangedDocumentsAlarm.addRequest(new Runnable(){
+        public void run(){
+          Set<Document> copy;
+synchronized (myChangedDocuments) {
+            copy=new HashSet<Document>(myChangedDocuments);
+            myChangedDocuments.clear();
+          }
+          for (          Document each : copy) {
+            FileDocumentManager.getInstance().saveDocument(each);
+          }
+        }
+      }
+,DOCUMENT_SAVE_DELAY);
+    }
+  }
+;
+  getDocumentEventMulticaster().addDocumentListener(myDocumentListener);
   mySettingsPathsChangesListener=new MavenGeneralSettings.Listener(){
     public void pathChanged(){
       updateSettingsFilePointers();
