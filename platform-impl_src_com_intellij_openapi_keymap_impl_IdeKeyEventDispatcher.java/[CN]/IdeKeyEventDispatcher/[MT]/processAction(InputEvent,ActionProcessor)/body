@@ -1,21 +1,30 @@
 {
   ActionManagerEx actionManager=ActionManagerEx.getInstanceEx();
+  final boolean dumb=DumbServiceImpl.getInstance().isDumb();
+  List<AnActionEvent> nonDumbAwareAction=new ArrayList<AnActionEvent>();
   for (  final AnAction action : myContext.getActions()) {
     final Presentation presentation=myPresentationFactory.getPresentation(action);
     final AnActionEvent actionEvent=processor.createEvent(e,myContext.getDataContext(),ActionPlaces.MAIN_MENU,presentation,ActionManager.getInstance());
-    action.beforeActionPerformedUpdate(actionEvent);
-    if (!presentation.isEnabled()) {
+    final boolean indexProblems=ActionUtil.performDumbAwareUpdate(action,actionEvent,true);
+    if (!indexProblems && !presentation.isEnabled()) {
+      continue;
+    }
+    if (dumb && !(action instanceof DumbAware)) {
+      nonDumbAwareAction.add(actionEvent);
       continue;
     }
     processor.onUpdatePassed(e,action,actionEvent);
     ((DataManagerImpl.MyDataContext)myContext.getDataContext()).setEventCount(IdeEventQueue.getInstance().getEventCount());
     actionManager.fireBeforeActionPerformed(action,actionEvent.getDataContext());
-    Component component=(Component)actionEvent.getDataContext().getData(DataConstants.CONTEXT_COMPONENT);
+    Component component=(Component)actionEvent.getDataContext().getData(DataConstantsEx.CONTEXT_COMPONENT);
     if (component != null && !component.isShowing()) {
       return true;
     }
     processor.performAction(e,action,actionEvent);
     return true;
+  }
+  if (!nonDumbAwareAction.isEmpty()) {
+    showDumbModeWarningLaterIfNobodyConsumesEvent(e,nonDumbAwareAction.toArray(new AnActionEvent[nonDumbAwareAction.size()]));
   }
   return false;
 }
