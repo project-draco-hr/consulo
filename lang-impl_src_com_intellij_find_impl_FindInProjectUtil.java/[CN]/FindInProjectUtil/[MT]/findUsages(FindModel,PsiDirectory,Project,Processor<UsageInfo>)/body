@@ -1,0 +1,83 @@
+{
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  final Collection<PsiFile> psiFiles=getFilesToSearchIn(findModel,project,psiDirectory);
+  try {
+    final SearchScope customScope=findModel.getCustomScope();
+    final Set<PsiFile> largeFiles=new THashSet<PsiFile>();
+    int i=0;
+    long totalFilesSize=0;
+    int count=0;
+    boolean warningShown=false;
+    final UsageViewManager usageViewManager=UsageViewManager.getInstance(project);
+    for (    final PsiFile psiFile : psiFiles) {
+      usageViewManager.checkSearchCanceled();
+      if (customScope != null && !ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+        public Boolean compute(){
+          return PsiSearchScopeUtil.isInScope(customScope,psiFile);
+        }
+      }
+)) {
+        continue;
+      }
+      final VirtualFile virtualFile=psiFile.getVirtualFile();
+      final int index=i++;
+      if (virtualFile == null)       continue;
+      long fileLength=getFileLength(virtualFile);
+      if (fileLength == -1)       continue;
+      if (ProjectUtil.isProjectOrWorkspaceFile(virtualFile))       continue;
+      if (fileLength > SINGLE_FILE_SIZE_LIMIT) {
+        largeFiles.add(psiFile);
+        continue;
+      }
+      if (progress != null) {
+        progress.setFraction((double)index / psiFiles.size());
+        String text=FindBundle.message("find.searching.for.string.in.file.progress",findModel.getStringToFind(),virtualFile.getPresentableUrl());
+        progress.setText(text);
+        progress.setText2(FindBundle.message("find.searching.for.string.in.file.occurrences.progress",count));
+      }
+      int countInFile=processUsagesInFile(psiFile,findModel,consumer);
+      if (countInFile > 0) {
+        totalFilesSize+=fileLength;
+        if (totalFilesSize > FILES_SIZE_LIMIT && !warningShown) {
+          showTooManyUsagesWaring(project,FindBundle.message("find.excessive.total.size.prompt",presentableSize(totalFilesSize),ApplicationNamesInfo.getInstance().getProductName()));
+          warningShown=true;
+        }
+      }
+      count+=countInFile;
+      if (count > USAGES_LIMIT && !warningShown) {
+        showTooManyUsagesWaring(project,FindBundle.message("find.excessive.usage.count.prompt",count));
+        warningShown=true;
+      }
+    }
+    if (!largeFiles.isEmpty()) {
+      final StringBuilder message=new StringBuilder();
+      message.append("<html><body>");
+      if (largeFiles.size() == 1) {
+        final VirtualFile vFile=largeFiles.iterator().next().getVirtualFile();
+        message.append("File '").append(getPresentablePath(vFile)).append("'&nbsp;(").append(presentableSize(getFileLength(vFile))).append(") is ");
+      }
+ else {
+        message.append("Files<br> ");
+        int counter=0;
+        for (        PsiFile file : largeFiles) {
+          final VirtualFile vFile=file.getVirtualFile();
+          message.append(getPresentablePath(vFile)).append("&nbsp;(").append(presentableSize(getFileLength(vFile))).append(")<br> ");
+          if (counter++ > 10)           break;
+        }
+        message.append("are ");
+      }
+      message.append("too large and cannot be scanned</body></html>");
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          ToolWindowManager.getInstance(project).notifyByBalloon(ToolWindowId.FIND,MessageType.WARNING,message.toString());
+        }
+      }
+);
+    }
+  }
+ catch (  ProcessCanceledException e) {
+  }
+  if (progress != null) {
+    progress.setText(FindBundle.message("find.progress.search.completed"));
+  }
+}
