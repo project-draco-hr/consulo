@@ -1,49 +1,50 @@
 {
-  final boolean askBeforeHotswap=myAskBeforeHotswap;
+  final boolean shouldAskBeforeHotswap=myAskBeforeHotswap;
   myAskBeforeHotswap=true;
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-  final Runnable thread=new Runnable(){
+  final String runHotswap=DebuggerSettings.getInstance().RUN_HOTSWAP_AFTER_COMPILE;
+  if (shouldAskBeforeHotswap && DebuggerSettings.RUN_HOTSWAP_NEVER.equals(runHotswap)) {
+    return;
+  }
+  final HotSwapProgressImpl findClassesProgress=new HotSwapProgressImpl(myProject);
+  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
     public void run(){
-      final HashMap<DebuggerSession,HashMap<String,HotSwapFile>> modifiedClasses=getModifiedClasses(sessions);
+      final Map<DebuggerSession,Map<String,HotSwapFile>> modifiedClasses=getModifiedClasses(findClassesProgress,sessions);
+      final Application application=ApplicationManager.getApplication();
       if (modifiedClasses.isEmpty()) {
-        final Application application=ApplicationManager.getApplication();
         application.invokeLater(new Runnable(){
           public void run(){
-            WindowManager.getInstance().getStatusBar(myProject).setInfo(DebuggerBundle.message("status.hotswap.uptodate"));
+            final String message=DebuggerBundle.message("status.hotswap.uptodate");
+            ToolWindowManager.getInstance(myProject).notifyByBalloon(ToolWindowId.DEBUG,MessageType.INFO,message,Messages.getInformationIcon(),null);
+            WindowManager.getInstance().getStatusBar(myProject).setInfo(message);
           }
         }
-,application.getDefaultModalityState());
+,ModalityState.NON_MODAL);
         return;
       }
-      final HashMap<DebuggerSession,HashMap<String,HotSwapFile>> classesToReload=new HashMap<DebuggerSession,HashMap<String,HotSwapFile>>();
-      if (askBeforeHotswap) {
-        String runHotswap=DebuggerSettings.getInstance().RUN_HOTSWAP_AFTER_COMPILE;
-        if (DebuggerSettings.RUN_HOTSWAP_ALWAYS.equals(runHotswap)) {
-          classesToReload.putAll(modifiedClasses);
-        }
- else         if (DebuggerSettings.RUN_HOTSWAP_NEVER.equals(runHotswap)) {
-        }
- else {
-          ApplicationManager.getApplication().invokeAndWait(new Runnable(){
-            public void run(){
-              RunHotswapDialog dialog=new RunHotswapDialog(myProject,sessions);
-              dialog.show();
-              if (dialog.isOK()) {
-                for (                DebuggerSession debuggerSession : dialog.getSessionsToReload()) {
-                  classesToReload.put(debuggerSession,modifiedClasses.get(debuggerSession));
-                }
+      application.invokeLater(new Runnable(){
+        public void run(){
+          if (shouldAskBeforeHotswap && !DebuggerSettings.RUN_HOTSWAP_ALWAYS.equals(runHotswap)) {
+            final RunHotswapDialog dialog=new RunHotswapDialog(myProject,sessions);
+            dialog.show();
+            if (!dialog.isOK()) {
+              return;
+            }
+            modifiedClasses.keySet().retainAll(dialog.getSessionsToReload());
+          }
+          if (modifiedClasses.size() > 0) {
+            final HotSwapProgressImpl progress=new HotSwapProgressImpl(myProject);
+            application.executeOnPooledThread(new Runnable(){
+              public void run(){
+                reloadModifiedClasses(modifiedClasses,progress);
               }
             }
+);
           }
-,ApplicationManager.getApplication().getDefaultModalityState());
         }
       }
- else {
-        classesToReload.putAll(modifiedClasses);
-      }
-      reloadModifiedClasses(classesToReload);
+,ModalityState.NON_MODAL);
     }
   }
-;
-  ApplicationManager.getApplication().executeOnPooledThread(thread);
+);
 }
