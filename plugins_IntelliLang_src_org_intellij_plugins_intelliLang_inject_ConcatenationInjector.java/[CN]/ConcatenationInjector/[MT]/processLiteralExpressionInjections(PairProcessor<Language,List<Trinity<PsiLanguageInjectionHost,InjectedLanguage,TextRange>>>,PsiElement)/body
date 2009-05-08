@@ -1,55 +1,17 @@
 {
-  if (operands.length == 0)   return;
-  final PsiElement firstOperand=operands[0];
-  final PsiElement topBlock=PsiUtil.getTopLevelEnclosingCodeBlock(firstOperand,null);
-  final LocalSearchScope searchScope=new LocalSearchScope(new PsiElement[]{topBlock instanceof PsiCodeBlock ? topBlock : firstOperand.getContainingFile()},"",true);
-  final THashSet<PsiModifierListOwner> visitedVars=new THashSet<PsiModifierListOwner>();
-  final LinkedList<PsiElement> places=new LinkedList<PsiElement>();
-  places.add(firstOperand);
-  boolean unparsable=false;
-  while (!places.isEmpty()) {
-    final PsiElement curPlace=places.removeFirst();
-    final PsiModifierListOwner owner=AnnotationUtilEx.getAnnotatedElementFor(curPlace,AnnotationUtilEx.LookupType.PREFER_CONTEXT);
-    if (owner == null)     continue;
-    if (processAnnotationInjections(owner,processor,operands))     return;
-    final PsiMethod psiMethod;
-    final Trinity<String,Integer,Integer> trin;
-    if (owner instanceof PsiParameter) {
-      psiMethod=PsiTreeUtil.getParentOfType(owner,PsiMethod.class,false);
-      final PsiParameterList parameterList=psiMethod == null ? null : psiMethod.getParameterList();
-      if (parameterList == null || parameterList != owner.getParent())       continue;
-      trin=Trinity.create(psiMethod.getName(),parameterList.getParametersCount(),parameterList.getParameterIndex((PsiParameter)owner));
-    }
- else     if (owner instanceof PsiMethod) {
-      psiMethod=(PsiMethod)owner;
-      trin=Trinity.create(psiMethod.getName(),psiMethod.getParameterList().getParametersCount(),-1);
-    }
- else     if (myInjectionConfiguration.isResolveReferences() && owner instanceof PsiVariable && visitedVars.add(owner)) {
-      final PsiVariable variable=(PsiVariable)owner;
-      for (      PsiReference psiReference : ReferencesSearch.search(variable,searchScope).findAll()) {
-        final PsiElement element=psiReference.getElement();
-        if (element instanceof PsiExpression) {
-          final PsiExpression refExpression=(PsiExpression)element;
-          places.add(refExpression);
-          if (!unparsable) {
-            unparsable=checkUnparsableReference(refExpression);
+  processLiteralExpressionInjectionsInner(myInjectionConfiguration,new Processor<Info>(){
+    public boolean process(    final Info info){
+      if (processAnnotationInjections(info.owner,processor,operands))       return false;
+      for (      MethodParameterInjection injection : info.injections) {
+        if (injection.isApplicable(info.method)) {
+          processInjectionWithContext(info.unparsable,injection,processor,operands);
+          if (injection.isTerminal()) {
+            return false;
           }
         }
       }
-      continue;
-    }
- else {
-      continue;
-    }
-    final Collection<MethodParameterInjection> injections=getMethodCache().get(trin);
-    if (injections == null)     return;
-    for (    MethodParameterInjection injection : injections) {
-      if (injection.isApplicable(psiMethod)) {
-        processInjectionWithContext(unparsable,injection,processor,operands);
-        if (injection.isTerminal()) {
-          return;
-        }
-      }
+      return true;
     }
   }
+,operands);
 }
