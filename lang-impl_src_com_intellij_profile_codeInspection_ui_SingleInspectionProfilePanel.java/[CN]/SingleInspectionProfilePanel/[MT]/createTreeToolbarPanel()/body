@@ -3,16 +3,6 @@
   DefaultActionGroup actions=new DefaultActionGroup();
   actions.add(actionManager.createExpandAllAction(myTreeExpander,myTree));
   actions.add(actionManager.createCollapseAllAction(myTreeExpander,myTree));
-  actions.add(new ToggleAction(InspectionsBundle.message("inspection.tools.action.show.global.inspections.text"),InspectionsBundle.message("inspection.tools.action.show.global.inspections.description"),SHOW_INSPECTION_SETTINGS){
-    public boolean isSelected(    AnActionEvent e){
-      return !myShowInspections;
-    }
-    public void setSelected(    AnActionEvent e,    boolean state){
-      myShowInspections=!state;
-      filterTree(myProfileFilter.getFilter());
-    }
-  }
-);
   actions.add(new AnAction(CommonBundle.message("button.reset.to.default"),CommonBundle.message("button.reset.to.default"),IconLoader.getIcon("/actions/reset-to-default.png")){
 {
       registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_R,InputEvent.CTRL_MASK)),myTree);
@@ -34,65 +24,44 @@
     }
   }
 );
-  actions.add(ActionManager.getInstance().getAction("InspectionProfilePanelToolbar"));
   actions.addSeparator();
-  actions.add(new AnAction("Add","Add",Icons.ADD_ICON){
+  actions.add(new MyAddScopeAction());
+  actions.add(new AnAction("Delete","Delete",Icons.DELETE_ICON){
+{
+      registerCustomShortcutSet(CommonShortcuts.DELETE,myTree);
+    }
     @Override public void update(    AnActionEvent e){
       final Presentation presentation=e.getPresentation();
       presentation.setEnabled(false);
-      if (mySelectedProfile == null)       return;
       final MyTreeNode[] nodes=myTree.getSelectedNodes(MyTreeNode.class,null);
       if (nodes.length > 0) {
-        final MyTreeNode node=nodes[0];
-        if (node.getScope() == null && mySelectedProfile.getProfileManager().getScopesManager().getScopes().length > 0) {
-          presentation.setEnabled(true);
+        for (        MyTreeNode node : nodes) {
+          if (node.getScope() == null || node.isByDefault())           return;
         }
+        presentation.setEnabled(true);
       }
     }
     @Override public void actionPerformed(    AnActionEvent e){
       final MyTreeNode[] nodes=myTree.getSelectedNodes(MyTreeNode.class,null);
-      final MyTreeNode node=nodes[0];
-      final Descriptor descriptor=node.getDesriptor();
-      if (descriptor != null) {
-        final InspectionProfileEntry tool=descriptor.getTool();
-        final ScopeToolState scopeToolState=mySelectedProfile.addScope(tool,mySelectedProfile.getProfileManager().getScopesManager().getScopes()[0],descriptor.getLevel(),tool.isEnabledByDefault());
-        final Descriptor addedDescriptor=new Descriptor(scopeToolState,mySelectedProfile);
-        if (node.getChildCount() == 0) {
-          node.add(new MyTreeNode(descriptor,DefaultScopesProvider.getAllScope(),true,descriptor.isEnabled(),true,false));
+      for (      MyTreeNode node : nodes) {
+        final Descriptor descriptor=node.getDesriptor();
+        LOG.assertTrue(descriptor != null);
+        final MyTreeNode parent=(MyTreeNode)node.getParent();
+        final HighlightDisplayKey key=descriptor.getKey();
+        if (parent.getChildCount() <= 2) {
+          mySelectedProfile.removeAllScopes(key.toString());
+          parent.removeAllChildren();
+          parent.setInspectionNode(true);
+          parent.setByDefault(true);
         }
-        node.insert(new MyTreeNode(addedDescriptor,scopeToolState.getScope(),tool.isEnabledByDefault(),true,false),0);
-        ((DefaultTreeModel)myTree.getModel()).reload(node);
+ else {
+          mySelectedProfile.removeScope(key.toString(),parent.getIndex(node));
+          node.removeFromParent();
+        }
+        ((DefaultTreeModel)myTree.getModel()).reload(parent);
+        myTree.setSelectionPath(new TreePath(parent.getPath()));
         myTree.revalidate();
       }
-    }
-  }
-);
-  actions.add(new AnAction("Delete","Delete",Icons.DELETE_ICON){
-    @Override public void update(    AnActionEvent e){
-      final Presentation presentation=e.getPresentation();
-      presentation.setEnabled(false);
-      final MyTreeNode[] nodes=myTree.getSelectedNodes(MyTreeNode.class,null);
-      if (nodes.length > 0) {
-        final MyTreeNode treeNode=nodes[0];
-        if (treeNode.getScope() != null) {
-          presentation.setEnabled(true);
-        }
-      }
-    }
-    @Override public void actionPerformed(    AnActionEvent e){
-      final MyTreeNode[] nodes=myTree.getSelectedNodes(MyTreeNode.class,null);
-      final MyTreeNode node=nodes[0];
-      final Descriptor descriptor=node.getDesriptor();
-      final TreeNode parent=node.getParent();
-      if (node.isByDefault()) {
-        mySelectedProfile.removeAllScopes(descriptor.getKey().toString());
-      }
- else {
-        mySelectedProfile.removeScope(descriptor.getKey().toString(),parent.getIndex(node));
-      }
-      node.removeFromParent();
-      ((DefaultTreeModel)myTree.getModel()).reload(parent);
-      myTree.revalidate();
     }
   }
 );
@@ -120,6 +89,7 @@
       node.removeFromParent();
       ((MyTreeNode)parent).insert(node,index - 1);
       ((DefaultTreeModel)myTree.getModel()).reload(parent);
+      myTree.setSelectionPath(new TreePath(node.getPath()));
       myTree.revalidate();
     }
   }
@@ -148,6 +118,7 @@
       node.removeFromParent();
       ((MyTreeNode)parent).insert(node,index + 1);
       ((DefaultTreeModel)myTree.getModel()).reload(parent);
+      myTree.setSelectionPath(new TreePath(node.getPath()));
       myTree.revalidate();
     }
   }
