@@ -17,36 +17,34 @@
       String path=root + "/" + GitUtil.unescapePath(relative);
       myUpdates.getGroupById(FileGroup.MERGED_WITH_CONFLICT_ID).add(path);
     }
-    h=new GitSimpleHandler(myProject,myRoot,GitHandler.DIFF);
-    h.setSilent(true);
-    h.setNoSSH(true);
-    h.addParameters("--name-status","--diff-filter=ADMRUX",myStart.getRev());
-    for (    String line : h.run().split("\n")) {
-      if (line.length() == 0) {
-        continue;
+    GitRevisionNumber currentHead=GitRevisionNumber.resolve(myProject,myRoot,"HEAD");
+    TreeSet<String> updated=new TreeSet<String>();
+    TreeSet<String> created=new TreeSet<String>();
+    TreeSet<String> removed=new TreeSet<String>();
+    if (currentHead.equals(myStart)) {
+      File mergeHeadsFile=new File(root,".git/MERGE_HEAD");
+      try {
+        String mergeHeads=new String(FileUtil.loadFileText(mergeHeadsFile,GitConfigUtil.UTF8_ENCODING));
+        for (StringScanner s=new StringScanner(mergeHeads); s.hasMoreData(); ) {
+          String head=s.line();
+          if (head.length() == 0) {
+            continue;
+          }
+          processDiff(root,updated,created,removed,myStart.getRev() + "..." + head);
+        }
       }
-      String[] tk=line.split("[\t ]+");
-      final String relative=tk[tk.length - 1];
-      if (myUnmergedPaths.contains(relative)) {
-        continue;
+ catch (      IOException e) {
+        exceptions.add(new VcsException("Unable to read the file " + mergeHeadsFile + ": "+ e.getMessage(),e));
       }
-      String path=root + "/" + GitUtil.unescapePath(relative);
-switch (tk[0].charAt(0)) {
-case 'M':
-        myUpdates.getGroupById(FileGroup.UPDATED_ID).add(path);
-      break;
-case 'A':
-    myUpdates.getGroupById(FileGroup.CREATED_ID).add(path);
-  break;
-case 'D':
-myUpdates.getGroupById(FileGroup.REMOVED_FROM_REPOSITORY_ID).add(path);
-break;
-default :
-throw new IllegalStateException("Unexpected status: " + line);
-}
-}
-}
- catch (VcsException e) {
-exceptions.add(e);
-}
+    }
+ else {
+      processDiff(root,updated,created,removed,myStart.getRev() + "..HEAD");
+    }
+    addAll(FileGroup.UPDATED_ID,updated);
+    addAll(FileGroup.CREATED_ID,created);
+    addAll(FileGroup.REMOVED_FROM_REPOSITORY_ID,removed);
+  }
+ catch (  VcsException e) {
+    exceptions.add(e);
+  }
 }
