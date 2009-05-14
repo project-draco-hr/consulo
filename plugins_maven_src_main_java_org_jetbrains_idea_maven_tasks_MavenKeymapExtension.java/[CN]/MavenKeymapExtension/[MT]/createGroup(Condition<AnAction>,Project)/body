@@ -1,22 +1,47 @@
 {
-  KeymapGroup result=KeymapGroupFactory.getInstance().createGroup(TasksBundle.message("maven.event.action.group.name"),CLOSED_ICON,OPEN_ICON);
+  KeymapGroup result=KeymapGroupFactory.getInstance().createGroup(TasksBundle.message("maven.event.action.group.name"),MavenProjectsStructure.OPEN_PHASES_ICON,MavenProjectsStructure.CLOSED_PHASES_ICON);
   if (project == null)   return result;
+  Comparator<MavenProject> projectComparator=new Comparator<MavenProject>(){
+    public int compare(    MavenProject o1,    MavenProject o2){
+      return o1.getDisplayName().compareToIgnoreCase(o2.getDisplayName());
+    }
+  }
+;
+  Map<MavenProject,Set<Pair<String,String>>> projectToActionsMapping=new TreeMap<MavenProject,Set<Pair<String,String>>>(projectComparator);
   ActionManager actionManager=ActionManager.getInstance();
-  String[] actionIds=actionManager.getActionIds(getActionPrefix(project,null));
-  Arrays.sort(actionIds);
-  Map<MavenProject,KeymapGroup> projectToGroupMapping=new THashMap<MavenProject,KeymapGroup>();
-  for (  String eachId : actionIds) {
+  for (  String eachId : actionManager.getActionIds(getActionPrefix(project,null))) {
     AnAction eachAction=actionManager.getAction(eachId);
     if (!(eachAction instanceof MavenGoalAction))     continue;
     if (condition != null && !condition.value(actionManager.getActionOrStub(eachId)))     continue;
-    MavenProject mavenProject=((MavenGoalAction)eachAction).getMavenProject();
-    KeymapGroup projectGroup=projectToGroupMapping.get(mavenProject);
-    if (projectGroup == null) {
-      projectGroup=KeymapGroupFactory.getInstance().createGroup(mavenProject.getDisplayName());
-      projectToGroupMapping.put(mavenProject,projectGroup);
-      result.addGroup(projectGroup);
+    MavenGoalAction mavenAction=(MavenGoalAction)eachAction;
+    MavenProject mavenProject=mavenAction.getMavenProject();
+    Set<Pair<String,String>> actions=projectToActionsMapping.get(mavenProject);
+    if (actions == null) {
+      final List<String> projectGoals=collectGoals(mavenProject);
+      actions=new TreeSet<Pair<String,String>>(new Comparator<Pair<String,String>>(){
+        public int compare(        Pair<String,String> o1,        Pair<String,String> o2){
+          String goal1=o1.getFirst();
+          String goal2=o2.getFirst();
+          int index1=projectGoals.indexOf(goal1);
+          int index2=projectGoals.indexOf(goal2);
+          if (index1 == index2)           return goal1.compareToIgnoreCase(goal2);
+          return (index1 < index2 ? -1 : 1);
+        }
+      }
+);
+      projectToActionsMapping.put(mavenProject,actions);
     }
-    projectGroup.addActionId(eachId);
+    actions.add(Pair.create(mavenAction.getGoal(),eachId));
+  }
+  for (  Map.Entry<MavenProject,Set<Pair<String,String>>> each : projectToActionsMapping.entrySet()) {
+    MavenProject mavenProject=each.getKey();
+    Set<Pair<String,String>> goalsToActionIds=each.getValue();
+    if (goalsToActionIds.isEmpty())     continue;
+    KeymapGroup group=KeymapGroupFactory.getInstance().createGroup(mavenProject.getDisplayName(),MavenProjectsStructure.OPEN_MODULES_ICON,MavenProjectsStructure.CLOSED_MODULES_ICON);
+    result.addGroup(group);
+    for (    Pair<String,String> eachGoalToActionId : goalsToActionIds) {
+      group.addActionId(eachGoalToActionId.getSecond());
+    }
   }
   return result;
 }
