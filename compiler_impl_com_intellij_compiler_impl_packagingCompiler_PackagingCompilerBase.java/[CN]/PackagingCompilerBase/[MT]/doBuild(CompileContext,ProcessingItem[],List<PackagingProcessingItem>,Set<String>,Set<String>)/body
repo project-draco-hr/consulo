@@ -1,0 +1,73 @@
+{
+  if (LOG.isDebugEnabled()) {
+    int num=Math.min(100,items.length);
+    LOG.debug("Files to process (" + num + " of "+ items.length+ "):");
+    for (int i=0; i < num; i++) {
+      LOG.debug(items[i].getFile().getPath());
+    }
+  }
+  final DeploymentUtil deploymentUtil=DeploymentUtil.getInstance();
+  final FileFilter fileFilter=new IgnoredFileFilter();
+  final C builderContext=context.getUserData(myBuilderContextKey);
+  Set<JarInfo> changedJars=new THashSet<JarInfo>();
+  for (  String deletedJar : deletedJars) {
+    final Collection<JarInfo> infos=builderContext.getJarInfos(deletedJar);
+    if (infos != null) {
+      changedJars.addAll(infos);
+    }
+  }
+  beforeBuildStarted(builderContext);
+  try {
+    for (    ProcessingItem item0 : items) {
+      if (item0 instanceof MockProcessingItem)       continue;
+      context.getProgressIndicator().checkCanceled();
+      PackagingProcessingItem item=(PackagingProcessingItem)item0;
+      final List<DestinationInfo> destinations=item.getDestinations();
+      final File fromFile=VfsUtil.virtualToIoFile(item.getFile());
+      for (      DestinationInfo destination : destinations) {
+        if (destination instanceof ExplodedDestinationInfo) {
+          final ExplodedDestinationInfo explodedDestination=(ExplodedDestinationInfo)destination;
+          File toFile=new File(FileUtil.toSystemDependentName(explodedDestination.getOutputPath()));
+          if (fromFile.exists()) {
+            deploymentUtil.copyFile(fromFile,toFile,context,writtenPaths,fileFilter);
+          }
+          onFileCopied(builderContext,explodedDestination);
+        }
+ else {
+          changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+        }
+      }
+      processedItems.add(item);
+    }
+    createManifestFiles(builderContext.getManifestFiles());
+    JarsBuilder builder=new JarsBuilder(changedJars,fileFilter,context);
+    final boolean processed=builder.buildJars(writtenPaths);
+    if (!processed) {
+      return false;
+    }
+    Set<VirtualFile> recompiledSources=new HashSet<VirtualFile>();
+    for (    JarInfo info : builder.getJarsToBuild()) {
+      for (      Pair<String,VirtualFile> pair : info.getPackedFiles()) {
+        recompiledSources.add(pair.getSecond());
+      }
+    }
+    for (    PackagingProcessingItem processedItem : processedItems) {
+      recompiledSources.remove(processedItem.getFile());
+    }
+    for (    VirtualFile source : recompiledSources) {
+      PackagingProcessingItem item=builderContext.getItemBySource(source);
+      LOG.assertTrue(item != null,source);
+      processedItems.add(item);
+    }
+    onBuildFinished(builderContext,builder);
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Exception e) {
+    LOG.info(e);
+    context.addMessage(CompilerMessageCategory.ERROR,e.getLocalizedMessage(),null,-1,-1);
+    return false;
+  }
+  return true;
+}
