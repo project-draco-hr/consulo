@@ -1,43 +1,22 @@
 {
   if (context == null || !context.isValid())   return;
-  String packagePrefix=getPackagePrefix(context,offset);
-  final PsiManager manager=context.getManager();
+  final String packagePrefix=getPackagePrefix(context,offset);
   final Set<String> qnames=new THashSet<String>();
-  final JavaPsiFacade facade=JavaPsiFacade.getInstance(manager.getProject());
-  final PsiShortNamesCache cache=facade.getShortNamesCache();
   final GlobalSearchScope scope=filterByScope ? context.getContainingFile().getResolveScope() : GlobalSearchScope.allScope(context.getProject());
-  final String[] names=ApplicationManager.getApplication().runReadAction(new Computable<String[]>(){
-    public String[] compute(){
-      return cache.getAllClassNames();
+  final PrefixMatcher prefixMatcher=set.getPrefixMatcher();
+  final boolean lookingForAnnotations=PsiJavaPatterns.psiElement().afterLeaf("@").accepts(context);
+  AllClassesSearch.search(scope,context.getProject(),new Condition<String>(){
+    public boolean value(    String s){
+      return prefixMatcher.prefixMatches(s);
     }
   }
-);
-  Arrays.sort(names,new Comparator<String>(){
-    public int compare(    final String o1,    final String o2){
-      return o1.compareToIgnoreCase(o2);
-    }
-  }
-);
-  boolean lookingForAnnotations=false;
-  final PsiElement prevSibling=context.getParent().getPrevSibling();
-  if (prevSibling instanceof PsiJavaToken && ((PsiJavaToken)prevSibling).getTokenType() == JavaTokenType.AT) {
-    lookingForAnnotations=true;
-  }
-  final PrefixMatcher matcher=set.getPrefixMatcher();
-  for (  final String name : names) {
-    if (!matcher.prefixMatches(name))     continue;
-    ProgressManager.getInstance().checkCanceled();
-    final PsiClass[] classes=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass[]>(){
-      public PsiClass[] compute(){
-        return cache.getClassesByName(name,scope);
-      }
-    }
-);
-    for (    PsiClass psiClass : classes) {
-      ProgressManager.getInstance().checkCanceled();
+).forEach(new Processor<PsiClass>(){
+    public boolean process(    PsiClass psiClass){
       if (isSuitable(context,packagePrefix,qnames,lookingForAnnotations,psiClass,filterByScope)) {
         set.addElement(createLookupItem(psiClass));
       }
+      return true;
     }
   }
+);
 }

@@ -1,6 +1,15 @@
 {
   if (baseClass instanceof PsiAnonymousClass)   return true;
   if (isFinal(baseClass))   return true;
+  final String qname=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+    public String compute(){
+      return baseClass.getQualifiedName();
+    }
+  }
+);
+  if (CommonClassNames.JAVA_LANG_OBJECT.equals(qname)) {
+    return AllClassesSearch.search(searchScope,baseClass.getProject(),parameters.getNameCondition()).forEach(consumer);
+  }
   final Ref<PsiClass> currentBase=Ref.create(null);
   final Stack<PsiClass> stack=new Stack<PsiClass>();
   final Set<PsiClass> processed=new HashSet<PsiClass>();
@@ -9,7 +18,7 @@
       final Ref<Boolean> result=new Ref<Boolean>();
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         public void run(){
-          if (checkInheritance || checkDeep && !(candidate instanceof PsiAnonymousClass)) {
+          if (parameters.isCheckInheritance() || parameters.isCheckDeep() && !(candidate instanceof PsiAnonymousClass)) {
             if (!candidate.isInheritor(currentBase.get(),false)) {
               result.set(true);
               return;
@@ -20,14 +29,15 @@
               result.set(consumer.process(candidate));
             }
  else {
-              if (!consumer.process(candidate))               result.set(false);
+              final String name=candidate.getName();
+              if (name != null && parameters.getNameCondition().value(name) && !consumer.process(candidate))               result.set(false);
             }
           }
         }
       }
 );
-      if (!result.isNull())       return result.get();
-      if (checkDeep && !(candidate instanceof PsiAnonymousClass) && !isFinal(candidate)) {
+      if (!result.isNull())       return result.get().booleanValue();
+      if (parameters.isCheckDeep() && !(candidate instanceof PsiAnonymousClass) && !isFinal(candidate)) {
         stack.push(candidate);
       }
       return true;
@@ -41,7 +51,7 @@
     final PsiClass psiClass=stack.pop();
     if (!processed.add(psiClass))     continue;
     currentBase.set(psiClass);
-    if (!DirectClassInheritorsSearch.search(psiClass,scope,includeAnonymous).forEach(processor))     return false;
+    if (!DirectClassInheritorsSearch.search(psiClass,scope,parameters.isIncludeAnonymous()).forEach(processor))     return false;
   }
   return true;
 }
