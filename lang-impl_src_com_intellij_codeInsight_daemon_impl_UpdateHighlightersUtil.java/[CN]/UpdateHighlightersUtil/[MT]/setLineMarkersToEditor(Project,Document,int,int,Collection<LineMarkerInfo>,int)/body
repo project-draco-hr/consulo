@@ -1,14 +1,15 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
-  List<LineMarkerInfo> array=new ArrayList<LineMarkerInfo>();
   List<LineMarkerInfo> oldMarkers=DaemonCodeAnalyzerImpl.getLineMarkers(document,project);
+  List<LineMarkerInfo> array=new ArrayList<LineMarkerInfo>(oldMarkers == null ? markers.size() : oldMarkers.size());
   MarkupModel markupModel=document.getMarkupModel(project);
+  RangeHighlightersToReuse toReuse=new RangeHighlightersToReuse();
   if (oldMarkers != null) {
     for (    LineMarkerInfo info : oldMarkers) {
       RangeHighlighter highlighter=info.highlighter;
       boolean toRemove=!highlighter.isValid() || info.updatePass == group && startOffset <= highlighter.getStartOffset() && (highlighter.getEndOffset() < endOffset || highlighter.getEndOffset() == document.getTextLength());
       if (toRemove) {
-        markupModel.removeHighlighter(highlighter);
+        toReuse.add(highlighter);
       }
  else {
         array.add(info);
@@ -22,13 +23,26 @@
     LOG.assertTrue(textRange != null,element);
     TextRange elementRange=InjectedLanguageManager.getInstance(project).injectedToHost(element,textRange);
     if (startOffset <= elementRange.getStartOffset() && elementRange.getEndOffset() <= endOffset) {
-      RangeHighlighter marker=markupModel.addRangeHighlighter(info.startOffset,info.endOffset,HighlighterLayer.ADDITIONAL_SYNTAX,info.textAttributesKey != null ? colorsScheme.getAttributes(info.textAttributesKey) : null,HighlighterTargetArea.EXACT_RANGE);
-      marker.setGutterIconRenderer(info.createGutterRenderer());
-      marker.setLineSeparatorColor(info.separatorColor);
-      marker.setLineSeparatorPlacement(info.separatorPlacement);
+      RangeHighlighter marker=toReuse.reuseHighlighterAt(info.startOffset,info.endOffset);
+      if (marker == null) {
+        marker=markupModel.addRangeHighlighter(info.startOffset,info.endOffset,HighlighterLayer.ADDITIONAL_SYNTAX,info.textAttributesKey != null ? colorsScheme.getAttributes(info.textAttributesKey) : null,HighlighterTargetArea.EXACT_RANGE);
+      }
+      GutterIconRenderer renderer=info.createGutterRenderer();
+      if (!Comparing.equal(marker.getGutterIconRenderer() == null ? null : marker.getGutterIconRenderer().getIcon(),renderer == null ? null : renderer.getIcon())) {
+        marker.setGutterIconRenderer(renderer);
+      }
+      if (!Comparing.equal(marker.getLineSeparatorColor(),info.separatorColor)) {
+        marker.setLineSeparatorColor(info.separatorColor);
+      }
+      if (!Comparing.equal(marker.getLineSeparatorPlacement(),info.separatorPlacement)) {
+        marker.setLineSeparatorPlacement(info.separatorPlacement);
+      }
       info.highlighter=marker;
       array.add(info);
     }
+  }
+  for (  RangeHighlighter highlighter : toReuse.forAll()) {
+    markupModel.removeHighlighter(highlighter);
   }
   DaemonCodeAnalyzerImpl.setLineMarkers(document,array,project);
 }
