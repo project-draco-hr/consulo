@@ -1,24 +1,40 @@
 {
-  final AntConfigurationBase antConfiguration=AntConfigurationBase.getInstance(myProject);
-  for (  final ExecutionEvent event : antConfiguration.getEventsForTarget(myTarget)) {
-    if (event instanceof ExecuteBeforeRunEvent) {
-      antConfiguration.clearTargetForEvent(event);
+  final RunManagerImpl runManager=(RunManagerImpl)RunManagerEx.getInstanceEx(myProject);
+  for (Enumeration nodes=myRoot.depthFirstEnumeration(); nodes.hasMoreElements(); ) {
+    final DefaultMutableTreeNode node=(DefaultMutableTreeNode)nodes.nextElement();
+    final Descriptor descriptor=(Descriptor)node.getUserObject();
+    final boolean isChecked=descriptor.isChecked();
+    final String targetName;
+    final String antfileUrl;
+    if (isChecked) {
+      final VirtualFile vFile=myTarget.getModel().getBuildFile().getVirtualFile();
+      targetName=vFile != null ? myTarget.getName() : null;
+      antfileUrl=vFile != null ? vFile.getUrl() : null;
     }
-  }
-  Enumeration nodes=myRoot.depthFirstEnumeration();
-  while (nodes.hasMoreElements()) {
-    DefaultMutableTreeNode node=(DefaultMutableTreeNode)nodes.nextElement();
-    Descriptor descriptor=(Descriptor)node.getUserObject();
-    if (!descriptor.isChecked())     continue;
+ else {
+      targetName=null;
+      antfileUrl=null;
+    }
     if (descriptor instanceof ConfigurationTypeDescriptor) {
-      ConfigurationTypeDescriptor configurationTypeDescriptor=(ConfigurationTypeDescriptor)descriptor;
-      ExecuteBeforeRunEvent event=new ExecuteBeforeRunEvent(configurationTypeDescriptor.getConfigurationFactory());
-      antConfiguration.setTargetForEvent(myFile,myTarget.getName(),event);
+      final ConfigurationTypeDescriptor configurationTypeDescriptor=(ConfigurationTypeDescriptor)descriptor;
+      for (      ConfigurationFactory factory : configurationTypeDescriptor.getConfigurationType().getConfigurationFactories()) {
+        final RunnerAndConfigurationSettingsImpl settings=runManager.getConfigurationTemplate(factory);
+        final AntBeforeRunTask task=runManager.getBeforeRunTask(settings.getConfiguration(),AntBeforeRunTaskProvider.ID);
+        if (isChecked || task.isRunningTarget(myTarget)) {
+          task.setEnabled(isChecked);
+          task.setAntFileUrl(antfileUrl);
+          task.setTargetName(targetName);
+        }
+      }
     }
  else     if (descriptor instanceof ConfigurationDescriptor) {
-      ConfigurationDescriptor configurationDescriptor=(ConfigurationDescriptor)descriptor;
-      ExecuteBeforeRunEvent event=new ExecuteBeforeRunEvent(configurationDescriptor.getConfiguration());
-      antConfiguration.setTargetForEvent(myFile,myTarget.getName(),event);
+      final ConfigurationDescriptor configurationDescriptor=(ConfigurationDescriptor)descriptor;
+      final AntBeforeRunTask task=runManager.getBeforeRunTask(configurationDescriptor.getConfiguration(),AntBeforeRunTaskProvider.ID);
+      if (isChecked || task.isRunningTarget(myTarget)) {
+        task.setEnabled(isChecked);
+        task.setAntFileUrl(antfileUrl);
+        task.setTargetName(targetName);
+      }
     }
   }
   close(OK_EXIT_CODE);
