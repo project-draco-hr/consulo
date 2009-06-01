@@ -1,55 +1,58 @@
 {
   startElement(expression);
   final PsiExpression lOperand=expression.getLOperand();
-  lOperand.accept(this);
-  IElementType signTokenType=expression.getOperationSign().getTokenType();
-  if (signTokenType == JavaTokenType.ANDAND) {
-    if (myEnabledShortCircuit) {
-      final Object exprValue=myConstantEvaluationHelper.computeConstantExpression(lOperand);
-      if (exprValue instanceof Boolean) {
-        myCurrentFlow.setConstantConditionOccurred(true);
-      }
-      if (calculateConstantExpression(expression) && exprValue instanceof Boolean) {
-        if (!((Boolean)exprValue).booleanValue()) {
-          myCurrentFlow.addInstruction(new GoToInstruction(0,myEndJumpRoles.get(myEndJumpRoles.size() - 1)));
-          addElementOffsetLater(myEndStatementStack.peekElement(),myEndStatementStack.peekAtStart());
-        }
-      }
- else {
-        myCurrentFlow.addInstruction(new ConditionalGoToInstruction(0,myEndJumpRoles.get(myEndJumpRoles.size() - 1),lOperand));
-        addElementOffsetLater(myEndStatementStack.peekElement(),myEndStatementStack.peekAtStart());
-      }
-    }
- else {
-      Instruction instruction=new ConditionalGoToInstruction(0,lOperand);
-      myCurrentFlow.addInstruction(instruction);
-      addElementOffsetLater(expression,false);
-    }
-  }
- else   if (signTokenType == JavaTokenType.OROR) {
-    if (myEnabledShortCircuit) {
-      final Object exprValue=myConstantEvaluationHelper.computeConstantExpression(lOperand);
-      if (exprValue instanceof Boolean) {
-        myCurrentFlow.setConstantConditionOccurred(true);
-      }
-      if (calculateConstantExpression(expression) && exprValue instanceof Boolean) {
-        if (((Boolean)exprValue).booleanValue()) {
-          myCurrentFlow.addInstruction(new GoToInstruction(0,myStartJumpRoles.get(myStartJumpRoles.size() - 1)));
-          addElementOffsetLater(myStartStatementStack.peekElement(),myStartStatementStack.peekAtStart());
-        }
-      }
- else {
-        myCurrentFlow.addInstruction(new ConditionalGoToInstruction(0,myStartJumpRoles.get(myStartJumpRoles.size() - 1),lOperand));
-        addElementOffsetLater(myStartStatementStack.peekElement(),myStartStatementStack.peekAtStart());
-      }
-    }
- else {
-      Instruction instruction=new ConditionalGoToInstruction(0,lOperand);
-      myCurrentFlow.addInstruction(instruction);
-      addElementOffsetLater(expression,false);
-    }
-  }
   final PsiExpression rOperand=expression.getROperand();
+  IElementType signTokenType=expression.getOperationSign().getTokenType();
+  if (signTokenType == JavaTokenType.ANDAND || signTokenType == JavaTokenType.OROR) {
+    if (myEnabledShortCircuit) {
+      Object exprValue=myConstantEvaluationHelper.computeConstantExpression(lOperand);
+      Boolean lvalue=null;
+      if (exprValue instanceof Boolean) {
+        myCurrentFlow.setConstantConditionOccurred(true);
+        lvalue=shouldCalculateConstantExpression(expression) ? (Boolean)exprValue : null;
+      }
+      exprValue=myConstantEvaluationHelper.computeConstantExpression(rOperand);
+      Boolean rvalue=null;
+      if (exprValue instanceof Boolean) {
+        myCurrentFlow.setConstantConditionOccurred(true);
+        rvalue=shouldCalculateConstantExpression(expression) ? (Boolean)exprValue : null;
+      }
+      Boolean doShortcut;
+      boolean shouldGenLOperand=true;
+      if (lvalue != null) {
+        doShortcut=lvalue.booleanValue() != (signTokenType == JavaTokenType.ANDAND);
+      }
+ else       if (rvalue != null && rvalue.booleanValue() != (signTokenType == JavaTokenType.ANDAND)) {
+        doShortcut=Boolean.TRUE;
+        shouldGenLOperand=false;
+      }
+ else {
+        doShortcut=null;
+      }
+      if (shouldGenLOperand) {
+        generateLOperand(lOperand,rOperand,signTokenType);
+      }
+      BranchingInstruction.Role role=signTokenType == JavaTokenType.ANDAND ? myEndJumpRoles.peek() : myStartJumpRoles.peek();
+      PsiElement gotoElement=signTokenType == JavaTokenType.ANDAND ? myEndStatementStack.peekElement() : myStartStatementStack.peekElement();
+      boolean gotoIsAtStart=signTokenType == JavaTokenType.ANDAND ? myEndStatementStack.peekAtStart() : myStartStatementStack.peekAtStart();
+      if (doShortcut == null) {
+        myCurrentFlow.addInstruction(new ConditionalGoToInstruction(0,role,lOperand));
+        addElementOffsetLater(gotoElement,gotoIsAtStart);
+      }
+ else       if (doShortcut.booleanValue()) {
+        myCurrentFlow.addInstruction(new GoToInstruction(0,role));
+        addElementOffsetLater(gotoElement,gotoIsAtStart);
+      }
+    }
+ else {
+      generateLOperand(lOperand,rOperand,signTokenType);
+      myCurrentFlow.addInstruction(new ConditionalGoToInstruction(0,lOperand));
+      addElementOffsetLater(expression,false);
+    }
+  }
+ else {
+    generateLOperand(lOperand,rOperand,signTokenType);
+  }
   if (rOperand != null) {
     rOperand.accept(this);
   }
