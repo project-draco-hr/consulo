@@ -1,33 +1,29 @@
 {
-  final VirtualFile[] files=remaining.toArray(new VirtualFile[remaining.size()]);
   DumbServiceImpl.getInstance(myProject).queueIndexUpdate(new Consumer<ProgressIndicator>(){
     public void consume(    final ProgressIndicator indicator){
+      final MyFileContentQueue queue=new MyFileContentQueue();
       try {
-        for (int i=0; i < files.length; i++) {
-          if (myProject != null && myProject.isDisposed())           return;
-          final VirtualFile file=files[i];
-          indicator.setFraction(((double)i) / files.length);
-          indicator.setText2(file.getPresentableUrl());
-          ApplicationManager.getApplication().runReadAction(new Runnable(){
-            public void run(){
-              indicator.checkCanceled();
-              if (myProject != null && myProject.isDisposed())               return;
-              if (!file.isValid())               return;
-              try {
-                processFile(new FileContent(file));
-              }
- catch (              NoProjectForFileException ignored) {
-              }
-catch (              Throwable e) {
-                LOG.error("Error while indexing " + file.getPresentableUrl() + "\n"+ "To reindex this file IDEA has to be restarted",e);
-                file.putUserData(DONT_INDEX_AGAIN_KEY,Boolean.TRUE);
-              }
-            }
+        final double count=remaining.size();
+        queue.queue(remaining,indicator);
+        final Consumer<VirtualFile> uiUpdater=new Consumer<VirtualFile>(){
+          final Set<VirtualFile> processed=new THashSet<VirtualFile>();
+          public void consume(          VirtualFile virtualFile){
+            indicator.checkCanceled();
+            indicator.setFraction(processed.size() / count);
+            processed.add(virtualFile);
+            indicator.setText2(virtualFile.getPresentableUrl());
           }
-);
+        }
+;
+        while (!myProject.isDisposed()) {
+          indicator.checkCanceled();
+          if (runUntilNextWriteAction(queue,uiUpdater)) {
+            break;
+          }
         }
       }
   finally {
+        queue.clear();
         updatingDone();
       }
     }
