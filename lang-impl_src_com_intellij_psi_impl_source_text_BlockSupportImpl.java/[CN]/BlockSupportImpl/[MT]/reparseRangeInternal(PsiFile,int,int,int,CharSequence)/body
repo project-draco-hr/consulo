@@ -5,48 +5,33 @@
   final CharTable charTable=fileImpl.getTreeElement().getCharTable();
   final int textLength=file.getTextLength() + lengthShift;
   final FileElement treeFileElement=fileImpl.getTreeElement();
-  if (true) {
+  if (treeFileElement.getElementType() instanceof ITemplateDataElementType) {
     makeFullParse(treeFileElement,newFileText,textLength,fileImpl);
     return;
   }
   final ASTNode leafAtStart=treeFileElement.findLeafElementAt(startOffset);
   final ASTNode leafAtEnd=treeFileElement.findLeafElementAt(endOffset);
-  ASTNode parent=leafAtStart != null && leafAtEnd != null ? TreeUtil.findCommonParent(leafAtStart,leafAtEnd) : treeFileElement;
+  ASTNode node=leafAtStart != null && leafAtEnd != null ? TreeUtil.findCommonParent(leafAtStart,leafAtEnd) : treeFileElement;
   Language baseLanguage=file.getViewProvider().getBaseLanguage();
-  int minErrorLevel=Integer.MAX_VALUE;
-  ASTNode bestReparseable=null;
-  ASTNode prevReparseable=null;
-  boolean theOnlyReparseable=false;
-  while (parent != null && !(parent instanceof FileElement)) {
-    IElementType elementType=parent.getElementType();
-    if (elementType instanceof IChameleonElementType) {
-      final TextRange textRange=parent.getTextRange();
-      final IChameleonElementType reparseable=(IChameleonElementType)elementType;
+  while (node != null && !(node instanceof FileElement)) {
+    IElementType elementType=node.getElementType();
+    if (elementType instanceof IReparseableElementType) {
+      final TextRange textRange=node.getTextRange();
+      final IReparseableElementType reparseable=(IReparseableElementType)elementType;
       if (reparseable.getLanguage() == baseLanguage) {
-        boolean languageChanged=false;
-        if (prevReparseable != null) {
-          languageChanged=prevReparseable.getElementType().getLanguage() != reparseable.getLanguage();
-        }
         CharSequence newTextStr=newFileText.subSequence(textRange.getStartOffset(),textRange.getStartOffset() + textRange.getLength() + lengthShift);
-        if (reparseable instanceof IErrorCounterChameleonElementType) {
-          int currentErrorLevel=((IErrorCounterChameleonElementType)reparseable).getErrorsCount(newTextStr,project);
-          if (currentErrorLevel == IErrorCounterChameleonElementType.FATAL_ERROR) {
-            prevReparseable=parent;
-          }
- else           if (Math.abs(currentErrorLevel) < Math.abs(minErrorLevel)) {
-            theOnlyReparseable=bestReparseable == null;
-            bestReparseable=parent;
-            minErrorLevel=currentErrorLevel;
-            if (languageChanged)             break;
+        if (reparseable.isParsable(newTextStr,project)) {
+          ASTNode chameleon=reparseable.createNode(newTextStr);
+          if (chameleon != null) {
+            DummyHolder holder=DummyHolderFactory.createHolder(fileImpl.getManager(),null,node.getPsi(),charTable);
+            holder.getTreeElement().rawAddChildren((TreeElement)chameleon);
+            mergeTrees(fileImpl,node,chameleon);
+            return;
           }
         }
       }
     }
-    parent=parent.getTreeParent();
+    node=node.getTreeParent();
   }
-  if (bestReparseable != null && !theOnlyReparseable) {
-  }
- else {
-    makeFullParse(parent,newFileText,textLength,fileImpl);
-  }
+  makeFullParse(node,newFileText,textLength,fileImpl);
 }
