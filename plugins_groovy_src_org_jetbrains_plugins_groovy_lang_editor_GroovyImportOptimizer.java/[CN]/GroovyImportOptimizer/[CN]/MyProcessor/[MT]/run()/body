@@ -5,6 +5,7 @@
   final Set<String> importedClasses=new LinkedHashSet<String>();
   final Set<String> staticallyImportedMembers=new LinkedHashSet<String>();
   final Set<GrImportStatement> usedImports=new HashSet<GrImportStatement>();
+  final Set<String> implicitlyImported=new LinkedHashSet<String>();
   myFile.accept(new GroovyRecursiveElementVisitor(){
     public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
       visitRefElement(refElement);
@@ -42,12 +43,7 @@
                 }
               }
  else {
-                if (element instanceof PsiClass) {
-                  importedName=((PsiClass)element).getQualifiedName();
-                }
- else                 if (element instanceof PsiMethod && ((PsiMethod)element).isConstructor()) {
-                  importedName=((PsiMethod)element).getContainingClass().getQualifiedName();
-                }
+                importedName=getTargetQualifiedName(element);
               }
             }
  else {
@@ -65,16 +61,17 @@
             }
           }
         }
- else         if (context == null && !(refElement.getParent() instanceof GrImportStatement) && element instanceof PsiClass) {
-          ContainerUtil.addIfNotNull(((PsiClass)element).getQualifiedName(),importedClasses);
+ else         if (context == null && !(refElement.getParent() instanceof GrImportStatement) && refElement.getQualifier() == null) {
+          final String qname=getTargetQualifiedName(element);
+          if (qname != null) {
+            implicitlyImported.add(qname);
+            importedClasses.add(qname);
+          }
         }
       }
     }
   }
 );
-  for (  final PsiClass psiClass : myFile.getClasses()) {
-    importedClasses.remove(psiClass.getQualifiedName());
-  }
   final GrImportStatement[] oldImports=myFile.getImportStatements();
   GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(myFile.getProject());
   ArrayList<GrImportStatement> aliased=new ArrayList<GrImportStatement>();
@@ -83,24 +80,15 @@
       aliased.add(factory.createImportStatementFromText(oldImport.getText()));
     }
   }
+  GrImportStatement[] newImports=prepare(importedClasses,staticallyImportedMembers,implicitlyImported);
+  for (  GrImportStatement aliasedImport : aliased) {
+    myFile.addImport(aliasedImport);
+  }
+  for (  GrImportStatement newImport : newImports) {
+    myFile.addImport(newImport);
+  }
+  myFile.removeImport(myFile.addImport(factory.createImportStatementFromText("import xxxx")));
   for (  GrImportStatement importStatement : oldImports) {
-    try {
-      myFile.removeImport(importStatement);
-    }
- catch (    IncorrectOperationException e) {
-      LOG.error(e);
-    }
-  }
-  GrImportStatement[] newImports=prepare(importedClasses,staticallyImportedMembers);
-  try {
-    for (    GrImportStatement aliasedImport : aliased) {
-      myFile.addImport(aliasedImport);
-    }
-    for (    GrImportStatement newImport : newImports) {
-      myFile.addImport(newImport);
-    }
-  }
- catch (  IncorrectOperationException e) {
-    LOG.error(e);
+    myFile.removeImport(importStatement);
   }
 }
