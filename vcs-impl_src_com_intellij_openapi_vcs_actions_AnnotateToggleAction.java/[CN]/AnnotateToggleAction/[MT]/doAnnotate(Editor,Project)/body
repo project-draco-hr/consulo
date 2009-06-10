@@ -1,13 +1,16 @@
 {
   final VirtualFile file=FileDocumentManager.getInstance().getFile(editor.getDocument());
   if (project == null)   return;
-  AbstractVcs vcs=ProjectLevelVcsManager.getInstance(project).getVcsFor(file);
+  final ProjectLevelVcsManager plVcsManager=ProjectLevelVcsManager.getInstance(project);
+  AbstractVcs vcs=plVcsManager.getVcsFor(file);
   if (vcs == null)   return;
   final AnnotationProvider annotationProvider=vcs.getAnnotationProvider();
   final Ref<FileAnnotation> fileAnnotationRef=new Ref<FileAnnotation>();
   final Ref<VcsException> exceptionRef=new Ref<VcsException>();
-  boolean result=ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
-    public void run(){
+  final BackgroundableActionEnabledHandler handler=((ProjectLevelVcsManagerImpl)plVcsManager).getBackgroundableActionHandler(ProjectLevelVcsManagerImpl.MyBackgroundableActions.ANNOTATE);
+  handler.register(file.getPath());
+  ProgressManager.getInstance().run(new Task.Backgroundable(project,VcsBundle.message("retrieving.annotations"),true,BackgroundFromStartOption.getInstance()){
+    public void run(    @NotNull ProgressIndicator indicator){
       try {
         fileAnnotationRef.set(annotationProvider.annotate(file));
       }
@@ -15,16 +18,17 @@
         exceptionRef.set(e);
       }
     }
+    @Override public void onCancel(){
+      onSuccess();
+    }
+    @Override public void onSuccess(){
+      handler.completed(file.getPath());
+      if (!exceptionRef.isNull()) {
+        AbstractVcsHelper.getInstance(project).showErrors(Arrays.asList(exceptionRef.get()),VcsBundle.message("message.title.annotate"));
+      }
+      if (fileAnnotationRef.isNull())       return;
+      doAnnotate(editor,project,file,fileAnnotationRef.get());
+    }
   }
-,VcsBundle.message("retrieving.annotations"),true,project);
-  if (!result) {
-    return;
-  }
-  if (!exceptionRef.isNull()) {
-    AbstractVcsHelper.getInstance(project).showErrors(Arrays.asList(exceptionRef.get()),VcsBundle.message("message.title.annotate"));
-  }
-  if (fileAnnotationRef.isNull()) {
-    return;
-  }
-  doAnnotate(editor,project,file,fileAnnotationRef.get());
+);
 }
