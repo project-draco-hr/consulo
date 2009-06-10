@@ -6,7 +6,7 @@
       if (application.isUnitTestMode()) {
         saveTestData();
       }
-      final Map<Module,Set<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,myFilesToCompile);
+      final Map<Module,List<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,myFilesToCompile);
       compileModules(moduleToFilesMap);
     }
     Collection<VirtualFile> dependentFiles;
@@ -22,43 +22,44 @@
         if (filesInScope.isEmpty()) {
           break;
         }
-        final Map<Module,Set<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,filesInScope);
+        final Map<Module,List<VirtualFile>> moduleToFilesMap=buildModuleToFilesMap(myCompileContext,filesInScope);
         myCompileContext.getDependencyCache().clearTraverseRoots();
         compileModules(moduleToFilesMap);
       }
     }
  while (!dependentFiles.isEmpty() && myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) == 0);
   }
- catch (  IOException e) {
-    throw new CompilerException(CompilerBundle.message("error.compiler.process.not.started",e.getMessage()),e);
-  }
-catch (  SecurityException e) {
+ catch (  SecurityException e) {
     throw new CompilerException(CompilerBundle.message("error.compiler.process.not.started",e.getMessage()),e);
   }
 catch (  IllegalArgumentException e) {
     throw new CompilerException(e.getMessage(),e);
   }
  finally {
-    myCompileContext.getProgressIndicator().setText(CompilerBundle.message("progress.deleting.temp.files"));
-    for (    final VirtualFile file : myModuleToTempDirMap.values()) {
-      if (file != null) {
-        final File ioFile=application.runReadAction(new Computable<File>(){
-          public File compute(){
-            return new File(file.getPath());
+    CompileDriver.runInContext(myCompileContext,CompilerBundle.message("progress.deleting.temp.files"),new ThrowableRunnable<RuntimeException>(){
+      public void run() throws RuntimeException {
+        for (        final VirtualFile file : myModuleToTempDirMap.values()) {
+          if (file != null) {
+            final File ioFile=new File(file.getPath());
+            FileUtil.asyncDelete(ioFile);
           }
         }
-);
-        FileUtil.asyncDelete(ioFile);
+        myModuleToTempDirMap.clear();
       }
     }
-    myModuleToTempDirMap.clear();
+);
   }
   if (myCompileContext.getProgressIndicator().isCanceled()) {
     myFilesToRecompile.clear();
     return Collections.emptyList();
   }
-  myCompileContext.getProgressIndicator().setText(CompilerBundle.message("progress.updating.caches"));
-  myCompileContext.getDependencyCache().update();
+  CompileDriver.runInContext(myCompileContext,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<CacheCorruptedException>(){
+    public void run() throws CacheCorruptedException {
+      ProgressIndicator indicator=myCompileContext.getProgressIndicator();
+      myCompileContext.getDependencyCache().update(indicator);
+    }
+  }
+);
   myFilesToRecompile.removeAll(mySuccesfullyCompiledJavaFiles);
   if (myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) != 0) {
     myFilesToRecompile.addAll(allDependent);
