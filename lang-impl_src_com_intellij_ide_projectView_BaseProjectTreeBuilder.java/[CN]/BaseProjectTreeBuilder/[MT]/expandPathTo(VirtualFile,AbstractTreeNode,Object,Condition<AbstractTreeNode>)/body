@@ -1,26 +1,45 @@
 {
-  if (root.canRepresent(element))   return root;
-  if (root instanceof ProjectViewNode && file != null && !((ProjectViewNode)root).contains(file))   return null;
-  DefaultMutableTreeNode currentNode=getNodeForElement(root);
-  boolean expanded=currentNode != null && getTree().isExpanded(new TreePath(currentNode.getPath()));
-  List<AbstractTreeNode> kids=getOrBuildChildren(root);
-  for (  AbstractTreeNode node : kids) {
-    if (nonStopCondition.value(node)) {
-      AbstractTreeNode result=expandPathTo(file,node,element,nonStopCondition);
-      if (result != null) {
-        currentNode=getNodeForElement(root);
-        if (currentNode != null) {
-          final TreePath path=new TreePath(currentNode.getPath());
-          if (!getTree().isExpanded(path)) {
-            getTree().expandPath(path);
+  if (root.canRepresent(element))   return new AsyncResult.Done<AbstractTreeNode>(root);
+  if (root instanceof ProjectViewNode && file != null && !((ProjectViewNode)root).contains(file)) {
+    return new AsyncResult.Rejected<AbstractTreeNode>();
+  }
+  final AsyncResult<AbstractTreeNode> async=new AsyncResult<AbstractTreeNode>();
+  expand(root,new Runnable(){
+    public void run(){
+      final DefaultMutableTreeNode rootNode=getNodeForElement(root);
+      if (rootNode != null) {
+        final List<AbstractTreeNode> kids=collectChildren(rootNode);
+        for (        final AbstractTreeNode node : kids) {
+          final boolean[] nodeWasCollapsed=new boolean[]{true};
+          final DefaultMutableTreeNode nodeForElement=getNodeForElement(node);
+          if (nodeForElement != null) {
+            nodeWasCollapsed[0]=getTree().isCollapsed(new TreePath(nodeForElement.getPath()));
+          }
+          if (nonStopCondition.value(node)) {
+            expandPathTo(file,node,element,nonStopCondition).doWhenDone(new AsyncResult.Handler<AbstractTreeNode>(){
+              public void run(              AbstractTreeNode abstractTreeNode){
+                async.setDone(abstractTreeNode);
+              }
+            }
+).doWhenRejected(new Runnable(){
+              public void run(){
+                if (nodeWasCollapsed[0]) {
+                  collapseChildren(node,null);
+                }
+              }
+            }
+);
+          }
+ else {
+            async.setRejected();
           }
         }
-        return result;
       }
- else       if (!expanded) {
-        hideChildrenFor(currentNode);
+ else {
+        async.setRejected();
       }
     }
   }
-  return null;
+);
+  return async;
 }
