@@ -1,27 +1,42 @@
 {
-  MavenProjectsProcessorTask task;
   try {
 synchronized (myQueue) {
       while (myQueue.isEmpty()) {
         myQueue.wait(WAIT_TIMEOUT);
         if (isStopped)         return false;
       }
-      task=myQueue.poll();
-      myQueueSize=myQueue.size();
     }
-    fireQueueChanged(myQueueSize);
   }
  catch (  InterruptedException e) {
     throw new RuntimeException(e);
   }
   if (isStopped)   return false;
-  if (task != null) {
-    try {
-      doPerform(task);
-    }
- catch (    Throwable e) {
-      MavenLog.LOG.error(e);
+  myCurrentTaskHandler=MavenUtil.runInBackground(myProject,myTitle,myCancellable,new MavenTask(){
+    public void run(    MavenProgressIndicator indicator) throws MavenProcessCanceledException {
+      while (true) {
+        MavenProjectsProcessorTask task;
+        int queueSize;
+        int counter=0;
+synchronized (myQueue) {
+          task=myQueue.poll();
+          queueSize=myQueue.size();
+        }
+        if (isStopped || task == null)         return;
+        indicator.checkCanceled();
+        indicator.getIndicator().setIndeterminate(false);
+        indicator.setFraction(counter++ / (double)(counter + queueSize));
+        String text=myTitle;
+        if (queueSize > 0)         text+=" (" + queueSize + " in queue)";
+        indicator.setText(text);
+        task.perform(myProject,myEmbeddersManager,new SoutMavenConsole(),indicator);
+      }
     }
   }
-  return true;
+);
+  myCurrentTaskHandler.waitFor();
+  if (myCurrentTaskHandler.isCancelled()) {
+    cancelAllPendingRequests();
+  }
+  myCurrentTaskHandler=null;
+  return !isStopped;
 }

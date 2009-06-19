@@ -1,0 +1,34 @@
+{
+  final Set<MavenProject> projectsToImport;
+synchronized (myProjectsToImport) {
+    projectsToImport=new THashSet<MavenProject>(myProjectsToImport);
+    myProjectsToImport.clear();
+  }
+  long before=System.currentTimeMillis();
+  final Ref<MavenProjectImporter> importer=new Ref<MavenProjectImporter>();
+  final Ref<List<MavenProjectsProcessorTask>> postTasks=new Ref<List<MavenProjectsProcessorTask>>();
+  final Runnable r=new Runnable(){
+    public void run(){
+      importer.set(new MavenProjectImporter(myProject,myProjectsTree,getFileToModuleMapping(),projectsToImport,modifiableModelsProvider,getImportingSettings()));
+      postTasks.set(importer.get().importProject());
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isDispatchThread()) {
+    r.run();
+  }
+ else {
+    MavenUtil.runInBackground(myProject,ProjectBundle.message("maven.project.importing"),false,new MavenTask(){
+      public void run(      MavenProgressIndicator indicator) throws MavenProcessCanceledException {
+        r.run();
+      }
+    }
+).waitFor();
+  }
+  long after=System.currentTimeMillis();
+  System.out.println("imported in : " + (after - before) + "ms");
+  VirtualFileManager.getInstance().refresh(isNormalProject());
+  schedulePostImportTasts(postTasks.get());
+  myImportingQueue.restartTimer();
+  return importer.get().getCreatedModules();
+}
