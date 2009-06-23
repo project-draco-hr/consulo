@@ -9,7 +9,7 @@
   final DeploymentUtil deploymentUtil=DeploymentUtil.getInstance();
   final FileFilter fileFilter=new IgnoredFileFilter();
   final C builderContext=context.getUserData(myBuilderContextKey);
-  Set<JarInfo> changedJars=new THashSet<JarInfo>();
+  final Set<JarInfo> changedJars=new THashSet<JarInfo>();
   for (  String deletedJar : deletedJars) {
     final Collection<JarInfo> infos=builderContext.getJarInfos(deletedJar);
     if (infos != null) {
@@ -19,24 +19,39 @@
   beforeBuildStarted(builderContext);
   try {
     int i=0;
-    for (    ProcessingItem item0 : items) {
+    for (    final ProcessingItem item0 : items) {
       if (item0 instanceof MockProcessingItem)       continue;
+      final PackagingProcessingItem item=(PackagingProcessingItem)item0;
       context.getProgressIndicator().checkCanceled();
-      PackagingProcessingItem item=(PackagingProcessingItem)item0;
-      final List<DestinationInfo> destinations=item.getDestinations();
-      final File fromFile=VfsUtil.virtualToIoFile(item.getFile());
-      for (      DestinationInfo destination : destinations) {
-        if (destination instanceof ExplodedDestinationInfo) {
-          final ExplodedDestinationInfo explodedDestination=(ExplodedDestinationInfo)destination;
-          File toFile=new File(FileUtil.toSystemDependentName(explodedDestination.getOutputPath()));
-          if (fromFile.exists()) {
-            deploymentUtil.copyFile(fromFile,toFile,context,writtenPaths,fileFilter);
-          }
-          onFileCopied(builderContext,explodedDestination);
-        }
+      final Ref<IOException> exception=Ref.create(null);
+      new ReadAction(){
+        protected void run(        final Result result){
+          final List<DestinationInfo> destinations=item.getDestinations();
+          final File fromFile=VfsUtil.virtualToIoFile(item.getFile());
+          for (          DestinationInfo destination : destinations) {
+            if (destination instanceof ExplodedDestinationInfo) {
+              final ExplodedDestinationInfo explodedDestination=(ExplodedDestinationInfo)destination;
+              File toFile=new File(FileUtil.toSystemDependentName(explodedDestination.getOutputPath()));
+              if (fromFile.exists()) {
+                try {
+                  deploymentUtil.copyFile(fromFile,toFile,context,writtenPaths,fileFilter);
+                }
+ catch (                IOException e) {
+                  exception.set(e);
+                  return;
+                }
+              }
+              onFileCopied(builderContext,explodedDestination);
+            }
  else {
-          changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+              changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+            }
+          }
         }
+      }
+.execute();
+      if (exception.get() != null) {
+        throw exception.get();
       }
       context.getProgressIndicator().setFraction(++i * 1.0 / items.length);
       processedItems.add(item);
