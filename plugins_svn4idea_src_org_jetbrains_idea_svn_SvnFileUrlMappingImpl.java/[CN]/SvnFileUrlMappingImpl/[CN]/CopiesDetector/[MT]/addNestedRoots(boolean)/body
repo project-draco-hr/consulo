@@ -1,0 +1,49 @@
+{
+  final List<VirtualFile> basicVfRoots=ObjectsConvertor.convert(myTopRoots,new Convertor<RootUrlInfo,VirtualFile>(){
+    public VirtualFile convert(    final RootUrlInfo real){
+      return real.getVirtualFile();
+    }
+  }
+);
+  final ChangeListManager clManager=ChangeListManager.getInstance(myVcs.getProject());
+  if (clearState) {
+    myGate.get();
+  }
+  clManager.invokeAfterUpdate(new Runnable(){
+    public void run(){
+      final List<RootUrlInfo> nestedRoots=new ArrayList<RootUrlInfo>();
+      for (      NestedCopiesBuilder.MyPointInfo info : myGate.get().getSet()) {
+        if (NestedCopyType.external.equals(info.getType())) {
+          try {
+            final SVNStatus svnStatus=SvnUtil.getStatus(myVcs,new File(info.getFile().getPath()));
+            if (svnStatus.getURL() == null)             continue;
+            info.setUrl(svnStatus.getURL());
+            info.setFormat(WorkingCopyFormat.getInstance(svnStatus.getWorkingCopyFormat()));
+          }
+ catch (          Exception e) {
+            continue;
+          }
+        }
+        for (        RootUrlInfo topRoot : myTopRoots) {
+          if (VfsUtil.isAncestor(topRoot.getVirtualFile(),info.getFile(),true)) {
+            final SVNURL repoRoot=myRepositoryRoots.ask(info.getUrl());
+            if (repoRoot != null) {
+              nestedRoots.add(new RootUrlInfo(repoRoot,info.getUrl(),info.getFormat(),info.getFile(),topRoot.getRoot()));
+            }
+            break;
+          }
+        }
+      }
+      myTopRoots.addAll(nestedRoots);
+      myApplier.apply(myVcs,myAtomicSectionsAware,myTopRoots,myLonelyRoots);
+    }
+  }
+,InvokeAfterUpdateMode.SILENT_CALLBACK_POOLED,null,new Consumer<VcsDirtyScopeManager>(){
+    public void consume(    VcsDirtyScopeManager vcsDirtyScopeManager){
+      if (clearState) {
+        vcsDirtyScopeManager.filesDirty(null,basicVfRoots);
+      }
+    }
+  }
+,null);
+}

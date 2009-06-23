@@ -2,30 +2,24 @@
   final SvnScopeZipper zipper=new SvnScopeZipper(dirtyScope);
   zipper.run();
   final Map<String,SvnScopeZipper.MyDirNonRecursive> nonRecursiveMap=zipper.getNonRecursiveDirs();
-  final Map<String,Map> preparedMap=new HashMap<String,Map>();
-  for (  SvnScopeZipper.MyDirNonRecursive item : nonRecursiveMap.values()) {
-    final Map result=new HashMap();
-    for (    FilePath path : item.getChildrenList()) {
-      result.put(path.getName(),path.getIOFile());
-    }
-    preparedMap.put(item.getDir().getIOFile().getAbsolutePath(),result);
-  }
-  final ISVNStatusFileProvider fileProvider=new ISVNStatusFileProvider(){
-    public Map getChildrenFiles(    File parent){
-      return preparedMap.get(parent.getAbsolutePath());
-    }
-  }
-;
+  final ISVNStatusFileProvider fileProvider=createFileProvider(nonRecursiveMap);
   try {
     final SvnChangeProviderContext context=new SvnChangeProviderContext(myVcs,builder,progress);
+    final StatusWalkerPartnerImpl partner=new StatusWalkerPartnerImpl(myVcs);
+    final NestedCopiesBuilder nestedCopiesBuilder=new NestedCopiesBuilder();
+    final EventDispatcher<StatusReceiver> statusReceiver=EventDispatcher.create(StatusReceiver.class);
+    statusReceiver.addListener(context);
+    statusReceiver.addListener(nestedCopiesBuilder);
+    final SvnRecursiveStatusWalker walker=new SvnRecursiveStatusWalker(statusReceiver.getMulticaster(),partner);
     for (    FilePath path : zipper.getRecursiveDirs()) {
-      processFile(path,context,SVNDepth.INFINITY,context.getClient());
+      walker.go(path,SVNDepth.INFINITY);
     }
-    context.getClient().setFilesProvider(fileProvider);
+    partner.setFileProvider(fileProvider);
     for (    SvnScopeZipper.MyDirNonRecursive item : nonRecursiveMap.values()) {
-      processFile(item.getDir(),context,SVNDepth.FILES,context.getClient());
+      walker.go(item.getDir(),SVNDepth.FILES);
     }
     processCopiedAndDeleted(context);
+    mySvnFileUrlMapping.acceptNestedData(nestedCopiesBuilder.getSet());
   }
  catch (  SVNException e) {
     throw new VcsException(e);
