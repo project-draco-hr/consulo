@@ -44,26 +44,52 @@
     visibleNodes.add(UsageViewImpl.NULL_NODE);
   }
   addUsageNodes(usageView.getRoot(),usageView,new ArrayList<UsageNode>());
-  Vector<Object> data=createListModel(visibleNodes,usages);
-  final JList list=new JList(data);
-  list.setCellRenderer(new ShowUsagesListCellRenderer(usageView));
+  final JTable table=new Table(){
+    @Override public boolean getScrollableTracksViewportWidth(){
+      return true;
+    }
+  }
+;
+  final Vector<Object> data=setModel(table,usages,visibleNodes,usageView);
   final Runnable navigateRunnable=new Runnable(){
     public void run(){
-      Object value=list.getSelectedValue();
-      if (value instanceof UsageNode) {
-        Usage usage=((UsageNode)value).getUsage();
-        if (usage == NullUsage.INSTANCE) {
-          appendMoreUsages(editor,popupPosition,handler,maxUsages);
-          return;
+      int[] selected=table.getSelectedRows();
+      for (      int i : selected) {
+        Object value=table.getValueAt(i,0);
+        if (value instanceof UsageNode) {
+          Usage usage=((UsageNode)value).getUsage();
+          if (usage == NullUsage.INSTANCE) {
+            appendMoreUsages(editor,popupPosition,handler,maxUsages);
+            return;
+          }
+          navigateAndHint(usage,null,handler,popupPosition,maxUsages);
         }
-        navigateAndHint(usage,null,handler,popupPosition,maxUsages);
       }
     }
   }
 ;
-  ListSpeedSearch speedSearch=new ListSpeedSearch(list,SPEED_SEARCH_TEXT);
+  SpeedSearchBase<JTable> speedSearch=new SpeedSearchBase<JTable>(table){
+    protected int getSelectedIndex(){
+      return table.getSelectedRow();
+    }
+    protected Object[] getAllElements(){
+      return data.toArray(new Object[data.size()]);
+    }
+    protected String getElementText(    Object element){
+      if (!(element instanceof UsageNode))       return element.toString();
+      UsageNode node=(UsageNode)element;
+      GroupNode group=(GroupNode)node.getParent();
+      return node.getUsage().getPresentation().getPlainText() + group.toString();
+    }
+    protected void selectElement(    Object element,    String selectedText){
+      int i=data.indexOf(element);
+      if (i == -1)       return;
+      table.getSelectionModel().setSelectionInterval(i,i);
+    }
+  }
+;
   speedSearch.setComparator(new SpeedSearchBase.SpeedSearchComparator(false));
-  PopupChooserBuilder builder=new PopupChooserBuilder(list);
+  PopupChooserBuilder builder=new PopupChooserBuilder(table);
   if (title != null) {
     String s;
     if (hasMore) {
@@ -102,6 +128,23 @@
   builder.setCommandButton(button);
   DefaultActionGroup filters=new DefaultActionGroup();
   usageView.addFilteringActions(filters);
+  filters.add(new AnAction("Open Find Usages Toolwindow","Show all usages in a separate toolwindow",IconLoader.getIcon("/general/toolWindowFind.png")){
+{
+      AnAction action=ActionManager.getInstance().getAction(IdeActions.ACTION_FIND_USAGES);
+      setShortcutSet(action.getShortcutSet());
+    }
+    @Override public void actionPerformed(    AnActionEvent e){
+      hideHints();
+      popup[0].cancel();
+      FindUsagesManager findUsagesManager=((FindManagerImpl)FindManager.getInstance(project)).getFindUsagesManager();
+      FindUsagesManager.SearchData data=new FindUsagesManager.SearchData();
+      data.myOptions=handler.getFindUsagesOptions();
+      SmartPsiElementPointer<PsiElement> pointer=SmartPointerManager.getInstance(project).createSmartPsiElementPointer(handler.getPsiElement());
+      data.myElements=new SmartPsiElementPointer[]{pointer};
+      findUsagesManager.rerunAndRecallFromHistory(data);
+    }
+  }
+);
   ActionToolbar actionToolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.USAGE_VIEW_TOOLBAR,filters,true);
   actionToolbar.setReservePlaceAutoPopupIcon(false);
   final JComponent toolBar=actionToolbar.getComponent();
@@ -116,7 +159,7 @@
   final MessageBusConnection messageBusConnection=project.getMessageBus().connect(usageView);
   messageBusConnection.subscribe(UsageFilteringRuleProvider.RULES_CHANGED,new Runnable(){
     public void run(){
-      rebuildPopup(usageView,usages,list,popup[0]);
+      rebuildPopup(usageView,usages,table,popup[0]);
     }
   }
 );
