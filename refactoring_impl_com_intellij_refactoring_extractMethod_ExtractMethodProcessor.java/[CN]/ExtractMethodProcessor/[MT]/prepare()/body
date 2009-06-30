@@ -17,92 +17,26 @@
   if (myCodeFragmentMember == null) {
     myCodeFragmentMember=ControlFlowUtil.findCodeFragment(codeFragment.getContext()).getParent();
   }
+  myControlFlowWrapper=new ControlFlowWrapper(myProject,codeFragment,myElements);
   try {
-    myControlFlow=ControlFlowFactory.getInstance(myProject).getControlFlow(codeFragment,new LocalsControlFlowPolicy(codeFragment),false,true);
-  }
- catch (  AnalysisCanceledException e) {
-    throw new PrepareFailedException(RefactoringBundle.message("extract.method.control.flow.analysis.failed"),e.getErrorElement());
-  }
-  if (LOG.isDebugEnabled()) {
-    LOG.debug(myControlFlow.toString());
-  }
-  calculateFlowStartAndEnd();
-  IntArrayList exitPoints=new IntArrayList();
-  myExitStatements=ControlFlowUtil.findExitPointsAndStatements(myControlFlow,myFlowStart,myFlowEnd,exitPoints,ControlFlowUtil.DEFAULT_EXIT_STATEMENTS_CLASSES);
-  if (LOG.isDebugEnabled()) {
-    LOG.debug("exit points:");
-    for (int i=0; i < exitPoints.size(); i++) {
-      LOG.debug("  " + exitPoints.get(i));
+    myExitStatements=myControlFlowWrapper.prepareExitStatements(myElements);
+    if (myControlFlowWrapper.isGenerateConditionalExit()) {
+      myGenerateConditionalExit=true;
     }
-    LOG.debug("exit statements:");
-    for (    PsiStatement exitStatement : myExitStatements) {
-      LOG.debug("  " + exitStatement);
-    }
-  }
-  if (exitPoints.isEmpty()) {
-    exitPoints.add(myControlFlow.getEndOffset(myElements[myElements.length - 1]));
-  }
-  if (exitPoints.size() != 1) {
-    if (!areExitStatementsTheSame()) {
-      showMultipleExitPointsMessage();
-      return false;
-    }
-    myGenerateConditionalExit=true;
-  }
  else {
-    myHasReturnStatement=myExpression == null && ControlFlowUtil.returnPresentBetween(myControlFlow,myFlowStart,myFlowEnd);
-  }
-  myOutputVariables=ControlFlowUtil.getOutputVariables(myControlFlow,myFlowStart,myFlowEnd,exitPoints.toArray());
-  if (myGenerateConditionalExit) {
-    final Set<PsiVariable> outputVariables=new HashSet<PsiVariable>(Arrays.asList(myOutputVariables));
-    for (    PsiStatement statement : myExitStatements) {
-      statement.accept(new JavaRecursiveElementVisitor(){
-        @Override public void visitReferenceExpression(        PsiReferenceExpression expression){
-          super.visitReferenceExpression(expression);
-          final PsiElement resolved=expression.resolve();
-          if (resolved instanceof PsiVariable) {
-            final PsiVariable variable=(PsiVariable)resolved;
-            if (isWrittenInside(variable)) {
-              outputVariables.add(variable);
-            }
-          }
-        }
-        private boolean isWrittenInside(        final PsiVariable variable){
-          final List<Instruction> instructions=myControlFlow.getInstructions();
-          for (int i=myFlowStart; i < myFlowEnd; i++) {
-            Instruction instruction=instructions.get(i);
-            if (instruction instanceof WriteVariableInstruction && variable.equals(((WriteVariableInstruction)instruction).variable))             return true;
-          }
-          return false;
-        }
-      }
-);
+      myHasReturnStatement=myExpression == null && myControlFlowWrapper.isReturnPresentBetween();
     }
-    myOutputVariables=outputVariables.toArray(new PsiVariable[outputVariables.size()]);
+    myFirstExitStatementCopy=myControlFlowWrapper.getFirstExitStatementCopy();
   }
-  Arrays.sort(myOutputVariables,PsiUtil.BY_POSITION);
-  final List<PsiVariable> inputVariables=ControlFlowUtil.getInputVariables(myControlFlow,myFlowStart,myFlowEnd);
-  if (myGenerateConditionalExit) {
-    List<PsiVariable> inputVariableList=new ArrayList<PsiVariable>(inputVariables);
-    removeParametersUsedInExitsOnly(codeFragment,myExitStatements,myControlFlow,myFlowStart,myFlowEnd,inputVariableList);
-    myInputVariables=inputVariableList;
+ catch (  ControlFlowWrapper.ExitStatementsNotSameException e) {
+    myExitStatements=myControlFlowWrapper.getExitStatements();
+    showMultipleExitPointsMessage();
+    return false;
   }
- else {
-    myInputVariables=inputVariables;
-  }
-  Collections.sort(myInputVariables,new Comparator<PsiVariable>(){
-    public int compare(    final PsiVariable v1,    final PsiVariable v2){
-      if (v1.getType() instanceof PsiEllipsisType) {
-        return 1;
-      }
-      if (v2.getType() instanceof PsiEllipsisType) {
-        return -1;
-      }
-      return v1.getTextOffset() - v2.getTextOffset();
-    }
-  }
-);
-  chooseTargetClass();
+  myOutputVariables=myControlFlowWrapper.getOutputVariables();
+  final List<PsiVariable> inputVariables=myControlFlowWrapper.getInputVariables(codeFragment);
+  chooseTargetClass(inputVariables);
+  myInputVariables=new InputVariables(inputVariables,myProject,new LocalSearchScope(myElements),true);
   PsiType expressionType=null;
   if (myExpression != null) {
     if (myForcedReturnType != null) {
@@ -188,11 +122,11 @@
     }
   }
   if (myExpression != null) {
-    myDuplicatesFinder=new DuplicatesFinder(elements.toArray(new PsiElement[elements.size()]),myInputVariables,new ArrayList<PsiVariable>());
+    myDuplicatesFinder=new DuplicatesFinder(elements.toArray(new PsiElement[elements.size()]),myInputVariables.copy(),new ArrayList<PsiVariable>());
     myDuplicates=myDuplicatesFinder.findDuplicates(myTargetClass);
   }
  else   if (elements.size() > 0) {
-    myDuplicatesFinder=new DuplicatesFinder(elements.toArray(new PsiElement[elements.size()]),myInputVariables,myOutputVariable != null ? new VariableReturnValue(myOutputVariable) : null,Arrays.asList(myOutputVariables));
+    myDuplicatesFinder=new DuplicatesFinder(elements.toArray(new PsiElement[elements.size()]),myInputVariables.copy(),myOutputVariable != null ? new VariableReturnValue(myOutputVariable) : null,Arrays.asList(myOutputVariables));
     myDuplicates=myDuplicatesFinder.findDuplicates(myTargetClass);
   }
  else {
