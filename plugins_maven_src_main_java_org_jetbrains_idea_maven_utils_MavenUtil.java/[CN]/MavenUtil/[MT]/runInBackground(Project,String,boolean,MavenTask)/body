@@ -1,38 +1,48 @@
 {
-  final Semaphore startSemaphore=new Semaphore();
   final Semaphore finishSemaphore=new Semaphore();
-  final ProgressIndicator[] indicator=new ProgressIndicator[1];
-  startSemaphore.down();
+  final MavenProgressIndicator indicator=new MavenProgressIndicator();
   finishSemaphore.down();
-  final MavenTask[] taskHolder=new MavenTask[]{task};
-  final boolean[] isCancelled=new boolean[1];
-  invokeLater(project,new Runnable(){
+  Runnable runnable=new Runnable(){
     public void run(){
-      ProgressManager.getInstance().run(new Task.Backgroundable(project,title,cancellable){
-        public void run(        @NotNull ProgressIndicator i){
-          try {
-            indicator[0]=i;
-            startSemaphore.up();
-            taskHolder[0].run(new MavenProgressIndicator(i));
-          }
- catch (          MavenProcessCanceledException ignore) {
-            isCancelled[0]=true;
-          }
-catch (          ProcessCanceledException ignore) {
-            isCancelled[0]=true;
-          }
- finally {
-            finishSemaphore.up();
-            taskHolder[0]=null;
-          }
-        }
-        @Override public boolean shouldStartInBackground(){
-          return true;
-        }
+      try {
+        task.run(indicator);
       }
-);
+ catch (      MavenProcessCanceledException ignore) {
+        indicator.cancel();
+      }
+catch (      ProcessCanceledException ignore) {
+        indicator.cancel();
+      }
+ finally {
+        finishSemaphore.up();
+      }
     }
   }
+;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    runnable.run();
+  }
+ else {
+    final Future<?> future=ApplicationManager.getApplication().executeOnPooledThread(runnable);
+    invokeLater(project,new Runnable(){
+      public void run(){
+        if (future.isDone())         return;
+        new Task.Backgroundable(project,title,cancellable){
+          public void run(          @NotNull ProgressIndicator i){
+            indicator.addIndicator(i);
+            try {
+              future.get();
+            }
+ catch (            InterruptedException e) {
+            }
+catch (            ExecutionException e) {
+            }
+          }
+        }
+.queue();
+      }
+    }
 );
-  return new MavenTaskHandler(startSemaphore,finishSemaphore,isCancelled,indicator);
+  }
+  return new MavenTaskHandler(finishSemaphore,indicator);
 }
