@@ -1,0 +1,35 @@
+{
+  if (recursionGuard.contains(fileElement))   return null;
+  recursionGuard.add(fileElement);
+  XmlTag result=MavenDomUtil.findTag(fileElement,path);
+  if (result != null)   return result;
+  if (path.equals("project.groupId") || path.equals("project.version")) {
+    path=path.replace("project.","project.parent.");
+    return MavenDomUtil.findTag(fileElement,path);
+  }
+  MavenDomProjectModel projectDomModel=(MavenDomProjectModel)fileElement.getRootElement();
+  VirtualFile projectFile=fileElement.getFile().getVirtualFile();
+  MavenDomParent parent=projectDomModel.getMavenParent();
+  if (!DomUtil.hasXml(parent))   return null;
+  String parentGroupId=parent.getGroupId().getValue();
+  String parentArtifactId=parent.getArtifactId().getValue();
+  String parentVersion=parent.getVersion().getValue();
+  String parentRelativePath=parent.getRelativePath().getStringValue();
+  if (StringUtil.isEmptyOrSpaces(parentRelativePath))   parentRelativePath="../pom.xml";
+  MavenId parentId=new MavenId(parentGroupId,parentArtifactId,parentVersion);
+  final MavenProjectsManager manager=MavenProjectsManager.getInstance(myElement.getProject());
+  DomFileElement<? extends DomElement> parentFileElement=new MavenParentProjectFileProcessor<DomFileElement<? extends DomElement>>(){
+    protected VirtualFile findManagedFile(    MavenId id){
+      MavenProject project=manager.findProject(id);
+      return project == null ? null : project.getFile();
+    }
+    protected DomFileElement<? extends DomElement> doProcessParent(    VirtualFile parentFile){
+      return MavenDomUtil.getMavenDomProjectFile(myElement.getProject(),parentFile);
+    }
+  }
+.process(projectFile,parentId,parentRelativePath,manager.getLocalRepository());
+  if (parentFileElement != null) {
+    return resolveModelProperty(parentFileElement,path,recursionGuard);
+  }
+  return result;
+}
