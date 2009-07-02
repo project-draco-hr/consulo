@@ -2,20 +2,40 @@
   String upToDateContent=fileAnnotation.getAnnotatedContent();
   final UpToDateLineNumberProvider getUpToDateLineNumber=new UpToDateLineNumberProviderImpl(editor.getDocument(),project,upToDateContent);
   editor.getGutter().closeAllAnnotations();
-  Collection<AnnotationFieldGutter> annotations=editor.getUserData(KEY_IN_EDITOR);
+  Collection<ActiveAnnotationGutter> annotations=editor.getUserData(KEY_IN_EDITOR);
   if (annotations == null) {
-    annotations=new HashSet<AnnotationFieldGutter>();
+    annotations=new HashSet<ActiveAnnotationGutter>();
     editor.putUserData(KEY_IN_EDITOR,annotations);
   }
-  final HighlightAnnotationsActions highlighting=new HighlightAnnotationsActions(project,file,fileAnnotation,((EditorGutterComponentEx)editor.getGutter()));
+  final EditorGutterComponentEx editorGutterComponentEx=(EditorGutterComponentEx)editor.getGutter();
+  final HighlightAnnotationsActions highlighting=new HighlightAnnotationsActions(project,file,fileAnnotation,editorGutterComponentEx);
+  final List<AnnotationFieldGutter> gutters=new ArrayList<AnnotationFieldGutter>();
+  final AnnotationSourceSwitcher switcher=fileAnnotation.getAnnotationSourceSwitcher();
+  final MyAnnotationPresentation presentation=new MyAnnotationPresentation(highlighting,switcher,editorGutterComponentEx);
+  if (switcher != null) {
+    switcher.switchTo(switcher.getDefaultSource());
+    final LineAnnotationAspect revisonAspect=switcher.getRevisionAspect();
+    final MyCurrentRevisionAnnotationFieldGutter currentRevisionGutter=new MyCurrentRevisionAnnotationFieldGutter(fileAnnotation,editor,revisonAspect,presentation);
+    final MyMergeSourceAvailableMarkerGutter mergeSourceGutter=new MyMergeSourceAvailableMarkerGutter(fileAnnotation,editor,null,presentation);
+    presentation.addSourceSwitchListener(currentRevisionGutter);
+    presentation.addSourceSwitchListener(mergeSourceGutter);
+    currentRevisionGutter.consume(switcher.getDefaultSource());
+    mergeSourceGutter.consume(switcher.getDefaultSource());
+    gutters.add(currentRevisionGutter);
+    gutters.add(mergeSourceGutter);
+  }
   final LineAnnotationAspect[] aspects=fileAnnotation.getAspects();
   for (  LineAnnotationAspect aspect : aspects) {
-    final AnnotationFieldGutter gutter=new AnnotationFieldGutter(getUpToDateLineNumber,fileAnnotation,editor,aspect,highlighting);
-    if (aspect instanceof EditorGutterAction) {
-      editor.getGutter().registerTextAnnotation(gutter,gutter);
+    final AnnotationFieldGutter gutter=new AnnotationFieldGutter(fileAnnotation,editor,aspect,presentation);
+    gutters.add(gutter);
+  }
+  for (  AnnotationFieldGutter gutter : gutters) {
+    final AnnotationGutterLineConvertorProxy proxy=new AnnotationGutterLineConvertorProxy(getUpToDateLineNumber,gutter);
+    if (gutter.isGutterAction()) {
+      editor.getGutter().registerTextAnnotation(proxy,proxy);
     }
  else {
-      editor.getGutter().registerTextAnnotation(gutter);
+      editor.getGutter().registerTextAnnotation(proxy);
     }
     annotations.add(gutter);
   }
