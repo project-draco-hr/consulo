@@ -4,10 +4,39 @@
   if (aClass == null) {
     return;
   }
+  final PsiElement parent=element.getParent();
+  if (!(parent instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression methodExpression=(PsiReferenceExpression)parent;
+  final PsiElement grandParent=methodExpression.getParent();
+  if (!(grandParent instanceof PsiMethodCallExpression)) {
+    return;
+  }
+  final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)grandParent;
+  final PsiExpressionList list=methodCallExpression.getArgumentList();
+  final PsiExpression[] expressions=list.getExpressions();
+  final StringBuilder fieldText=new StringBuilder("private static final Pattern PATTERN = " + "Pattern.compile(");
+  if (expressions.length > 0) {
+    fieldText.append(expressions[0].getText());
+    for (int i=1, expressionsLength=expressions.length; i < expressionsLength; i++) {
+      fieldText.append(',');
+      fieldText.append(expressions[i].getText());
+    }
+  }
+  fieldText.append(");");
   final PsiElementFactory factory=JavaPsiFacade.getElementFactory(project);
-  final GlobalSearchScope resolveScope=aClass.getResolveScope();
-  final PsiClassType patternType=factory.createTypeByFQClassName("java.util.regex.Pattern",resolveScope);
-  final PsiField newField=factory.createField("pattern",patternType);
+  final PsiField newField=factory.createFieldFromText(fieldText.toString(),element);
   final PsiElement field=aClass.add(newField);
-  showTemplateBuilder((PsiField)field);
+  final StringBuilder expressionText=new StringBuilder("PATTERN.");
+  expressionText.append(methodExpression.getReferenceName());
+  expressionText.append('(');
+  final PsiExpression qualifier=methodExpression.getQualifierExpression();
+  expressionText.append(qualifier.getText());
+  expressionText.append(')');
+  final PsiExpression newExpression=factory.createExpressionFromText(expressionText.toString(),element);
+  PsiMethodCallExpression newMethodCallExpression=(PsiMethodCallExpression)methodCallExpression.replace(newExpression);
+  newMethodCallExpression=CodeInsightUtilBase.forcePsiPostprocessAndRestoreElement(newMethodCallExpression);
+  final PsiExpression reference=newMethodCallExpression.getMethodExpression().getQualifierExpression();
+  showTemplateBuilder(aClass,((PsiField)field).getNameIdentifier(),reference);
 }
