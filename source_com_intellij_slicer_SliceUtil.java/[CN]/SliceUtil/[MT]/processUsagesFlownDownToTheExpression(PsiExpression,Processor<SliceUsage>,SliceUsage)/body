@@ -1,6 +1,4 @@
 {
-  PsiMethod method=PsiTreeUtil.getParentOfType(expression,PsiMethod.class);
-  if (method == null)   return true;
   expression=simplify(expression);
   Processor<SliceUsage> uniqueProcessor=new CommonProcessors.UniqueProcessor<SliceUsage>(processor,new TObjectHashingStrategy<SliceUsage>(){
     public int computeHashCode(    final SliceUsage object){
@@ -15,11 +13,38 @@
     PsiReferenceExpression ref=(PsiReferenceExpression)expression;
     PsiElement resolved=ref.resolve();
     if (!(resolved instanceof PsiVariable))     return true;
-    Collection<PsiExpression> expressions=getExpressionsFlownTo(expression,method,(PsiVariable)resolved);
-    return processFlownFromExpressions(expressions,uniqueProcessor,parent);
+    PsiCodeBlock codeBlock;
+    PsiElement element=expression;
+    while ((codeBlock=PsiTreeUtil.getParentOfType(element,PsiCodeBlock.class)) != null) {
+      PsiAnonymousClass anon=PsiTreeUtil.getParentOfType(codeBlock,PsiAnonymousClass.class);
+      if (anon == null)       break;
+      element=anon;
+    }
+    if (codeBlock != null) {
+      PsiVariable variable=(PsiVariable)resolved;
+      Set<PsiExpression> expressions=new THashSet<PsiExpression>(getExpressionsAssignedToVariable(ref,variable,codeBlock));
+      if (variable.hasModifierProperty(PsiModifier.FINAL)) {
+        PsiExpression initializer=variable.getInitializer();
+        if (initializer != null)         expressions.add(initializer);
+      }
+      if (!processFlownFromExpressions(expressions,uniqueProcessor,parent))       return false;
+    }
+    if (resolved instanceof PsiField) {
+      return processFieldUsages((PsiField)resolved,processor,parent);
+    }
+ else     if (resolved instanceof PsiParameter) {
+      return processParameterUsages((PsiParameter)resolved,processor,parent);
+    }
   }
- else   if (expression instanceof PsiMethodCallExpression) {
+  if (expression instanceof PsiMethodCallExpression) {
     return processMethodReturnValue((PsiMethodCallExpression)expression,uniqueProcessor,parent);
+  }
+  if (expression instanceof PsiConditionalExpression) {
+    PsiConditionalExpression conditional=(PsiConditionalExpression)expression;
+    PsiExpression thenE=conditional.getThenExpression();
+    PsiExpression elseE=conditional.getElseExpression();
+    if (thenE != null && !processUsagesFlownDownToTheExpression(thenE,processor,parent))     return false;
+    if (elseE != null && !processUsagesFlownDownToTheExpression(elseE,processor,parent))     return false;
   }
   return true;
 }
