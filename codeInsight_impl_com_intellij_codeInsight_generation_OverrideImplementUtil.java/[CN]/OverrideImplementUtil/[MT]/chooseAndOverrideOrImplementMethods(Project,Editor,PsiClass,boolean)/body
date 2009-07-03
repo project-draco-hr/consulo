@@ -2,18 +2,38 @@
   LOG.assertTrue(aClass.isValid());
   ApplicationManager.getApplication().assertReadAccessAllowed();
   Collection<CandidateInfo> candidates=getMethodsToOverrideImplement(aClass,toImplement);
-  if (candidates.isEmpty())   return;
-  final MemberChooser<PsiMethodMember> chooser=new MemberChooser<PsiMethodMember>(ContainerUtil.map2Array(candidates,PsiMethodMember.class,new Function<CandidateInfo,PsiMethodMember>(){
-    public PsiMethodMember fun(    final CandidateInfo s){
-      return new PsiMethodMember(s);
+  Collection<CandidateInfo> secondary=toImplement ? Collections.<CandidateInfo>emptyList() : getMethodsToOverrideImplement(aClass,true);
+  if (candidates.isEmpty() && secondary.isEmpty())   return;
+  final PsiMethodMember[] onlyPrimary=convertToMethodMembers(candidates);
+  final PsiMethodMember[] all=ArrayUtil.mergeArrays(onlyPrimary,convertToMethodMembers(secondary),PsiMethodMember.class);
+  final String toMerge=PropertiesComponent.getInstance(project).getValue(PROP_COMBINED_OVERRIDE_IMPLEMENT);
+  final Ref<Boolean> merge=Ref.create(!"false".equals(toMerge));
+  final MemberChooser<PsiMethodMember> chooser=new MemberChooser<PsiMethodMember>(merge.get().booleanValue() ? all : onlyPrimary,false,true,project,PsiUtil.isLanguageLevel5OrHigher(aClass)){
+    @Override protected void fillToolbarActions(    DefaultActionGroup group){
+      super.fillToolbarActions(group);
+      if (toImplement)       return;
+      final ToggleAction mergeAction=new ToggleAction("Show methods to implement"){
+        @Override public boolean isSelected(        AnActionEvent e){
+          return merge.get().booleanValue();
+        }
+        @Override public void setSelected(        AnActionEvent e,        boolean state){
+          merge.set(state);
+          resetElements(state ? all : onlyPrimary);
+          setTitle(getChooserTitle(false,merge));
+        }
+      }
+;
+      mergeAction.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_I,InputEvent.ALT_MASK)),myTree);
+      group.add(mergeAction);
     }
   }
-),false,true,project,PsiUtil.isLanguageLevel5OrHigher(aClass) && (PsiUtil.isLanguageLevel6OrHigher(aClass) || !toImplement));
-  chooser.setTitle(toImplement ? CodeInsightBundle.message("methods.to.implement.chooser.title") : CodeInsightBundle.message("methods.to.override.chooser.title"));
+;
+  chooser.setTitle(getChooserTitle(toImplement,merge));
   registerHandlerForComplementaryAction(project,editor,aClass,toImplement,chooser);
   chooser.setCopyJavadocVisible(true);
   chooser.show();
   if (chooser.getExitCode() != DialogWrapper.OK_EXIT_CODE)   return;
+  PropertiesComponent.getInstance(project).setValue(PROP_COMBINED_OVERRIDE_IMPLEMENT,merge.get().toString());
   final List<PsiMethodMember> selectedElements=chooser.getSelectedElements();
   if (selectedElements == null || selectedElements.isEmpty())   return;
   new WriteCommandAction(project,aClass.getContainingFile()){
