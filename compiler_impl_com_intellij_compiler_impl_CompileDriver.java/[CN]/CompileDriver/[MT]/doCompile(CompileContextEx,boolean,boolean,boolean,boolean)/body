@@ -23,48 +23,40 @@
       }
       return ExitStatus.ERRORS;
     }
-    final boolean[] needRecalcOutputDirs={false};
+    boolean needRecalcOutputDirs=false;
     final List<VirtualFile> outputsToRefresh=new ArrayList<VirtualFile>();
-    final ExitStatus[] exitStatus={null};
-    runInContext(context,"Walking output directories...",new ThrowableRunnable<RuntimeException>(){
-      public void run() throws RuntimeException {
-        for (        VirtualFile output : context.getAllOutputDirectories()) {
-          if (output.isValid()) {
-            walkChildren(output,context);
-          }
+    for (    VirtualFile output : context.getAllOutputDirectories()) {
+      if (output.isValid()) {
+        walkChildren(output,context);
+      }
  else {
-            needRecalcOutputDirs[0]=true;
-            final File file=new File(output.getPath());
-            if (!file.exists()) {
-              final boolean created=file.mkdirs();
-              if (!created) {
-                context.addMessage(CompilerMessageCategory.ERROR,"Failed to create output directory " + file.getPath(),null,0,0);
-                exitStatus[0]=ExitStatus.ERRORS;
-                return;
-              }
-            }
-            output=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
-            if (output == null) {
-              context.addMessage(CompilerMessageCategory.ERROR,"Failed to locate output directory " + file.getPath(),null,0,0);
-              exitStatus[0]=ExitStatus.ERRORS;
-              return;
-            }
+        needRecalcOutputDirs=true;
+        final File file=new File(output.getPath());
+        if (!file.exists()) {
+          final boolean created=file.mkdirs();
+          if (!created) {
+            context.addMessage(CompilerMessageCategory.ERROR,"Failed to create output directory " + file.getPath(),null,0,0);
+            return ExitStatus.ERRORS;
           }
-          outputsToRefresh.add(output);
         }
-        for (        Pair<VirtualFile,VirtualFile> generated : myGenerationCompilerModuleToOutputDirMap.values()) {
-          walkChildren(generated.getFirst(),context);
-          outputsToRefresh.add(generated.getFirst());
-          walkChildren(generated.getSecond(),context);
-          outputsToRefresh.add(generated.getSecond());
+        output=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
+        if (output == null) {
+          context.addMessage(CompilerMessageCategory.ERROR,"Failed to locate output directory " + file.getPath(),null,0,0);
+          return ExitStatus.ERRORS;
         }
       }
+      outputsToRefresh.add(output);
     }
-);
-    if (exitStatus[0] != null)     return exitStatus[0];
-    CompilerUtil.refreshFilesInterruptibly(context,outputsToRefresh,"Refreshing output directories...");
+    for (    Pair<IntermediateOutputCompiler,Module> pair : myGenerationCompilerModuleToOutputDirMap.keySet()) {
+      final Pair<VirtualFile,VirtualFile> generated=myGenerationCompilerModuleToOutputDirMap.get(pair);
+      walkChildren(generated.getFirst(),context);
+      outputsToRefresh.add(generated.getFirst());
+      walkChildren(generated.getSecond(),context);
+      outputsToRefresh.add(generated.getSecond());
+    }
+    RefreshQueue.getInstance().refresh(false,true,null,outputsToRefresh.toArray(new VirtualFile[outputsToRefresh.size()]));
     DumbService.getInstance(myProject).waitForSmartMode();
-    if (needRecalcOutputDirs[0]) {
+    if (needRecalcOutputDirs) {
       context.recalculateOutputDirs();
     }
     boolean didSomething=false;
@@ -89,7 +81,7 @@
       dropDependencyCache(context);
       final VirtualFile[] allOutputDirs=context.getAllOutputDirectories();
       if (didSomething && GENERATE_CLASSPATH_INDEX) {
-        runInContext(context,"Generating classpath index...",new ThrowableRunnable<RuntimeException>(){
+        CompilerUtil.runInContext(context,"Generating classpath index...",new ThrowableRunnable<RuntimeException>(){
           public void run(){
             int count=0;
             for (            VirtualFile file : allOutputDirs) {
