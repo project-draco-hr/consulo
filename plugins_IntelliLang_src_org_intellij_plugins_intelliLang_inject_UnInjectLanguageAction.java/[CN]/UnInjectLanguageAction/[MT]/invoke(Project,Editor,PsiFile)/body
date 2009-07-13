@@ -1,56 +1,17 @@
 {
   final PsiLanguageInjectionHost host=findInjectionHost(editor,file);
-  final Configuration configuration=Configuration.getInstance();
-  final ArrayList<BaseInjection> injectionsToRemove=new ArrayList<BaseInjection>();
-  final ArrayList<PsiAnnotation> annotationsToRemove=new ArrayList<PsiAnnotation>();
-  collectInjections(host,configuration,injectionsToRemove,annotationsToRemove);
-  if (!injectionsToRemove.isEmpty() || !annotationsToRemove.isEmpty()) {
-    final List<PsiFile> psiFiles=ContainerUtil.mapNotNull(annotationsToRemove,new NullableFunction<PsiAnnotation,PsiFile>(){
-      public PsiFile fun(      final PsiAnnotation psiAnnotation){
-        return psiAnnotation instanceof PsiCompiledElement ? null : psiAnnotation.getContainingFile();
+  try {
+    for (    LanguageInjectorSupport support : Extensions.getExtensions(LanguageInjectorSupport.EP_NAME)) {
+      if (support.removeInjectionInPlace(host))       return;
+    }
+    final TemporaryPlacesRegistry places=TemporaryPlacesRegistry.getInstance(project);
+    for (    Pair<SmartPsiElementPointer<PsiLanguageInjectionHost>,InjectedLanguage> pair : places.getTempInjectionsSafe()) {
+      if (pair.first.getElement() == host) {
+        places.removeTempInjection(pair);
       }
     }
-);
-    final UndoableAction action=new UndoableAction(){
-      public void undo() throws UnexpectedUndoException {
-        for (        BaseInjection injection : injectionsToRemove) {
-          if (injection instanceof XmlTagInjection) {
-            configuration.getTagInjections().add((XmlTagInjection)injection);
-          }
- else           if (injection instanceof XmlAttributeInjection) {
-            configuration.getAttributeInjections().add((XmlAttributeInjection)injection);
-          }
- else           if (injection instanceof MethodParameterInjection) {
-            configuration.getParameterInjections().add((MethodParameterInjection)injection);
-          }
-        }
-        configuration.configurationModified();
-        FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
-      }
-      public void redo() throws UnexpectedUndoException {
-        configuration.getTagInjections().removeAll(injectionsToRemove);
-        configuration.getAttributeInjections().removeAll(injectionsToRemove);
-        configuration.getParameterInjections().removeAll(injectionsToRemove);
-        configuration.configurationModified();
-        FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
-      }
-      public DocumentReference[] getAffectedDocuments(){
-        return DocumentReference.EMPTY_ARRAY;
-      }
-      public boolean isComplex(){
-        return true;
-      }
-    }
-;
-    new WriteCommandAction(project,psiFiles.toArray(new PsiFile[psiFiles.size()])){
-      @Override protected void run(      final Result result) throws Throwable {
-        for (        PsiAnnotation annotation : annotationsToRemove) {
-          annotation.delete();
-        }
-        action.redo();
-        UndoManager.getInstance(project).undoableActionPerformed(action);
-      }
-    }
-.execute();
+  }
+  finally {
+    FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
   }
 }

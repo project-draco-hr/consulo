@@ -1,0 +1,63 @@
+{
+  if (!isMine(psiElement))   return false;
+  final Configuration configuration=Configuration.getInstance();
+  final HashMap<MethodParameterInjection,Object> injectionsMap=new HashMap<MethodParameterInjection,Object>();
+  final ArrayList<PsiAnnotation> annotations=new ArrayList<PsiAnnotation>();
+  final PsiLiteralExpression host=(PsiLiteralExpression)psiElement;
+  final Project project=host.getProject();
+  collectInjections(host,configuration,injectionsMap,annotations);
+  if (injectionsMap.isEmpty() && annotations.isEmpty())   return false;
+  final ArrayList<MethodParameterInjection> originalInjections=new ArrayList<MethodParameterInjection>(injectionsMap.keySet());
+  final List<MethodParameterInjection> newInjections=ContainerUtil.mapNotNull(originalInjections,new NullableFunction<MethodParameterInjection,MethodParameterInjection>(){
+    public MethodParameterInjection fun(    final MethodParameterInjection injection){
+      final Object key=injectionsMap.get(injection);
+      final MethodParameterInjection newInjection=injection.copy();
+      for (      MethodParameterInjection.MethodInfo info : newInjection.getMethodInfos()) {
+        Configuration.clearMethodParameterFlag(info,(Trinity<String,Integer,Integer>)key);
+      }
+      for (      MethodParameterInjection.MethodInfo info : newInjection.getMethodInfos()) {
+        if (info.isEnabled())         return newInjection;
+      }
+      return null;
+    }
+  }
+);
+  final List<PsiFile> psiFiles=ContainerUtil.mapNotNull(annotations,new NullableFunction<PsiAnnotation,PsiFile>(){
+    public PsiFile fun(    final PsiAnnotation psiAnnotation){
+      return psiAnnotation instanceof PsiCompiledElement ? null : psiAnnotation.getContainingFile();
+    }
+  }
+);
+  final UndoableAction action=new UndoableAction(){
+    public void undo() throws UnexpectedUndoException {
+      configuration.getParameterInjections().removeAll(newInjections);
+      configuration.getParameterInjections().addAll(originalInjections);
+      configuration.configurationModified();
+      FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
+    }
+    public void redo() throws UnexpectedUndoException {
+      configuration.getParameterInjections().removeAll(originalInjections);
+      configuration.getParameterInjections().addAll(newInjections);
+      configuration.configurationModified();
+      FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
+    }
+    public DocumentReference[] getAffectedDocuments(){
+      return DocumentReference.EMPTY_ARRAY;
+    }
+    public boolean isComplex(){
+      return true;
+    }
+  }
+;
+  new WriteCommandAction(project,psiFiles.toArray(new PsiFile[psiFiles.size()])){
+    @Override protected void run(    final Result result) throws Throwable {
+      for (      PsiAnnotation annotation : annotations) {
+        annotation.delete();
+      }
+      action.redo();
+      UndoManager.getInstance(project).undoableActionPerformed(action);
+    }
+  }
+.execute();
+  return true;
+}
