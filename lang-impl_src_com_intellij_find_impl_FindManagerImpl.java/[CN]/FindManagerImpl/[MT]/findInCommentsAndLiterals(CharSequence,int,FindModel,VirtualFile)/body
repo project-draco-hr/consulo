@@ -1,0 +1,72 @@
+{
+  if (file == null)   return NOT_FOUND_RESULT;
+  FileType ftype=file.getFileType();
+  Language lang=null;
+  if (ftype instanceof LanguageFileType) {
+    lang=((LanguageFileType)ftype).getLanguage();
+  }
+  if (lang == null)   return NOT_FOUND_RESULT;
+  CommentsLiteralsSearchData data=model.getUserData(ourCommentsLiteralsSearchDataKey);
+  if (data == null || data.lastFile != file) {
+    Lexer lexer=getLexer(file,lang);
+    ParserDefinition definition=LanguageParserDefinitions.INSTANCE.forLanguage(lang);
+    TokenSet tokensOfInterest=model.isInCommentsOnly() ? definition.getCommentTokens() : TokenSet.EMPTY;
+    tokensOfInterest=TokenSet.orSet(tokensOfInterest,model.isInStringLiteralsOnly() ? definition.getStringLiteralElements() : TokenSet.EMPTY);
+    if (model.isInStringLiteralsOnly()) {
+      final Lexer xmlLexer=getLexer(null,Language.findLanguageByID("XML"));
+      final String marker="xxx";
+      xmlLexer.start("<a href=\"" + marker + "\" />");
+      while (!marker.equals(xmlLexer.getTokenText())) {
+        xmlLexer.advance();
+        if (xmlLexer.getTokenType() == null)         break;
+      }
+      IElementType convenienceXmlAttrType=xmlLexer.getTokenType();
+      if (convenienceXmlAttrType != null) {
+        tokensOfInterest=TokenSet.orSet(tokensOfInterest,TokenSet.create(convenienceXmlAttrType));
+      }
+    }
+    Matcher matcher=model.isRegularExpressions() ? compileRegExp(model,"") : null;
+    StringSearcher searcher=matcher != null ? null : createStringSearcher(model);
+    data=new CommentsLiteralsSearchData(file,lexer,tokensOfInterest,searcher,matcher);
+    model.putUserData(ourCommentsLiteralsSearchDataKey,data);
+  }
+  data.lexer.start(text,data.startOffset,text.length(),0);
+  IElementType tokenType;
+  final Lexer lexer=data.lexer;
+  final TokenSet tokens=data.tokensOfInterest;
+  int lastGoodOffset=0;
+  boolean scanningForward=model.isForward();
+  FindResultImpl prevFindResult=NOT_FOUND_RESULT;
+  while ((tokenType=lexer.getTokenType()) != null) {
+    if (lexer.getState() == 0)     lastGoodOffset=lexer.getTokenStart();
+    if (tokens.contains(tokenType)) {
+      int start=lexer.getTokenStart();
+      if (start >= offset || !scanningForward) {
+        FindResultImpl findResult=null;
+        if (data.searcher != null) {
+          int i=data.searcher.scan(text,start,lexer.getTokenEnd());
+          if (i != -1)           findResult=new FindResultImpl(i,i + model.getStringToFind().length());
+        }
+ else {
+          data.matcher.reset(text.subSequence(start,lexer.getTokenEnd()));
+          if (data.matcher.find()) {
+            int matchStart=data.matcher.start();
+            findResult=new FindResultImpl(start + matchStart,start + data.matcher.end());
+          }
+        }
+        if (findResult != null) {
+          if (scanningForward) {
+            data.startOffset=lastGoodOffset;
+            return findResult;
+          }
+ else {
+            if (start >= offset)             return prevFindResult;
+            prevFindResult=findResult;
+          }
+        }
+      }
+    }
+    lexer.advance();
+  }
+  return prevFindResult;
+}
