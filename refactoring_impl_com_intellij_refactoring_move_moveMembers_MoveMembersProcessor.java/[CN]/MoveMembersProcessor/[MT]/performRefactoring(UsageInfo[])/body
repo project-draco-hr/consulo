@@ -1,2 +1,45 @@
 {
+  try {
+    LanguageExtension<MoveMemberHandler> extension=new LanguageExtension<MoveMemberHandler>("com.intellij.refactoring.moveMemberHandler");
+    ArrayList<MoveMembersUsageInfo> otherUsages=new ArrayList<MoveMembersUsageInfo>();
+    for (    UsageInfo usageInfo : usages) {
+      MoveMembersUsageInfo usage=(MoveMembersUsageInfo)usageInfo;
+      if (!usage.reference.isValid())       continue;
+      final MoveMemberHandler handler=extension.forLanguage(usageInfo.getElement().getLanguage());
+      if (handler != null) {
+        if (handler.changeExternalUsage(myOptions,usage))         continue;
+      }
+      otherUsages.add(usage);
+    }
+    for (    PsiMember member : myMembersToMove) {
+      ArrayList<PsiReference> refsToBeRebind=new ArrayList<PsiReference>();
+      for (Iterator<MoveMembersUsageInfo> iterator=otherUsages.iterator(); iterator.hasNext(); ) {
+        MoveMembersUsageInfo info=iterator.next();
+        if (member.equals(info.member)) {
+          PsiReference ref=info.getReference();
+          if (ref != null) {
+            refsToBeRebind.add(ref);
+          }
+          iterator.remove();
+        }
+      }
+      final RefactoringElementListener elementListener=getTransaction().getElementListener(member);
+      final MoveMemberHandler handler=extension.forLanguage(member.getLanguage());
+      PsiMember newMember=handler.doMove(myOptions,member,otherUsages);
+      elementListener.elementMoved(newMember);
+      fixVisibility(newMember,usages);
+      for (      PsiReference reference : refsToBeRebind) {
+        reference.bindToElement(newMember);
+      }
+    }
+    final MoveMemberHandler handler=MoveMemberHandler.EP_NAME.forLanguage(myTargetClass.getLanguage());
+    if (handler != null)     handler.decodeContextInfo(myTargetClass);
+    myMembersToMove.clear();
+    if (myMoveCallback != null) {
+      myMoveCallback.refactoringCompleted();
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
 }
