@@ -33,7 +33,13 @@
               myFileContentAttic.offer(file);
               iterateIndexableFiles(file,new Processor<VirtualFile>(){
                 public boolean process(                final VirtualFile file){
-                  myFilesToUpdate.add(file);
+                  w.lock();
+                  try {
+                    myFilesToUpdate.add(file);
+                  }
+  finally {
+                    w.unlock();
+                  }
                   return true;
                 }
               }
@@ -65,35 +71,39 @@
           content=ArrayUtil.EMPTY_BYTE_ARRAY;
         }
         final FileContent fc=new FileContent(file,content);
-synchronized (myFutureInvalidations) {
-          final InvalidationTask invalidator=new InvalidationTask(file){
-            public void run(){
-              Throwable unexpectedError=null;
-              for (              ID<?,?> indexId : affectedIndices) {
-                try {
-                  updateSingleIndex(indexId,file,null,fc);
-                }
- catch (                StorageException e) {
-                  LOG.info(e);
-                  requestRebuild(indexId);
-                }
-catch (                ProcessCanceledException ignored) {
-                }
-catch (                Throwable e) {
-                  LOG.info(e);
-                  if (unexpectedError == null) {
-                    unexpectedError=e;
-                  }
-                }
+        final InvalidationTask invalidator=new InvalidationTask(file){
+          public void run(){
+            Throwable unexpectedError=null;
+            for (            ID<?,?> indexId : affectedIndices) {
+              try {
+                updateSingleIndex(indexId,file,null,fc);
               }
-              IndexingStamp.flushCache();
-              if (unexpectedError != null) {
-                LOG.error(unexpectedError);
+ catch (              StorageException e) {
+                LOG.info(e);
+                requestRebuild(indexId);
+              }
+catch (              ProcessCanceledException ignored) {
+              }
+catch (              Throwable e) {
+                LOG.info(e);
+                if (unexpectedError == null) {
+                  unexpectedError=e;
+                }
               }
             }
+            IndexingStamp.flushCache();
+            if (unexpectedError != null) {
+              LOG.error(unexpectedError);
+            }
           }
+        }
 ;
+        w.lock();
+        try {
           myFutureInvalidations.offer(invalidator);
+        }
+  finally {
+          w.unlock();
         }
       }
     }
