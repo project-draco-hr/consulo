@@ -1,0 +1,70 @@
+{
+  final boolean isInMethod=psiBlock.getParent() instanceof PsiMethod;
+  try {
+    final ControlFlowAnalyzer analyzer=createControlFlowAnalyzer();
+    final ControlFlow flow=analyzer.buildControlFlow(psiBlock);
+    if (flow == null)     return RunnerResult.NOT_APPLICABLE;
+    int endOffset=flow.getInstructionCount();
+    myInstructions=flow.getInstructions();
+    myFields=flow.getFields();
+    if (LOG.isDebugEnabled()) {
+      for (int i=0; i < myInstructions.length; i++) {
+        Instruction instruction=myInstructions[i];
+        LOG.debug(i + ": " + instruction.toString());
+      }
+    }
+    int branchCount=0;
+    for (    Instruction instruction : myInstructions) {
+      if (instruction instanceof BranchingInstruction)       branchCount++;
+    }
+    if (branchCount > 80)     return RunnerResult.TOO_COMPLEX;
+    final ArrayList<DfaInstructionState> queue=new ArrayList<DfaInstructionState>();
+    final DfaMemoryState initialState=createMemoryState();
+    if (isInMethod) {
+      PsiMethod method=(PsiMethod)psiBlock.getParent();
+      final PsiParameter[] parameters=method.getParameterList().getParameters();
+      for (      PsiParameter parameter : parameters) {
+        if (AnnotationUtil.isNotNull(parameter)) {
+          initialState.applyNotNull(myValueFactory.getVarFactory().create(parameter,false));
+        }
+      }
+    }
+    queue.add(new DfaInstructionState(myInstructions[0],initialState));
+    long timeLimit=ourTimeLimit;
+    final boolean unitTestMode=ApplicationManager.getApplication().isUnitTestMode();
+    final long before=System.currentTimeMillis();
+    while (!queue.isEmpty()) {
+      if (!unitTestMode && System.currentTimeMillis() - before > timeLimit)       return RunnerResult.TOO_COMPLEX;
+      ProgressManager.getInstance().checkCanceled();
+      DfaInstructionState instructionState=queue.remove(0);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(instructionState.toString());
+      }
+      Instruction instruction=instructionState.getInstruction();
+      long distance=instructionState.getDistanceFromStart();
+      if (instruction instanceof BranchingInstruction) {
+        if (!instruction.setMemoryStateProcessed(instructionState.getMemoryState().createCopy())) {
+          return RunnerResult.TOO_COMPLEX;
+        }
+      }
+      DfaInstructionState[] after=instruction.accept(this,instructionState.getMemoryState(),visitor);
+      if (after != null) {
+        for (        DfaInstructionState state : after) {
+          Instruction nextInstruction=state.getInstruction();
+          if ((!(nextInstruction instanceof BranchingInstruction) || !nextInstruction.isMemoryStateProcessed(state.getMemoryState())) && instruction.getIndex() < endOffset) {
+            state.setDistanceFromStart(distance + 1);
+            queue.add(state);
+          }
+        }
+      }
+    }
+    return RunnerResult.OK;
+  }
+ catch (  ArrayIndexOutOfBoundsException e) {
+    LOG.error(psiBlock.getText(),e);
+    return RunnerResult.ABORTED;
+  }
+catch (  EmptyStackException e) {
+    return RunnerResult.ABORTED;
+  }
+}
