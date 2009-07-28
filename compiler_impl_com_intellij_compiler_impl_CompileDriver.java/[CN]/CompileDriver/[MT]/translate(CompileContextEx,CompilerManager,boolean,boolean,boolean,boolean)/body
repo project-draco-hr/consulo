@@ -3,43 +3,60 @@
   final TranslatingCompiler[] translators=compilerManager.getCompilers(TranslatingCompiler.class,myCompilerFilter);
   final Set<FileType> generatedTypes=new HashSet<FileType>();
   VirtualFile[] snapshot=null;
-  for (  final TranslatingCompiler translator : translators) {
-    if (context.getProgressIndicator().isCanceled()) {
-      throw new ExitException(ExitStatus.CANCELLED);
-    }
-    if (snapshot == null || ContainerUtil.intersects(generatedTypes,compilerManager.getRegisteredInputTypes(translator))) {
-      snapshot=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
-        public VirtualFile[] compute(){
-          return context.getCompileScope().getFiles(null,true);
-        }
+  final List<TranslatingCompiler.OutputItem> postponedItems=new ArrayList<TranslatingCompiler.OutputItem>();
+  try {
+    for (int currentCompiler=0, translatorsLength=translators.length; currentCompiler < translatorsLength; currentCompiler++) {
+      final TranslatingCompiler translator=translators[currentCompiler];
+      if (context.getProgressIndicator().isCanceled()) {
+        throw new ExitException(ExitStatus.CANCELLED);
       }
+      if (snapshot == null || ContainerUtil.intersects(generatedTypes,compilerManager.getRegisteredInputTypes(translator))) {
+        snapshot=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
+          public VirtualFile[] compute(){
+            return context.getCompileScope().getFiles(null,true);
+          }
+        }
 );
-    }
-    final CompileContextEx _context;
-    if (translator instanceof IntermediateOutputCompiler) {
-      final IntermediateOutputCompiler _translator=(IntermediateOutputCompiler)translator;
-      _context=new CompileContextExProxy(context){
-        public VirtualFile getModuleOutputDirectory(        final Module module){
-          return getGenerationOutputDir(_translator,module,false);
-        }
-        public VirtualFile getModuleOutputDirectoryForTests(        final Module module){
-          return getGenerationOutputDir(_translator,module,true);
-        }
       }
+      final CompileContextEx _context;
+      if (translator instanceof IntermediateOutputCompiler) {
+        final IntermediateOutputCompiler _translator=(IntermediateOutputCompiler)translator;
+        _context=new CompileContextExProxy(context){
+          public VirtualFile getModuleOutputDirectory(          final Module module){
+            return getGenerationOutputDir(_translator,module,false);
+          }
+          public VirtualFile getModuleOutputDirectoryForTests(          final Module module){
+            return getGenerationOutputDir(_translator,module,true);
+          }
+        }
 ;
-    }
+      }
  else {
-      _context=context;
+        _context=context;
+      }
+      final boolean compiledSomething=compileSources(_context,translators,currentCompiler,snapshot,forceCompile,isRebuild,trackDependencies,onlyCheckStatus,postponedItems);
+      if (compiledSomething) {
+        generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(translator));
+      }
+      dropDependencyCache(_context);
+      if (_context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+        throw new ExitException(ExitStatus.ERRORS);
+      }
+      didSomething|=compiledSomething;
     }
-    final boolean compiledSomething=compileSources(_context,snapshot,translator,forceCompile,isRebuild,trackDependencies,onlyCheckStatus);
-    if (compiledSomething) {
-      generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(translator));
+  }
+  finally {
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) == 0 && postponedItems.size() > 0) {
+      try {
+        final TranslatingCompiler.OutputItem[] successfullyCompiled=postponedItems.toArray(new TranslatingCompiler.OutputItem[postponedItems.size()]);
+        TranslatingCompilerFilesMonitor.getInstance().update(context,successfullyCompiled,VirtualFile.EMPTY_ARRAY);
+      }
+ catch (      IOException e) {
+        LOG.info(e);
+        context.requestRebuildNextTime(e.getMessage());
+        throw new ExitException(ExitStatus.ERRORS);
+      }
     }
-    dropDependencyCache(context);
-    if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-      throw new ExitException(ExitStatus.ERRORS);
-    }
-    didSomething|=compiledSomething;
   }
   return didSomething;
 }
