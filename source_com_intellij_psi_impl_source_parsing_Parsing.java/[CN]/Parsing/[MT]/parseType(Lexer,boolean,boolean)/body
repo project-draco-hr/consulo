@@ -1,38 +1,56 @@
 {
   IElementType tokenType=lexer.getTokenType();
-  TreeElement refElement;
   if (tokenType == null) {
     return null;
   }
- else   if (PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
+  CompositeElement type=ASTFactory.composite(JavaElementType.TYPE);
+  if (areTypeAnnotationsSupported())   parseAnnotationListTo(lexer,type);
+  tokenType=lexer.getTokenType();
+  TreeElement refElement;
+  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
     refElement=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
     lexer.advance();
   }
- else   if (tokenType == IDENTIFIER) {
-    refElement=parseJavaCodeReference(lexer,eatLastDot,true);
+ else   if (tokenType == JavaTokenType.IDENTIFIER) {
+    refElement=parseJavaCodeReference(lexer,eatLastDot,true,false);
   }
- else   if (allowWildcard && lexer.getTokenType() == QUEST) {
+ else   if (allowWildcard && lexer.getTokenType() == JavaTokenType.QUEST) {
     return parseWildcardType(lexer);
   }
  else {
     return null;
   }
-  CompositeElement type=ASTFactory.composite(TYPE);
   type.rawAddChildren(refElement);
-  while (lexer.getTokenType() == LBRACKET) {
+  CompositeElement arrayTypeElement=ASTFactory.composite(JavaElementType.TYPE);
+  while (true) {
+    if (areTypeAnnotationsSupported())     parseAnnotationListTo(lexer,arrayTypeElement);
+    if (lexer.getTokenType() != JavaTokenType.LBRACKET) {
+      if (arrayTypeElement.getFirstChildNode() != null) {
+        type.rawAddChildren(arrayTypeElement.getFirstChildNode());
+        type.rawAddChildren(Factory.createErrorElement(JavaErrorMessages.message("expected.lbracket")));
+        return type;
+      }
+      break;
+    }
     final LexerPosition lbracketPos=lexer.getCurrentPosition();
     TreeElement lbracket=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
     lexer.advance();
-    if (lexer.getTokenType() != RBRACKET) {
+    if (lexer.getTokenType() != JavaTokenType.RBRACKET) {
       lexer.restore(lbracketPos);
       break;
     }
-    CompositeElement type1=ASTFactory.composite(TYPE);
-    type1.rawAddChildren(type);
-    type1.rawAddChildren(lbracket);
-    type1.rawAddChildren(ParseUtil.createTokenElement(lexer,myContext.getCharTable()));
+    if (arrayTypeElement.getFirstChildNode() == null) {
+      arrayTypeElement.rawAddChildren(type);
+    }
+ else {
+      arrayTypeElement.getFirstChildNode().rawInsertBeforeMe(type);
+    }
+    arrayTypeElement.rawAddChildren(lbracket);
+    TreeElement rBracket=ParseUtil.createTokenElement(lexer,myContext.getCharTable());
+    arrayTypeElement.rawAddChildren(rBracket);
     lexer.advance();
-    type=type1;
+    type=arrayTypeElement;
+    arrayTypeElement=ASTFactory.composite(JavaElementType.TYPE);
   }
   return type;
 }
