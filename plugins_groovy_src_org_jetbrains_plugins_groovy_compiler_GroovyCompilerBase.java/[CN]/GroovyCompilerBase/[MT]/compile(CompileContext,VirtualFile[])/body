@@ -1,0 +1,45 @@
+{
+  Set<OutputItem> successfullyCompiled=new HashSet<OutputItem>();
+  Set<VirtualFile> toRecompileCollector=new HashSet<VirtualFile>();
+  Map<Module,List<VirtualFile>> mapModulesToVirtualFiles=CompilerUtil.buildModuleToFilesMap(compileContext,virtualFiles);
+  final List<Chunk<Module>> chunks=ModuleCompilerUtil.getSortedModuleChunks(myProject,new ArrayList<Module>(mapModulesToVirtualFiles.keySet()));
+  for (  final Chunk<Module> chunk : chunks) {
+    for (    final Module module : chunk.getNodes()) {
+      final List<VirtualFile> moduleFiles=mapModulesToVirtualFiles.get(module);
+      if (!toRecompileCollector.isEmpty()) {
+        toRecompileCollector.addAll(moduleFiles);
+        continue;
+      }
+      final GroovyFacet facet=GroovyFacet.getInstance(module);
+      final List<VirtualFile> toCompile=new ArrayList<VirtualFile>();
+      final List<VirtualFile> toCopy=new ArrayList<VirtualFile>();
+      final CompilerConfiguration configuration=CompilerConfiguration.getInstance(myProject);
+      if (module.getModuleType() instanceof JavaModuleType) {
+        final boolean compileGroovyFiles=facet != null && facet.getConfiguration().isCompileGroovyFiles();
+        for (        final VirtualFile file : moduleFiles) {
+          final boolean shouldCompile=module.getModuleType() instanceof JavaModuleType && (file.getFileType() == GroovyFileType.GROOVY_FILE_TYPE && compileGroovyFiles || file.getFileType() == StdFileTypes.JAVA);
+          (shouldCompile ? toCompile : toCopy).add(file);
+        }
+      }
+      if (!toCompile.isEmpty()) {
+        compileFiles(compileContext,successfullyCompiled,toRecompileCollector,module,toCompile);
+      }
+      if (!toCopy.isEmpty()) {
+        copyFiles(compileContext,successfullyCompiled,toRecompileCollector,toCopy,configuration);
+      }
+    }
+  }
+  final Set<OutputItem> compiledItems=successfullyCompiled;
+  final VirtualFile[] toRecompile=toRecompileCollector.toArray(new VirtualFile[toRecompileCollector.size()]);
+  return new ExitStatus(){
+    private final OutputItem[] myCompiledItems=compiledItems.toArray(new OutputItem[compiledItems.size()]);
+    private final VirtualFile[] myToRecompile=toRecompile;
+    public OutputItem[] getSuccessfullyCompiled(){
+      return myCompiledItems;
+    }
+    public VirtualFile[] getFilesToRecompile(){
+      return myToRecompile;
+    }
+  }
+;
+}
