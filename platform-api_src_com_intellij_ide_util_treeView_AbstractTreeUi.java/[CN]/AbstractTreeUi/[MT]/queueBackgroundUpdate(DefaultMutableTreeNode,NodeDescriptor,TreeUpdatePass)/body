@@ -1,11 +1,14 @@
 {
-  if (myLoadingParents.contains(getElementFromDescriptor(descriptor)))   return false;
-  myLoadingParents.add(getElementFromDescriptor(descriptor));
+  assertIsDispatchThread();
+  final Object oldElementFromDescriptor=getElementFromDescriptor(descriptor);
+  if (isLoadedInBackground(oldElementFromDescriptor))   return false;
+  addToLoadedInBackground(oldElementFromDescriptor);
   if (!isNodeBeingBuilt(node)) {
     LoadingNode loadingNode=new LoadingNode(getLoadingNodeText());
     myTreeModel.insertNodeInto(loadingNode,node,node.getChildCount());
   }
   final Ref<Object[]> children=new Ref<Object[]>();
+  final Ref<Object> elementFromDescriptor=new Ref<Object>();
   Runnable buildRunnable=new Runnable(){
     public void run(){
       if (isReleased()) {
@@ -13,7 +16,11 @@
       }
       update(descriptor,true);
       Object element=getElementFromDescriptor(descriptor);
-      if (element == null)       return;
+      if (element == null) {
+        removeFromLoadedInBackground(oldElementFromDescriptor);
+        return;
+      }
+      elementFromDescriptor.set(element);
       children.set(getChildrenFor(getBuilder().getTreeStructureElement(descriptor)));
     }
   }
@@ -23,10 +30,18 @@
     public void run(){
       if (isReleased())       return;
       if (children.get() == null)       return;
+      if (isRerunNeeded(pass)) {
+        removeFromLoadedInBackground(elementFromDescriptor.get());
+        getUpdater().addSubtreeToUpdate(pass);
+        return;
+      }
       updateNodeChildren(node,pass,children.get(),true);
-      myLoadingParents.remove(getElementFromDescriptor(descriptor));
-      update(descriptor,false);
-      Object element=getElementFromDescriptor(descriptor);
+      removeFromLoadedInBackground(elementFromDescriptor.get());
+      if (isRerunNeeded(pass)) {
+        getUpdater().addSubtreeToUpdate(pass);
+        return;
+      }
+      Object element=elementFromDescriptor.get();
       if (element != null) {
         myUnbuiltNodes.remove(node);
         for (int i=0; i < node.getChildCount(); i++) {
