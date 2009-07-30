@@ -7,136 +7,49 @@
       e.printStackTrace();
     }
   }
+  if (args.length != 2) {
+    System.err.println("There is no arguments for groovy compiler");
+    return;
+  }
+  final boolean forStubs="stubs".equals(args[0]);
+  final File argsFile=new File(args[1]);
+  if (!argsFile.exists()) {
+    System.err.println("Arguments file for groovy compiler not found");
+    return;
+  }
   try {
-    String moduleClasspath=null;
-    String moduleOutputPath=null;
-    boolean isGrails=false;
-    boolean forStubs=false;
-    String encoding=null;
-    if (args.length != 1) {
-      System.err.println("There is no arguments for groovy compiler");
-      return;
-    }
-    File argsFile=new File(args[0]);
-    if (!argsFile.exists()) {
-      System.err.println("Arguments file for groovy compiler not found");
-      return;
-    }
-    List srcFiles=new ArrayList();
-    Map class2File=new HashMap();
-    BufferedReader reader=null;
-    FileInputStream stream;
-    try {
-      stream=new FileInputStream(argsFile);
-      reader=new BufferedReader(new InputStreamReader(stream));
-      String line;
-      while ((line=reader.readLine()) != null && !line.equals(CLASSPATH)) {
-        if (SRC_FILE.equals(line)) {
-          final File file=new File(reader.readLine());
-          srcFiles.add(file);
-          String s;
-          while (!END.equals(s=reader.readLine())) {
-            class2File.put(s,file);
-          }
-        }
-      }
-      while (line != null) {
-        if (line.startsWith(CLASSPATH)) {
-          moduleClasspath=reader.readLine();
-        }
-        if (line.startsWith(IS_GRAILS)) {
-          String s=reader.readLine();
-          isGrails="true".equals(s);
-        }
-        if (line.startsWith(FOR_STUBS)) {
-          String s=reader.readLine();
-          forStubs="true".equals(s);
-        }
-        if (line.startsWith(ENCODING)) {
-          encoding=reader.readLine();
-        }
-        if (line.startsWith(OUTPUTPATH)) {
-          moduleOutputPath=reader.readLine();
-        }
-        line=reader.readLine();
-      }
-    }
- catch (    FileNotFoundException e) {
-      e.printStackTrace();
-    }
-catch (    IOException e) {
-      e.printStackTrace();
-    }
- finally {
-      try {
-        reader.close();
-      }
- catch (      IOException e) {
-        e.printStackTrace();
-      }
- finally {
-        argsFile.delete();
-      }
-    }
+    final CompilerConfiguration compilerConfiguration=new CompilerConfiguration();
+    compilerConfiguration.setOutput(new PrintWriter(System.err));
+    compilerConfiguration.setWarningLevel(WarningMessage.PARANOIA);
+    final List compilerMessages=new ArrayList();
+    final List patchers=new ArrayList();
+    final List srcFiles=new ArrayList();
+    final Map class2File=new HashMap();
+    final String moduleClasspath=fillFromArgsFile(argsFile,compilerConfiguration,patchers,compilerMessages,srcFiles,class2File);
     if (srcFiles.isEmpty())     return;
-    MessageCollector messageCollector=new MessageCollector();
-    final List compiledFiles=new ArrayList();
     System.out.println(PRESENTABLE_MESSAGE + "Groovy compiler: loading sources...");
-    createCompilationUnits(srcFiles,class2File,moduleClasspath,moduleOutputPath,isGrails,encoding,forStubs).compile(messageCollector,compiledFiles);
+    final CompilationUnit unit=createCompilationUnit(moduleClasspath,forStubs,compilerConfiguration);
+    addSources(forStubs,srcFiles,unit);
+    runPatchers(patchers,compilerMessages,class2File,unit);
+    System.out.println(PRESENTABLE_MESSAGE + "Groovyc: compiling...");
+    final List compiledFiles=GroovyCompilerWrapper.compile(compilerMessages,forStubs,unit);
     System.out.println(CLEAR_PRESENTABLE);
-    Set allCompiling=new HashSet();
-    allCompiling.addAll(srcFiles);
-    File[] toRecompilesFiles=!compiledFiles.isEmpty() ? new File[0] : (File[])allCompiling.toArray(new File[allCompiling.size()]);
-    CompilerMessage[] compilerMessages=messageCollector.getAllMessage();
     System.out.println();
-    for (int i=0; i < compiledFiles.size(); i++) {
-      MyCompilationUnits.OutputItem compiledOutputItem=(MyCompilationUnits.OutputItem)compiledFiles.get(i);
-      System.out.print(COMPILED_START);
-      System.out.print(compiledOutputItem.getOutputPath());
-      System.out.print(SEPARATOR);
-      System.out.print(compiledOutputItem.getSourceFile());
-      System.out.print(SEPARATOR);
-      System.out.print(compiledOutputItem.getOutputRootDirectory());
-      System.out.print(COMPILED_END);
-      System.out.println();
-    }
+    reportCompiledItems(compiledFiles);
     System.out.println();
-    for (int i=0; i < toRecompilesFiles.length; i++) {
-      File toRecompileFile=toRecompilesFiles[i];
-      System.out.print(TO_RECOMPILE_START);
-      try {
-        System.out.print(toRecompileFile.getCanonicalPath());
-      }
- catch (      IOException e) {
-        toRecompileFile.getPath();
-      }
-      System.out.print(TO_RECOMPILE_END);
-      System.out.println();
+    if (compiledFiles.isEmpty()) {
+      reportNotCompiledItems(srcFiles);
     }
     int errorCount=0;
-    for (int i=0; i < compilerMessages.length; i++) {
-      CompilerMessage message=compilerMessages[i];
-      final String category=message.getCategory();
-      final boolean isError=category == MessageCollector.ERROR;
-      if (isError) {
+    for (int i=0; i < compilerMessages.size(); i++) {
+      CompilerMessage message=(CompilerMessage)compilerMessages.get(i);
+      if (message.getCategory() == CompilerMessage.ERROR) {
         if (errorCount > 100) {
           continue;
         }
         errorCount++;
       }
-      System.out.print(MESSAGES_START);
-      System.out.print(category);
-      System.out.print(SEPARATOR);
-      System.out.print(message.getMessage());
-      System.out.print(SEPARATOR);
-      System.out.print(message.getUrl());
-      System.out.print(SEPARATOR);
-      System.out.print(message.getLineNum());
-      System.out.print(SEPARATOR);
-      System.out.print(message.getColumnNum());
-      System.out.print(SEPARATOR);
-      System.out.print(MESSAGES_END);
-      System.out.println();
+      printMessage(message);
     }
   }
  catch (  Throwable e) {
