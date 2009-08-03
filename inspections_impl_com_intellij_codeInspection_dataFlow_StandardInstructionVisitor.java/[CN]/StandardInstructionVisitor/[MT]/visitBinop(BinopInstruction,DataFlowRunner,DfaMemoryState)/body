@@ -1,3 +1,74 @@
 {
-  return instruction.apply(runner,memState);
+  myReachable.add(instruction);
+  final Instruction next=runner.getInstruction(instruction.getIndex() + 1);
+  DfaValue dfaRight=memState.pop();
+  DfaValue dfaLeft=memState.pop();
+  final String opSign=instruction.getOperationSign();
+  if (opSign != null) {
+    final DfaValueFactory factory=runner.getFactory();
+    if (("==".equals(opSign) || "!=".equals(opSign)) && dfaLeft instanceof DfaConstValue && dfaRight instanceof DfaConstValue) {
+      boolean negated="!=".equals(opSign) ^ (memState.canBeNaN(dfaLeft) || memState.canBeNaN(dfaRight));
+      if (dfaLeft == dfaRight ^ negated) {
+        memState.push(factory.getConstFactory().getTrue());
+        instruction.setTrueReachable();
+      }
+ else {
+        memState.push(factory.getConstFactory().getFalse());
+        instruction.setFalseReachable();
+      }
+      return new DfaInstructionState[]{new DfaInstructionState(next,memState)};
+    }
+    boolean negated=memState.canBeNaN(dfaLeft) || memState.canBeNaN(dfaRight);
+    DfaRelationValue dfaRelation=factory.getRelationFactory().create(dfaLeft,dfaRight,opSign,negated);
+    if (dfaRelation != null) {
+      myCanBeNullInInstanceof.add(instruction);
+      ArrayList<DfaInstructionState> states=new ArrayList<DfaInstructionState>();
+      final DfaMemoryState trueCopy=memState.createCopy();
+      if (trueCopy.applyCondition(dfaRelation)) {
+        trueCopy.push(factory.getConstFactory().getTrue());
+        instruction.setTrueReachable();
+        states.add(new DfaInstructionState(next,trueCopy));
+      }
+      DfaMemoryState falseCopy=memState;
+      if (falseCopy.applyCondition(dfaRelation.createNegated())) {
+        falseCopy.push(factory.getConstFactory().getFalse());
+        instruction.setFalseReachable();
+        states.add(new DfaInstructionState(next,falseCopy));
+        if (instruction instanceof InstanceofInstruction && !falseCopy.isNull(dfaLeft)) {
+          myUsefulInstanceofs.add((InstanceofInstruction)instruction);
+        }
+      }
+      return states.toArray(new DfaInstructionState[states.size()]);
+    }
+ else     if ("+".equals(opSign)) {
+      memState.push(instruction.getNonNullStringValue(factory));
+      instruction.setTrueReachable();
+      instruction.setFalseReachable();
+    }
+ else {
+      if (instruction instanceof InstanceofInstruction) {
+        if ((dfaLeft instanceof DfaTypeValue || dfaLeft instanceof DfaNotNullValue) && dfaRight instanceof DfaTypeValue) {
+          final PsiType leftType;
+          if (dfaLeft instanceof DfaNotNullValue) {
+            leftType=((DfaNotNullValue)dfaLeft).getType();
+          }
+ else {
+            leftType=((DfaTypeValue)dfaLeft).getType();
+            myCanBeNullInInstanceof.add(instruction);
+          }
+          if (!((DfaTypeValue)dfaRight).getType().isAssignableFrom(leftType)) {
+            myUsefulInstanceofs.add((InstanceofInstruction)instruction);
+          }
+        }
+ else {
+          myUsefulInstanceofs.add((InstanceofInstruction)instruction);
+        }
+      }
+      memState.push(DfaUnknownValue.getInstance());
+    }
+  }
+ else {
+    memState.push(DfaUnknownValue.getInstance());
+  }
+  return new DfaInstructionState[]{new DfaInstructionState(next,memState)};
 }
