@@ -1,12 +1,24 @@
 {
-  List<Pair<MavenProject,Module>> incompatible=new ArrayList<Pair<MavenProject,Module>>();
-  for (  MavenProject each : myProjectsTree.getProjects()) {
-    Module module=myFileToModuleMapping.get(each.getFile());
-    if (module == null)     continue;
-    if (shouldCreateModuleFor(each) && !(module.getModuleType() instanceof JavaModuleType)) {
-      incompatible.add(Pair.create(each,module));
+  final List<Pair<MavenProject,Module>> incompatible=collectIncompatibleModulesWithProjects();
+  if (incompatible.isEmpty())   return false;
+  final int[] result=new int[1];
+  MavenUtil.invokeAndWait(myProject,myModelsProvider.getModalityStateForQuestionDialogs(),new Runnable(){
+    public void run(){
+      String message=ProjectBundle.message("maven.import.incompatible.modules",formatProjectsWithModules(incompatible),incompatible.size() == 1 ? "" : "s");
+      String[] options={ProjectBundle.message("maven.import.incompatible.modules.recreate"),ProjectBundle.message("maven.import.incompatible.modules.ignore")};
+      result[0]=Messages.showDialog(myProject,message,ProjectBundle.message("maven.tab.importing"),options,0,Messages.getQuestionIcon());
     }
   }
-  if (incompatible.isEmpty())   return;
-  doDeleteIncompatibleModules(incompatible);
+);
+  if (result[0] == 0) {
+    for (    Pair<MavenProject,Module> each : incompatible) {
+      myFileToModuleMapping.remove(each.first.getFile());
+      myModuleModel.disposeModule(each.second);
+    }
+    return true;
+  }
+ else {
+    myProjectsTree.setIgnoredState(MavenUtil.collectFirsts(incompatible),true,true);
+    return false;
+  }
 }

@@ -1,2 +1,48 @@
 {
+  List<MavenIndex> remainingWaiting=new ArrayList<MavenIndex>(indices);
+  try {
+    for (    MavenIndex each : indices) {
+      if (indicator.isCanceled())       return;
+      indicator.setText(IndicesBundle.message("maven.indices.updating.index",each.getRepositoryId(),each.getRepositoryPathOrUrl()));
+synchronized (myUpdatingIndicesLock) {
+        remainingWaiting.remove(each);
+        myWaitingIndices.remove(each);
+        myUpdatingIndex=each;
+      }
+      try {
+        MavenEmbedderWrapper embedderToUse=null;
+        if (fullUpdate) {
+          embedderToUse=new ReadAction<MavenEmbedderWrapper>(){
+            @Override protected void run(            Result<MavenEmbedderWrapper> result) throws Throwable {
+              if (!projectOrNull.isDisposed()) {
+                MavenGeneralSettings settings=MavenProjectsManager.getInstance(projectOrNull).getGeneralSettings();
+                result.setResult(MavenEmbedderFactory.createEmbedder(settings,Collections.EMPTY_MAP));
+              }
+            }
+          }
+.execute().getResultObject();
+          if (embedderToUse == null)           throw new ProcessCanceledException();
+        }
+        try {
+          getIndicesObject().updateOrRepair(each,embedderToUse,fullUpdate,indicator);
+        }
+  finally {
+          if (embedderToUse != null)           embedderToUse.release();
+        }
+        scheduleRehighlightAllPoms(projectOrNull);
+      }
+  finally {
+synchronized (myUpdatingIndicesLock) {
+          myUpdatingIndex=null;
+        }
+      }
+    }
+  }
+ catch (  ProcessCanceledException ignore) {
+  }
+ finally {
+synchronized (myUpdatingIndicesLock) {
+      myWaitingIndices.removeAll(remainingWaiting);
+    }
+  }
 }
