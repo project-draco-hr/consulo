@@ -1,36 +1,10 @@
 {
-  final PsiFile placeFile=getOriginalFile();
-  final VirtualFile placeVFfile=placeFile.getVirtualFile();
-  if (placeVFfile == null) {
-    return true;
-  }
-  final Project project=getProject();
-  for (  final GroovyFile file : GroovyDslFileIndex.getDslFiles(new AdditionalIndexedRootsScope(getResolveScope(),StandardDslIndexedRootsProvider.class))) {
-    final VirtualFile vfile=file.getVirtualFile();
-    if (vfile == null || vfile.equals(placeVFfile)) {
-      continue;
-    }
-    CachedValue<GroovyDslExecutor> cachedEnhanced=file.getUserData(CACHED_ENHANCED_KEY);
-    if (cachedEnhanced == null) {
-      file.putUserData(CACHED_ENHANCED_KEY,cachedEnhanced=file.getManager().getCachedValuesManager().createCachedValue(new CachedValueProvider<GroovyDslExecutor>(){
-        public Result<GroovyDslExecutor> compute(){
-          try {
-            return Result.create(new GroovyDslExecutor(file.getText(),vfile.getName()),file);
-          }
- catch (          CompilationFailedException e) {
-            LOG.error(e);
-            return Result.create(null,file);
-          }
-        }
-      }
-,false));
-    }
-    final StringBuilder classText=new StringBuilder();
-    final GroovyDslExecutor value=cachedEnhanced.getValue();
-    if (value != null) {
-      value.processScriptVariants(new ScriptWrapper(){
+  return GroovyDslFileIndex.processExecutors(this,new PairProcessor<GroovyFile,GroovyDslExecutor>(){
+    public boolean process(    GroovyFile groovyFile,    GroovyDslExecutor executor){
+      final StringBuilder classText=new StringBuilder();
+      executor.processScriptVariants(new ScriptWrapper(){
         public String getExtension(){
-          return placeVFfile.getExtension();
+          return getOriginalFile().getVirtualFile().getExtension();
         }
       }
 ,new GroovyEnhancerConsumer(){
@@ -49,18 +23,19 @@
         }
       }
 );
-    }
-    if (classText.length() > 0) {
-      final PsiClass psiClass=GroovyPsiElementFactory.getInstance(project).createGroovyFile("class GroovyEnhanced {\n" + classText + "}",false,place).getClasses()[0];
-      final NameHint nameHint=processor.getHint(NameHint.KEY);
-      final String expectedName=nameHint == null ? null : nameHint.getName(ResolveState.initial());
-      for (      PsiMethod method : psiClass.getMethods()) {
-        if ((expectedName == null || expectedName.equals(method.getName())) && !processor.execute(method,ResolveState.initial()))         return false;
+      if (classText.length() > 0) {
+        final PsiClass psiClass=GroovyPsiElementFactory.getInstance(getProject()).createGroovyFile("class GroovyEnhanced {\n" + classText + "}",false,place).getClasses()[0];
+        final NameHint nameHint=processor.getHint(NameHint.KEY);
+        final String expectedName=nameHint == null ? null : nameHint.getName(ResolveState.initial());
+        for (        PsiMethod method : psiClass.getMethods()) {
+          if ((expectedName == null || expectedName.equals(method.getName())) && !processor.execute(method,ResolveState.initial()))           return false;
+        }
+        for (        final PsiField field : psiClass.getFields()) {
+          if ((expectedName == null || expectedName.equals(field.getName())) && !processor.execute(field,ResolveState.initial()))           return false;
+        }
       }
-      for (      final PsiField field : psiClass.getFields()) {
-        if ((expectedName == null || expectedName.equals(field.getName())) && !processor.execute(field,ResolveState.initial()))         return false;
-      }
+      return true;
     }
   }
-  return true;
+);
 }
