@@ -3,36 +3,43 @@
     myCompileContext.addMessage(CompilerMessageCategory.ERROR,CompilerBundle.message("error.compiler.internal.error",exitValue),null,-1,-1);
   }
   myCompiler.compileFinished();
-  final Module[] chunkModules=chunk.getModules();
-  ApplicationManager.getApplication().runReadAction(new Runnable(){
-    public void run(){
-      final Set<VirtualFile> compiledWithErrors=getFilesCompiledWithErrors();
-      final FileTypeManager typeManager=FileTypeManager.getInstance();
-      final String outputDirPath=outputDir.replace(File.separatorChar,'/');
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("myFileNameToSourceMap contains entries: " + chunk.myFileNameToSourceMap.size());
-      }
-      try {
-        for (        final Module module : chunkModules) {
-          for (          final VirtualFile root : chunk.getSourceRoots(module)) {
-            final String packagePrefix=myProjectFileIndex.getPackageNameByDirectory(root);
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("Building output items for " + root.getPresentableUrl() + "; output dir = "+ outputDirPath+ "; packagePrefix = \""+ packagePrefix+ "\"");
+  final List<File> toRefresh=new ArrayList<File>();
+  final Map<String,Collection<TranslatingCompiler.OutputItem>> results=new HashMap<String,Collection<TranslatingCompiler.OutputItem>>();
+  try {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        final Set<VirtualFile> compiledWithErrors=getFilesCompiledWithErrors();
+        final FileTypeManager typeManager=FileTypeManager.getInstance();
+        final String outputDirPath=outputDir.replace(File.separatorChar,'/');
+        try {
+          for (          final Module module : chunk.getModules()) {
+            for (            final VirtualFile root : chunk.getSourceRoots(module)) {
+              final String packagePrefix=myProjectFileIndex.getPackageNameByDirectory(root);
+              if (LOG.isDebugEnabled()) {
+                LOG.debug("Building output items for " + root.getPresentableUrl() + "; output dir = "+ outputDirPath+ "; packagePrefix = \""+ packagePrefix+ "\"");
+              }
+              buildOutputItemsList(outputDirPath,module,root,typeManager,compiledWithErrors,root,packagePrefix,toRefresh,results);
             }
-            buildOutputItemsList(chunk,outputDirPath,module,root,typeManager,compiledWithErrors,root,packagePrefix);
+          }
+        }
+ catch (        CacheCorruptedException e) {
+          myCompileContext.requestRebuildNextTime(CompilerBundle.message("error.compiler.caches.corrupted"));
+          if (LOG.isDebugEnabled()) {
+            LOG.debug(e);
           }
         }
       }
- catch (      CacheCorruptedException e) {
-        myCompileContext.requestRebuildNextTime(CompilerBundle.message("error.compiler.caches.corrupted"));
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(e);
-        }
-      }
+    }
+);
+  }
+  finally {
+    CompilerUtil.refreshIOFiles(toRefresh);
+    for (Iterator<Map.Entry<String,Collection<TranslatingCompiler.OutputItem>>> it=results.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<String,Collection<TranslatingCompiler.OutputItem>> entry=it.next();
+      mySink.add(entry.getKey(),entry.getValue(),VirtualFile.EMPTY_ARRAY);
+      it.remove();
     }
   }
-);
-  CompilerUtil.refreshIOFiles(chunk.myFilesToRefresh);
-  chunk.myFileNameToSourceMap.clear();
-  chunk.myFilesToRefresh.clear();
+  CompilerUtil.refreshIOFiles(toRefresh);
+  myFileNameToSourceMap.clear();
 }

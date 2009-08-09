@@ -3,9 +3,10 @@
   final TranslatingCompiler[] translators=compilerManager.getCompilers(TranslatingCompiler.class,myCompilerFilter);
   final Set<FileType> generatedTypes=new HashSet<FileType>();
   VirtualFile[] snapshot=null;
-  final List<TranslatingCompiler.OutputItem> postponedItems=new ArrayList<TranslatingCompiler.OutputItem>();
+  final TranslatorsOutputSink sink=new TranslatorsOutputSink(context,translators);
   try {
     for (int currentCompiler=0, translatorsLength=translators.length; currentCompiler < translatorsLength; currentCompiler++) {
+      sink.setCurrentCompilerIndex(currentCompiler);
       final TranslatingCompiler translator=translators[currentCompiler];
       if (context.getProgressIndicator().isCanceled()) {
         throw new ExitException(ExitStatus.CANCELLED);
@@ -34,7 +35,7 @@
  else {
         _context=context;
       }
-      final boolean compiledSomething=compileSources(_context,translators,currentCompiler,snapshot,forceCompile,isRebuild,trackDependencies,onlyCheckStatus,postponedItems);
+      final boolean compiledSomething=compileSources(_context,translators,currentCompiler,snapshot,forceCompile,isRebuild,trackDependencies,onlyCheckStatus,sink);
       if (compiledSomething) {
         generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(translator));
       }
@@ -46,16 +47,8 @@
     }
   }
   finally {
-    if (context.getMessageCount(CompilerMessageCategory.ERROR) == 0 && postponedItems.size() > 0) {
-      try {
-        final TranslatingCompiler.OutputItem[] successfullyCompiled=postponedItems.toArray(new TranslatingCompiler.OutputItem[postponedItems.size()]);
-        TranslatingCompilerFilesMonitor.getInstance().update(context,successfullyCompiled,VirtualFile.EMPTY_ARRAY);
-      }
- catch (      IOException e) {
-        LOG.info(e);
-        context.requestRebuildNextTime(e.getMessage());
-        throw new ExitException(ExitStatus.ERRORS);
-      }
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+      sink.flushPostponedItems();
     }
   }
   return didSomething;
