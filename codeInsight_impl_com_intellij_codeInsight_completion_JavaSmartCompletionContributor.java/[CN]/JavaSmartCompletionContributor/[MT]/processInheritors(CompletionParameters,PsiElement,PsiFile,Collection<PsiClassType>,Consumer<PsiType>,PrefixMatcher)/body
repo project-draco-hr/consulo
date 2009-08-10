@@ -1,2 +1,54 @@
 {
+  for (  final PsiClassType type : expectedClassTypes) {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        consumer.consume(type);
+        final PsiClassType.ClassResolveResult baseResult=JavaCompletionUtil.originalize(type).resolveGenerics();
+        final PsiClass baseClass=baseResult.getElement();
+        if (baseClass == null)         return;
+        final PsiSubstitutor baseSubstitutor=baseResult.getSubstitutor();
+        final THashSet<PsiType> statVariants=new THashSet<PsiType>();
+        final Processor<PsiClass> processor=CodeInsightUtil.createInheritorsProcessor(parameters.getPosition(),type,0,false,statVariants,baseClass,baseSubstitutor);
+        final StatisticsInfo[] statisticsInfos=StatisticsManager.getInstance().getAllValues(JavaStatisticsManager.getMemberUseKey1(type));
+        for (        final StatisticsInfo statisticsInfo : statisticsInfos) {
+          final String value=statisticsInfo.getValue();
+          if (value.startsWith(JavaStatisticsManager.CLASS_PREFIX)) {
+            final String qname=value.substring(JavaStatisticsManager.CLASS_PREFIX.length());
+            final PsiClass psiClass=JavaPsiFacade.getInstance(file.getProject()).findClass(qname,file.getResolveScope());
+            if (psiClass != null && !PsiTreeUtil.isAncestor(file,psiClass,true) && !processor.process(psiClass))             break;
+          }
+        }
+        for (        final PsiType variant : statVariants) {
+          consumer.consume(variant);
+        }
+      }
+    }
+);
+  }
+  final Condition<String> shortNameCondition=new Condition<String>(){
+    public boolean value(    String s){
+      return matcher.prefixMatches(s);
+    }
+  }
+;
+  for (  final PsiClassType type : expectedClassTypes) {
+    final boolean shouldSearchForInheritors=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+      public Boolean compute(){
+        final PsiClass psiClass=type.resolve();
+        return psiClass != null && psiClass.isValid() && !psiClass.hasModifierProperty(PsiModifier.FINAL);
+      }
+    }
+).booleanValue();
+    if (shouldSearchForInheritors) {
+      final Set<PsiType> psiTypes=CodeInsightUtil.addSubtypes(type,identifierCopy,false,shortNameCondition);
+      for (      final PsiType psiType : psiTypes) {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            consumer.consume(psiType);
+          }
+        }
+);
+      }
+    }
+  }
 }
