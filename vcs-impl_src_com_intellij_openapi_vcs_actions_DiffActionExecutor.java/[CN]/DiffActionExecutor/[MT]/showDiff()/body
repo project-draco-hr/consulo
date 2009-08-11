@@ -1,35 +1,57 @@
 {
-  final VcsRevisionNumber revisionNumber=getRevisionNumber();
-  try {
-    if (revisionNumber == null) {
-      return;
-    }
-    final DiffContent remote=createRemote(revisionNumber);
-    if (remote == null) {
-      return;
-    }
-    final SimpleDiffRequest request=new SimpleDiffRequest(myProject,mySelectedFile.getPresentableUrl());
-    final Document document=FileDocumentManager.getInstance().getDocument(mySelectedFile);
-    if (document == null)     return;
-    final DocumentContent content2=new DocumentContent(myProject,document);
-    final VcsRevisionNumber currentRevision=myDiffProvider.getCurrentRevision(mySelectedFile);
-    if (revisionNumber.compareTo(currentRevision) > 0) {
-      request.setContents(content2,remote);
-      request.setContentTitles(VcsBundle.message("diff.title.local"),revisionNumber.asString());
-    }
+  final Ref<VcsException> exceptionRef=new Ref<VcsException>();
+  final Ref<SimpleDiffRequest> requestRef=new Ref<SimpleDiffRequest>();
+  final Task.Backgroundable task=new Task.Backgroundable(myProject,VcsBundle.message("show.diff.progress.title.detailed",mySelectedFile.getPath()),true,BackgroundFromStartOption.getInstance()){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      final VcsRevisionNumber revisionNumber=getRevisionNumber();
+      try {
+        if (revisionNumber == null) {
+          return;
+        }
+        final DiffContent remote=createRemote(revisionNumber);
+        if (remote == null) {
+          return;
+        }
+        final SimpleDiffRequest request=new SimpleDiffRequest(myProject,mySelectedFile.getPresentableUrl());
+        final Document document=FileDocumentManager.getInstance().getDocument(mySelectedFile);
+        if (document == null)         return;
+        final DocumentContent content2=new DocumentContent(myProject,document);
+        final VcsRevisionNumber currentRevision=myDiffProvider.getCurrentRevision(mySelectedFile);
+        if (revisionNumber.compareTo(currentRevision) > 0) {
+          request.setContents(content2,remote);
+          request.setContentTitles(VcsBundle.message("diff.title.local"),revisionNumber.asString());
+        }
  else {
-      request.setContents(remote,content2);
-      request.setContentTitles(revisionNumber.asString(),VcsBundle.message("diff.title.local"));
+          request.setContents(remote,content2);
+          request.setContentTitles(revisionNumber.asString(),VcsBundle.message("diff.title.local"));
+        }
+        request.addHint(DiffTool.HINT_SHOW_FRAME);
+        requestRef.set(request);
+      }
+ catch (      ProcessCanceledException e) {
+      }
+catch (      VcsException e) {
+        exceptionRef.set(e);
+      }
+catch (      IOException e) {
+        exceptionRef.set(new VcsException(e));
+      }
     }
-    request.addHint(DiffTool.HINT_SHOW_FRAME);
-    DiffManager.getInstance().getDiffTool().show(request);
+    @Override public void onCancel(){
+      onSuccess();
+    }
+    @Override public void onSuccess(){
+      myHandler.completed(ProjectLevelVcsManagerImpl.keyFromVf(mySelectedFile));
+      if (!exceptionRef.isNull()) {
+        AbstractVcsHelper.getInstance(myProject).showError(exceptionRef.get(),VcsBundle.message("message.title.diff"));
+        return;
+      }
+      if (!requestRef.isNull()) {
+        DiffManager.getInstance().getDiffTool().show(requestRef.get());
+      }
+    }
   }
- catch (  ProcessCanceledException e) {
-  }
-catch (  VcsException e) {
-    AbstractVcsHelper.getInstance(myProject).showError(e,VcsBundle.message("message.title.diff"));
-  }
-catch (  IOException e) {
-    AbstractVcsHelper.getInstance(myProject).showError(new VcsException(e),VcsBundle.message("message.title.diff"));
-  }
+;
+  myHandler.register(ProjectLevelVcsManagerImpl.keyFromVf(mySelectedFile));
+  ProgressManager.getInstance().run(task);
 }
