@@ -10,7 +10,7 @@
             return AutoCompletionPolicy.ALWAYS_AUTOCOMPLETE;
           }
           @Override public void handleInsert(          InsertionContext context){
-            final PsiElement position=AnalyzingJavaSmartCompletionContributor.getPosition(context,this);
+            final PsiElement position=SmartCompletionDecorator.getPosition(context,this);
             final Editor editor=context.getEditor();
             if (or(psiElement(PsiParenthesizedExpression.class).withLastChild(psiElement(JavaTokenType.RPARENTH)),psiElement().afterLeaf(psiElement().withText("(").withParent(PsiTypeCastExpression.class))).accepts(position)) {
               editor.getDocument().deleteString(context.getSelectionEndOffset(),context.getOffsetMap().getOffset(CompletionInitializationContext.IDENTIFIER_END_OFFSET));
@@ -65,6 +65,7 @@
       if (reference != null) {
         final ElementFilter filter=getReferenceFilter(element);
         if (filter != null) {
+          final List<ExpectedTypeInfo> infos=Arrays.asList(getExpectedTypes(parameters));
           for (          final LookupElement item : completeReference(element,reference,filter,true)) {
             if (AFTER_THROW_NEW.accepts(element)) {
               ((LookupItem)item).setAttribute(LookupItem.DONT_CHECK_FOR_INNERS,"");
@@ -72,7 +73,10 @@
                 JavaAwareCompletionData.setShowFQN((LookupItem)item);
               }
             }
-            result.addElement(item);
+ else {
+              ((LookupItem)item).setAttribute(LookupItem.NEW_OBJECT_ATTR,"");
+            }
+            result.addElement(decorate(item,infos));
           }
         }
  else         if (INSIDE_TYPECAST.accepts(element)) {
@@ -86,8 +90,14 @@
   }
 );
   extend(CompletionType.SMART,INSIDE_EXPRESSION,new ExpectedTypeBasedCompletionProvider(){
-    protected void addCompletions(    final CompletionParameters params,    final CompletionResultSet result,    final Collection<ExpectedTypeInfo> infos){
+    protected void addCompletions(    final CompletionParameters params,    final CompletionResultSet result,    final Collection<ExpectedTypeInfo> _infos){
       final PsiElement position=params.getPosition();
+      final Set<ExpectedTypeInfo> infos=ApplicationManager.getApplication().runReadAction(new Computable<Set<ExpectedTypeInfo>>(){
+        public Set<ExpectedTypeInfo> compute(){
+          return new THashSet<ExpectedTypeInfo>(_infos,EXPECTED_TYPE_INFO_STRATEGY);
+        }
+      }
+);
       for (      final ExpectedTypeInfo info : infos) {
         final JavaSmartCompletionParameters parameters=new JavaSmartCompletionParameters(params,info);
         final PsiType type=info.getType();
@@ -110,11 +120,11 @@
 );
         final Consumer<LookupElement> consumer=new Consumer<LookupElement>(){
           public void consume(          final LookupElement lookupElement){
-            if (lookupElement instanceof TypedLookupItem) {
-              final TypedLookupItem item=(TypedLookupItem)lookupElement;
+            final TypedLookupItem item=lookupElement.as(TypedLookupItem.class);
+            if (item != null) {
               final PsiType psiType=item.getType();
               if (psiType != null && type.isAssignableFrom(psiType)) {
-                result.addElement(lookupElement);
+                result.addElement(decorate(lookupElement,_infos));
               }
               return;
             }
@@ -127,11 +137,8 @@
  else {
               substitutor=null;
             }
-            if (filter.isAcceptable(object,position)) {
-              result.addElement(lookupElement);
-            }
- else             if (substitutor != null && object instanceof PsiElement && filter.isAcceptable(new CandidateInfo((PsiElement)object,substitutor),position)) {
-              result.addElement(lookupElement);
+            if (filter.isAcceptable(object,position) || substitutor != null && object instanceof PsiElement && filter.isAcceptable(new CandidateInfo((PsiElement)object,substitutor),position)) {
+              result.addElement(decorate(lookupElement,_infos));
             }
           }
         }
@@ -195,6 +202,8 @@
       final int parameterIndex=pair.second.intValue();
       final PsiTypeParameter[] typeParameters=referencedClass.getTypeParameters();
       final PsiTypeParameter targetParameter=typeParameters[parameterIndex];
+      boolean isLast=parameterIndex == typeParameters.length - 1;
+      final TailType tail=isLast ? new CharTailType('>') : TailType.COMMA;
       boolean hasExpected=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
         public Boolean compute(){
           PsiResolveHelper resolveHelper=JavaPsiFacade.getInstance(context.getProject()).getResolveHelper();
@@ -212,7 +221,8 @@
               final PsiType paramSubstitution=currentSubstitutor.substitute(parameter);
               final PsiType substitution=resolveHelper.getSubstitutionForTypeParameter(targetParameter,paramSubstitution,argSubstitution,false,PsiUtil.getLanguageLevel(context));
               if (substitution != null && substitution != PsiType.NULL) {
-                resultSet.addElement(PsiTypeLookupItem.createLookupItem(substitution));
+                final LookupItem item=PsiTypeLookupItem.createLookupItem(substitution);
+                resultSet.addElement(TailTypeDecorator.createDecorator(item.setInsertHandler(new DefaultInsertHandler()),tail));
               }
             }
           }
@@ -221,8 +231,6 @@
       }
 ).booleanValue();
       if (!hasExpected) {
-        boolean isLast=parameterIndex == typeParameters.length - 1;
-        final TailType tail=isLast ? new CharTailType('>') : TailType.COMMA;
         final List<PsiClassType> typeList=Collections.singletonList((PsiClassType)TypeConversionUtil.typeParameterErasure(targetParameter));
         processInheritors(parameters,context,parameters.getOriginalFile(),typeList,new Consumer<PsiType>(){
           public void consume(          final PsiType type){
@@ -242,8 +250,10 @@
       final PsiFile file=parameters.getOriginalFile();
       final List<PsiClassType> expectedClassTypes=new SmartList<PsiClassType>();
       final List<PsiArrayType> expectedArrayTypes=new SmartList<PsiArrayType>();
+      final List<ExpectedTypeInfo> infos=new SmartList<ExpectedTypeInfo>();
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         public void run(){
+          infos.addAll(Arrays.asList(getExpectedTypes(parameters)));
           for (          PsiType type : ExpectedTypesGetter.getExpectedTypes(identifierCopy,true)) {
             if (type instanceof PsiClassType) {
               final PsiClassType classType=(PsiClassType)type;
@@ -266,14 +276,15 @@
             if (item.getObject() instanceof PsiClass) {
               JavaAwareCompletionData.setShowFQN(item);
             }
-            result.addElement(item);
+            item.setInsertHandler(new DefaultInsertHandler());
+            result.addElement(decorate(item,infos));
           }
         }
 );
       }
       processInheritors(parameters,identifierCopy,file,expectedClassTypes,new Consumer<PsiType>(){
         public void consume(        final PsiType type){
-          addExpectedType(result,type,parameters);
+          addExpectedType(result,type,parameters,infos);
         }
       }
 ,result.getPrefixMatcher());
