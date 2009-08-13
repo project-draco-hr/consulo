@@ -1,0 +1,31 @@
+{
+  final Ref<Boolean> result=Ref.create(false);
+  final Semaphore finished=new Semaphore();
+  final CompileStatusNotification callback=new CompileStatusNotification(){
+    public void finished(    boolean aborted,    int errors,    int warnings,    CompileContext compileContext){
+      result.set(!aborted && errors == 0);
+      finished.up();
+    }
+  }
+;
+  final CompilerFilter compilerFilter=new CompilerFilter(){
+    public boolean acceptCompiler(    Compiler compiler){
+      return compiler instanceof IncrementalArtifactsCompiler;
+    }
+  }
+;
+  ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+    public void run(){
+      final CompilerManager manager=CompilerManager.getInstance(myProject);
+      finished.down();
+      List<Artifact> artifacts=new ArrayList<Artifact>();
+      for (      ArtifactPointer pointer : task.getArtifactPointers()) {
+        ContainerUtil.addIfNotNull(pointer.getArtifact(),artifacts);
+      }
+      manager.make(ArtifactCompileScope.create(myProject,artifacts),compilerFilter,callback);
+    }
+  }
+,ModalityState.NON_MODAL);
+  finished.waitFor();
+  return result.get();
+}
