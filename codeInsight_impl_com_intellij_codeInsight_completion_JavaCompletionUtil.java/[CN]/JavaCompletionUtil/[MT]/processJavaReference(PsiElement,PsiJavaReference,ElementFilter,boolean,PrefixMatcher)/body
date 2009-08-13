@@ -8,51 +8,14 @@
 ;
   final JavaCompletionProcessor processor=new JavaCompletionProcessor(element,elementFilter,checkAccess,nameCondition);
   javaReference.processVariants(processor);
-  for (  CompletionElement completionElement : processor.getResults()) {
-    ContainerUtil.addIfNotNull(createLookupElement(completionElement),set);
-  }
-  if (javaReference instanceof PsiReferenceExpression) {
-    final PsiReferenceExpression refExpr=(PsiReferenceExpression)javaReference;
-    final PsiExpression qualifier=refExpr.getQualifierExpression();
-    if (qualifier != null) {
-      final Project project=qualifier.getProject();
-      final PsiType type=GuessManager.getInstance(project).getDataFlowCastedExpressionType(qualifier);
-      if (type != null) {
-        processor.clear();
-        final String newText="((" + type.getCanonicalText() + ") "+ qualifier.getText()+ ")."+ refExpr.getReferenceName();
-        final PsiExpression newRef=JavaPsiFacade.getElementFactory(project).createExpressionFromText(newText,refExpr);
-        ((PsiReferenceExpression)newRef).processVariants(processor);
-        final LookupElement castItem=PsiTypeLookupItem.createLookupItem(type);
-        for (        CompletionElement completionElement : processor.getResults()) {
-          final LookupElement item=createLookupElement(completionElement);
-          if (item != null) {
-            set.add(LookupElementDecorator.delegate(item,new InsertHandlerDecorator<LookupElement>(){
-              public void handleInsert(              InsertionContext context,              LookupElementDecorator<LookupElement> item){
-                final Document document=context.getEditor().getDocument();
-                PsiDocumentManager.getInstance(project).commitDocument(document);
-                final PsiFile file=context.getFile();
-                final PsiReferenceExpression ref=PsiTreeUtil.findElementOfClassAtOffset(file,context.getStartOffset(),PsiReferenceExpression.class,false);
-                if (ref != null) {
-                  final PsiElement qualifier=ref.getQualifier();
-                  if (qualifier != null) {
-                    final CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(project);
-                    final String parenSpace=settings.SPACE_WITHIN_PARENTHESES ? " " : "";
-                    document.insertString(qualifier.getTextRange().getEndOffset(),parenSpace + ")");
-                    final String spaceWithin=settings.SPACE_WITHIN_CAST_PARENTHESES ? " " : "";
-                    final String prefix="(" + parenSpace + "("+ spaceWithin;
-                    final String spaceAfter=settings.SPACE_AFTER_TYPE_CAST ? " " : "";
-                    final int exprStart=qualifier.getTextRange().getStartOffset();
-                    document.insertString(exprStart,prefix + spaceWithin + ")"+ spaceAfter);
-                    CompletionUtil.emulateInsertion(context,exprStart + prefix.length(),castItem,(char)0);
-                  }
-                }
-                item.getDelegate().handleInsert(context);
-              }
-            }
-));
-          }
-        }
-      }
+  final Collection<CompletionElement> plainResults=processor.getResults();
+  final PsiType qualifierType=processor.getQualifierType();
+  PsiType castedQualifierType=addQualifierCastingVariants(javaReference,processor,set);
+  boolean mayHighlight=qualifierType != null && (castedQualifierType == null || !qualifierType.isAssignableFrom(castedQualifierType));
+  for (  CompletionElement completionElement : plainResults) {
+    LookupElement item=createLookupElement(completionElement,qualifierType);
+    if (item != null) {
+      set.add(mayHighlight ? highlightIfNeeded(qualifierType,item) : item);
     }
   }
   return set;
