@@ -1,0 +1,41 @@
+{
+  expression=simplify(expression);
+  PsiElement original=expression;
+  if (expression instanceof PsiReferenceExpression) {
+    PsiReferenceExpression ref=(PsiReferenceExpression)expression;
+    JavaResolveResult result=ref.advancedResolve(false);
+    parentSubstitutor=result.getSubstitutor().putAll(parentSubstitutor);
+    PsiElement resolved=result.getElement();
+    if (resolved instanceof PsiMethod && expression.getParent() instanceof PsiMethodCallExpression) {
+      return processUsagesFlownDownTo(expression.getParent(),processor,parent,parentSubstitutor);
+    }
+    if (!(resolved instanceof PsiVariable))     return true;
+    expression=resolved;
+  }
+  if (expression instanceof PsiVariable) {
+    PsiVariable variable=(PsiVariable)expression;
+    final Set<PsiExpression> expressions=new THashSet<PsiExpression>(DfaUtil.getCachedVariableValues(variable,original));
+    PsiExpression initializer=variable.getInitializer();
+    if (initializer != null && expressions.isEmpty())     expressions.add(initializer);
+    for (    PsiExpression exp : expressions) {
+      if (!handToProcessor(exp,processor,parent,parentSubstitutor))       return false;
+    }
+    if (variable instanceof PsiField) {
+      return processFieldUsages((PsiField)variable,processor,parent,parentSubstitutor);
+    }
+ else     if (variable instanceof PsiParameter) {
+      return processParameterUsages((PsiParameter)variable,processor,parent,parentSubstitutor);
+    }
+  }
+  if (expression instanceof PsiMethodCallExpression) {
+    return processMethodReturnValue((PsiMethodCallExpression)expression,processor,parent,parentSubstitutor);
+  }
+  if (expression instanceof PsiConditionalExpression) {
+    PsiConditionalExpression conditional=(PsiConditionalExpression)expression;
+    PsiExpression thenE=conditional.getThenExpression();
+    PsiExpression elseE=conditional.getElseExpression();
+    if (thenE != null && !handToProcessor(thenE,processor,parent,parentSubstitutor))     return false;
+    if (elseE != null && !handToProcessor(elseE,processor,parent,parentSubstitutor))     return false;
+  }
+  return true;
+}
