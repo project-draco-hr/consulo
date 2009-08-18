@@ -1,0 +1,51 @@
+{
+  if (!processed.add(artifact))   return true;
+  final FList<Pair<Artifact,CompositePackagingElement<?>>> pathFromRoot;
+  final CompositePackagingElement<?> rootElement=artifact.getRootElement();
+  if (rootElement instanceof ArtifactRootElement<?>) {
+    pathFromRoot=pathToElement;
+  }
+ else {
+    if (!processor.process(rootElement,pathToElement,artifact)) {
+      return false;
+    }
+    pathFromRoot=pathToElement.prepend(new Pair<Artifact,CompositePackagingElement<?>>(artifact,rootElement));
+  }
+  if (pathFromRoot.size() > maxLevel)   return true;
+  for (  final Artifact anArtifact : context.getArtifactModel().getArtifacts()) {
+    if (processed.contains(anArtifact))     continue;
+    final PackagingElementProcessor<ArtifactPackagingElement> elementProcessor=new PackagingElementProcessor<ArtifactPackagingElement>(){
+      @Override public boolean shouldProcessSubstitution(      ComplexPackagingElement<?> element){
+        return !(element instanceof ArtifactPackagingElement);
+      }
+      @Override public boolean process(      @NotNull List<CompositePackagingElement<?>> parents,      @NotNull ArtifactPackagingElement element){
+        if (element.getArtifactName().equals(artifact.getName())) {
+          FList<Pair<Artifact,CompositePackagingElement<?>>> currentPath=pathFromRoot;
+          for (int i=0, parentsSize=parents.size(); i < parentsSize - 1; i++) {
+            CompositePackagingElement<?> parent=parents.get(i);
+            if (!processor.process(parent,currentPath,anArtifact)) {
+              return false;
+            }
+            currentPath=currentPath.prepend(new Pair<Artifact,CompositePackagingElement<?>>(anArtifact,parent));
+            if (currentPath.size() > maxLevel) {
+              return true;
+            }
+          }
+          if (!parents.isEmpty()) {
+            CompositePackagingElement<?> lastParent=parents.get(parents.size() - 1);
+            if (lastParent instanceof ArtifactRootElement<?> && !processor.process(lastParent,currentPath,anArtifact)) {
+              return false;
+            }
+          }
+          return processParents(anArtifact,context,processor,currentPath,maxLevel,processed);
+        }
+        return true;
+      }
+    }
+;
+    if (!processPackagingElements(anArtifact,ArtifactElementType.ARTIFACT_ELEMENT_TYPE,elementProcessor,context,true)) {
+      return false;
+    }
+  }
+  return true;
+}
