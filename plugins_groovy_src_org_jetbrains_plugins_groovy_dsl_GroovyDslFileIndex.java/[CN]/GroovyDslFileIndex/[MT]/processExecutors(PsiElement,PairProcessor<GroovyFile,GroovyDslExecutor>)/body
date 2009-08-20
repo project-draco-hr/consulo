@@ -4,30 +4,50 @@
   if (placeVFfile == null) {
     return true;
   }
+  int count=0;
+  final LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>> queue=new LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>>();
+  final Set<String> unusedPaths=new THashSet<String>(ourMapping.keySet());
   for (  final GroovyFile file : getDslFiles(new AdditionalIndexedRootsScope(place.getResolveScope(),StandardDslIndexedRootsProvider.class))) {
     final VirtualFile vfile=file.getVirtualFile();
-    if (vfile == null || vfile.equals(placeVFfile)) {
+    if (vfile == null) {
       continue;
     }
-    CachedValue<GroovyDslExecutor> cachedEnhanced=file.getUserData(CACHED_ENHANCED_KEY);
-    if (cachedEnhanced == null) {
-      file.putUserData(CACHED_ENHANCED_KEY,cachedEnhanced=file.getManager().getCachedValuesManager().createCachedValue(new CachedValueProvider<GroovyDslExecutor>(){
-        public Result<GroovyDslExecutor> compute(){
-          try {
-            return Result.create(new GroovyDslExecutor(file.getText(),vfile.getName()),file);
-          }
- catch (          CompilationFailedException e) {
-            LOG.error(e);
-            return Result.create(null,file);
-          }
-        }
-      }
-,false));
+    unusedPaths.remove(vfile.getUrl());
+    if (vfile.equals(placeVFfile)) {
+      continue;
     }
-    final GroovyDslExecutor value=cachedEnhanced.getValue();
-    if (value != null && !consumer.process(file,value)) {
+    final long stamp=file.getModificationStamp();
+    final GroovyDslExecutor cached=getCachedExecutor(vfile,stamp);
+    if (cached == null) {
+      final String text=file.getText();
+      count++;
+      scheduleParsing(queue,file,vfile,stamp,text);
+    }
+ else     if (!consumer.process(file,cached)) {
       return false;
     }
+  }
+  for (  final String unusedPath : unusedPaths) {
+    final VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(unusedPath);
+    if (file != null) {
+      ourMapping.remove(unusedPath);
+    }
+  }
+  try {
+    while (count > 0) {
+      ProgressManager.getInstance().checkCanceled();
+      final Pair<GroovyFile,GroovyDslExecutor> pair=queue.poll(20,TimeUnit.MILLISECONDS);
+      if (pair != null) {
+        final GroovyDslExecutor executor=pair.second;
+        if (executor != null && !consumer.process(pair.first,executor)) {
+          return false;
+        }
+        count--;
+      }
+    }
+  }
+ catch (  InterruptedException e) {
+    LOG.error(e);
   }
   return true;
 }
