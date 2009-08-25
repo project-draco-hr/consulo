@@ -1,0 +1,65 @@
+{
+  final PsiElement parent=element.getParent();
+  final PsiElement grandParent=parent.getParent();
+  if (!(grandParent instanceof PsiClass)) {
+    return;
+  }
+  final PsiClass aClass=(PsiClass)grandParent;
+  final PsiReferenceList extendsList=aClass.getExtendsList();
+  if (extendsList == null) {
+    return;
+  }
+  final PsiJavaCodeReferenceElement[] extendsReferences=extendsList.getReferenceElements();
+  if (extendsReferences.length != 1) {
+    return;
+  }
+  final PsiJavaCodeReferenceElement extendsReference=extendsReferences[0];
+  final PsiElement target=extendsReference.resolve();
+  if (!(target instanceof PsiClass)) {
+    return;
+  }
+  final PsiClass extendsClass=(PsiClass)target;
+  final PsiReferenceList implementsList=extendsClass.getImplementsList();
+  if (implementsList == null) {
+    return;
+  }
+  final PsiJavaCodeReferenceElement[] implementsReferences=implementsList.getReferenceElements();
+  final List<PsiJavaCodeReferenceElement> listenerReferences=new ArrayList();
+  for (  PsiJavaCodeReferenceElement implementsReference : implementsReferences) {
+    final String name=implementsReference.getReferenceName();
+    if (name != null && !name.endsWith("Listener")) {
+      continue;
+    }
+    final PsiElement implementsTarget=implementsReference.resolve();
+    if (!(implementsTarget instanceof PsiClass)) {
+      continue;
+    }
+    final PsiClass implementsClass=(PsiClass)implementsTarget;
+    if (!implementsClass.isInterface()) {
+      continue;
+    }
+    final PsiMethod[] methods=implementsClass.getMethods();
+    for (    PsiMethod method : methods) {
+      final PsiMethod overridingMethod=aClass.findMethodBySignature(method,false);
+      if (overridingMethod == null) {
+        implementMethodInClass(method,aClass);
+        continue;
+      }
+      final PsiMethod[] superMethods=overridingMethod.findSuperMethods(implementsClass);
+      for (      PsiMethod superMethod : superMethods) {
+        if (!superMethod.equals(method)) {
+          continue;
+        }
+        removeCallsToSuperMethodFromMethod(overridingMethod,extendsClass);
+      }
+    }
+    listenerReferences.add(implementsReference);
+  }
+  extendsReference.delete();
+  final PsiReferenceList referenceList=aClass.getImplementsList();
+  if (referenceList != null) {
+    for (    PsiJavaCodeReferenceElement listenerReference : listenerReferences) {
+      referenceList.add(listenerReference);
+    }
+  }
+}
