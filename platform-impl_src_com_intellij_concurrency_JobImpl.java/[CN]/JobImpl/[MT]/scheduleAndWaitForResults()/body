@@ -1,23 +1,9 @@
 {
-  if (JobSchedulerImpl.CORES_COUNT < 2) {
-    List<T> results=new ArrayList<T>(myTasks.size());
-    for (    Callable<T> task : myTasks) {
-synchronized (myLock) {
-        if (myCanceled)         return Collections.emptyList();
-      }
-      results.add(task.call());
-    }
-    return results;
-  }
-synchronized (myLock) {
-    final Application application=ApplicationManager.getApplication();
-    boolean callerHasReadAccess=application != null && application.isReadAccessAllowed();
-    myFutures=new ArrayList<PrioritizedFutureTask<T>>(myTasks.size());
-    int startTaskIndex=JobSchedulerImpl.currentTaskIndex();
-    for (    final Callable<T> task : myTasks) {
-      final PrioritizedFutureTask<T> future=new PrioritizedFutureTask<T>(task,myJobIndex,startTaskIndex++,myPriority,callerHasReadAccess,false);
-      myFutures.add(future);
-    }
+  checkCanSchedule();
+  final Application application=ApplicationManager.getApplication();
+  boolean callerHasReadAccess=application != null && application.isReadAccessAllowed();
+  createFutures(callerHasReadAccess,false);
+  if (JobSchedulerImpl.CORES_COUNT >= 2) {
     for (    PrioritizedFutureTask<T> future : myFutures) {
       JobSchedulerImpl.execute(future);
     }
@@ -25,33 +11,5 @@ synchronized (myLock) {
   for (  PrioritizedFutureTask<T> future : myFutures) {
     future.run();
   }
-  List<T> results=new ArrayList<T>(myFutures.size());
-  Throwable ex=null;
-  for (  Future<T> f : myFutures) {
-    try {
-      while (true) {
-        try {
-          results.add(f.get(100,TimeUnit.MILLISECONDS));
-          break;
-        }
- catch (        TimeoutException e) {
-          if (f.isDone() || f.isCancelled())           break;
-        }
-      }
-    }
- catch (    CancellationException ignore) {
-    }
-catch (    ExecutionException e) {
-      cancel();
-      Throwable cause=e.getCause();
-      if (cause != null) {
-        ex=cause;
-      }
-    }
-  }
-  for (  PrioritizedFutureTask<T> future : myFutures) {
-    future.awaitTermination();
-  }
-  if (ex != null)   throw ex;
-  return results;
+  return waitForTermination();
 }
