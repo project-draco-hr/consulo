@@ -1,29 +1,32 @@
 {
-  final VirtualFile[] pom=new VirtualFile[1];
   PsiFile[] psiFiles=myAggregatorProject != null ? new PsiFile[]{getPsiFile(project,myAggregatorProject.getFile())} : PsiFile.EMPTY_ARRAY;
-  new WriteCommandAction.Simple(project,"Create new Maven module",psiFiles){
-    protected void run() throws Throwable {
+  final VirtualFile pom=new WriteCommandAction<VirtualFile>(project,"Create new Maven module",psiFiles){
+    @Override protected void run(    Result<VirtualFile> result) throws Throwable {
+      VirtualFile file;
       try {
-        pom[0]=root.createChildData(this,MavenConstants.POM_XML);
-        MavenUtil.applyMavenProjectFileTemplate(project,pom[0],myProjectId);
+        file=root.createChildData(this,MavenConstants.POM_XML);
+        MavenUtil.applyMavenProjectFileTemplate(project,file,myProjectId);
+        result.setResult(file);
       }
  catch (      IOException e) {
-        NotificationsManager.getNotificationsManager().notify("Cannot create ",e.getMessage(),NotificationType.ERROR,NotificationListener.REMOVE);
+        MavenLog.LOG.warn(e);
+        NotificationsManager.getNotificationsManager().notify("Cannot create " + MavenConstants.POM_XML + " "+ root.getPath(),e.getMessage(),NotificationType.ERROR,NotificationListener.REMOVE);
         return;
       }
-      updateProjectPom(project,pom[0]);
+      updateProjectPom(project,file);
       if (myAggregatorProject != null) {
         MavenDomProjectModel model=MavenDomUtil.getMavenDomProjectModel(project,myAggregatorProject.getFile());
         model.getPackaging().setStringValue("pom");
         MavenDomModule module=model.getModules().addModule();
-        module.setValue(getPsiFile(project,pom[0]));
+        module.setValue(getPsiFile(project,file));
       }
     }
   }
-.execute();
+.execute().getResultObject();
+  if (pom == null)   return;
   if (myAggregatorProject == null) {
     MavenProjectsManager manager=MavenProjectsManager.getInstance(project);
-    manager.addManagedFiles(Collections.singletonList(pom[0]));
+    manager.addManagedFiles(Collections.singletonList(pom));
   }
   if (myArchetype == null) {
     try {
@@ -36,8 +39,8 @@
   }
   MavenUtil.invokeLater(project,ModalityState.NON_MODAL,new Runnable(){
     public void run(){
-      EditorHelper.openInEditor(getPsiFile(project,pom[0]));
-      if (myArchetype != null)       generateFromArchetype(project,pom[0]);
+      EditorHelper.openInEditor(getPsiFile(project,pom));
+      if (myArchetype != null)       generateFromArchetype(project,pom);
     }
   }
 );
