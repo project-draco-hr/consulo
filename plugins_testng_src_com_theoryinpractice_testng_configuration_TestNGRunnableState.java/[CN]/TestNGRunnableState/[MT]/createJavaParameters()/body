@@ -5,14 +5,13 @@
   javaParameters.getVMParametersList().add("-ea");
   javaParameters.setMainClass("org.testng.RemoteTestNGStarter");
   javaParameters.setWorkingDirectory(config.getProperty(RunJavaConfiguration.WORKING_DIRECTORY_PROPERTY));
-  javaParameters.getClassPath().add(PathUtil.getJarPathForClass(IDEACoverageListener.class));
+  javaParameters.getClassPath().add(PathUtil.getJarPathForClass(RemoteTestNGStarter.class));
   Module module=config.getConfigurationModule().getModule();
   LanguageLevel effectiveLanguageLevel=module == null ? LanguageLevelProjectExtension.getInstance(project).getLanguageLevel() : LanguageLevelUtil.getEffectiveLanguageLevel(module);
   final boolean is15=effectiveLanguageLevel != LanguageLevel.JDK_1_4 && effectiveLanguageLevel != LanguageLevel.JDK_1_3;
   LOG.info("Language level is " + effectiveLanguageLevel.toString());
   LOG.info("is15 is " + is15);
   javaParameters.getClassPath().add(is15 ? PathUtil.getJarPathForClass(AfterClass.class) : new File(PathManager.getPreinstalledPluginsPath(),"testng/lib-jdk14/testng-jdk14.jar").getPath());
-  final boolean hasIDEACoverageEnabled=config.isCoverageEnabled() && config.getCoverageRunner() instanceof IDEACoverageRunner;
   JavaParametersUtil.configureConfiguration(javaParameters,config);
   Sdk jdk=module == null ? ProjectRootManager.getInstance(project).getProjectJdk() : ModuleRootManager.getInstance(module).getSdk();
   javaParameters.setJdk(jdk);
@@ -21,10 +20,8 @@
     ((JUnitPatcher)patcher).patchJavaParameters(module,javaParameters);
   }
   JavaSdkUtil.addRtJar(javaParameters.getClassPath());
-  if ((!(runnerSettings.getData() instanceof DebuggingRunnerData) || config.getCoverageRunner() instanceof IDEACoverageRunner) && config.isCoverageEnabled()) {
-    myCurrentCoverageSuite=CoverageDataManager.getInstance(project).addCoverageSuite(config);
-    LOG.info("Added coverage data with name '" + myCurrentCoverageSuite.getPresentableName() + "'");
-    config.appendCoverageArgument(javaParameters);
+  for (  RunConfigurationExtension ext : Extensions.getExtensions(RunConfigurationExtension.EP_NAME)) {
+    ext.updateJavaParameters(config,javaParameters,getRunnerSettings());
   }
   LOG.info("Test scope is: " + config.getPersistantData().getScope());
   if (config.getPersistantData().getScope() == TestSearchScope.WHOLE_PROJECT) {
@@ -48,9 +45,10 @@
   if (data.TEST_LISTENERS != null && !data.TEST_LISTENERS.isEmpty()) {
     buf.append(StringUtil.join(data.TEST_LISTENERS,";"));
   }
-  if (hasIDEACoverageEnabled) {
+  for (  Object o : Extensions.getExtensions(IDEATestNGListener.EP_NAME)) {
     if (buf.length() > 0)     buf.append(";");
-    buf.append(IDEACoverageListener.class.getName());
+    buf.append(o.getClass().getName());
+    javaParameters.getClassPath().add(PathUtil.getJarPathForClass(o.getClass()));
   }
   if (buf.length() > 0)   javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.LISTENER_COMMAND_OPT,buf.toString());
   VirtualFile[] sources;
