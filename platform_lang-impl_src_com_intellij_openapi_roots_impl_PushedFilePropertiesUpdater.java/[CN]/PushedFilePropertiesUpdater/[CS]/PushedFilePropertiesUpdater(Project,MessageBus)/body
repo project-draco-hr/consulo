@@ -1,0 +1,52 @@
+{
+  myProject=project;
+  myPushers=Extensions.getExtensions(FilePropertyPusher.EP_NAME);
+  myFilePushers=ContainerUtil.findAllAsArray(myPushers,new Condition<FilePropertyPusher>(){
+    public boolean value(    FilePropertyPusher pusher){
+      return !pusher.pushDirectoriesOnly();
+    }
+  }
+);
+  ((StartupManagerEx)StartupManager.getInstance(project)).registerPreStartupActivity(new Runnable(){
+    public void run(){
+      pushAll(myPushers);
+      final MessageBusConnection connection=bus.connect();
+      connection.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootListener(){
+        public void beforeRootsChange(        final ModuleRootEvent event){
+        }
+        public void rootsChanged(        final ModuleRootEvent event){
+          pushAll(myPushers);
+        }
+      }
+);
+      connection.subscribe(VirtualFileManager.VFS_CHANGES,new BulkVirtualFileListenerAdapter(new VirtualFileAdapter(){
+        @Override public void fileCreated(        final VirtualFileEvent event){
+          final VirtualFile file=event.getFile();
+          final FilePropertyPusher[] pushers=file.isDirectory() ? myPushers : myFilePushers;
+          pushRecursively(file,project,pushers);
+        }
+        @Override public void fileMoved(        final VirtualFileMoveEvent event){
+          final VirtualFile file=event.getFile();
+          final FilePropertyPusher[] pushers=file.isDirectory() ? myPushers : myFilePushers;
+          for (          FilePropertyPusher pusher : pushers) {
+            file.putUserData(pusher.getFileDataKey(),null);
+          }
+          pushRecursively(file,project,pushers);
+        }
+      }
+));
+      for (      final FilePropertyPusher pusher : myPushers) {
+        pusher.initExtra(project,bus,new FilePropertyPusher.Engine(){
+          public void pushAll(){
+            PushedFilePropertiesUpdater.this.pushAll(pusher);
+          }
+          public void pushRecursively(          VirtualFile file,          Project project){
+            PushedFilePropertiesUpdater.this.pushRecursively(file,project,pusher);
+          }
+        }
+);
+      }
+    }
+  }
+);
+}
