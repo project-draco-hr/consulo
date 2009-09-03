@@ -6,7 +6,8 @@
   final byte[] oldBytes=myFileContentAttic.remove(file);
   final boolean forceIndexing=oldBytes != null;
   PsiFile psiFile=null;
-  for (  ID<?,?> indexId : myIndices.keySet()) {
+  final Job<Object> job=JobScheduler.getInstance().createJob("IndexJob",Job.DEFAULT_PRIORITY / 2);
+  for (  final ID<?,?> indexId : myIndices.keySet()) {
     if (forceIndexing ? getInputFilter(indexId).acceptInput(file) : shouldIndexFile(file,indexId)) {
       if (fc == null) {
         byte[] currentBytes;
@@ -29,14 +30,27 @@
         fc.putUserData(PROJECT,project);
         oldContent=oldBytes != null ? new FileContent(file,oldBytes) : null;
       }
-      try {
-        updateSingleIndex(indexId,file,fc,oldContent);
+      final FileContent _oldContent=oldContent;
+      final FileContent _fc=fc;
+      job.addTask(new Runnable(){
+        public void run(){
+          try {
+            updateSingleIndex(indexId,file,_fc,_oldContent);
+          }
+ catch (          StorageException e) {
+            requestRebuild(indexId);
+            LOG.info(e);
+          }
+        }
       }
- catch (      StorageException e) {
-        requestRebuild(indexId);
-        LOG.info(e);
-      }
+);
     }
+  }
+  try {
+    job.scheduleAndWaitForResults();
+  }
+ catch (  Throwable throwable) {
+    LOG.info(throwable);
   }
   if (psiFile != null) {
     psiFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
