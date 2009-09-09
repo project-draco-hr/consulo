@@ -1,42 +1,47 @@
 {
-  PsiClass psiClass=JVMNameUtil.getClassAt(position);
-  if (psiClass == null) {
-    return null;
-  }
-  String waitPrepareFor;
-  ClassPrepareRequestor waitRequestor;
-  if (PsiUtil.isLocalOrAnonymousClass(psiClass)) {
-    PsiClass parent=JVMNameUtil.getTopLevelParentClass(psiClass);
-    if (parent == null) {
-      return null;
-    }
-    final String parentQName=JVMNameUtil.getNonAnonymousClassName(parent);
-    if (parentQName == null) {
-      return null;
-    }
-    waitPrepareFor=parentQName + "$*";
-    waitRequestor=new ClassPrepareRequestor(){
-      public void processClassPrepare(      DebugProcess debuggerProcess,      ReferenceType referenceType){
-        final CompoundPositionManager positionManager=((DebugProcessImpl)debuggerProcess).getPositionManager();
-        if (positionManager.locationsOfLine(referenceType,position).size() > 0) {
-          requestor.processClassPrepare(debuggerProcess,referenceType);
+  final Ref<String> waitPrepareFor=new Ref<String>(null);
+  final Ref<ClassPrepareRequestor> waitRequestor=new Ref<ClassPrepareRequestor>(null);
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      PsiClass psiClass=JVMNameUtil.getClassAt(position);
+      if (psiClass == null) {
+        return;
+      }
+      if (PsiUtil.isLocalOrAnonymousClass(psiClass)) {
+        PsiClass parent=JVMNameUtil.getTopLevelParentClass(psiClass);
+        if (parent == null) {
+          return;
         }
+        final String parentQName=JVMNameUtil.getNonAnonymousClassName(parent);
+        if (parentQName == null) {
+          return;
+        }
+        waitPrepareFor.set(parentQName + "$*");
+        waitRequestor.set(new ClassPrepareRequestor(){
+          public void processClassPrepare(          DebugProcess debuggerProcess,          ReferenceType referenceType){
+            final CompoundPositionManager positionManager=((DebugProcessImpl)debuggerProcess).getPositionManager();
+            if (positionManager.locationsOfLine(referenceType,position).size() > 0) {
+              requestor.processClassPrepare(debuggerProcess,referenceType);
+            }
  else {
-          final List<ReferenceType> positionClasses=positionManager.getAllClasses(position);
-          if (positionClasses.contains(referenceType)) {
-            requestor.processClassPrepare(debuggerProcess,referenceType);
+              final List<ReferenceType> positionClasses=positionManager.getAllClasses(position);
+              if (positionClasses.contains(referenceType)) {
+                requestor.processClassPrepare(debuggerProcess,referenceType);
+              }
+            }
           }
         }
+);
+      }
+ else {
+        waitPrepareFor.set(JVMNameUtil.getNonAnonymousClassName(psiClass));
+        waitRequestor.set(requestor);
       }
     }
-;
   }
- else {
-    waitPrepareFor=JVMNameUtil.getNonAnonymousClassName(psiClass);
-    waitRequestor=requestor;
-  }
-  if (waitPrepareFor == null) {
+);
+  if (waitPrepareFor.get() == null) {
     return null;
   }
-  return myDebugProcess.getRequestsManager().createClassPrepareRequest(waitRequestor,waitPrepareFor);
+  return myDebugProcess.getRequestsManager().createClassPrepareRequest(waitRequestor.get(),waitPrepareFor.get());
 }
