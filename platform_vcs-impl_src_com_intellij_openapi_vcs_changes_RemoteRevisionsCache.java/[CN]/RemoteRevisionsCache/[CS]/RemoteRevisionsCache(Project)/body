@@ -1,27 +1,26 @@
 {
-  myLock=new Object();
-  myData=new HashMap<String,Pair<VcsRoot,VcsRevisionNumber>>();
-  myRefreshingQueues=Collections.synchronizedMap(new HashMap<VcsRoot,LazyRefreshingSelfQueue<String>>());
-  myLatestRevisionsMap=new HashMap<String,VcsRevisionNumber>();
+  myProject=project;
   myLfs=LocalFileSystem.getInstance();
+  myLock=new Object();
+  myRemoteRevisionsNumbersCache=new RemoteRevisionsNumbersCache(myProject);
+  myRemoteRevisionsStateCache=new RemoteRevisionsStateCache(myProject);
   myChangeDecorator=new RemoteStatusChangeNodeDecorator(this);
   myVcsManager=ProjectLevelVcsManager.getInstance(project);
   myVcsManager.addVcsListener(this);
+  myKinds=new HashMap<String,RemoteDifferenceStrategy>();
   Disposer.register(project,new Disposable(){
     public void dispose(){
       myVcsManager.removeVcsListener(RemoteRevisionsCache.this);
     }
   }
 );
+  updateKinds();
   final MyRecursiveUpdateRequest request=new MyRecursiveUpdateRequest(project,new Runnable(){
     public void run(){
-      final List<LazyRefreshingSelfQueue<String>> list=new ArrayList<LazyRefreshingSelfQueue<String>>();
-synchronized (myLock) {
-        list.addAll(myRefreshingQueues.values());
-      }
-      LOG.debug("queues refresh started, queues: " + list.size());
-      for (      LazyRefreshingSelfQueue<String> queue : list) {
-        queue.updateStep();
+      boolean somethingChanged=myRemoteRevisionsNumbersCache.updateStep();
+      somethingChanged|=myRemoteRevisionsStateCache.updateStep();
+      if (somethingChanged) {
+        myProject.getMessageBus().syncPublisher(REMOTE_VERSION_CHANGED).run();
       }
     }
   }
