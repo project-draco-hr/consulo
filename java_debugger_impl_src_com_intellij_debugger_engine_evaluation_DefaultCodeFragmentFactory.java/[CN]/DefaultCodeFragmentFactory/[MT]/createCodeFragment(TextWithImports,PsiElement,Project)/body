@@ -14,5 +14,44 @@
   }
   fragment.setVisibilityChecker(JavaCodeFragment.VisibilityChecker.EVERYTHING_VISIBLE);
   fragment.putUserData(DebuggerExpressionComboBox.KEY,"DebuggerComboBoxEditor.IS_DEBUGGER_EDITOR");
+  fragment.putCopyableUserData(JavaCompletionUtil.DYNAMIC_TYPE_EVALUATOR,new PairFunction<PsiExpression,CompletionParameters,PsiType>(){
+    public PsiType fun(    PsiExpression expression,    CompletionParameters parameters){
+      if (!RuntimeTypeEvaluator.isSubtypeable(expression)) {
+        return null;
+      }
+      if (parameters.getInvocationCount() == 1 && JavaCompletionUtil.containsMethodCalls(expression)) {
+        final CompletionService service=CompletionService.getCompletionService();
+        if (service.getAdvertisementText() == null) {
+          service.setAdvertisementText("Invoke completion once more to see runtime type variants");
+        }
+        return null;
+      }
+      final DebuggerContextImpl debuggerContext=DebuggerManagerEx.getInstanceEx(project).getContext();
+      DebuggerSession debuggerSession=debuggerContext.getDebuggerSession();
+      if (debuggerSession != null) {
+        final Semaphore semaphore=new Semaphore();
+        semaphore.down();
+        final AtomicReference<String> nameRef=new AtomicReference<String>();
+        final RuntimeTypeEvaluator worker=new RuntimeTypeEvaluator(null,expression,debuggerContext,ProgressManager.getInstance().getProgressIndicator()){
+          @Override protected void typeCalculationFinished(          @Nullable String type){
+            nameRef.set(type);
+            semaphore.up();
+          }
+        }
+;
+        debuggerContext.getDebugProcess().getManagerThread().invoke(worker);
+        semaphore.waitFor(1000);
+        final String className=nameRef.get();
+        if (className != null) {
+          final PsiClass psiClass=JavaPsiFacade.getInstance(project).findClass(className,GlobalSearchScope.allScope(project));
+          if (psiClass != null) {
+            return JavaPsiFacade.getElementFactory(project).createType(psiClass);
+          }
+        }
+      }
+      return null;
+    }
+  }
+);
   return fragment;
 }
