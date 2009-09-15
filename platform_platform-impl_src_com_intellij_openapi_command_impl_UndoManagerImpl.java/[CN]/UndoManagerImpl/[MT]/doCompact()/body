@@ -1,35 +1,32 @@
 {
-  Set<DocumentReference> docsOnHold=new HashSet<DocumentReference>(myUndoStacksHolder.getAffectedDocuments());
-  docsOnHold.addAll(myRedoStacksHolder.getAffectedDocuments());
-  docsOnHold.removeAll(myUndoStacksHolder.getGlobalStackAffectedDocuments());
-  docsOnHold.removeAll(myRedoStacksHolder.getGlobalStackAffectedDocuments());
-  Set<DocumentReference> openedDocs=new HashSet<DocumentReference>();
-  for (  DocumentReference docRef : docsOnHold) {
-    final VirtualFile file=docRef.getFile();
-    if (file != null) {
-      if (myProject != null && FileEditorManager.getInstance(myProject).isFileOpen(file)) {
-        openedDocs.add(docRef);
+  Collection<DocumentReference> refs=collectReferencesWithoutMergers();
+  Collection<DocumentReference> openDocs=new HashSet<DocumentReference>();
+  for (  DocumentReference each : refs) {
+    VirtualFile file=each.getFile();
+    if (file == null) {
+      Document document=each.getDocument();
+      if (document != null && EditorFactory.getInstance().getEditors(document,myProject).length > 0) {
+        openDocs.add(each);
       }
     }
  else {
-      Document document=docRef.getDocument();
-      if (document != null && EditorFactory.getInstance().getEditors(document,myProject).length > 0) {
-        openedDocs.add(docRef);
+      if (myProject != null && FileEditorManager.getInstance(myProject).isFileOpen(file)) {
+        openDocs.add(each);
       }
     }
   }
-  docsOnHold.removeAll(openedDocs);
-  if (docsOnHold.size() <= FREE_QUEUES_LIMIT)   return;
-  final DocumentReference[] freeDocs=docsOnHold.toArray(new DocumentReference[docsOnHold.size()]);
-  Arrays.sort(freeDocs,new Comparator<DocumentReference>(){
-    public int compare(    DocumentReference docRef1,    DocumentReference docRef2){
-      return getRefAge(docRef1) - getRefAge(docRef2);
+  refs.removeAll(openDocs);
+  if (refs.size() <= FREE_QUEUES_LIMIT)   return;
+  DocumentReference[] backSorted=refs.toArray(new DocumentReference[refs.size()]);
+  Arrays.sort(backSorted,new Comparator<DocumentReference>(){
+    public int compare(    DocumentReference a,    DocumentReference b){
+      return getLastCommandTimestamp(a) - getLastCommandTimestamp(b);
     }
   }
 );
-  for (int i=0; i < freeDocs.length - FREE_QUEUES_LIMIT; i++) {
-    DocumentReference doc=freeDocs[i];
-    if (getRefAge(doc) + COMMANDS_TO_KEEP_LIVE_QUEUES > myCommandCounter)     break;
-    clearUndoRedoQueue(doc);
+  for (int i=0; i < backSorted.length - FREE_QUEUES_LIMIT; i++) {
+    DocumentReference each=backSorted[i];
+    if (getLastCommandTimestamp(each) + COMMANDS_TO_KEEP_LIVE_QUEUES > myCommandTimestamp)     break;
+    clearUndoRedoQueue(each);
   }
 }
