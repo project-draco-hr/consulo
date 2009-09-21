@@ -1,0 +1,46 @@
+{
+  if (!myUndoableGroup.isUndoable()) {
+    reportCannotUndo(CommonBundle.message("cannot.undo.error.contains.nonundoable.changes.message"),myUndoableGroup.getAffectedDocuments());
+    return;
+  }
+  if (!myUndoableGroup.isValid()) {
+    reportCannotUndo(CommonBundle.message("cannot.undo.error.roots.was.changed.message"),myUndoableGroup.getAffectedDocuments());
+    return;
+  }
+  Set<DocumentReference> clashing=getStackHolder().collectClashingActions(myUndoableGroup);
+  if (!clashing.isEmpty()) {
+    reportCannotUndo(CommonBundle.message("cannot.undo.error.other.affected.files.changed.message"),clashing);
+    return;
+  }
+  if (myUndoableGroup.shouldAskConfirmation()) {
+    if (!askUser())     return;
+  }
+ else {
+    if (restore(getBeforeState())) {
+      setBeforeState(new EditorAndState(myEditor,myEditor.getState(FileEditorStateLevel.UNDO)));
+      return;
+    }
+  }
+  Collection<VirtualFile> readOnlyFiles=collectReadOnlyAffectedFiles();
+  if (!readOnlyFiles.isEmpty()) {
+    final Project project=myManager.getProject();
+    final VirtualFile[] files=readOnlyFiles.toArray(new VirtualFile[readOnlyFiles.size()]);
+    if (project == null) {
+      VirtualFileManager.getInstance().fireReadOnlyModificationAttempt(files);
+      return;
+    }
+    final ReadonlyStatusHandler.OperationStatus operationStatus=ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(files);
+    if (operationStatus.hasReadonlyFiles())     return;
+  }
+  Collection<Document> readOnlyDocuments=collectReadOnlyDocuments();
+  if (!readOnlyDocuments.isEmpty()) {
+    for (    Document document : readOnlyDocuments) {
+      document.fireReadOnlyModificationAttempt();
+    }
+    return;
+  }
+  getStackHolder().removeFromStacks(myUndoableGroup);
+  getReverseStackHolder().addToStacks(myUndoableGroup);
+  performAction();
+  restore(getAfterState());
+}
