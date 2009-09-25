@@ -11,27 +11,80 @@
   tree.saveState(node);
   final ValueDescriptorImpl valueDescriptor=((ValueDescriptorImpl)descriptor);
   final DebuggerContextImpl debuggerContext=tree.getDebuggerContext();
-  final ValueMarkup markup=valueDescriptor.getMarkup(debuggerContext.getDebugProcess());
-  try {
-    if (markup != null) {
-      valueDescriptor.setMarkup(debuggerContext.getDebugProcess(),null);
+  final DebugProcessImpl debugProcess=debuggerContext.getDebugProcess();
+  final ValueMarkup markup=valueDescriptor.getMarkup(debugProcess);
+  debugProcess.getManagerThread().invoke(new DebuggerContextCommandImpl(debuggerContext){
+    public Priority getPriority(){
+      return Priority.HIGH;
     }
+    public void threadAction(){
+      boolean sessionRefreshNeeded=true;
+      try {
+        if (markup != null) {
+          valueDescriptor.setMarkup(debugProcess,null);
+        }
  else {
-      final ValueMarkup valueMarkup=ObjectMarkupPropertiesDialog.chooseMarkup(valueDescriptor.getName());
-      if (valueMarkup != null) {
-        valueDescriptor.setMarkup(debuggerContext.getDebugProcess(),valueMarkup);
-      }
+          final Value value=valueDescriptor.getValue();
+          final Map<Long,ValueMarkup> additionalMarkup=suggestMarkup(debugProcess,value);
+          ValueMarkup valueMarkup=null;
+          if (value instanceof ObjectReference) {
+            valueMarkup=additionalMarkup.get(((ObjectReference)value).uniqueID());
+          }
+          if (valueMarkup == null) {
+            valueMarkup=new ValueMarkup(valueDescriptor.getName(),Color.RED);
+          }
+          final Ref<Pair<ValueMarkup,Boolean>> result=new Ref<Pair<ValueMarkup,Boolean>>(null);
+          try {
+            final ValueMarkup _suggestion=valueMarkup;
+            SwingUtilities.invokeAndWait(new Runnable(){
+              public void run(){
+                result.set(ObjectMarkupPropertiesDialog.chooseMarkup(_suggestion,additionalMarkup));
+              }
+            }
+);
+          }
+ catch (          InterruptedException ignored) {
+          }
+catch (          InvocationTargetException e) {
+            LOG.error(e);
+          }
+          final Pair<ValueMarkup,Boolean> pair=result.get();
+          if (pair != null) {
+            valueDescriptor.setMarkup(debugProcess,pair.first);
+            if (pair.second) {
+              final Map<Long,ValueMarkup> map=NodeDescriptorImpl.getMarkupMap(debugProcess);
+              if (map != null) {
+                for (                Map.Entry<Long,ValueMarkup> entry : additionalMarkup.entrySet()) {
+                  final Long key=entry.getKey();
+                  if (!map.containsKey(key)) {
+                    map.put(key,entry.getValue());
+                  }
+                }
+              }
+            }
+          }
  else {
-        return;
+            sessionRefreshNeeded=false;
+          }
+        }
       }
-    }
-  }
   finally {
-    tree.restoreState(node);
-    node.labelChanged();
+        final boolean _sessionRefreshNeeded=sessionRefreshNeeded;
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            tree.restoreState(node);
+            node.labelChanged();
+            if (_sessionRefreshNeeded) {
+              final DebuggerSession session=debuggerContext.getDebuggerSession();
+              if (session != null) {
+                session.refresh(true);
+              }
+            }
+          }
+        }
+);
+      }
+    }
   }
-  final DebuggerSession session=debuggerContext.getDebuggerSession();
-  if (session != null) {
-    session.refresh(true);
-  }
+);
 }
