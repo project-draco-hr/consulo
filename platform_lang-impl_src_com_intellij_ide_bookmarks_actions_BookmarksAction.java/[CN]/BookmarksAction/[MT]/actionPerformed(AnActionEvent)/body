@@ -1,0 +1,118 @@
+{
+  DataContext dataContext=e.getDataContext();
+  final Project project=PlatformDataKeys.PROJECT.getData(dataContext);
+  if (project == null)   return;
+  BookmarkInContextInfo bookmarkInContextInfo=new BookmarkInContextInfo(dataContext,project).invoke();
+  VirtualFile file=bookmarkInContextInfo.getFile();
+  Bookmark bookmarkAtPlace=bookmarkInContextInfo.getBookmarkAtPlace();
+  int line=bookmarkInContextInfo.getLine();
+  if (file == null)   return;
+  final DefaultListModel model=buildModel(project,bookmarkAtPlace,file,line);
+  final JLabel pathLabel=new JLabel(" ");
+  pathLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+  final Font font=pathLabel.getFont();
+  pathLabel.setFont(font.deriveFont((float)10));
+  final JList list=new JList(model);
+  list.addKeyListener(new KeyAdapter(){
+    public void keyPressed(    KeyEvent e){
+      if (e.getKeyCode() == KeyEvent.VK_DELETE) {
+        int index=list.getSelectedIndex();
+        if (index == -1 || index >= list.getModel().getSize()) {
+          return;
+        }
+        Object[] values=list.getSelectedValues();
+        for (        Object value : values) {
+          if (value instanceof BookmarkItem) {
+            BookmarkItem item=(BookmarkItem)value;
+            model.removeElement(item);
+            if (model.getSize() > 0) {
+              if (model.getSize() == index) {
+                list.setSelectedIndex(model.getSize() - 1);
+              }
+ else               if (model.getSize() > index) {
+                list.setSelectedIndex(index);
+              }
+            }
+ else {
+              list.clearSelection();
+            }
+            BookmarkManager.getInstance(project).removeBookmark(item.myBookmark);
+          }
+        }
+      }
+    }
+  }
+);
+  list.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    private String getTitle2Text(    String fullText){
+      int labelWidth=pathLabel.getWidth();
+      if (fullText == null || fullText.length() == 0)       return " ";
+      while (pathLabel.getFontMetrics(pathLabel.getFont()).stringWidth(fullText) > labelWidth) {
+        int sep=fullText.indexOf(File.separatorChar,4);
+        if (sep < 0)         return fullText;
+        fullText="..." + fullText.substring(sep);
+      }
+      return fullText;
+    }
+    public void valueChanged(    final ListSelectionEvent e){
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          updatePathLabel();
+        }
+      }
+);
+    }
+    private void updatePathLabel(){
+      final Object[] values=list.getSelectedValues();
+      if (values != null && values.length == 1) {
+        pathLabel.setText(getTitle2Text(((ItemWrapper)values[0]).footerText()));
+      }
+ else {
+        pathLabel.setText(" ");
+      }
+    }
+  }
+);
+  Runnable runnable=new Runnable(){
+    public void run(){
+      IdeFocusManager.getInstance(project).doWhenFocusSettlesDown(new Runnable(){
+        public void run(){
+          Object[] values=list.getSelectedValues();
+          if (values.length == 1) {
+            ((ItemWrapper)values[0]).execute(project);
+          }
+ else {
+            for (            Object value : values) {
+              if (value instanceof BookmarkItem) {
+                ((BookmarkItem)value).execute(project);
+              }
+            }
+          }
+        }
+      }
+);
+    }
+  }
+;
+  if (list.getModel().getSize() == 0) {
+    list.clearSelection();
+  }
+  new ListSpeedSearch(list){
+    @Override protected String getElementText(    Object element){
+      return ((ItemWrapper)element).speedSearchText();
+    }
+  }
+;
+  list.setCellRenderer(new ItemRenderer(project));
+  JPanel footerPanel=new JPanel(new BorderLayout()){
+    @Override protected void paintComponent(    Graphics g){
+      super.paintComponent(g);
+      g.setColor(BORDER_COLOR);
+      g.drawLine(0,0,getWidth(),0);
+    }
+  }
+;
+  footerPanel.setBorder(BorderFactory.createEmptyBorder(4,4,4,4));
+  footerPanel.add(pathLabel);
+  new PopupChooserBuilder(list).setTitle("Bookmarks").setMovable(true).setSouthComponent(footerPanel).setItemChoosenCallback(runnable).createPopup().showCenteredInCurrentWindow(project);
+}
