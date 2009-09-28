@@ -1,0 +1,92 @@
+{
+  if (pass.isExpired()) {
+    return new ActionCallback.Rejected();
+  }
+  NodeDescriptor childDesc=childDescriptor;
+  if (childDesc == null) {
+    pass.expire();
+    return new ActionCallback.Rejected();
+  }
+  Object oldElement=getElementFromDescriptor(childDesc);
+  if (oldElement == null) {
+    pass.expire();
+    return new ActionCallback.Rejected();
+  }
+  boolean changes=update(childDesc,false);
+  boolean forceRemapping=false;
+  Object newElement=getElementFromDescriptor(childDesc);
+  Integer index=newElement != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc)) : null;
+  if (index != null) {
+    final Object elementFromMap=elementToIndexMap.getKey(index);
+    if (elementFromMap != newElement && elementFromMap.equals(newElement)) {
+      if (isInStructure(elementFromMap) && isInStructure(newElement)) {
+        if (parentNode.getUserObject() instanceof NodeDescriptor) {
+          final NodeDescriptor parentDescriptor=getDescriptorFrom(parentNode);
+          childDesc=getTreeStructure().createDescriptor(elementFromMap,parentDescriptor);
+          childNode.setUserObject(childDesc);
+          newElement=elementFromMap;
+          forceRemapping=true;
+          update(childDesc,false);
+          changes=true;
+        }
+      }
+    }
+    if (childDesc.getIndex() != index.intValue()) {
+      changes=true;
+    }
+    childDesc.setIndex(index.intValue());
+  }
+  if (index != null && changes) {
+    updateNodeImageAndPosition(childNode);
+  }
+  if (!oldElement.equals(newElement) | forceRemapping) {
+    removeMapping(oldElement,childNode,newElement);
+    if (newElement != null) {
+      createMapping(newElement,childNode);
+    }
+  }
+  if (index == null) {
+    int selectedIndex=-1;
+    if (TreeBuilderUtil.isNodeOrChildSelected(myTree,childNode)) {
+      selectedIndex=parentNode.getIndex(childNode);
+    }
+    if (childNode.getParent() instanceof DefaultMutableTreeNode) {
+      final DefaultMutableTreeNode parent=(DefaultMutableTreeNode)childNode.getParent();
+      if (myTree.isExpanded(new TreePath(parent.getPath()))) {
+        if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
+          insertLoadingNode(parent,false);
+        }
+      }
+    }
+    Object disposedElement=getElementFor(childNode);
+    removeNodeFromParent(childNode,selectedIndex >= 0);
+    disposeNode(childNode);
+    if (selectedIndex >= 0) {
+      if (parentNode.getChildCount() > 0) {
+        if (parentNode.getChildCount() > selectedIndex) {
+          TreeNode newChildNode=parentNode.getChildAt(selectedIndex);
+          if (isValidForSelectionAdjusting(newChildNode)) {
+            addSelectionPath(new TreePath(myTreeModel.getPathToRoot(newChildNode)),true,getExpiredElementCondition(disposedElement));
+          }
+        }
+ else {
+          TreeNode newChild=parentNode.getChildAt(parentNode.getChildCount() - 1);
+          if (isValidForSelectionAdjusting(newChild)) {
+            addSelectionPath(new TreePath(myTreeModel.getPathToRoot(newChild)),true,getExpiredElementCondition(disposedElement));
+          }
+        }
+      }
+ else {
+        addSelectionPath(new TreePath(myTreeModel.getPathToRoot(parentNode)),true,getExpiredElementCondition(disposedElement));
+      }
+    }
+  }
+ else {
+    elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc));
+    updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate);
+  }
+  if (parentNode.equals(getRootNode())) {
+    myTreeModel.nodeChanged(getRootNode());
+  }
+  return new ActionCallback.Done();
+}
