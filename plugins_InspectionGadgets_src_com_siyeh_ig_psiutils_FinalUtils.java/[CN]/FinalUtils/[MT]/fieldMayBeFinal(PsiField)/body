@@ -1,0 +1,83 @@
+{
+  final PsiClass aClass=field.getContainingClass();
+  if (aClass == null) {
+    return false;
+  }
+  final PsiExpression initializer=field.getInitializer();
+  final PsiClassInitializer[] classInitializers=aClass.getInitializers();
+  boolean assignedInInitializer=initializer != null;
+  boolean isInitialized=assignedInInitializer;
+  for (  PsiClassInitializer classInitializer : classInitializers) {
+    if (classInitializer.hasModifierProperty(PsiModifier.STATIC)) {
+      continue;
+    }
+    if (VariableAccessUtils.variableIsAssigned(field,classInitializer,false)) {
+      if (assignedInInitializer) {
+        return false;
+      }
+ else       if (variableIsAssignedOnceAndOnlyOnce(field,classInitializer)) {
+        isInitialized=true;
+      }
+      assignedInInitializer=true;
+    }
+  }
+  final PsiMethod[] methods=aClass.getMethods();
+  for (  PsiMethod method : methods) {
+    if (method.hasModifierProperty(PsiModifier.STATIC)) {
+      continue;
+    }
+    if (method.isConstructor() && !assignedInInitializer) {
+      if (!VariableAccessUtils.variableIsAssigned(field,method,false)) {
+        return false;
+      }
+ else       if (variableIsAssignedOnceAndOnlyOnce(field,method)) {
+        isInitialized=true;
+      }
+    }
+ else     if (VariableAccessUtils.variableIsAssigned(field,method,false)) {
+      return false;
+    }
+  }
+  final PsiField[] fields=aClass.getFields();
+  for (  PsiField aField : fields) {
+    if (aField.hasModifierProperty(PsiModifier.STATIC)) {
+      continue;
+    }
+    if (aField.equals(field)) {
+      continue;
+    }
+    final PsiExpression expression=aField.getInitializer();
+    if (expression == null) {
+      continue;
+    }
+    if (VariableAccessUtils.variableIsAssigned(field,expression)) {
+      if (assignedInInitializer || isInitialized) {
+        return false;
+      }
+ else {
+        isInitialized=true;
+      }
+    }
+  }
+  if (!isInitialized) {
+    return false;
+  }
+  final PsiElement[] children=aClass.getChildren();
+  final ClassVisitor visitor=new ClassVisitor(field);
+  for (  PsiElement child : children) {
+    child.accept(visitor);
+    if (visitor.isVariableAssignedInClass()) {
+      return false;
+    }
+  }
+  PsiClass containingClass=aClass.getContainingClass();
+  final AssignmentVisitor assignmentVisitor=new AssignmentVisitor(field,aClass);
+  while (containingClass != null) {
+    containingClass.accept(assignmentVisitor);
+    if (assignmentVisitor.isVariableAssigned()) {
+      return false;
+    }
+    containingClass=containingClass.getContainingClass();
+  }
+  return true;
+}

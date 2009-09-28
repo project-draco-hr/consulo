@@ -1,0 +1,84 @@
+{
+  final PsiReferenceExpression parameterReference=(PsiReferenceExpression)descriptor.getPsiElement();
+  final PsiElement target=parameterReference.resolve();
+  if (!(target instanceof PsiParameter)) {
+    return;
+  }
+  final PsiParameter parameter=(PsiParameter)target;
+  final PsiElement declarationScope=parameter.getDeclarationScope();
+  final PsiElement body;
+  if (declarationScope instanceof PsiMethod) {
+    final PsiMethod method=(PsiMethod)declarationScope;
+    body=method.getBody();
+  }
+ else   if (declarationScope instanceof PsiCatchSection) {
+    final PsiCatchSection catchSection=(PsiCatchSection)declarationScope;
+    body=catchSection.getCatchBlock();
+  }
+ else   if (declarationScope instanceof PsiLoopStatement) {
+    final PsiLoopStatement forStatement=(PsiLoopStatement)declarationScope;
+    final PsiStatement forBody=forStatement.getBody();
+    if (forBody instanceof PsiBlockStatement) {
+      final PsiBlockStatement blockStatement=(PsiBlockStatement)forBody;
+      body=blockStatement.getCodeBlock();
+    }
+ else {
+      body=forBody;
+    }
+  }
+ else {
+    return;
+  }
+  if (body == null) {
+    return;
+  }
+  final PsiManager manager=PsiManager.getInstance(project);
+  final CodeStyleManager codeStyleManager=manager.getCodeStyleManager();
+  final String parameterName=parameterReference.getText();
+  final JavaCodeStyleManager javaCodeStyleManager=JavaCodeStyleManager.getInstance(project);
+  final String variableName=javaCodeStyleManager.suggestUniqueVariableName(parameterName,parameterReference,true);
+  final SearchScope scope=parameter.getUseScope();
+  final Query<PsiReference> search=ReferencesSearch.search(parameter,scope);
+  final PsiReference reference=search.findFirst();
+  if (reference == null) {
+    return;
+  }
+  final PsiElement element=reference.getElement();
+  if (!(element instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression firstReference=(PsiReferenceExpression)element;
+  final PsiElement[] children=body.getChildren();
+  final int startIndex;
+  final int endIndex;
+  if (body instanceof PsiCodeBlock) {
+    startIndex=1;
+    endIndex=children.length - 1;
+  }
+ else {
+    startIndex=0;
+    endIndex=children.length;
+  }
+  boolean newDeclarationCreated=false;
+  final StringBuilder buffer=new StringBuilder();
+  for (int i=startIndex; i < endIndex; i++) {
+    final PsiElement child=children[i];
+    newDeclarationCreated|=replaceVariableName(child,firstReference,variableName,parameterName,buffer);
+  }
+  final String replacementText;
+  if (newDeclarationCreated) {
+    replacementText="{" + buffer + '}';
+  }
+ else {
+    final PsiType type=parameterReference.getType();
+    if (type == null) {
+      return;
+    }
+    final String className=type.getCanonicalText();
+    replacementText='{' + className + ' '+ variableName+ " = "+ parameterName+ ';'+ buffer+ '}';
+  }
+  final PsiElementFactory elementFactory=JavaPsiFacade.getInstance(project).getElementFactory();
+  final PsiCodeBlock block=elementFactory.createCodeBlockFromText(replacementText,null);
+  body.replace(block);
+  codeStyleManager.reformat(declarationScope);
+}

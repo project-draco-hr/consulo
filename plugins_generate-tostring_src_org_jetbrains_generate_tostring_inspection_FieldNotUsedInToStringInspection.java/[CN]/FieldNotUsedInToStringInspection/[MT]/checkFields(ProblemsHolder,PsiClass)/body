@@ -1,0 +1,46 @@
+{
+  if (log.isDebugEnabled())   log.debug("checkFields: clazz=" + clazz);
+  if (clazz == null || clazz.getName() == null) {
+    return;
+  }
+  PsiAdapter psi=PsiAdapterFactory.getPsiAdapter();
+  PsiField[] fields=psi.getFields(clazz);
+  if (fields.length == 0) {
+    log.debug("Class does not have any fields");
+    return;
+  }
+  PsiMethod toStringMethod=psi.findMethodByName(clazz,"toString");
+  if (toStringMethod == null) {
+    log.debug("No toString() method");
+    return;
+  }
+  PsiCodeBlock code=toStringMethod.getBody();
+  if (code == null) {
+    log.debug("No toString() code");
+    return;
+  }
+  String body=code.getText();
+  if (body.indexOf("getDeclaredFields()") != -1) {
+    log.debug("Using reflection");
+    return;
+  }
+ else   if (body.indexOf("ReflectionToStringBuilder(this).toString()") != -1) {
+    log.debug("Using reflection (ReflectionToStringBuilder)");
+    return;
+  }
+  Project project=clazz.getProject();
+  fields=GenerateToStringUtils.filterAvailableFields(project,psi,clazz,GenerateToStringContext.getConfig().getFilterPattern());
+  if (fields == null || fields.length == 0) {
+    log.debug("No fields to be dumped as all fields was excluded (exclude field by XXX from Settings)");
+    return;
+  }
+  for (  PsiField field : fields) {
+    if (log.isDebugEnabled())     log.debug("Evaluating if field " + field.getName() + " is in toString() method");
+    String pattern="(?s).*\\W" + field.getName() + "[\\W&&[^=]].*";
+    if (log.isDebugEnabled())     log.debug("Match pattern = " + pattern);
+    if (!body.matches(pattern)) {
+      if (log.isDebugEnabled())       log.debug("Field is not used in toString() method (out-of-sync): " + field);
+      holder.registerProblem(field,"Field '" + field.getName() + "' is not used in toString() method",ProblemHighlightType.GENERIC_ERROR_OR_WARNING,fix);
+    }
+  }
+}

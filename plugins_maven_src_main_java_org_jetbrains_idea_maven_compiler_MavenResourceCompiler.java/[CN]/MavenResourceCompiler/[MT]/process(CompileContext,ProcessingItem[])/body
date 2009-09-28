@@ -1,0 +1,37 @@
+{
+  context.getProgressIndicator().setText("Processing Maven resources...");
+  List<ProcessingItem> result=new ArrayList<ProcessingItem>(items.length);
+  List<File> filesToRefresh=new ArrayList<File>(items.length);
+  deleteOutdatedFile(context.getUserData(FILES_TO_DELETE_KEY),filesToRefresh);
+  int count=0;
+  for (  final ProcessingItem each : items) {
+    if (!(each instanceof MyProcessingItem))     continue;
+    context.getProgressIndicator().setFraction(((double)count) / items.length);
+    context.getProgressIndicator().checkCanceled();
+    MyProcessingItem eachItem=(MyProcessingItem)each;
+    VirtualFile sourceVirtualFile=eachItem.getFile();
+    File sourceFile=new File(sourceVirtualFile.getPath());
+    File outputFile=new File(eachItem.getOutputPath());
+    try {
+      outputFile.getParentFile().mkdirs();
+      if (eachItem.isFiltered()) {
+        String charset=sourceVirtualFile.getCharset().name();
+        String text=new String(FileUtil.loadFileBytes(sourceFile),charset);
+        String escapedCharacters="properties".equals(sourceVirtualFile.getExtension()) ? "\\" : null;
+        text=MavenPropertyResolver.resolve(eachItem.getModule(),text,eachItem.getProperties(),eachItem.getEscapeString(),escapedCharacters);
+        FileUtil.writeToFile(outputFile,text.getBytes(charset));
+      }
+ else {
+        FileUtil.copy(sourceFile,outputFile);
+      }
+      ((MyValididtyState)each.getValidityState()).setOutputFileTimestamp(outputFile.lastModified());
+      result.add(each);
+      filesToRefresh.add(outputFile);
+    }
+ catch (    IOException e) {
+      context.addMessage(CompilerMessageCategory.ERROR,"Maven: Cannot process resource file: " + e.getMessage(),sourceVirtualFile.getUrl(),-1,-1);
+    }
+  }
+  CompilerUtil.refreshIOFiles(filesToRefresh);
+  return result.toArray(new ProcessingItem[result.size()]);
+}

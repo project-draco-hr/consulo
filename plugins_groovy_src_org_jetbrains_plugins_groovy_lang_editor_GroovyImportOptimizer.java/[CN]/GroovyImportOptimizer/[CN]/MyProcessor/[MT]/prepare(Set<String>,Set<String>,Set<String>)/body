@@ -1,0 +1,62 @@
+{
+  final Project project=myFile.getProject();
+  final CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(project);
+  final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(project);
+  TObjectIntHashMap<String> packageCountMap=new TObjectIntHashMap<String>();
+  TObjectIntHashMap<String> classCountMap=new TObjectIntHashMap<String>();
+  for (  String importedClass : importedClasses) {
+    if (implicitlyImported.contains(importedClass)) {
+      continue;
+    }
+    final String packageName=StringUtil.getPackageName(importedClass);
+    if (!packageCountMap.containsKey(packageName))     packageCountMap.put(packageName,0);
+    packageCountMap.increment(packageName);
+  }
+  for (  String importedMember : staticallyImportedMembers) {
+    final String className=StringUtil.getPackageName(importedMember);
+    if (!classCountMap.containsKey(className))     classCountMap.put(className,0);
+    classCountMap.increment(className);
+  }
+  final Set<String> onDemandImportedSimpleClassNames=new HashSet<String>();
+  final List<GrImportStatement> result=new ArrayList<GrImportStatement>();
+  packageCountMap.forEachEntry(new TObjectIntProcedure<String>(){
+    public boolean execute(    String s,    int i){
+      if (i >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND) {
+        result.add(factory.createImportStatementFromText(s,false,true,null));
+        final PsiPackage aPackage=JavaPsiFacade.getInstance(myFile.getProject()).findPackage(s);
+        if (aPackage != null) {
+          for (          PsiClass clazz : aPackage.getClasses(myFile.getResolveScope())) {
+            onDemandImportedSimpleClassNames.add(clazz.getName());
+          }
+        }
+      }
+      return true;
+    }
+  }
+);
+  classCountMap.forEachEntry(new TObjectIntProcedure<String>(){
+    public boolean execute(    String s,    int i){
+      if (i >= settings.NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND) {
+        result.add(factory.createImportStatementFromText(s,true,true,null));
+      }
+      return true;
+    }
+  }
+);
+  List<GrImportStatement> explicated=CollectionFactory.arrayList();
+  for (  String importedClass : importedClasses) {
+    final String parentName=StringUtil.getPackageName(importedClass);
+    if (packageCountMap.get(parentName) >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND)     continue;
+    if (implicitlyImported.contains(importedClass) && !onDemandImportedSimpleClassNames.contains(StringUtil.getShortName(importedClass)))     continue;
+    explicated.add(factory.createImportStatementFromText(importedClass,false,false,null));
+  }
+  for (  String importedMember : staticallyImportedMembers) {
+    final String className=StringUtil.getPackageName(importedMember);
+    if (classCountMap.get(className) >= settings.NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND)     continue;
+    result.add(factory.createImportStatementFromText(importedMember,true,false,null));
+  }
+  Collections.sort(result,IMPORT_STATEMENT_COMPARATOR);
+  Collections.sort(explicated,IMPORT_STATEMENT_COMPARATOR);
+  explicated.addAll(result);
+  return explicated.toArray(new GrImportStatement[explicated.size()]);
+}

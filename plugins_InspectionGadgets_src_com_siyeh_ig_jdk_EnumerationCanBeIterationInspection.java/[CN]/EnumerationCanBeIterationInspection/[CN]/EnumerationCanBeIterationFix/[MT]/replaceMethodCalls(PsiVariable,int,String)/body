@@ -1,0 +1,56 @@
+{
+  final PsiManager manager=enumerationVariable.getManager();
+  final Project project=manager.getProject();
+  final JavaPsiFacade facade=JavaPsiFacade.getInstance(project);
+  final PsiElementFactory factory=facade.getElementFactory();
+  final Query<PsiReference> query=ReferencesSearch.search(enumerationVariable);
+  final List<PsiElement> referenceElements=new ArrayList();
+  for (  PsiReference reference : query) {
+    final PsiElement referenceElement=reference.getElement();
+    referenceElements.add(referenceElement);
+  }
+  Collections.sort(referenceElements,PsiElementOrderComparator.getInstance());
+  int result=0;
+  for (  PsiElement referenceElement : referenceElements) {
+    if (!(referenceElement instanceof PsiReferenceExpression)) {
+      result=KEEP_DECLARATION;
+      continue;
+    }
+    if (referenceElement.getTextOffset() <= startOffset) {
+      result=KEEP_DECLARATION;
+      continue;
+    }
+    final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)referenceElement;
+    final PsiElement referenceParent=referenceExpression.getParent();
+    if (!(referenceParent instanceof PsiReferenceExpression)) {
+      if (referenceParent instanceof PsiAssignmentExpression) {
+        result=KEEP_DECLARATION;
+        break;
+      }
+      result=KEEP_INITIALIZATION;
+      continue;
+    }
+    final PsiElement referenceGrandParent=referenceParent.getParent();
+    if (!(referenceGrandParent instanceof PsiMethodCallExpression)) {
+      result=KEEP_INITIALIZATION;
+      continue;
+    }
+    final PsiMethodCallExpression callExpression=(PsiMethodCallExpression)referenceGrandParent;
+    final PsiReferenceExpression foundReferenceExpression=callExpression.getMethodExpression();
+    final String foundName=foundReferenceExpression.getReferenceName();
+    final String newExpressionText;
+    if ("hasMoreElements".equals(foundName)) {
+      newExpressionText=newVariableName + ".hasNext()";
+    }
+ else     if ("nextElement".equals(foundName)) {
+      newExpressionText=newVariableName + ".next()";
+    }
+ else {
+      result=KEEP_INITIALIZATION;
+      continue;
+    }
+    final PsiExpression newExpression=factory.createExpressionFromText(newExpressionText,callExpression);
+    callExpression.replace(newExpression);
+  }
+  return result;
+}

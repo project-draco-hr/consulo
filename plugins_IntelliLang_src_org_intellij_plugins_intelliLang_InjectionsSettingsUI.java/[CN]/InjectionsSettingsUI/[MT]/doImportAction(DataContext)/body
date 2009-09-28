@@ -1,0 +1,66 @@
+{
+  final FileChooserDescriptor descriptor=new FileChooserDescriptor(true,false,true,false,true,false){
+    @Override public boolean isFileVisible(    VirtualFile file,    boolean showHiddenFiles){
+      return super.isFileVisible(file,showHiddenFiles) && (file.isDirectory() || "xml".equals(file.getExtension()) || file.getFileType() == StdFileTypes.ARCHIVE);
+    }
+    @Override public boolean isFileSelectable(    VirtualFile file){
+      return file.getFileType() == StdFileTypes.XML;
+    }
+  }
+;
+  descriptor.setDescription("Please select the configuration file (usually named IntelliLang.xml) to import.");
+  descriptor.setTitle("Import Configuration");
+  descriptor.putUserData(LangDataKeys.MODULE_CONTEXT,LangDataKeys.MODULE.getData(dataContext));
+  final FileChooserDialog chooser=FileChooserFactory.getInstance().createFileChooser(descriptor,myProject);
+  final SplitterProportionsData splitterData=PeerFactory.getInstance().getUIHelper().createSplitterProportionsData();
+  splitterData.externalizeFromDimensionService("IntelliLang.ImportSettingsKey.SplitterProportions");
+  final VirtualFile[] files=chooser.choose(null,myProject);
+  if (files.length != 1)   return;
+  try {
+    final Configuration cfg=Configuration.load(files[0].getInputStream());
+    if (cfg == null) {
+      Messages.showWarningDialog(myProject,"The selected file does not contain any importable configuration.","Nothing to Import");
+      return;
+    }
+    final Map<String,Set<BaseInjection>> currentMap=ContainerUtil.classify(myInjections.iterator(),new Convertor<BaseInjection,String>(){
+      public String convert(      final BaseInjection o){
+        return o.getSupportId();
+      }
+    }
+);
+    final List<BaseInjection> originalInjections=new ArrayList<BaseInjection>();
+    final List<BaseInjection> newInjections=new ArrayList<BaseInjection>();
+    for (    String supportId : InjectorUtils.getActiveInjectionSupportIds()) {
+      final Set<BaseInjection> currentInjections=currentMap.get(supportId);
+      final List<BaseInjection> importingInjections=cfg.getInjections(supportId);
+      if (currentInjections == null) {
+        newInjections.addAll(importingInjections);
+        continue;
+      }
+ else {
+        Configuration.importInjections(currentInjections,importingInjections,originalInjections,newInjections);
+      }
+    }
+    myInjections.removeAll(originalInjections);
+    myInjections.addAll(newInjections);
+    for (    BaseInjection injection : newInjections) {
+      injection.initializePlaces(true);
+    }
+    ((ListTableModel<BaseInjection>)myInjectionsTable.getModel()).setItems(myInjections);
+    final int n=newInjections.size();
+    if (n > 1) {
+      Messages.showInfoMessage(myProject,n + " entries have been successfully imported","Import Successful");
+    }
+ else     if (n == 1) {
+      Messages.showInfoMessage(myProject,"One entry has been successfully imported","Import Successful");
+    }
+ else {
+      Messages.showInfoMessage(myProject,"No new entries have been imported","Import");
+    }
+  }
+ catch (  Exception e1) {
+    Configuration.LOG.error("Unable to load Settings",e1);
+    final String msg=e1.getLocalizedMessage();
+    Messages.showErrorDialog(myProject,msg != null && msg.length() > 0 ? msg : e1.toString(),"Could not load Settings");
+  }
+}

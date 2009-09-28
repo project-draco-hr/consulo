@@ -1,0 +1,58 @@
+{
+  final JavaCodeStyleManager codeStyleManager=JavaCodeStyleManager.getInstance(myProject);
+  String[] nameSuggestions=codeStyleManager.suggestVariableName(VariableKind.PARAMETER,null,null,PsiType.getJavaLangObject(myClass.getManager(),myClass.getResolveScope())).names;
+  final String objectBaseName=nameSuggestions.length > 0 ? nameSuggestions[0] : BASE_OBJECT_PARAMETER_NAME;
+  myParameterName=getUniqueLocalVarName(objectBaseName,myEqualsFields);
+  final PsiType classType=TypesUtil.createType(myClass.getQualifiedName(),myClass.getContext());
+  nameSuggestions=codeStyleManager.suggestVariableName(VariableKind.LOCAL_VARIABLE,null,null,classType).names;
+  String instanceBaseName=nameSuggestions.length > 0 && nameSuggestions[0].length() < 10 ? nameSuggestions[0] : BASE_OBJECT_LOCAL_NAME;
+  myClassInstanceName=getUniqueLocalVarName(instanceBaseName,myEqualsFields);
+  @NonNls StringBuffer buffer=new StringBuffer();
+  buffer.append("boolean equals(").append(myParameterName).append(") {\n");
+  addEqualsPrologue(buffer);
+  if (myEqualsFields.length > 0) {
+    addClassInstance(buffer);
+    ArrayList<PsiField> equalsFields=new ArrayList<PsiField>();
+    for (    PsiField equalsField : myEqualsFields) {
+      equalsFields.add(equalsField);
+    }
+    Collections.sort(equalsFields,EqualsFieldsComparator.INSTANCE);
+    for (    PsiField field : equalsFields) {
+      if (!field.hasModifierProperty(PsiModifier.STATIC)) {
+        final PsiType type=field.getType();
+        if (type instanceof PsiArrayType) {
+          addArrayEquals(buffer,field);
+        }
+ else         if (type instanceof PsiPrimitiveType) {
+          if (PsiType.DOUBLE.equals(type) || PsiType.FLOAT.equals(type)) {
+            addDoubleFieldComparison(buffer,field);
+          }
+ else {
+            addPrimitiveFieldComparison(buffer,field);
+          }
+        }
+ else {
+          if (type instanceof PsiClassType) {
+            final PsiClass aClass=((PsiClassType)type).resolve();
+            if (aClass != null && aClass.isEnum()) {
+              addPrimitiveFieldComparison(buffer,field);
+              continue;
+            }
+          }
+          addFieldComparison(buffer,field);
+        }
+      }
+    }
+  }
+  buffer.append("\nreturn true;\n}");
+  GrMethod result=myFactory.createMethodFromText(buffer.toString());
+  final PsiParameter parameter=result.getParameterList().getParameters()[0];
+  PsiUtil.setModifierProperty(parameter,PsiModifier.FINAL,CodeStyleSettingsManager.getSettings(myProject).GENERATE_FINAL_PARAMETERS);
+  try {
+    result=((GrMethod)CodeStyleManager.getInstance(myProject).reformat(result));
+  }
+ catch (  IncorrectOperationException e) {
+    e.printStackTrace();
+  }
+  return result;
+}

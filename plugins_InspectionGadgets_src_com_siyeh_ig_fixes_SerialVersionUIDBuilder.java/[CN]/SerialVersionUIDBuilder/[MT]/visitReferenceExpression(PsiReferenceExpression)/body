@@ -1,0 +1,108 @@
+{
+  super.visitReferenceExpression(expression);
+  final PsiElement element=expression.resolve();
+  final PsiElement elementParentClass=ClassUtils.getContainingClass(element);
+  final PsiElement expressionParentClass=ClassUtils.getContainingClass(expression);
+  if (expressionParentClass == null || expressionParentClass.equals(elementParentClass)) {
+    return;
+  }
+  PsiElement parentOfParentClass=ClassUtils.getContainingClass(expressionParentClass);
+  while (parentOfParentClass != null && !parentOfParentClass.equals(clazz)) {
+    if (!(expressionParentClass instanceof PsiAnonymousClass)) {
+      getAccessMethodIndex(expressionParentClass);
+    }
+    getAccessMethodIndex(parentOfParentClass);
+    parentOfParentClass=ClassUtils.getContainingClass(parentOfParentClass);
+  }
+  if (element instanceof PsiField) {
+    final PsiField field=(PsiField)element;
+    if (field.hasModifierProperty(PsiModifier.PRIVATE)) {
+      boolean isStatic=false;
+      final PsiType type=field.getType();
+      if (field.hasModifierProperty(PsiModifier.STATIC)) {
+        if (field.hasModifierProperty(PsiModifier.FINAL) && type instanceof PsiPrimitiveType) {
+          final PsiExpression initializer=field.getInitializer();
+          if (PsiUtil.isConstantExpression(initializer)) {
+            return;
+          }
+        }
+        isStatic=true;
+      }
+      final String returnTypeSignature=MemberSignature.createTypeSignature(type).replace('/','.');
+      final String className=clazz.getQualifiedName();
+      @NonNls final StringBuilder signatureBuffer=new StringBuilder("(");
+      if (!isStatic) {
+        signatureBuffer.append('L').append(className).append(';');
+      }
+      final String accessMethodIndex=getAccessMethodIndex(field);
+      if (!field.getContainingClass().equals(clazz)) {
+        return;
+      }
+      @NonNls String name=null;
+      final PsiElement parent=expression.getParent();
+      if (parent instanceof PsiAssignmentExpression) {
+        final PsiAssignmentExpression assignment=(PsiAssignmentExpression)parent;
+        if (assignment.getLExpression().equals(expression)) {
+          name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "02";
+          signatureBuffer.append(returnTypeSignature);
+        }
+      }
+ else       if (parent instanceof PsiPostfixExpression) {
+        final PsiPostfixExpression postfixExpression=(PsiPostfixExpression)parent;
+        final PsiJavaToken operationSign=postfixExpression.getOperationSign();
+        final IElementType tokenType=operationSign.getTokenType();
+        if (tokenType.equals(JavaTokenType.PLUSPLUS)) {
+          name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "08";
+        }
+ else         if (tokenType.equals(JavaTokenType.MINUSMINUS)) {
+          name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "10";
+        }
+      }
+ else       if (parent instanceof PsiPrefixExpression) {
+        final PsiPrefixExpression prefixExpression=(PsiPrefixExpression)parent;
+        final PsiJavaToken operationSign=prefixExpression.getOperationSign();
+        final IElementType tokenType=operationSign.getTokenType();
+        if (tokenType.equals(JavaTokenType.PLUSPLUS)) {
+          name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "04";
+        }
+ else         if (tokenType.equals(JavaTokenType.MINUSMINUS)) {
+          name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "06";
+        }
+      }
+      if (name == null) {
+        name=ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "00";
+      }
+      signatureBuffer.append(')').append(returnTypeSignature);
+      final String signature=signatureBuffer.toString();
+      final MemberSignature methodSignature=new MemberSignature(name,Modifier.STATIC,signature);
+      nonPrivateMethods.add(methodSignature);
+    }
+  }
+ else   if (element instanceof PsiMethod) {
+    final PsiMethod method=(PsiMethod)element;
+    if (method.hasModifierProperty(PsiModifier.PRIVATE) && method.getContainingClass().equals(clazz)) {
+      final String signature;
+      if (method.hasModifierProperty(PsiModifier.STATIC)) {
+        signature=MemberSignature.createMethodSignature(method).replace('/','.');
+      }
+ else {
+        final String returnTypeSignature=MemberSignature.createTypeSignature(method.getReturnType()).replace('/','.');
+        @NonNls final StringBuilder signatureBuffer=new StringBuilder();
+        signatureBuffer.append("(L");
+        signatureBuffer.append(clazz.getQualifiedName()).append(';');
+        final PsiParameter[] parameters=method.getParameterList().getParameters();
+        for (        final PsiParameter parameter : parameters) {
+          final PsiType type=parameter.getType();
+          final String typeSignature=MemberSignature.createTypeSignature(type).replace('/','.');
+          signatureBuffer.append(typeSignature);
+        }
+        signatureBuffer.append(')');
+        signatureBuffer.append(returnTypeSignature);
+        signature=signatureBuffer.toString();
+      }
+      final String accessMethodIndex=getAccessMethodIndex(method);
+      final MemberSignature methodSignature=new MemberSignature(ACCESS_METHOD_NAME_PREFIX + accessMethodIndex + "00",Modifier.STATIC,signature);
+      nonPrivateMethods.add(methodSignature);
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  if (!(referenceElement instanceof PsiExpression)) {
+    return false;
+  }
+  final JavaResolveResult resolveResult=methodCallExpression.resolveMethodGenerics();
+  final PsiMethod method=(PsiMethod)resolveResult.getElement();
+  if (method == null) {
+    return false;
+  }
+  final PsiSubstitutor substitutor=resolveResult.getSubstitutor();
+  final PsiExpressionList expressionList=methodCallExpression.getArgumentList();
+  final PsiExpression[] expressions=expressionList.getExpressions();
+  final int index=findElementIndexInExpressionList(referenceElement,expressions);
+  if (index < 0) {
+    return false;
+  }
+  final PsiParameterList parameterList=method.getParameterList();
+  if (parameterList.getParametersCount() == 0) {
+    return false;
+  }
+  final PsiParameter[] parameters=parameterList.getParameters();
+  final PsiParameter parameter;
+  final PsiType type;
+  if (index < parameters.length) {
+    parameter=parameters[index];
+    type=parameter.getType();
+  }
+ else {
+    parameter=parameters[parameters.length - 1];
+    type=parameter.getType();
+    if (!(type instanceof PsiEllipsisType)) {
+      return false;
+    }
+  }
+  if (!useParameterizedTypeForCollectionMethods) {
+    return checkType(type,substitutor,weakestTypeClasses);
+  }
+  final String methodName=method.getName();
+  if (HardcodedMethodConstants.REMOVE.equals(methodName) || HardcodedMethodConstants.GET.equals(methodName) || "containsKey".equals(methodName)|| "containsValue".equals(methodName)|| "contains".equals(methodName)|| HardcodedMethodConstants.INDEX_OF.equals(methodName)|| HardcodedMethodConstants.LAST_INDEX_OF.equals(methodName)) {
+    final PsiClass containingClass=method.getContainingClass();
+    if (ClassUtils.isSubclass(containingClass,"java.util.Map") || ClassUtils.isSubclass(containingClass,"java.util.Collection")) {
+      final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
+      final PsiExpression qualifier=methodExpression.getQualifierExpression();
+      if (qualifier != null) {
+        final PsiType qualifierType=qualifier.getType();
+        if (qualifierType instanceof PsiClassType) {
+          final PsiClassType classType=(PsiClassType)qualifierType;
+          final PsiType[] parameterTypes=classType.getParameters();
+          if (parameterTypes.length > 0) {
+            final PsiType parameterType=parameterTypes[0];
+            final PsiExpression expression=expressions[index];
+            final PsiType expressionType=expression.getType();
+            if (expressionType == null || parameterType == null || !parameterType.isAssignableFrom(expressionType)) {
+              return false;
+            }
+            return checkType(parameterType,substitutor,weakestTypeClasses);
+          }
+        }
+      }
+    }
+  }
+  return checkType(type,substitutor,weakestTypeClasses);
+}

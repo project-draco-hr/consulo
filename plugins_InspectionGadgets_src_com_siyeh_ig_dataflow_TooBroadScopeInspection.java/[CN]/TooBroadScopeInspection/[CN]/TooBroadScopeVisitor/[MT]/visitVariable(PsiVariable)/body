@@ -1,0 +1,90 @@
+{
+  super.visitVariable(variable);
+  if (!(variable instanceof PsiLocalVariable)) {
+    return;
+  }
+  final PsiExpression initializer=variable.getInitializer();
+  if (!isMoveable(initializer)) {
+    return;
+  }
+  final PsiElement variableScope=PsiTreeUtil.getParentOfType(variable,PsiCodeBlock.class,PsiForStatement.class);
+  if (variableScope == null) {
+    return;
+  }
+  final Query<PsiReference> query=ReferencesSearch.search(variable,variable.getUseScope());
+  final Collection<PsiReference> referencesCollection=query.findAll();
+  final int size=referencesCollection.size();
+  if (size == 0) {
+    return;
+  }
+  final PsiElement[] referenceElements=new PsiElement[referencesCollection.size()];
+  int index=0;
+  for (  PsiReference reference : referencesCollection) {
+    final PsiElement referenceElement=reference.getElement();
+    referenceElements[index]=referenceElement;
+    index++;
+  }
+  PsiElement commonParent=ScopeUtils.getCommonParent(referenceElements);
+  if (commonParent == null) {
+    return;
+  }
+  if (initializer != null) {
+    commonParent=ScopeUtils.moveOutOfLoops(commonParent,variableScope);
+    if (commonParent == null) {
+      return;
+    }
+  }
+  if (PsiTreeUtil.isAncestor(commonParent,variableScope,true)) {
+    return;
+  }
+  if (PsiTreeUtil.isAncestor(variableScope,commonParent,true)) {
+    registerVariableError(variable,variable);
+    return;
+  }
+  if (m_onlyLookAtBlocks) {
+    return;
+  }
+  if (commonParent instanceof PsiForStatement) {
+    return;
+  }
+  final PsiElement referenceElement=referenceElements[0];
+  final PsiElement blockChild=ScopeUtils.getChildWhichContainsElement(variableScope,referenceElement);
+  if (blockChild == null) {
+    return;
+  }
+  final PsiElement insertionPoint=ScopeUtils.findTighterDeclarationLocation(blockChild,variable);
+  if (insertionPoint == null) {
+    if (!(blockChild instanceof PsiExpressionStatement)) {
+      return;
+    }
+    final PsiExpressionStatement expressionStatement=(PsiExpressionStatement)blockChild;
+    final PsiExpression expression=expressionStatement.getExpression();
+    if (!(expression instanceof PsiAssignmentExpression)) {
+      return;
+    }
+    final PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)expression;
+    final IElementType tokenType=assignmentExpression.getOperationTokenType();
+    if (tokenType != JavaTokenType.EQ) {
+      return;
+    }
+    final PsiExpression lhs=assignmentExpression.getLExpression();
+    if (!lhs.equals(referenceElement)) {
+      return;
+    }
+    final PsiExpression rhs=assignmentExpression.getRExpression();
+    if (rhs != null && VariableAccessUtils.variableIsUsed(variable,rhs)) {
+      return;
+    }
+  }
+  if (insertionPoint != null && JspPsiUtil.isInJspFile(insertionPoint)) {
+    PsiElement elementBefore=insertionPoint.getPrevSibling();
+    elementBefore=PsiTreeUtil.skipSiblingsBackward(elementBefore,PsiWhiteSpace.class);
+    if (elementBefore instanceof PsiDeclarationStatement) {
+      final PsiElement variableParent=variable.getParent();
+      if (elementBefore.equals(variableParent)) {
+        return;
+      }
+    }
+  }
+  registerVariableError(variable,variable);
+}

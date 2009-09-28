@@ -1,0 +1,68 @@
+{
+  if (location == null)   return null;
+  final ReferenceType refType=location.declaringType();
+  if (refType == null)   return null;
+  final String originalQName=refType.name().replace('/','.');
+  int dollar=originalQName.indexOf('$');
+  String qName=dollar >= 0 ? originalQName.substring(0,dollar) : originalQName;
+  String runtimeName=qName;
+  for (  ScriptPositionManagerHelper helper : ScriptPositionManagerHelper.EP_NAME.getExtensions()) {
+    if (helper.isAppropriateRuntimeName(runtimeName)) {
+      qName=helper.getOriginalScriptName(refType,runtimeName);
+      break;
+    }
+  }
+  final GlobalSearchScope searchScope=myDebugProcess.getSearchScope();
+  final PsiClass[] classes=GroovyPsiManager.getInstance(project).getNamesCache().getClassesByFQName(qName,searchScope);
+  PsiClass clazz=classes.length == 1 ? classes[0] : null;
+  if (clazz != null)   return clazz.getContainingFile();
+  DirectoryIndex directoryIndex=DirectoryIndex.getInstance(project);
+  int dotIndex=qName.lastIndexOf(".");
+  String packageName=dotIndex > 0 ? qName.substring(0,dotIndex) : "";
+  Query<VirtualFile> query=directoryIndex.getDirectoriesByPackageName(packageName,true);
+  final String fileNameWithoutExtension=dotIndex > 0 ? qName.substring(dotIndex + 1) : qName;
+  final Set<String> extensions=getAllGroovyFileExtensions();
+  final Ref<PsiFile> result=new Ref<PsiFile>();
+  query.forEach(new Processor<VirtualFile>(){
+    public boolean process(    VirtualFile vDir){
+      for (      final String extension : extensions) {
+        VirtualFile vFile=vDir.findChild(fileNameWithoutExtension + "." + extension);
+        if (vFile != null) {
+          PsiFile psiFile=PsiManager.getInstance(project).findFile(vFile);
+          if (psiFile instanceof GroovyFileBase) {
+            result.set(psiFile);
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+  }
+);
+  PsiFile res=result.get();
+  if (res != null) {
+    return res;
+  }
+  if (StringUtil.isEmpty(packageName)) {
+    final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+    for (    final String extension : extensions) {
+      for (      final PsiFile file : FilenameIndex.getFilesByName(project,runtimeName + "." + extension,GlobalSearchScope.projectScope(project))) {
+        final VirtualFile vFile=file.getVirtualFile();
+        if (file instanceof GroovyFile && vFile != null && !fileIndex.isInSource(vFile)) {
+          for (          PsiClass aClass : ((GroovyFile)file).getClasses()) {
+            if (qName.equals(aClass.getQualifiedName())) {
+              return file;
+            }
+          }
+        }
+      }
+    }
+  }
+  for (  ScriptPositionManagerHelper helper : ScriptPositionManagerHelper.EP_NAME.getExtensions()) {
+    if (helper.isAppropriateRuntimeName(runtimeName)) {
+      PsiFile file=helper.getExtraScriptIfNotFound(refType,runtimeName,project);
+      if (file != null)       return file;
+    }
+  }
+  return null;
+}

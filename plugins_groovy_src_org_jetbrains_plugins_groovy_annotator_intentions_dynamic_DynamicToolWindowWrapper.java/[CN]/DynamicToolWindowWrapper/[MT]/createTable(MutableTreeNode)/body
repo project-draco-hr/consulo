@@ -1,0 +1,135 @@
+{
+  ColumnInfo[] columnInfos={new ClassColumnInfo(myColumnNames[CLASS_OR_ELEMENT_NAME_COLUMN]),new PropertyTypeColumnInfo(myColumnNames[TYPE_COLUMN])};
+  myTreeTableModel=new ListTreeTableModelOnColumns(myTreeRoot,columnInfos);
+  myTreeTable=new MyTreeTable(myTreeTableModel);
+  final MyColoredTreeCellRenderer treeCellRenderer=new MyColoredTreeCellRenderer();
+  myTreeTable.setDefaultRenderer(String.class,new TableCellRenderer(){
+    public Component getTableCellRendererComponent(    JTable table,    Object value,    boolean isSelected,    boolean hasFocus,    int row,    int column){
+      if (value instanceof String) {
+        final GrTypeElement typeElement;
+        try {
+          typeElement=GroovyPsiElementFactory.getInstance(myProject).createTypeElement(((String)value));
+          if (typeElement != null) {
+            String shortName=typeElement.getType().getPresentableText();
+            return new JLabel(shortName);
+          }
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.debug("Type cannot be created",e);
+        }
+        return new JLabel(QuickfixUtil.shortenType((String)value));
+      }
+      return new JLabel();
+    }
+  }
+);
+  myTreeTable.setTreeCellRenderer(treeCellRenderer);
+  myTreeTable.setRootVisible(false);
+  myTreeTable.setSelectionMode(DefaultTreeSelectionModel.CONTIGUOUS_TREE_SELECTION);
+  final MyPropertyTypeCellEditor typeCellEditor=new MyPropertyTypeCellEditor();
+  typeCellEditor.addCellEditorListener(new CellEditorListener(){
+    public void editingStopped(    ChangeEvent e){
+      final TreeTableTree tree=getTree();
+      String newTypeValue=((MyPropertyTypeCellEditor)e.getSource()).getCellEditorValue();
+      if (newTypeValue == null || tree == null) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      try {
+        GrTypeElement typeElement=GroovyPsiElementFactory.getInstance(myProject).createTypeElement(newTypeValue);
+        if (typeElement != null) {
+          String canonical=typeElement.getType().getCanonicalText();
+          if (canonical != null)           newTypeValue=canonical;
+        }
+      }
+ catch (      IncorrectOperationException ex) {
+      }
+      final TreePath editingTypePath=tree.getSelectionPath();
+      if (editingTypePath == null)       return;
+      final TreePath editingClassPath=editingTypePath.getParentPath();
+      Object oldTypeValue=myTreeTable.getValueAt(tree.getRowForPath(editingTypePath),TYPE_COLUMN);
+      if (!(oldTypeValue instanceof String)) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      final Object editingPropertyObject=myTreeTable.getValueAt(tree.getRowForPath(editingTypePath),CLASS_OR_ELEMENT_NAME_COLUMN);
+      final Object editingClassObject=myTreeTable.getValueAt(tree.getRowForPath(editingClassPath),CLASS_OR_ELEMENT_NAME_COLUMN);
+      if (!(editingPropertyObject instanceof DItemElement) || !(editingClassObject instanceof DClassElement)) {
+        myTreeTable.editingStopped(e);
+        return;
+      }
+      final DItemElement dynamicElement=(DItemElement)editingPropertyObject;
+      final String name=dynamicElement.getName();
+      final String className=((DClassElement)editingClassObject).getName();
+      if (dynamicElement instanceof DPropertyElement) {
+        DynamicManager.getInstance(myProject).replaceDynamicPropertyType(className,name,(String)oldTypeValue,newTypeValue);
+      }
+ else       if (dynamicElement instanceof DMethodElement) {
+        final List<MyPair> myPairList=((DMethodElement)dynamicElement).getPairs();
+        DynamicManager.getInstance(myProject).replaceDynamicMethodType(className,name,myPairList,(String)oldTypeValue,newTypeValue);
+      }
+    }
+    public void editingCanceled(    ChangeEvent e){
+      System.out.println("editing canceled");
+      myTreeTable.editingCanceled(e);
+    }
+  }
+);
+  RefactoringListenerManager.getInstance(myProject).addListenerProvider(new RefactoringElementListenerProvider(){
+    @Nullable public RefactoringElementListener getListener(    final PsiElement element){
+      if (element instanceof PsiClass) {
+        final String qualifiedName=((PsiClass)element).getQualifiedName();
+        return new RefactoringElementListener(){
+          public void elementMoved(          PsiElement newElement){
+            renameElement(qualifiedName,newElement);
+          }
+          public void elementRenamed(          PsiElement newElement){
+            renameElement(qualifiedName,newElement);
+          }
+          private void renameElement(          String oldClassName,          PsiElement newElement){
+            if (newElement instanceof PsiClass) {
+              final String newClassName=((PsiClass)newElement).getQualifiedName();
+              final DRootElement rootElement=DynamicManager.getInstance(myProject).getRootElement();
+              final DClassElement oldClassElement=rootElement.getClassElement(oldClassName);
+              final TreeNode oldClassNode=TreeUtil.findNodeWithObject((DefaultMutableTreeNode)myTreeRoot,oldClassElement);
+              DynamicManager.getInstance(myProject).replaceClassName(oldClassElement,newClassName);
+              myTreeTableModel.nodeChanged(oldClassNode);
+            }
+          }
+        }
+;
+      }
+      return null;
+    }
+  }
+);
+  myTreeTable.setDefaultEditor(String.class,typeCellEditor);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      deleteRow();
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_DELETE,0),JComponent.WHEN_FOCUSED);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      final int selectionRow=myTreeTable.getTree().getLeadSelectionRow();
+      myTreeTable.editCellAt(selectionRow,CLASS_OR_ELEMENT_NAME_COLUMN,event);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_F2,0),JComponent.WHEN_FOCUSED);
+  myTreeTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent event){
+      final int selectionRow=myTreeTable.getTree().getLeadSelectionRow();
+      myTreeTable.editCellAt(selectionRow,TYPE_COLUMN,event);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_F2,KeyEvent.CTRL_MASK),JComponent.WHEN_FOCUSED);
+  myTreeTable.getTree().setShowsRootHandles(true);
+  myTreeTable.getTableHeader().setReorderingAllowed(false);
+  myTreeTable.setPreferredScrollableViewportSize(new Dimension(300,myTreeTable.getRowHeight() * 10));
+  myTreeTable.getColumn(myColumnNames[CLASS_OR_ELEMENT_NAME_COLUMN]).setPreferredWidth(200);
+  myTreeTable.getColumn(myColumnNames[TYPE_COLUMN]).setPreferredWidth(160);
+  JScrollPane scrollpane=ScrollPaneFactory.createScrollPane(myTreeTable);
+  scrollpane.setPreferredSize(new Dimension(600,400));
+  return scrollpane;
+}

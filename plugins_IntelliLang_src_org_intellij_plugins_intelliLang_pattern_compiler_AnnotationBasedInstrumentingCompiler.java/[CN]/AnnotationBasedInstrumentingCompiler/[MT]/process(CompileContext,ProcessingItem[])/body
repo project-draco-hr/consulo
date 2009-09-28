@@ -1,0 +1,48 @@
+{
+  final ProgressIndicator progressIndicator=context.getProgressIndicator();
+  progressIndicator.setText(getProgressMessage());
+  final Project project=context.getProject();
+  final ArrayList<ProcessingItem> result=new ArrayList<ProcessingItem>(items.length);
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      int filesProcessed=0;
+      for (      ProcessingItem pi : items) {
+        final InstrumentationItem item=((InstrumentationItem)pi);
+        final VirtualFile classFile=item.getClassFile();
+        try {
+          final byte[] bytes=classFile.contentsToByteArray();
+          final ClassReader classreader;
+          try {
+            classreader=new ClassReader(bytes,0,bytes.length);
+          }
+ catch (          Exception e) {
+            LOG.debug("ASM failed to read class file <" + classFile.getPresentableUrl() + ">",e);
+            continue;
+          }
+          final ClassWriter classwriter=new PsiClassWriter(project,item.isJDK6());
+          final Instrumenter instrumenter=createInstrumenter(classwriter);
+          classreader.accept(instrumenter,0);
+          if (instrumenter.instrumented()) {
+            final FileOutputStream out=new FileOutputStream(classFile.getPath());
+            try {
+              out.write(classwriter.toByteArray());
+            }
+  finally {
+              out.close();
+            }
+          }
+          result.add(item);
+          progressIndicator.setFraction(++filesProcessed / (double)items.length);
+        }
+ catch (        InstrumentationException e) {
+          context.addMessage(CompilerMessageCategory.ERROR,"[" + getDescription() + "]: "+ e.getLocalizedMessage(),null,-1,-1);
+        }
+catch (        IOException e) {
+          context.addMessage(CompilerMessageCategory.ERROR,"[" + getDescription() + "]: "+ e.getLocalizedMessage(),null,-1,-1);
+        }
+      }
+    }
+  }
+);
+  return result.toArray(new ProcessingItem[result.size()]);
+}

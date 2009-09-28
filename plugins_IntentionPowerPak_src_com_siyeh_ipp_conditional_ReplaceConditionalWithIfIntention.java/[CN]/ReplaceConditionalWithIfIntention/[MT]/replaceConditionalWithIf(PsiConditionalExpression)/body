@@ -1,0 +1,73 @@
+{
+  final PsiStatement statement=PsiTreeUtil.getParentOfType(expression,PsiStatement.class);
+  if (statement == null) {
+    return;
+  }
+  final PsiVariable variable;
+  if (statement instanceof PsiDeclarationStatement) {
+    variable=PsiTreeUtil.getParentOfType(expression,PsiVariable.class);
+  }
+ else {
+    variable=null;
+  }
+  final PsiExpression thenExpression=expression.getThenExpression();
+  final PsiExpression elseExpression=expression.getElseExpression();
+  final PsiExpression condition=expression.getCondition();
+  final PsiExpression strippedCondition=ParenthesesUtils.stripParentheses(condition);
+  final StringBuilder newStatement=new StringBuilder();
+  newStatement.append("if(");
+  if (strippedCondition != null) {
+    newStatement.append(strippedCondition.getText());
+  }
+  newStatement.append(')');
+  if (variable != null) {
+    final String name=variable.getName();
+    newStatement.append(name);
+    newStatement.append('=');
+    final PsiExpression initializer=variable.getInitializer();
+    if (initializer == null) {
+      return;
+    }
+    appendElementTextWithoutParentheses(initializer,expression,thenExpression,newStatement);
+    newStatement.append("; else ");
+    newStatement.append(name);
+    newStatement.append('=');
+    appendElementTextWithoutParentheses(initializer,expression,elseExpression,newStatement);
+    newStatement.append(';');
+    initializer.delete();
+    final PsiManager manager=statement.getManager();
+    final Project project=manager.getProject();
+    final JavaPsiFacade facade=JavaPsiFacade.getInstance(project);
+    final PsiElementFactory factory=facade.getElementFactory();
+    final PsiStatement ifStatement=factory.createStatementFromText(newStatement.toString(),statement);
+    final PsiElement parent=statement.getParent();
+    final PsiElement addedElement=parent.addAfter(ifStatement,statement);
+    final CodeStyleManager styleManager=manager.getCodeStyleManager();
+    styleManager.reformat(addedElement);
+  }
+ else {
+    final PsiElement expressionParent=expression.getParent();
+    final boolean addBraces=expressionParent instanceof PsiIfStatement;
+    if (addBraces || thenExpression == null) {
+      newStatement.append('{');
+    }
+    appendElementTextWithoutParentheses(statement,expression,thenExpression,newStatement);
+    if (addBraces) {
+      newStatement.append("} else {");
+    }
+ else {
+      if (thenExpression == null) {
+        newStatement.append('}');
+      }
+      newStatement.append(" else ");
+      if (elseExpression == null) {
+        newStatement.append('{');
+      }
+    }
+    appendElementTextWithoutParentheses(statement,expression,elseExpression,newStatement);
+    if (addBraces || elseExpression == null) {
+      newStatement.append('}');
+    }
+    replaceStatement(newStatement.toString(),statement);
+  }
+}

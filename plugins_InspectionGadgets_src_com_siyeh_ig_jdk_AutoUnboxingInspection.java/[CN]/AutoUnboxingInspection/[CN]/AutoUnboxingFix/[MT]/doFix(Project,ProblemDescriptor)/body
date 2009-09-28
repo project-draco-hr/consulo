@@ -1,0 +1,93 @@
+{
+  final PsiExpression expression=(PsiExpression)descriptor.getPsiElement();
+  final PsiType type=expression.getType();
+  if (type == null) {
+    return;
+  }
+  final PsiPrimitiveType unboxedType=PsiPrimitiveType.getUnboxedType(type);
+  if (unboxedType == null) {
+    return;
+  }
+  final String unboxedTypeText=unboxedType.getCanonicalText();
+  final String expressionText=expression.getText();
+  final String boxClassName=s_unboxingMethods.get(unboxedTypeText);
+  final String newExpressionText;
+  if (expression instanceof PsiTypeCastExpression) {
+    newExpressionText='(' + expressionText + ")."+ boxClassName+ "()";
+  }
+ else {
+    final String constantText=computeConstantBooleanText(expression);
+    if (constantText != null) {
+      newExpressionText=constantText;
+    }
+ else {
+      newExpressionText=expressionText + '.' + boxClassName+ "()";
+    }
+  }
+  final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(project);
+  final PsiElementFactory factory=psiFacade.getElementFactory();
+  final PsiElement parent=expression.getParent();
+  if (parent instanceof PsiPrefixExpression && !unboxedType.equalsToText("boolean")) {
+    final PsiPrefixExpression prefixExpression=(PsiPrefixExpression)parent;
+    final PsiJavaToken operationSign=prefixExpression.getOperationSign();
+    final IElementType tokenType=operationSign.getTokenType();
+    if (JavaTokenType.PLUSPLUS.equals(tokenType)) {
+      replaceExpression(prefixExpression,expressionText + '=' + newExpressionText+ "+1");
+    }
+ else {
+      replaceExpression(prefixExpression,expressionText + '=' + newExpressionText+ "-1");
+    }
+  }
+ else   if (parent instanceof PsiPostfixExpression) {
+    final PsiPostfixExpression postfixExpression=(PsiPostfixExpression)parent;
+    final PsiJavaToken operationSign=postfixExpression.getOperationSign();
+    final IElementType tokenType=operationSign.getTokenType();
+    final PsiElement grandParent=postfixExpression.getParent();
+    if (grandParent instanceof PsiExpressionStatement) {
+      if (JavaTokenType.PLUSPLUS.equals(tokenType)) {
+        replaceExpression(postfixExpression,expressionText + '=' + newExpressionText+ "+1");
+      }
+ else {
+        replaceExpression(postfixExpression,expressionText + '=' + newExpressionText+ "-1");
+      }
+    }
+ else {
+      final PsiElement element=postfixExpression.replace(postfixExpression.getOperand());
+      final PsiStatement statement=PsiTreeUtil.getParentOfType(element,PsiStatement.class);
+      if (statement == null) {
+        return;
+      }
+      final PsiStatement newStatement;
+      if (JavaTokenType.PLUSPLUS.equals(tokenType)) {
+        newStatement=factory.createStatementFromText(expressionText + '=' + newExpressionText+ "+1;",statement);
+      }
+ else {
+        newStatement=factory.createStatementFromText(expressionText + '=' + newExpressionText+ "-1;",statement);
+      }
+      final PsiElement greatGrandParent=statement.getParent();
+      greatGrandParent.addAfter(newStatement,statement);
+    }
+  }
+ else   if (parent instanceof PsiAssignmentExpression) {
+    final PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)parent;
+    final PsiExpression lExpression=assignmentExpression.getLExpression();
+    if (expression.equals(lExpression)) {
+      final PsiJavaToken operationSign=assignmentExpression.getOperationSign();
+      final String operationSignText=operationSign.getText();
+      final char sign=operationSignText.charAt(0);
+      final PsiExpression rExpression=assignmentExpression.getRExpression();
+      if (rExpression == null) {
+        return;
+      }
+      final String text=lExpression.getText() + '=' + newExpressionText+ sign+ rExpression.getText();
+      final PsiExpression newExpression=factory.createExpressionFromText(text,assignmentExpression);
+      assignmentExpression.replace(newExpression);
+    }
+ else {
+      replaceExpression(expression,newExpressionText);
+    }
+  }
+ else {
+    replaceExpression(expression,newExpressionText);
+  }
+}

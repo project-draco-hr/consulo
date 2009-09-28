@@ -1,0 +1,95 @@
+{
+  final XSLTMain main=loadMain();
+  TransformerFactory transformerFactory;
+  try {
+    transformerFactory=main.createTransformerFactory();
+  }
+ catch (  AbstractMethodError e) {
+    transformerFactory=createTransformerFactoryStatic();
+  }
+catch (  ClassNotFoundException e) {
+    transformerFactory=createTransformerFactoryStatic();
+  }
+  final String uriResolverClass=System.getProperty("xslt.uri-resolver");
+  if (uriResolverClass != null) {
+    transformerFactory.setURIResolver((URIResolver)Class.forName(uriResolverClass).newInstance());
+  }
+  final boolean[] trouble=new boolean[]{false};
+  final MyErrorListener listener=new MyErrorListener(trouble);
+  final boolean isSmartErrorHandling=System.getProperty("xslt.smart-error-handling","false").equals("true");
+  if (isSmartErrorHandling) {
+    transformerFactory.setErrorListener(listener);
+  }
+  final File xslt=new File(System.getProperty("xslt.file"));
+  try {
+    final Transformer transformer=transformerFactory.newTransformer(new StreamSource(xslt));
+    if (transformer != null && !trouble[0]) {
+      final Enumeration props=System.getProperties().keys();
+      while (props.hasMoreElements()) {
+        String s=(String)props.nextElement();
+        if (s.startsWith("xslt.param.")) {
+          final String name=s.substring("xslt.param.".length());
+          final String value=System.getProperty(s);
+          transformer.setParameter(name,value);
+        }
+      }
+      final File input=new File(System.getProperty("xslt.input"));
+      final String out=System.getProperty("xslt.output");
+      final StreamResult result;
+      final Integer _port=Integer.getInteger("xslt.listen-port",-1);
+      final int port=_port.intValue();
+      if (port != -1) {
+        try {
+          final ServerSocket serverSocket=new ServerSocket(port,1,InetAddress.getByName("127.0.0.1"));
+          serverSocket.setSoTimeout(5000);
+          final Socket socket=serverSocket.accept();
+          result=new StreamResult(new OutputStreamWriter(new BufferedOutputStream(socket.getOutputStream(),16),"UTF-8"));
+          Runtime.getRuntime().addShutdownHook(new Thread(){
+            public void run(){
+              try {
+                result.getWriter().flush();
+                result.getWriter().close();
+              }
+ catch (              IOException e) {
+              }
+            }
+          }
+);
+        }
+ catch (        SocketTimeoutException e) {
+          System.err.println("Plugin did not connect to runner within timeout. Run aborted.");
+          return;
+        }
+      }
+ else {
+        if (out != null) {
+          final File output=new File(out);
+          result=new StreamResult(output);
+        }
+ else {
+          final String encoding=System.getProperty("file.encoding");
+          if (encoding != null) {
+            transformer.setOutputProperty("encoding",encoding);
+            result=new StreamResult(new OutputStreamWriter(System.out,encoding));
+          }
+ else {
+            result=new StreamResult(System.out);
+          }
+        }
+      }
+      main.start(transformer,new StreamSource(input),result);
+    }
+  }
+ catch (  TransformerException e) {
+    if (isSmartErrorHandling) {
+      listener.error(e);
+    }
+ else {
+      throw e;
+    }
+  }
+catch (  Throwable t) {
+    t.printStackTrace();
+    System.exit(1);
+  }
+}

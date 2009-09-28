@@ -1,0 +1,44 @@
+{
+  super(PluginBuildProperties.getBuildJarTargetName(chunk.getName()),null,DevKitBundle.message("ant.build.jar.description",chunk.getName()),null);
+  final File moduleBaseDir=chunk.getBaseDir();
+  final Module[] modules=chunk.getModules();
+  final Module module=modules[0];
+  final String moduleName=module.getName();
+  final HashSet<Library> libs=new HashSet<Library>();
+  for (  Module module1 : modules) {
+    PluginBuildUtil.getLibraries(module1,libs);
+  }
+  final String jarPathPropertyRef=BuildProperties.propertyRef(PluginBuildProperties.getJarPathProperty(moduleName));
+  if (libs.isEmpty()) {
+    add(createPluginsJar(jarPathPropertyRef,modules,moduleBaseDir,genOptions,moduleBuildProperties));
+  }
+ else {
+    @NonNls final String tempSuffix="temp";
+    final File jarDir=new File(moduleBaseDir.getParentFile(),tempSuffix);
+    String tempDir=GenerationUtils.toRelativePath(jarDir.getPath(),chunk,genOptions);
+    final String tempDirProperty=BuildProperties.getTempDirForModuleProperty(moduleName);
+    add(new Property(tempDirProperty,tempDir));
+    add(new Mkdir(BuildProperties.propertyRef(tempDirProperty)));
+    add(new Mkdir(BuildProperties.propertyRef(tempDirProperty) + "/lib"));
+    final @NonNls String libRelativePath=BuildProperties.propertyRef(tempDirProperty) + "/lib/";
+    add(createPluginsJar(libRelativePath + chunk.getName() + ".jar",modules,moduleBaseDir,genOptions,moduleBuildProperties));
+    for (    Library lib : libs) {
+      final VirtualFile[] files=lib.getFiles(OrderRootType.CLASSES);
+      for (      VirtualFile file : files) {
+        final String relativePath=GenerationUtils.toRelativePath(file,chunk,genOptions);
+        if (file.getFileSystem() instanceof JarFileSystem) {
+          add(new Copy(relativePath,libRelativePath + file.getName()));
+        }
+ else {
+          final Jar jar=new Jar(libRelativePath + file.getNameWithoutExtension() + ".jar","preserve");
+          jar.add(new ZipFileSet(relativePath,"",true));
+          add(jar);
+        }
+      }
+    }
+    final Tag zipTag=new Zip(jarPathPropertyRef);
+    zipTag.add(new FileSet(tempDir));
+    add(zipTag);
+    add(new Delete(BuildProperties.propertyRef(tempDirProperty)));
+  }
+}

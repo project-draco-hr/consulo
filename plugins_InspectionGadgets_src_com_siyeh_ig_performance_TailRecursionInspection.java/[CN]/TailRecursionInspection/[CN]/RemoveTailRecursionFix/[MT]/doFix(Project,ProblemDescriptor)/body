@@ -1,0 +1,53 @@
+{
+  final PsiElement tailCallToken=descriptor.getPsiElement();
+  final PsiMethod method=PsiTreeUtil.getParentOfType(tailCallToken,PsiMethod.class);
+  if (method == null) {
+    return;
+  }
+  final PsiCodeBlock body=method.getBody();
+  if (body == null) {
+    return;
+  }
+  final StringBuilder builder=new StringBuilder();
+  builder.append('{');
+  final PsiClass containingClass=method.getContainingClass();
+  final String thisVariableName;
+  final JavaCodeStyleManager styleManager=JavaCodeStyleManager.getInstance(project);
+  if (methodReturnsContainingClassType(method,containingClass)) {
+    builder.append(containingClass.getName());
+    thisVariableName=styleManager.suggestUniqueVariableName("result",method,false);
+    builder.append(' ');
+    builder.append(thisVariableName);
+    builder.append(" = this;");
+  }
+ else   if (methodContainsCallOnOtherInstance(method)) {
+    builder.append(containingClass.getName());
+    thisVariableName=styleManager.suggestUniqueVariableName("other",method,false);
+    builder.append(' ');
+    builder.append(thisVariableName);
+    builder.append(" = this;");
+  }
+ else {
+    thisVariableName=null;
+  }
+  final boolean tailCallIsContainedInLoop;
+  if (ControlFlowUtils.isInLoop(tailCallToken)) {
+    tailCallIsContainedInLoop=true;
+    builder.append(method.getName());
+    builder.append(':');
+  }
+ else {
+    tailCallIsContainedInLoop=false;
+  }
+  builder.append("while(true)");
+  final PsiManager psiManager=PsiManager.getInstance(project);
+  final CodeStyleManager codeStyleManager=psiManager.getCodeStyleManager();
+  replaceTailCalls(body,method,thisVariableName,tailCallIsContainedInLoop,builder);
+  builder.append('}');
+  @NonNls final String replacementText=builder.toString();
+  final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(project);
+  final PsiElementFactory elementFactory=psiFacade.getElementFactory();
+  final PsiCodeBlock block=elementFactory.createCodeBlockFromText(replacementText,method);
+  body.replace(block);
+  codeStyleManager.reformat(method);
+}

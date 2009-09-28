@@ -1,0 +1,54 @@
+{
+  final VcsKey vcsKey=GitVcs.getKey();
+  try {
+    String root=myRoot.getPath();
+    GitSimpleHandler h=new GitSimpleHandler(myProject,myRoot,GitHandler.LS_FILES);
+    h.setNoSSH(true);
+    h.setSilent(true);
+    h.addParameters("--unmerged");
+    for (StringScanner s=new StringScanner(h.run()); s.hasMoreData(); ) {
+      if (s.isEol()) {
+        s.nextLine();
+        continue;
+      }
+      s.boundedToken('\t');
+      final String relative=s.line();
+      if (!myUnmergedPaths.add(relative)) {
+        continue;
+      }
+      String path=root + "/" + GitUtil.unescapePath(relative);
+      myUpdates.getGroupById(FileGroup.MERGED_WITH_CONFLICT_ID).add(path,vcsKey,null);
+    }
+    GitRevisionNumber currentHead=GitRevisionNumber.resolve(myProject,myRoot,"HEAD");
+    TreeSet<String> updated=new TreeSet<String>();
+    TreeSet<String> created=new TreeSet<String>();
+    TreeSet<String> removed=new TreeSet<String>();
+    if (currentHead.equals(myStart)) {
+      File mergeHeadsFile=new File(root,".git/MERGE_HEAD");
+      try {
+        if (mergeHeadsFile.exists()) {
+          String mergeHeads=new String(FileUtil.loadFileText(mergeHeadsFile,GitConfigUtil.UTF8_ENCODING));
+          for (StringScanner s=new StringScanner(mergeHeads); s.hasMoreData(); ) {
+            String head=s.line();
+            if (head.length() == 0) {
+              continue;
+            }
+            processDiff(root,updated,created,removed,myStart.getRev() + "..." + head);
+          }
+        }
+      }
+ catch (      IOException e) {
+        exceptions.add(new VcsException("Unable to read the file " + mergeHeadsFile + ": "+ e.getMessage(),e));
+      }
+    }
+ else {
+      processDiff(root,updated,created,removed,myStart.getRev() + "..HEAD");
+    }
+    addAll(FileGroup.UPDATED_ID,updated);
+    addAll(FileGroup.CREATED_ID,created);
+    addAll(FileGroup.REMOVED_FROM_REPOSITORY_ID,removed);
+  }
+ catch (  VcsException e) {
+    exceptions.add(e);
+  }
+}

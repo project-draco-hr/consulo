@@ -1,0 +1,168 @@
+{
+  final Collection<String> unknownLibraries=new TreeSet<String>();
+  final Collection<String> unknownJdks=new TreeSet<String>();
+  final Set<String> refsToModules=new HashSet<String>();
+  final List<Module> result=new ArrayList<Module>();
+  try {
+    final ModifiableModuleModel moduleModel=model != null ? model : ModuleManager.getInstance(project).getModifiableModel();
+    final ModifiableRootModel[] rootModels=new ModifiableRootModel[getParameters().projectsToConvert.size()];
+    final Set<File> files=new HashSet<File>();
+    for (    String path : getParameters().projectsToConvert) {
+      String modulesDirectory=getParameters().converterOptions.commonModulesDirectory;
+      if (modulesDirectory == null) {
+        modulesDirectory=path;
+      }
+      final String moduleName=EclipseProjectFinder.findProjectName(path);
+      final File imlFile=new File(modulesDirectory + File.separator + moduleName+ IdeaXml.IML_EXT);
+      if (imlFile.isFile()) {
+        files.add(imlFile);
+      }
+      final File emlFile=new File(modulesDirectory + File.separator + moduleName+ EclipseXml.IDEA_SETTINGS_POSTFIX);
+      if (emlFile.isFile()) {
+        files.add(emlFile);
+      }
+    }
+    if (!files.isEmpty()) {
+      final int resultCode=Messages.showYesNoCancelDialog(ApplicationInfoEx.getInstanceEx().getFullApplicationName() + " module files found:\n" + StringUtil.join(files,new Function<File,String>(){
+        public String fun(        File file){
+          return file.getPath();
+        }
+      }
+,"\n")+ ".\n Would you like to reuse them?","Module files found",Messages.getQuestionIcon());
+      if (resultCode != DialogWrapper.OK_EXIT_CODE) {
+        if (resultCode == DialogWrapper.CANCEL_EXIT_CODE) {
+          final LocalFileSystem localFileSystem=LocalFileSystem.getInstance();
+          for (          File file : files) {
+            final VirtualFile virtualFile=localFileSystem.findFileByIoFile(file);
+            if (virtualFile != null) {
+              final IOException[] ex=new IOException[1];
+              ApplicationManager.getApplication().runWriteAction(new Runnable(){
+                public void run(){
+                  try {
+                    virtualFile.delete(this);
+                  }
+ catch (                  IOException e) {
+                    ex[0]=e;
+                  }
+                }
+              }
+);
+              if (ex[0] != null) {
+                throw ex[0];
+              }
+            }
+ else {
+              FileUtil.delete(file);
+            }
+          }
+        }
+ else {
+          return result;
+        }
+      }
+    }
+    int idx=0;
+    final Set<String> usedVariables=new HashSet<String>();
+    for (    String path : getParameters().projectsToConvert) {
+      String modulesDirectory=getParameters().converterOptions.commonModulesDirectory;
+      if (modulesDirectory == null) {
+        modulesDirectory=path;
+      }
+      final Module module=moduleModel.newModule(modulesDirectory + "/" + EclipseProjectFinder.findProjectName(path)+ IdeaXml.IML_EXT,StdModuleTypes.JAVA);
+      result.add(module);
+      final ModifiableRootModel rootModel=ModuleRootManager.getInstance(module).getModifiableModel();
+      rootModels[idx++]=rootModel;
+      final File classpathFile=new File(path,EclipseXml.DOT_CLASSPATH_EXT);
+      final EclipseClasspathReader classpathReader=new EclipseClasspathReader(path,project,getParameters().projectsToConvert);
+      classpathReader.init(rootModel);
+      if (classpathFile.exists()) {
+        final Element classpathElement=JDOMUtil.loadDocument(classpathFile).getRootElement();
+        classpathReader.readClasspath(rootModel,unknownLibraries,unknownJdks,usedVariables,refsToModules,getParameters().converterOptions.testPattern,classpathElement);
+      }
+      ClasspathStorage.setStorageType(rootModel,getParameters().linkConverted ? EclipseClasspathStorageProvider.ID : ClasspathStorage.DEFAULT_STORAGE);
+      if (model != null) {
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            rootModel.commit();
+          }
+        }
+);
+      }
+    }
+    if (model == null) {
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          ProjectRootManagerEx.getInstanceEx(project).multiCommit(moduleModel,rootModels);
+        }
+      }
+);
+    }
+  }
+ catch (  Exception e) {
+    LOG.error(e);
+  }
+  createEclipseLibrary(project,unknownLibraries,IdeaXml.ECLIPSE_LIBRARY);
+  StringBuffer message=new StringBuffer();
+  refsToModules.removeAll(getParameters().existingModuleNames);
+  for (  String path : getParameters().projectsToConvert) {
+    final String projectName=EclipseClasspathReader.getLastPathComponent(FileUtil.toSystemIndependentName(path));
+    if (projectName != null) {
+      refsToModules.remove(projectName);
+      getParameters().existingModuleNames.add(projectName);
+    }
+  }
+  if (!refsToModules.isEmpty()) {
+    message.append("Unknown modules detected");
+    for (    String module : refsToModules) {
+      message.append("\n").append(module);
+    }
+  }
+  if (!unknownJdks.isEmpty()) {
+    if (message.length() > 0) {
+      message.append("\nand jdks");
+    }
+ else {
+      message.append("Imported project refers to unknown jdks");
+    }
+    for (    String unknownJdk : unknownJdks) {
+      message.append("\n").append(unknownJdk);
+    }
+  }
+  if (!unknownLibraries.isEmpty()) {
+    if (message.length() > 0)     message.append("\n");
+    message.append(EclipseBundle.message("eclipse.import.warning.undefinded.libraries"));
+    for (    String name : unknownLibraries) {
+      message.append("\n").append(name);
+    }
+    if (model == null) {
+      message.append("\nPlease export Eclipse user libraries and import them now from");
+      final String pathToUserLibraries=Messages.showInputDialog(project,message.toString(),getTitle(),Messages.getErrorIcon(),project.getBaseDir().getPath() + "/" + project.getName()+ ".userlibraries",new InputValidator(){
+        public boolean checkInput(        String inputString){
+          return new File(inputString).exists();
+        }
+        public boolean canClose(        String inputString){
+          return checkInput(inputString);
+        }
+      }
+);
+      if (pathToUserLibraries != null) {
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            try {
+              EclipseUserLibrariesHelper.readProjectLibrariesContent(new File(pathToUserLibraries),project,unknownLibraries);
+            }
+ catch (            Exception e) {
+              LOG.error(e);
+            }
+          }
+        }
+);
+      }
+      return result;
+    }
+  }
+  if (message.length() > 0) {
+    Messages.showErrorDialog(project,message.toString(),getTitle());
+  }
+  return result;
+}

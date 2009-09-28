@@ -1,0 +1,36 @@
+{
+  final Map<MavenProject,MavenProjectChanges> projectsToImportWithChanges;
+  final boolean importModuleGroupsRequired;
+synchronized (myImportingDataLock) {
+    projectsToImportWithChanges=new THashMap<MavenProject,MavenProjectChanges>(myProjectsToImport);
+    myProjectsToImport.clear();
+    importModuleGroupsRequired=myImportModuleGroupsRequired;
+  }
+  fireScheduledImportsChanged();
+  long before=System.currentTimeMillis();
+  final Ref<MavenProjectImporter> importer=new Ref<MavenProjectImporter>();
+  final Ref<List<MavenProjectsProcessorTask>> postTasks=new Ref<List<MavenProjectsProcessorTask>>();
+  final Runnable r=new Runnable(){
+    public void run(){
+      importer.set(new MavenProjectImporter(myProject,myProjectsTree,getFileToModuleMapping(modelsProvider),projectsToImportWithChanges,importModuleGroupsRequired,modelsProvider,getImportingSettings()));
+      postTasks.set(importer.get().importProject());
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isDispatchThread()) {
+    r.run();
+  }
+ else {
+    MavenUtil.runInBackground(myProject,ProjectBundle.message("maven.project.importing"),false,new MavenTask(){
+      public void run(      MavenProgressIndicator indicator) throws MavenProcessCanceledException {
+        r.run();
+      }
+    }
+).waitFor();
+  }
+  long importTime=System.currentTimeMillis() - before;
+  VirtualFileManager.getInstance().refresh(isNormalProject());
+  schedulePostImportTasts(postTasks.get());
+  myImportingQueue.restartTimer();
+  return importer.get().getCreatedModules();
+}

@@ -1,0 +1,99 @@
+{
+  boolean isLParen=builder.getTokenType() == mLPAREN;
+  boolean isStringName=builder.getTokenType() == mSTRING_LITERAL || builder.getTokenType() == mGSTRING_LITERAL;
+  if (builder.getTokenType() != mIDENT && !isStringName && !isLParen) {
+    builder.error(GroovyBundle.message("indentifier.or.string.or.left.parenth.literal.expected"));
+    return WRONGWAY;
+  }
+  if (isLParen && !canBeTuple) {
+    builder.error(GroovyBundle.message("indentifier.or.string.or.left.parenth.literal.expected"));
+    return WRONGWAY;
+  }
+  if (isLParen && mustBeMethod) {
+    return WRONGWAY;
+  }
+  if (isAnnotationMember && isStringName) {
+    builder.error(GroovyBundle.message("string.name.unexpected"));
+  }
+  if (!isLParen) {
+    PsiBuilder.Marker varMarker=builder.mark();
+    builder.advanceLexer();
+    if (mLPAREN != builder.getTokenType()) {
+      if (mustBeMethod) {
+        varMarker.drop();
+        return WRONGWAY;
+      }
+      varMarker.rollbackTo();
+    }
+ else {
+      varMarker.drop();
+      if (!hasModifiers) {
+        builder.error(GroovyBundle.message("method.definition.without.modifier"));
+        return WRONGWAY;
+      }
+      builder.advanceLexer();
+      ParameterList.parse(builder,mRPAREN,parser);
+      if (isEnumConstantMember && !isStringName) {
+        builder.error(GroovyBundle.message("string.name.unexpected"));
+      }
+      ParserUtils.getToken(builder,mNLS);
+      if (!ParserUtils.getToken(builder,mRPAREN)) {
+        builder.error(GroovyBundle.message("rparen.expected"));
+        ThrowClause.parse(builder);
+        return METHOD_DEFINITION;
+      }
+      if (builder.getTokenType() == kDEFAULT) {
+        PsiBuilder.Marker defaultValueMarker=builder.mark();
+        ParserUtils.getToken(builder,kDEFAULT);
+        ParserUtils.getToken(builder,mNLS);
+        if (!AnnotationArguments.parseAnnotationMemberValueInitializer(builder,parser)) {
+          builder.error(GroovyBundle.message("annotation.initializer.expected"));
+        }
+        defaultValueMarker.done(DEFAULT_ANNOTATION_VALUE);
+        return ANNOTATION_METHOD;
+      }
+      if (ParserUtils.lookAhead(builder,mNLS,kTHROWS) || ParserUtils.lookAhead(builder,mNLS,mLCURLY)) {
+        ParserUtils.getToken(builder,mNLS);
+      }
+      ThrowClause.parse(builder);
+      if (builder.getTokenType() == mLCURLY || ParserUtils.lookAhead(builder,mNLS,mLCURLY)) {
+        ParserUtils.getToken(builder,mNLS);
+        OpenOrClosableBlock.parseOpenBlock(builder,parser);
+      }
+      return METHOD_DEFINITION;
+    }
+  }
+  PsiBuilder.Marker varAssMarker=builder.mark();
+  final IElementType declarator=parseDeclarator(builder,isLParen,hasModifiers);
+  if (declarator != WRONGWAY) {
+    final boolean wasAssingment=parseAssignment(builder,parser);
+    if (declarator == TUPLE_DECLARATION || declarator == TUPLE_ERROR) {
+      varAssMarker.drop();
+      if (!wasAssingment && !hasModifiers) {
+        builder.error(GroovyBundle.message("assignment.expected"));
+        return WRONGWAY;
+      }
+    }
+ else     if (isInClass) {
+      varAssMarker.done(FIELD);
+    }
+ else {
+      varAssMarker.done(VARIABLE);
+    }
+    while (ParserUtils.getToken(builder,mCOMMA)) {
+      ParserUtils.getToken(builder,mNLS);
+      if (WRONGWAY.equals(parseVariableOrField(builder,isInClass,parser)) && declarator == mIDENT) {
+        return VARIABLE_DEFINITION_ERROR;
+      }
+    }
+    if (isInClass && declarator == TUPLE_DECLARATION) {
+      builder.error(GroovyBundle.message("tuple.cant.be.placed.in.class"));
+    }
+    return declarator == TUPLE_DECLARATION ? MULTIPLE_VARIABLE_DEFINITION : VARIABLE_DEFINITION;
+  }
+ else {
+    varAssMarker.drop();
+    builder.error(GroovyBundle.message("identifier.expected"));
+    return WRONGWAY;
+  }
+}

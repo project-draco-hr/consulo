@@ -1,0 +1,67 @@
+{
+  super(project,true);
+  myProject=project;
+  setTitle(SvnBundle.message("dialog.show.svn.map.title"));
+  init();
+  final SvnVcs vcs=SvnVcs.getInstance(myProject);
+  final List<WCInfo> infoList=vcs.getAllWcInfos();
+  myTableModel.setItems(infoList);
+  final boolean promptForCorrection=vcs.getSvnFileUrlMapping().rootsDiffer();
+  if (promptForCorrection) {
+    myWarningLabel.setText(SvnBundle.message("action.working.copies.map.correct.warning.text"));
+    myWarningLabel.setUI(new MultiLineLabelUI());
+    myCorrectButton.addActionListener(new ActionListener(){
+      public void actionPerformed(      final ActionEvent e){
+        correctMappings(vcs,infoList);
+      }
+    }
+);
+  }
+  myCorrectButton.setVisible(promptForCorrection);
+  myWarningLabel.setVisible(promptForCorrection);
+  myTableView.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    final ListSelectionEvent e){
+      final Collection<WCInfo> selected=myTableView.getSelection();
+      myChangeFormatButton.setEnabled((selected.size() == 1) && (!ProjectLevelVcsManager.getInstance(project).isBackgroundVcsOperationRunning()));
+    }
+  }
+);
+  myChangeFormatListener=new ActionListener(){
+    public void actionPerformed(    final ActionEvent e){
+      final Collection<WCInfo> selected=myTableView.getSelection();
+      if (selected.size() != 1) {
+        return;
+      }
+      final WCInfo wcInfo=selected.iterator().next();
+      File path=new File(wcInfo.getPath());
+      if (!wcInfo.isIsWcRoot()) {
+        path=SvnUtil.getWorkingCopyRoot(path);
+      }
+      ChangeFormatDialog dialog=new ChangeFormatDialog(project,path,false,!wcInfo.isIsWcRoot());
+      dialog.setData(true,wcInfo.getFormat().getOption());
+      dialog.show();
+      if (!dialog.isOK()) {
+        return;
+      }
+      final String newMode=dialog.getUpgradeMode();
+      if (!wcInfo.getFormat().getOption().equals(newMode)) {
+        final WorkingCopyFormat newFormat=WorkingCopyFormat.getInstance(newMode);
+        final Task.Backgroundable task=new SvnFormatWorker(project,newFormat,wcInfo);
+        doOKAction();
+        ProgressManager.getInstance().run(task);
+      }
+    }
+  }
+;
+  myChangeFormatButton.addActionListener(myChangeFormatListener);
+  myChangeFormatButton.setEnabled((myTableView.getSelection().size() == 1) && (!ProjectLevelVcsManager.getInstance(project).isBackgroundVcsOperationRunning()));
+  myRefresh.addActionListener(new ActionListener(){
+    public void actionPerformed(    final ActionEvent e){
+      final SvnVcs vcs=SvnVcs.getInstance(myProject);
+      subscribeToUpdates(vcs);
+      vcs.invokeRefreshSvnRoots(false);
+      myRefresh.setEnabled(false);
+    }
+  }
+);
+}

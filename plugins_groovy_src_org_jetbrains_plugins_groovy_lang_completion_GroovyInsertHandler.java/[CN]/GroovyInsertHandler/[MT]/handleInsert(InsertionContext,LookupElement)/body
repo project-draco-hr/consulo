@@ -1,0 +1,71 @@
+{
+  @NonNls Object obj=item.getObject();
+  if (obj instanceof PsiMethod) {
+    PsiMethod method=(PsiMethod)obj;
+    PsiParameter[] parameters=method.getParameterList().getParameters();
+    Editor editor=context.getEditor();
+    Document document=editor.getDocument();
+    if (context.getCompletionChar() == Lookup.REPLACE_SELECT_CHAR) {
+      handleOverwrite(editor.getCaretModel().getOffset(),document);
+    }
+    CaretModel caretModel=editor.getCaretModel();
+    int offset=context.getStartOffset() + method.getName().length();
+    PsiFile file=PsiDocumentManager.getInstance(method.getProject()).getPsiFile(document);
+    PsiElement elementAt=file.findElementAt(context.getStartOffset());
+    PsiElement parent=elementAt != null ? elementAt.getParent() : null;
+    if (parent instanceof GrReferenceExpression && ((GrReferenceExpression)parent).getDotTokenType() == GroovyElementTypes.mMEMBER_POINTER) {
+      return;
+    }
+    if (parent instanceof GrAnnotationNameValuePair || parent.getParent() instanceof GrAnnotationNameValuePair) {
+      document.insertString(offset," = ");
+      caretModel.moveToOffset(offset + 3);
+      return;
+    }
+    if (PsiTreeUtil.getParentOfType(elementAt,GrImportStatement.class) != null)     return;
+    if (parameters.length == 1 && CLOSURE_CLASS.equals(parameters[0].getType().getCanonicalText())) {
+      document.insertString(offset," {}");
+      caretModel.moveToOffset(offset + 2);
+      return;
+    }
+    PsiDocumentManager docManager=PsiDocumentManager.getInstance(method.getProject());
+    docManager.commitDocument(document);
+    PsiFile psiFile=docManager.getPsiFile(document);
+    if (isExpressionStatement(psiFile,context.getStartOffset()) && PsiType.VOID.equals(method.getReturnType()) && '(' != context.getCompletionChar() && parameters.length > 0) {
+      TailType.insertChar(editor,offset,' ');
+      return;
+    }
+    new MethodParenthesesHandler(method,true).handleInsert(context,item);
+    return;
+  }
+  if (obj instanceof String && !"assert".equals(obj)) {
+    Editor editor=context.getEditor();
+    Document document=editor.getDocument();
+    if (context.getCompletionChar() == Lookup.REPLACE_SELECT_CHAR) {
+      handleOverwrite(editor.getCaretModel().getOffset(),document);
+    }
+  }
+ else   if (obj instanceof PsiClass) {
+    final PsiClass clazz=(PsiClass)obj;
+    Editor editor=context.getEditor();
+    Document document=editor.getDocument();
+    PsiFile file=PsiDocumentManager.getInstance(clazz.getProject()).getPsiFile(document);
+    PsiElement elementAt=file.findElementAt(context.getStartOffset());
+    CaretModel caretModel=editor.getCaretModel();
+    int offset=context.getStartOffset() + clazz.getName().length();
+    final String text=document.getText();
+    final PsiElement parent=elementAt.getParent();
+    if (parent instanceof GrCodeReferenceElement && parent.getParent() instanceof GrNewExpression && (offset == text.length() || !text.substring(offset).trim().startsWith("("))) {
+      document.insertString(offset,"()");
+      final PsiMethod[] methods=clazz.getConstructors();
+      for (      PsiMethod method : methods) {
+        if (method.getParameterList().getParameters().length > 0) {
+          caretModel.moveToOffset(offset + 1);
+          return;
+        }
+      }
+      caretModel.moveToOffset(offset + 2);
+      return;
+    }
+  }
+  addTailType(item).processTail(context.getEditor(),context.getTailOffset());
+}

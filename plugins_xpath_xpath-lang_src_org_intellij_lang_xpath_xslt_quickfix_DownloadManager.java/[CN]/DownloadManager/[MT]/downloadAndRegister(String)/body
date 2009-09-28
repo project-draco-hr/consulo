@@ -1,0 +1,82 @@
+{
+  final ExternalResourceManager resourceManager=ExternalResourceManager.getInstance();
+  File file=null;
+  try {
+    final URL url=new URL(location);
+    HttpConfigurable.getInstance().prepareURL(location);
+    final URLConnection urlConnection=url.openConnection();
+    urlConnection.connect();
+    final InputStream in=urlConnection.getInputStream();
+    final int total=urlConnection.getContentLength();
+    final String name=Integer.toHexString(System.identityHashCode(this)) + "_" + Integer.toHexString(location.hashCode())+ "_"+ location.substring(location.lastIndexOf('/') + 1);
+    file=new File(myResourcePath,name.lastIndexOf('.') == -1 ? name + ".xml" : name);
+    final OutputStream out=new FileOutputStream(file);
+    byte[] buf=new byte[128];
+    int n;
+    while ((n=in.read(buf)) != -1) {
+      myProgress.checkCanceled();
+      myProgress.setFraction(total / (double)n);
+      out.write(buf,0,n);
+    }
+    in.close();
+    out.close();
+    try {
+      final File _file=file;
+      final Set<String>[] resourceDependencies=new Set[1];
+      Runnable runnable=new Runnable(){
+        public void run(){
+          Runnable runnable=new Runnable(){
+            public void run(){
+              final VirtualFile vf=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(_file);
+              if (vf != null) {
+                final PsiFile psiFile=PsiManager.getInstance(myProject).findFile(vf);
+                if (psiFile != null && isAccepted(psiFile)) {
+                  resourceDependencies[0]=getResourceDependencies(psiFile);
+                  resourceManager.addResource(location,_file.getAbsolutePath());
+                }
+ else {
+                  Messages.showErrorDialog(myProject,"Not a valid file: " + vf.getPresentableUrl(),"Download Problem");
+                }
+              }
+            }
+          }
+;
+          ApplicationManager.getApplication().runWriteAction(runnable);
+        }
+      }
+;
+      GuiUtils.invokeAndWait(runnable);
+      if (resourceDependencies[0] != null) {
+        for (        String s : resourceDependencies[0]) {
+          myProgress.checkCanceled();
+          myProgress.setFraction(0);
+          fetch(s);
+        }
+      }
+    }
+ catch (    InterruptedException e) {
+    }
+catch (    InvocationTargetException e) {
+      final Throwable targetException=e.getTargetException();
+      if (targetException instanceof RuntimeException) {
+        throw (RuntimeException)targetException;
+      }
+ else       if (targetException instanceof IOException) {
+        throw (IOException)targetException;
+      }
+ else       if (targetException instanceof InterruptedException) {
+      }
+ else {
+        Logger.getInstance(getClass().getName()).error(e);
+      }
+    }
+  }
+ catch (  IOException e) {
+    throw new DownloadException(location,e);
+  }
+ finally {
+    if (file != null && resourceManager.getResourceLocation(location) == location) {
+      file.delete();
+    }
+  }
+}

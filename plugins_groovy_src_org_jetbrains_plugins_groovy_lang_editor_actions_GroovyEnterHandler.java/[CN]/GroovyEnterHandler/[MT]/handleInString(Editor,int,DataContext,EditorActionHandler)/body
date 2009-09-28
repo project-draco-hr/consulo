@@ -1,0 +1,63 @@
+{
+  Project project=DataKeys.PROJECT.getData(dataContext);
+  if (project == null)   return false;
+  PsiFile file=PsiManager.getInstance(project).findFile(FileDocumentManager.getInstance().getFile(editor.getDocument()));
+  Document document=editor.getDocument();
+  String fileText=document.getText();
+  if (fileText.length() == caretOffset)   return false;
+  if (!checkStringApplicable(editor,caretOffset))   return false;
+  if (file == null)   return false;
+  PsiDocumentManager.getInstance(project).commitDocument(document);
+  PsiElement stringElement=file.findElementAt(caretOffset - 1);
+  if (stringElement == null)   return false;
+  ASTNode node=stringElement.getNode();
+  if (node == null)   return false;
+  if (GroovyTokenTypes.mSTRING_LITERAL == node.getElementType()) {
+    if (GroovyEditorActionUtil.isPlainStringLiteral(node.getTreeParent())) {
+      String text=node.getText();
+      String innerText=text.equals("''") ? "" : text.substring(1,text.length() - 1);
+      PsiElement literal=stringElement.getParent();
+      if (!(literal instanceof GrLiteral))       return false;
+      TextRange literalRange=literal.getTextRange();
+      document.replaceString(literalRange.getStartOffset(),literalRange.getEndOffset(),"'''" + innerText + "'''");
+      editor.getCaretModel().moveToOffset(caretOffset + 2);
+      EditorModificationUtil.insertStringAtCaret(editor,"\n");
+    }
+ else {
+      EditorModificationUtil.insertStringAtCaret(editor,"\n");
+    }
+    return true;
+  }
+  if (!GroovyEditorActionUtil.GSTRING_TOKENS.contains(node.getElementType()) && checkGStringInnerExpression(stringElement)) {
+    stringElement=stringElement.getParent().getNextSibling();
+    if (stringElement == null)     return false;
+    node=stringElement.getNode();
+    if (node == null)     return false;
+  }
+  if (GroovyEditorActionUtil.GSTRING_TOKENS.contains(node.getElementType())) {
+    PsiElement parent=stringElement.getParent();
+    while (parent != null && !(parent instanceof GrLiteral)) {
+      parent=parent.getParent();
+    }
+    if (parent == null || parent.getLastChild() instanceof PsiErrorElement)     return false;
+    if (GroovyEditorActionUtil.isPlainGString(parent.getNode())) {
+      PsiElement exprSibling=stringElement.getNextSibling();
+      boolean rightFromDollar=exprSibling instanceof GrExpression && exprSibling.getTextRange().getStartOffset() == caretOffset;
+      if (rightFromDollar)       caretOffset--;
+      String text=parent.getText();
+      String innerText=text.equals("\"\"") ? "" : text.substring(1,text.length() - 1);
+      TextRange parentRange=parent.getTextRange();
+      document.replaceString(parentRange.getStartOffset(),parentRange.getEndOffset(),"\"\"\"" + innerText + "\"\"\"");
+      editor.getCaretModel().moveToOffset(caretOffset + 2);
+      EditorModificationUtil.insertStringAtCaret(editor,"\n");
+      if (rightFromDollar) {
+        editor.getCaretModel().moveCaretRelatively(1,0,false,false,true);
+      }
+    }
+ else {
+      originalHandler.execute(editor,dataContext);
+    }
+    return true;
+  }
+  return false;
+}

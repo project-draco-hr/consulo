@@ -1,0 +1,58 @@
+{
+  final Project project=element.getProject();
+  final GrParametersOwner owner=PsiTreeUtil.getParentOfType(element,GrParametersOwner.class);
+  final Collection<PsiElement> occurrences=new ArrayList<PsiElement>();
+  final boolean success=collectOwnerOccurrences(project,owner,occurrences);
+  if (!success)   return;
+  final boolean isClosure=owner instanceof GrClosableBlock;
+  if (!checkOwnerOccurences(project,occurrences,isClosure))   return;
+  final GrParameter firstParam=getFirstParameter(owner);
+switch (analyzeForNamedArguments(owner,occurrences)) {
+case ERROR:
+{
+      final GrNamedElement namedElement=getReferencedElement(owner);
+      LOG.assertTrue(namedElement != null);
+      final String msg=GroovyIntentionsBundle.message("wrong.first.parameter.type",isClosure ? CLOSURE_CAPTION_CAP : METHOD_CAPTION_CAP,namedElement.getName(),firstParam.getName());
+      showErrorMessage(msg,project);
+      return;
+    }
+case MUST_BE_MAP:
+{
+    if (firstParam == getAppropriateParameter(element)) {
+      final String msg=GroovyIntentionsBundle.message("convert.cannot.itself");
+      showErrorMessage(msg,project);
+      return;
+    }
+    performRefactoring(element,owner,occurrences,false,null,false);
+    break;
+  }
+case IS_NOT_MAP:
+{
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    String[] possibleNames=generateValidNames(MY_POSSIBLE_NAMES,firstParam);
+    final GroovyMapParameterDialog dialog=new GroovyMapParameterDialog(project,possibleNames,true){
+      @Override protected void doOKAction(){
+        String name=getEnteredName();
+        ArrayList<String> conflicts=new ArrayList<String>();
+        GroovyValidationUtil.validateNewParameterName(firstParam,conflicts,name);
+        if (reportConflicts(conflicts,project)) {
+          performRefactoring(element,owner,occurrences,createNewFirst(),name,specifyTypeExplicitly());
+        }
+        super.doOKAction();
+      }
+    }
+;
+    ApplicationManager.getApplication().invokeLater(new Runnable(){
+      public void run(){
+        dialog.show();
+      }
+    }
+);
+  }
+ else {
+    performRefactoring(element,owner,occurrences,true,(new GroovyValidationUtil.ParameterNameSuggester("attrs",firstParam)).generateName(),false);
+  }
+  break;
+}
+}
+}

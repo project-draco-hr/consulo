@@ -1,0 +1,38 @@
+{
+  super.visitTryStatement(statement);
+  final PsiCodeBlock tryBlock=statement.getTryBlock();
+  if (tryBlock == null) {
+    return;
+  }
+  final Set<PsiType> exceptionsThrown=ExceptionUtils.calculateExceptionsThrown(tryBlock);
+  final int numExceptionsThrown=exceptionsThrown.size();
+  final Set<PsiType> exceptionsCaught=new HashSet<PsiType>(numExceptionsThrown);
+  final PsiCatchSection[] catchSections=statement.getCatchSections();
+  for (  final PsiCatchSection catchSection : catchSections) {
+    final PsiParameter parameter=catchSection.getParameter();
+    if (parameter == null) {
+      continue;
+    }
+    final PsiType typeCaught=parameter.getType();
+    if (onlyWarnOnRootExceptions) {
+      final String canonicalText=typeCaught.getCanonicalText();
+      if (!"java.lang.RuntimeException".equals(canonicalText) && !"java.lang.Exception".equals(canonicalText) && !"java.lang.Throwable".equals(canonicalText)) {
+        continue;
+      }
+    }
+    if (exceptionsThrown.contains(typeCaught)) {
+      exceptionsCaught.add(typeCaught);
+    }
+    final List<PsiType> typesMasked=new ArrayList();
+    for (    PsiType typeThrown : exceptionsThrown) {
+      if (!exceptionsCaught.contains(typeThrown) && typeCaught.isAssignableFrom(typeThrown)) {
+        exceptionsCaught.add(typeCaught);
+        typesMasked.add(typeThrown);
+      }
+    }
+    if (!typesMasked.isEmpty()) {
+      final PsiTypeElement typeElement=parameter.getTypeElement();
+      registerError(typeElement,typesMasked,statement,catchSection);
+    }
+  }
+}

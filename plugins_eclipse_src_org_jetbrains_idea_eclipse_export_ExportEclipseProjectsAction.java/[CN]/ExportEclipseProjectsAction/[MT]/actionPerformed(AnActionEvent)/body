@@ -1,0 +1,84 @@
+{
+  final Project project=e.getData(PlatformDataKeys.PROJECT);
+  if (project == null)   return;
+  project.save();
+  final List<Module> modules=new ArrayList<Module>();
+  final List<Module> incompatibleModules=new ArrayList<Module>();
+  for (  Module module : ModuleManager.getInstance(project).getModules()) {
+    if (!EclipseClasspathStorageProvider.ID.equals(ClasspathStorage.getStorageType(module))) {
+      final ModifiableRootModel model=ModuleRootManager.getInstance(module).getModifiableModel();
+      try {
+        ClasspathStorage.getProvider(EclipseClasspathStorageProvider.ID).assertCompatible(model);
+        modules.add(module);
+      }
+ catch (      ConfigurationException e1) {
+        incompatibleModules.add(module);
+      }
+ finally {
+        model.dispose();
+      }
+    }
+  }
+  if (!incompatibleModules.isEmpty()) {
+    if (Messages.showOkCancelDialog(project,"Eclipse incompatible modules found. Would you like to proceed and possibly loose your configurations?","Eclipse Incompatible Modules Found",Messages.getWarningIcon()) != DialogWrapper.OK_EXIT_CODE) {
+      return;
+    }
+  }
+ else   if (modules.isEmpty()) {
+    Messages.showInfoMessage(project,EclipseBundle.message("eclipse.export.nothing.to.do"),EclipseBundle.message("eclipse.export.dialog.title"));
+    return;
+  }
+  modules.addAll(incompatibleModules);
+  final ExportEclipseProjectsDialog dialog=new ExportEclipseProjectsDialog(project,modules);
+  dialog.show();
+  if (dialog.isOK()) {
+    if (dialog.isLink()) {
+      for (      Module module : dialog.getSelectedModules()) {
+        final ModifiableRootModel model=ModuleRootManager.getInstance(module).getModifiableModel();
+        ClasspathStorage.setStorageType(model,EclipseClasspathStorageProvider.ID);
+        model.dispose();
+      }
+    }
+ else {
+      for (      Module module : dialog.getSelectedModules()) {
+        final ModifiableRootModel model=ModuleRootManager.getInstance(module).getModifiableModel();
+        final VirtualFile[] contentRoots=model.getContentRoots();
+        final String storageRoot=contentRoots.length == 1 ? contentRoots[0].getPath() : ClasspathStorage.getStorageRootFromOptions(module);
+        try {
+          final Element classpathEleemnt=new Element(EclipseXml.CLASSPATH_TAG);
+          final EclipseClasspathWriter classpathWriter=new EclipseClasspathWriter(model);
+          classpathWriter.writeClasspath(classpathEleemnt,null);
+          final File classpathFile=new File(storageRoot,EclipseXml.CLASSPATH_FILE);
+          if (!FileUtil.createIfDoesntExist(classpathFile))           continue;
+          EclipseJDOMUtil.output(new Document(classpathEleemnt),classpathFile,project);
+          final Element ideaSpecific=new Element(IdeaXml.COMPONENT_TAG);
+          if (classpathWriter.writeIDEASpecificClasspath(ideaSpecific)) {
+            final File emlFile=new File(storageRoot,module.getName() + EclipseXml.IDEA_SETTINGS_POSTFIX);
+            if (!FileUtil.createIfDoesntExist(emlFile))             continue;
+            EclipseJDOMUtil.output(new Document(ideaSpecific),emlFile,project);
+          }
+          DotProjectFileHelper.saveDotProjectFile(module,storageRoot);
+        }
+ catch (        ConversionException e1) {
+          LOG.error(e1);
+        }
+catch (        IOException e1) {
+          LOG.error(e1);
+        }
+catch (        WriteExternalException e1) {
+          LOG.error(e1);
+        }
+ finally {
+          model.dispose();
+        }
+      }
+    }
+    try {
+      EclipseUserLibrariesHelper.appendProjectLibraries(project,dialog.getUserLibrariesFile());
+    }
+ catch (    IOException e1) {
+      LOG.error(e1);
+    }
+    project.save();
+  }
+}

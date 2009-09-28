@@ -1,0 +1,60 @@
+{
+  return new BaseInspectionVisitor(){
+    @Override public void visitClass(    PsiClass aClass){
+      final PsiAnnotation annotation=AnnotationUtil.findAnnotation(aClass,RunWith.class.getName());
+      if (annotation != null) {
+        for (        PsiNameValuePair pair : annotation.getParameterList().getAttributes()) {
+          final PsiAnnotationMemberValue value=pair.getValue();
+          if (value instanceof PsiClassObjectAccessExpression) {
+            final PsiTypeElement typeElement=((PsiClassObjectAccessExpression)value).getOperand();
+            if (typeElement.getType().getCanonicalText().equals(Parameterized.class.getName())) {
+              List<MethodCandidate> candidates=new ArrayList<MethodCandidate>();
+              for (              PsiMethod method : aClass.getMethods()) {
+                PsiType returnType=method.getReturnType();
+                final PsiClass returnTypeClass=PsiUtil.resolveClassInType(returnType);
+                final Project project=aClass.getProject();
+                final PsiClass collectionsClass=JavaPsiFacade.getInstance(project).findClass(Collection.class.getName(),GlobalSearchScope.allScope(project));
+                if (AnnotationUtil.isAnnotated(method,PARAMETERS_FQN,false)) {
+                  final PsiModifierList modifierList=method.getModifierList();
+                  boolean hasToFixSignature=false;
+                  String message="Make method \'" + method.getName() + "\' ";
+                  String errorString="Method \'#ref()\' should be ";
+                  if (!modifierList.hasModifierProperty(PsiModifier.PUBLIC)) {
+                    message+=PsiModifier.PUBLIC + " ";
+                    errorString+=PsiModifier.PUBLIC + " ";
+                    hasToFixSignature=true;
+                  }
+                  if (!modifierList.hasModifierProperty(PsiModifier.STATIC)) {
+                    message+=PsiModifier.STATIC;
+                    errorString+=PsiModifier.STATIC;
+                    hasToFixSignature=true;
+                  }
+                  if (collectionsClass != null && (returnTypeClass == null || !InheritanceUtil.isInheritorOrSelf(returnTypeClass,collectionsClass,true))) {
+                    message+=(hasToFixSignature ? " and" : "") + " return Collection";
+                    errorString+=(hasToFixSignature ? " and" : "") + " return Collection";
+                    returnType=JavaPsiFacade.getElementFactory(project).createType(collectionsClass);
+                    hasToFixSignature=true;
+                  }
+                  if (hasToFixSignature) {
+                    candidates.add(new MethodCandidate(method,message,errorString,returnType));
+                    continue;
+                  }
+                  return;
+                }
+              }
+              if (candidates.isEmpty()) {
+                registerClassError(aClass);
+              }
+ else {
+                for (                MethodCandidate candidate : candidates) {
+                  registerMethodError(candidate.myMethod,candidate.myProblem,candidate.myErrorString,candidate.myReturnType);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+;
+}

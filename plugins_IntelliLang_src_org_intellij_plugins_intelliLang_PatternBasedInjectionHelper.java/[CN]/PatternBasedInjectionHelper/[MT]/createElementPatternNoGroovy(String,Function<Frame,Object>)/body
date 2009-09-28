@@ -1,0 +1,134 @@
+{
+  final Stack<Frame> stack=new Stack<Frame>();
+  int curPos=0;
+  Frame curFrame=new Frame();
+  Object curResult=null;
+  final StringBuilder curString=new StringBuilder();
+  while (true) {
+    if (curPos > text.length())     break;
+    final char ch=curPos++ < text.length() ? text.charAt(curPos - 1) : 0;
+switch (curFrame.state) {
+case init:
+      if (Character.isJavaIdentifierStart(ch)) {
+        curString.append(ch);
+        curFrame.state=State.name;
+      }
+ else {
+        throw new IllegalStateException("method call expected");
+      }
+    break;
+case name:
+  if (Character.isJavaIdentifierPart(ch)) {
+    curString.append(ch);
+  }
+ else   if (ch == '(' || Character.isWhitespace(ch)) {
+    curFrame.methodName=curString.toString();
+    curString.setLength(0);
+    curFrame.state=ch == '(' ? State.param_start : State.name_end;
+  }
+ else {
+    throw new IllegalStateException("'" + curString + ch+ "' method name start is invalid");
+  }
+break;
+case name_end:
+if (ch == '(') {
+curFrame.state=State.param_start;
+}
+ else if (!Character.isWhitespace(ch)) {
+throw new IllegalStateException("'(' expected after '" + curFrame.methodName + "'");
+}
+break;
+case param_start:
+if (Character.isWhitespace(ch)) {
+}
+ else if (Character.isDigit(ch) || ch == '\"') {
+curFrame.state=State.literal;
+curString.append(ch);
+}
+ else if (ch == ')') {
+curFrame.state=State.invoke;
+}
+ else if (Character.isJavaIdentifierStart(ch)) {
+curString.append(ch);
+stack.push(curFrame);
+curFrame=new Frame();
+curFrame.state=State.name;
+}
+ else {
+throw new IllegalStateException("expression expected in '" + curFrame.methodName + "' call");
+}
+break;
+case param_end:
+if (ch == ')') {
+curFrame.state=State.invoke;
+}
+ else if (ch == ',') {
+curFrame.state=State.param_start;
+}
+ else if (!Character.isWhitespace(ch)) {
+throw new IllegalStateException("')' or ',' expected in '" + curFrame.methodName + "' call");
+}
+break;
+case literal:
+if (curString.charAt(0) == '\"') {
+curString.append(ch);
+if (ch == '\"') {
+curFrame.params.add(makeParam(curString.toString()));
+curString.setLength(0);
+curFrame.state=State.param_end;
+}
+}
+ else if (Character.isWhitespace(ch) || ch == ',' || ch == ')') {
+curFrame.params.add(makeParam(curString.toString()));
+curString.setLength(0);
+curFrame.state=ch == ')' ? State.invoke : ch == ',' ? State.param_start : State.param_end;
+}
+ else {
+curString.append(ch);
+}
+break;
+case invoke:
+curResult=executor.fun(curFrame);
+if (ch == 0 && stack.isEmpty()) {
+return (ElementPattern<PsiElement>)curResult;
+}
+ else if (ch == '.') {
+curFrame=new Frame();
+curFrame.target=curResult;
+curFrame.state=State.init;
+curResult=null;
+}
+ else if (ch == ',' || ch == ')') {
+curFrame=stack.pop();
+curFrame.params.add(curResult);
+curResult=null;
+curFrame.state=ch == ')' ? State.invoke : State.param_start;
+}
+ else if (Character.isWhitespace(ch)) {
+curFrame.state=State.invoke_end;
+}
+ else {
+throw new IllegalStateException((stack.isEmpty() ? "'.' or <eof>" : "'.' or ')'") + "expected after '" + curFrame.methodName+ "' call");
+}
+break;
+case invoke_end:
+if (ch == ')') {
+curFrame.state=State.invoke;
+}
+ else if (ch == ',') {
+curFrame.state=State.param_start;
+}
+ else if (ch == '.') {
+curFrame=new Frame();
+curFrame.target=curResult;
+curFrame.state=State.init;
+curResult=null;
+}
+ else if (!Character.isWhitespace(ch)) {
+throw new IllegalStateException((stack.isEmpty() ? "'.' or <eof>" : "'.' or ')'") + "expected after '" + curFrame.methodName+ "' call");
+}
+break;
+}
+}
+return null;
+}

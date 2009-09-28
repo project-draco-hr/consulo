@@ -1,0 +1,107 @@
+{
+  final PsiStatement body=whileStatement.getBody();
+  if (body == null) {
+    return;
+  }
+  final PsiStatement initialization=getPreviousStatement(whileStatement);
+  final PsiDeclarationStatement declaration=(PsiDeclarationStatement)initialization;
+  if (declaration == null) {
+    return;
+  }
+  final PsiElement declaredElement=declaration.getDeclaredElements()[0];
+  if (!(declaredElement instanceof PsiLocalVariable)) {
+    return;
+  }
+  final PsiLocalVariable iterator=(PsiLocalVariable)declaredElement;
+  final PsiMethodCallExpression initializer=(PsiMethodCallExpression)iterator.getInitializer();
+  if (initializer == null) {
+    return;
+  }
+  final PsiReferenceExpression methodExpression=initializer.getMethodExpression();
+  final PsiExpression collection=methodExpression.getQualifierExpression();
+  if (collection == null) {
+    return;
+  }
+  final PsiType collectionType=collection.getType();
+  if (collectionType == null) {
+    return;
+  }
+  final PsiManager manager=collection.getManager();
+  final PsiType contentType=getContentType(collectionType,manager);
+  if (contentType == null) {
+    return;
+  }
+  final Project project=whileStatement.getProject();
+  final PsiStatement firstStatement=getFirstStatement(body);
+  final boolean isDeclaration=isIteratorNextDeclaration(firstStatement,iterator,contentType);
+  final PsiStatement statementToSkip;
+  String contentVariableName;
+  if (isDeclaration) {
+    final PsiDeclarationStatement declarationStatement=(PsiDeclarationStatement)firstStatement;
+    if (declarationStatement == null) {
+      return;
+    }
+    final PsiElement[] declaredElements=declarationStatement.getDeclaredElements();
+    final PsiLocalVariable localVariable=(PsiLocalVariable)declaredElements[0];
+    contentVariableName=localVariable.getName();
+    statementToSkip=declarationStatement;
+  }
+ else {
+    if (collection instanceof PsiReferenceExpression) {
+      final PsiJavaCodeReferenceElement referenceElement=(PsiJavaCodeReferenceElement)collection;
+      final String collectionName=referenceElement.getReferenceName();
+      contentVariableName=createNewVariableName(whileStatement,contentType,collectionName);
+    }
+ else {
+      contentVariableName=createNewVariableName(whileStatement,contentType,null);
+    }
+    statementToSkip=null;
+  }
+  final CodeStyleSettings codeStyleSettings=CodeStyleSettingsManager.getSettings(project);
+  @NonNls final String finalString;
+  finalString=codeStyleSettings.GENERATE_FINAL_PARAMETERS ? "final " : "";
+  @NonNls final StringBuilder out=new StringBuilder(64);
+  out.append("for(");
+  out.append(finalString);
+  out.append(contentType.getCanonicalText());
+  out.append(' ');
+  out.append(contentVariableName);
+  out.append(": ");
+  out.append(collection.getText());
+  out.append(')');
+  final PsiType iteratorType=iterator.getType();
+  final PsiType iteratorContentType=getContentType(iteratorType,manager);
+  if (iteratorContentType != null && !TypeConversionUtil.isAssignable(iteratorContentType,contentType)) {
+    final String typeText=iteratorContentType.getCanonicalText();
+    contentVariableName='(' + typeText + ')'+ contentVariableName;
+  }
+  replaceIteratorNext(body,contentVariableName,iterator,contentType,statementToSkip,out);
+  final Query<PsiReference> query=ReferencesSearch.search(iterator,iterator.getUseScope());
+  boolean deleteIterator=true;
+  for (  PsiReference usage : query) {
+    final PsiElement element=usage.getElement();
+    if (PsiTreeUtil.isAncestor(whileStatement,element,true)) {
+      continue;
+    }
+    final PsiAssignmentExpression assignment=PsiTreeUtil.getParentOfType(element,PsiAssignmentExpression.class);
+    if (assignment == null) {
+      deleteIterator=false;
+      break;
+    }
+    final PsiExpression expression=assignment.getRExpression();
+    initializer.delete();
+    iterator.setInitializer(expression);
+    final PsiElement statement=assignment.getParent();
+    final PsiElement lastChild=statement.getLastChild();
+    if (lastChild instanceof PsiComment) {
+      iterator.add(lastChild);
+    }
+    statement.replace(iterator);
+    break;
+  }
+  if (deleteIterator) {
+    iterator.delete();
+  }
+  final String result=out.toString();
+  replaceStatementAndShortenClassNames(whileStatement,result);
+}

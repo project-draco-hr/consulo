@@ -1,0 +1,39 @@
+{
+  if (!(file instanceof XmlFile))   return;
+  final XmlFile f=(XmlFile)file;
+  final XmlDocument d=f.getDocument();
+  if (d == null)   return;
+  final XmlTag rootTag=d.getRootTag();
+  if (rootTag == null)   return;
+  names.dependencies.add(new NSDeclTracker(rootTag));
+  try {
+    final Map<String,String> namespaceDeclarations=rootTag.getLocalNamespaceDeclarations();
+    final Collection<String> prefixes=namespaceDeclarations.keySet();
+    final Set<XmlElementDescriptor> history=new THashSet<XmlElementDescriptor>();
+    final XmlElementFactory ef=XmlElementFactory.getInstance(file.getProject());
+    int noSchemaNamespaces=0;
+    for (    String prefix : prefixes) {
+      final String namespace=namespaceDeclarations.get(prefix);
+      if (isIgnoredNamespace(prefix,namespace))       continue;
+      final XmlTag tag=ef.createTagFromText("<dummy-tag xmlns='" + namespace + "' />",XMLLanguage.INSTANCE);
+      final XmlDocument document=PsiTreeUtil.getParentOfType(tag,XmlDocument.class);
+      final XmlNSDescriptor rootDescriptor=tag.getNSDescriptor(tag.getNamespace(),true);
+      if (rootDescriptor == null || (rootDescriptor instanceof XmlNSDescriptorImpl && ((XmlNSDescriptorImpl)rootDescriptor).getTag() == null) || !rootDescriptor.getDeclaration().isPhysical()) {
+        final QName any=QNameUtil.createAnyLocalName(namespace);
+        names.elementNames.add(any);
+        names.attributeNames.add(any);
+        noSchemaNamespaces++;
+        continue;
+      }
+      names.dependencies.add(rootDescriptor.getDescriptorFile());
+      final XmlElementDescriptor[] e=rootDescriptor.getRootElementsDescriptors(document);
+      for (      XmlElementDescriptor descriptor : e) {
+        processElementDescriptors(descriptor,tag,names,history);
+      }
+    }
+    names.validateNames=names.elementNames.size() > noSchemaNamespaces;
+  }
+ catch (  IncorrectOperationException e) {
+    Logger.getInstance(XsltContextProvider.class.getName()).error(e);
+  }
+}

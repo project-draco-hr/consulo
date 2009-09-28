@@ -1,0 +1,76 @@
+{
+  final PsiElement element=descriptor.getPsiElement();
+  final PsiElement parent=element.getParent();
+  if (!(parent instanceof PsiForeachStatement)) {
+    return;
+  }
+  final PsiElement map;
+  if (element instanceof PsiReferenceExpression) {
+    final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)element;
+    final PsiElement target=referenceExpression.resolve();
+    if (!(target instanceof PsiVariable)) {
+      return;
+    }
+    final PsiVariable variable=(PsiVariable)target;
+    final PsiExpression initializer=variable.getInitializer();
+    if (!(initializer instanceof PsiMethodCallExpression)) {
+      return;
+    }
+    final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)initializer;
+    final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
+    final PsiExpression qualifier=methodExpression.getQualifierExpression();
+    if (!(qualifier instanceof PsiReferenceExpression)) {
+      return;
+    }
+    final PsiReferenceExpression reference=(PsiReferenceExpression)qualifier;
+    map=reference.resolve();
+    final String qualifierText=qualifier.getText();
+    replaceExpression(referenceExpression,qualifierText + ".entrySet()");
+  }
+ else   if (element instanceof PsiMethodCallExpression) {
+    final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)element;
+    final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
+    final PsiExpression qualifier=methodExpression.getQualifierExpression();
+    if (!(qualifier instanceof PsiReferenceExpression)) {
+      return;
+    }
+    final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)qualifier;
+    map=referenceExpression.resolve();
+    final String qualifierText=qualifier.getText();
+    replaceExpression(methodCallExpression,qualifierText + ".entrySet()");
+  }
+ else {
+    return;
+  }
+  final PsiForeachStatement foreachStatement=(PsiForeachStatement)parent;
+  final PsiExpression iteratedValue=foreachStatement.getIteratedValue();
+  if (iteratedValue == null) {
+    return;
+  }
+  final PsiType type=iteratedValue.getType();
+  if (!(type instanceof PsiClassType)) {
+    return;
+  }
+  final PsiClassType classType=(PsiClassType)type;
+  final PsiType[] parameterTypes=classType.getParameters();
+  if (parameterTypes.length != 1) {
+    return;
+  }
+  PsiType parameterType=parameterTypes[0];
+  boolean insertCast=false;
+  if (parameterType == null) {
+    parameterType=TypeUtils.getJavaLangObjectType(foreachStatement);
+    insertCast=true;
+  }
+  final PsiParameter parameter=foreachStatement.getIterationParameter();
+  final String variableName=createNewVariableName(foreachStatement,parameterType);
+  if (insertCast) {
+    replaceParameterAccess(parameter,"((Map.Entry)" + variableName + ')',map,foreachStatement);
+  }
+ else {
+    replaceParameterAccess(parameter,variableName,map,foreachStatement);
+  }
+  final PsiElementFactory factory=JavaPsiFacade.getInstance(project).getElementFactory();
+  final PsiParameter newParameter=factory.createParameter(variableName,parameterType);
+  parameter.replace(newParameter);
+}

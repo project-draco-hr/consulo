@@ -1,0 +1,66 @@
+{
+  myProjectsTree.addListener(new MavenProjectsTree.ListenerAdapter(){
+    @Override public void projectsIgnoredStateChanged(    List<MavenProject> ignored,    List<MavenProject> unignored,    Object message){
+      if (message instanceof MavenProjectImporter)       return;
+      scheduleImport(false);
+    }
+    @Override public void projectsUpdated(    List<Pair<MavenProject,MavenProjectChanges>> updated,    List<MavenProject> deleted,    Object message){
+      myEmbeddersManager.clearCaches();
+      unscheduleAllTasks(deleted);
+      List<MavenProject> updatedProjects=MavenUtil.collectFirsts(updated);
+      List<Pair<MavenProject,MavenProjectChanges>> toImport=new ArrayList<Pair<MavenProject,MavenProjectChanges>>(updated);
+      for (      MavenProject each : updatedProjects) {
+        for (        MavenProject eachDependent : myProjectsTree.getDependentProjects(each)) {
+          toImport.add(Pair.create(eachDependent,MavenProjectChanges.DEPENDENCIES));
+        }
+      }
+      Set<MavenProject> toResolve=new THashSet<MavenProject>(updatedProjects);
+      for (      MavenProject each : ContainerUtil.concat(updatedProjects,deleted)) {
+        toResolve.addAll(myProjectsTree.getDependentProjects(each));
+      }
+      Iterator<MavenProject> it=toResolve.iterator();
+      while (it.hasNext()) {
+        MavenProject each=it.next();
+        if (each.hasErrors())         it.remove();
+      }
+      if (haveChanges(toImport) || !deleted.isEmpty()) {
+        scheduleImport(toImport,message == FORCE_IMPORT_MESSAGE);
+      }
+      scheduleResolve(toResolve,message == FORCE_IMPORT_MESSAGE);
+    }
+    private boolean haveChanges(    List<Pair<MavenProject,MavenProjectChanges>> projectsWithChanges){
+      for (      MavenProjectChanges each : MavenUtil.collectSeconds(projectsWithChanges)) {
+        if (each.hasChanges())         return true;
+      }
+      return false;
+    }
+    @Override public void projectResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges,    org.apache.maven.project.MavenProject nativeMavenProject,    Object message){
+      if (shouldScheduleProject(projectWithChanges)) {
+        if (projectWithChanges.first.hasUnresolvedPlugins()) {
+          schedulePluginsResolving(projectWithChanges.first,nativeMavenProject);
+        }
+        scheduleForNextImport(projectWithChanges);
+      }
+      processMessage(message);
+    }
+    @Override public void foldersResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges,    Object message){
+      if (shouldScheduleProject(projectWithChanges)) {
+        scheduleForNextImport(projectWithChanges);
+      }
+      processMessage(message);
+    }
+    private boolean shouldScheduleProject(    Pair<MavenProject,MavenProjectChanges> projectWithChanges){
+      return !projectWithChanges.first.hasErrors() && projectWithChanges.second.hasChanges();
+    }
+    private void processMessage(    Object message){
+      if (getScheduledProjectsCount() == 0)       return;
+      if (message == SCHEDULE_IMPORT_MESSAGE) {
+        scheduleImport(false);
+      }
+ else       if (message == FORCE_IMPORT_MESSAGE) {
+        scheduleImport(true);
+      }
+    }
+  }
+);
+}

@@ -1,0 +1,58 @@
+{
+  super.visitNewExpression(expression);
+  if (!TypeUtils.expressionHasTypeOrSubtype(expression,"java.lang.Throwable")) {
+    return;
+  }
+  final PsiElement parent=getParent(expression.getParent());
+  if (parent instanceof PsiThrowStatement) {
+    return;
+  }
+ else   if (parent instanceof PsiReturnStatement) {
+    return;
+  }
+  final PsiElement typedParent=PsiTreeUtil.getParentOfType(expression,PsiAssignmentExpression.class,PsiVariable.class);
+  final PsiLocalVariable variable;
+  if (typedParent instanceof PsiAssignmentExpression) {
+    final PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)typedParent;
+    final PsiExpression rhs=assignmentExpression.getRExpression();
+    if (!PsiTreeUtil.isAncestor(rhs,expression,false)) {
+      return;
+    }
+    final PsiExpression lhs=assignmentExpression.getLExpression();
+    if (!(lhs instanceof PsiReferenceExpression)) {
+      return;
+    }
+    final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)lhs;
+    final PsiElement target=referenceExpression.resolve();
+    if (!(target instanceof PsiLocalVariable)) {
+      return;
+    }
+    variable=(PsiLocalVariable)target;
+  }
+ else   if (typedParent instanceof PsiVariable) {
+    if (!(typedParent instanceof PsiLocalVariable)) {
+      return;
+    }
+    variable=(PsiLocalVariable)typedParent;
+  }
+ else {
+    variable=null;
+  }
+  if (variable != null) {
+    final Query<PsiReference> query=ReferencesSearch.search(variable,variable.getUseScope());
+    for (    PsiReference reference : query) {
+      final PsiElement usage=reference.getElement();
+      PsiElement usageParent=usage.getParent();
+      while (usageParent instanceof PsiParenthesizedExpression) {
+        usageParent=usageParent.getParent();
+      }
+      if (usageParent instanceof PsiThrowStatement) {
+        return;
+      }
+ else       if (usageParent instanceof PsiReturnStatement) {
+        return;
+      }
+    }
+  }
+  registerError(expression,expression);
+}

@@ -1,0 +1,83 @@
+{
+  if (place instanceof XmlTag) {
+    final XmlTag xmlTag=(XmlTag)place;
+    for (    final BaseInjection injection : myInjectionConfiguration.getInjections(LanguageInjectionSupport.XML_SUPPORT_ID)) {
+      if (injection.acceptsPsiElement(xmlTag)) {
+        final Language language=InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+        if (language == null)         continue;
+        final boolean separateFiles=!injection.isSingleFile() && StringUtil.isNotEmpty(injection.getValuePattern());
+        final Ref<Boolean> hasSubTags=Ref.create(Boolean.FALSE);
+        final List<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>> result=new ArrayList<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>>();
+        xmlTag.acceptChildren(new PsiElementVisitor(){
+          @Override public void visitElement(          final PsiElement element){
+            if (element instanceof XmlText) {
+              if (element.getTextLength() == 0)               return;
+              final List<TextRange> list=injection.getInjectedArea(element);
+              final InjectedLanguage l=InjectedLanguage.create(injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),false);
+              for (              TextRange textRange : list) {
+                result.add(Trinity.create((PsiLanguageInjectionHost)element,l,textRange));
+              }
+            }
+ else             if (element instanceof XmlTag) {
+              hasSubTags.set(Boolean.TRUE);
+              if (injection instanceof AbstractTagInjection && ((AbstractTagInjection)injection).isApplyToSubTagTexts()) {
+                element.acceptChildren(this);
+              }
+            }
+          }
+        }
+);
+        if (!result.isEmpty()) {
+          if (separateFiles) {
+            for (            Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange> trinity : result) {
+              processor.process(language,Collections.singletonList(trinity));
+            }
+          }
+ else {
+            for (            Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange> trinity : result) {
+              trinity.first.putUserData(LanguageInjectionSupport.HAS_UNPARSABLE_FRAGMENTS,hasSubTags.get());
+            }
+            processor.process(language,result);
+          }
+        }
+        if (injection.isTerminal()) {
+          break;
+        }
+      }
+    }
+  }
+ else   if (place instanceof XmlAttribute) {
+    final XmlAttribute attribute=(XmlAttribute)place;
+    final XmlAttributeValue value=attribute.getValueElement();
+    if (value == null)     return;
+    final PsiElement[] children=value.getChildren();
+    if (children.length < 3 || !(children[1] instanceof XmlToken) || ((XmlToken)children[1]).getTokenType() != XmlTokenType.XML_ATTRIBUTE_VALUE_TOKEN) {
+      return;
+    }
+    for (    BaseInjection injection : myInjectionConfiguration.getInjections(LanguageInjectionSupport.XML_SUPPORT_ID)) {
+      if (injection.acceptsPsiElement(attribute)) {
+        final Language language=InjectedLanguage.findLanguageById(injection.getInjectedLanguageId());
+        if (language == null)         continue;
+        final boolean separateFiles=!injection.isSingleFile() && StringUtil.isNotEmpty(injection.getValuePattern());
+        final List<TextRange> ranges=injection.getInjectedArea(value);
+        if (ranges.isEmpty())         continue;
+        final List<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>> result=new ArrayList<Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange>>();
+        final InjectedLanguage l=InjectedLanguage.create(injection.getInjectedLanguageId(),injection.getPrefix(),injection.getSuffix(),false);
+        for (        TextRange textRange : ranges) {
+          result.add(Trinity.create((PsiLanguageInjectionHost)value,l,textRange));
+        }
+        if (separateFiles) {
+          for (          Trinity<PsiLanguageInjectionHost,InjectedLanguage,TextRange> trinity : result) {
+            processor.process(language,Collections.singletonList(trinity));
+          }
+        }
+ else {
+          processor.process(language,result);
+        }
+        if (injection.isTerminal()) {
+          break;
+        }
+      }
+    }
+  }
+}

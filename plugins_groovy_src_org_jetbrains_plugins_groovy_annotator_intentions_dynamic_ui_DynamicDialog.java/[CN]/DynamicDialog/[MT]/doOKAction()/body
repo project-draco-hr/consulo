@@ -1,0 +1,66 @@
+{
+  super.doOKAction();
+  mySettings.setContainingClassName(getEnteredContaningClass().getContainingClass().getQualifiedName());
+  mySettings.setStatic(myStaticCheckBox.isSelected());
+  GrTypeElement typeElement=getEnteredTypeName();
+  if (typeElement == null) {
+    mySettings.setType("java.lang.Object");
+  }
+ else {
+    PsiType type=typeElement.getType();
+    if (type instanceof PsiPrimitiveType) {
+      type=TypesUtil.boxPrimitiveType(type,typeElement.getManager(),ProjectScope.getAllScope(myProject));
+    }
+    final String typeQualifiedName=type.getCanonicalText();
+    if (typeQualifiedName != null) {
+      mySettings.setType(typeQualifiedName);
+    }
+ else {
+      mySettings.setType(type.getCanonicalText());
+    }
+  }
+  Document document=PsiDocumentManager.getInstance(myProject).getDocument(myReferenceExpression.getContainingFile());
+  final DocumentReference[] refs=new DocumentReference[]{DocumentReferenceManager.getInstance().create(document)};
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      UndoManager.getInstance(myProject).undoableActionPerformed(new UndoableAction(){
+        public void undo() throws UnexpectedUndoException {
+          final DItemElement itemElement;
+          if (mySettings.isMethod()) {
+            final java.util.List<MyPair> myPairList=mySettings.getPairs();
+            final String[] argumentsTypes=QuickfixUtil.getArgumentsTypes(myPairList);
+            itemElement=myDynamicManager.findConcreteDynamicMethod(mySettings.getContainingClassName(),mySettings.getName(),argumentsTypes);
+          }
+ else {
+            itemElement=myDynamicManager.findConcreteDynamicProperty(mySettings.getContainingClassName(),mySettings.getName());
+          }
+          if (itemElement == null) {
+            Messages.showWarningDialog(myProject,GroovyInspectionBundle.message("Cannot.perform.undo.operation"),GroovyInspectionBundle.message("Undo.disable"));
+            return;
+          }
+          final DClassElement classElement=myDynamicManager.getClassElementByItem(itemElement);
+          if (classElement == null) {
+            Messages.showWarningDialog(myProject,GroovyInspectionBundle.message("Cannot.perform.undo.operation"),GroovyInspectionBundle.message("Undo.disable"));
+            return;
+          }
+          removeElement(itemElement);
+          if (classElement.getMethods().size() == 0 && classElement.getProperties().size() == 0) {
+            myDynamicManager.removeClassElement(classElement);
+          }
+        }
+        public void redo() throws UnexpectedUndoException {
+          addElement(mySettings);
+        }
+        public DocumentReference[] getAffectedDocuments(){
+          return refs;
+        }
+        public boolean isGlobal(){
+          return true;
+        }
+      }
+);
+      addElement(mySettings);
+    }
+  }
+,"Add dynamic element",null);
+}
