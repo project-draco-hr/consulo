@@ -1,0 +1,77 @@
+{
+  assertIsDispatchThread();
+  final Object oldElementFromDescriptor=getElementFromDescriptor(descriptor);
+  if (isLoadedInBackground(oldElementFromDescriptor))   return false;
+  addToLoadedInBackground(oldElementFromDescriptor);
+  if (!isNodeBeingBuilt(node)) {
+    LoadingNode loadingNode=new LoadingNode(getLoadingNodeText());
+    myTreeModel.insertNodeInto(loadingNode,node,node.getChildCount());
+  }
+  final Ref<LoadedChildren> children=new Ref<LoadedChildren>();
+  final Ref<Object> elementFromDescriptor=new Ref<Object>();
+  Runnable buildRunnable=new Runnable(){
+    public void run(){
+      if (isReleased()) {
+        return;
+      }
+      if (!descriptorIsUpToDate) {
+        update(descriptor,true);
+      }
+      Object element=getElementFromDescriptor(descriptor);
+      if (element == null) {
+        removeFromLoadedInBackground(oldElementFromDescriptor);
+        return;
+      }
+      elementFromDescriptor.set(element);
+      Object[] loadedElements=getChildrenFor(getBuilder().getTreeStructureElement(descriptor));
+      LoadedChildren loaded=new LoadedChildren(loadedElements);
+      for (      Object each : loadedElements) {
+        NodeDescriptor eachChildDescriptor=getTreeStructure().createDescriptor(each,descriptor);
+        eachChildDescriptor.update();
+        loaded.putDescriptor(each,eachChildDescriptor);
+      }
+      children.set(loaded);
+    }
+  }
+;
+  final DefaultMutableTreeNode[] nodeToProcessActions=new DefaultMutableTreeNode[1];
+  Runnable updateRunnable=new Runnable(){
+    public void run(){
+      if (isReleased())       return;
+      if (children.get() == null)       return;
+      if (isRerunNeeded(pass)) {
+        removeFromLoadedInBackground(elementFromDescriptor.get());
+        getUpdater().addSubtreeToUpdate(pass);
+        return;
+      }
+      removeFromLoadedInBackground(elementFromDescriptor.get());
+      if (myUnbuiltNodes.contains(node)) {
+        Pair<Boolean,LoadedChildren> unbuilt=processUnbuilt(node,descriptor,pass,isExpanded(node,wasExpanded),children.get());
+        if (unbuilt.getFirst()) {
+          nodeToProcessActions[0]=node;
+          return;
+        }
+      }
+      updateNodeChildren(node,pass,children.get(),true,canSmartExpand,forceUpdate,true);
+      if (isRerunNeeded(pass)) {
+        getUpdater().addSubtreeToUpdate(pass);
+        return;
+      }
+      Object element=elementFromDescriptor.get();
+      if (element != null) {
+        removeLoading(node,true);
+        nodeToProcessActions[0]=node;
+      }
+    }
+  }
+;
+  addTaskToWorker(buildRunnable,true,updateRunnable,new Runnable(){
+    public void run(){
+      if (nodeToProcessActions[0] != null) {
+        processNodeActionsIfReady(nodeToProcessActions[0]);
+      }
+    }
+  }
+);
+  return true;
+}
