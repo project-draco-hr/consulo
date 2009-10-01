@@ -15,7 +15,7 @@
  else {
     cleanProcessedFlag(file);
     IndexingStamp.flushCache();
-    boolean indicesAffected=false;
+    final List<ID<?,?>> affectedIndices=new ArrayList<ID<?,?>>(myIndices.size());
     final boolean isTooLarge=isTooLarge(file);
     for (    final ID<?,?> indexId : myIndices.keySet()) {
       try {
@@ -26,18 +26,7 @@
         }
  else {
           if (!isTooLarge && shouldUpdateIndex(file,indexId)) {
-            indicesAffected=true;
-            if (markForReindex) {
-              ApplicationManager.getApplication().runReadAction(new Runnable(){
-                public void run(){
-                  IndexingStamp.update(file,indexId,-1L);
-                }
-              }
-);
-            }
- else {
-              updateSingleIndex(indexId,file,null);
-            }
+            affectedIndices.add(indexId);
           }
         }
       }
@@ -46,21 +35,61 @@
         requestRebuild(indexId);
       }
     }
-    IndexingStamp.flushCache();
-    if (indicesAffected && markForReindex) {
-      iterateIndexableFiles(file,new Processor<VirtualFile>(){
-        public boolean process(        final VirtualFile file){
-          w.lock();
-          try {
-            myFilesToUpdate.add(file);
+    if (affectedIndices.size() > 0) {
+      if (markForReindex) {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            for (            ID<?,?> indexId : affectedIndices) {
+              IndexingStamp.update(file,indexId,-1L);
+            }
           }
+        }
+);
+        iterateIndexableFiles(file,new Processor<VirtualFile>(){
+          public boolean process(          final VirtualFile file){
+            scheduleForUpdate(file);
+            return true;
+          }
+        }
+);
+      }
+ else {
+        final InvalidationTask invalidator=new InvalidationTask(file){
+          public void run(){
+            Throwable unexpectedError=null;
+            for (            ID<?,?> indexId : affectedIndices) {
+              try {
+                updateSingleIndex(indexId,file,null);
+              }
+ catch (              StorageException e) {
+                LOG.info(e);
+                requestRebuild(indexId);
+              }
+catch (              ProcessCanceledException ignored) {
+              }
+catch (              Throwable e) {
+                LOG.info(e);
+                if (unexpectedError == null) {
+                  unexpectedError=e;
+                }
+              }
+            }
+            IndexingStamp.flushCache();
+            if (unexpectedError != null) {
+              LOG.error(unexpectedError);
+            }
+          }
+        }
+;
+        w.lock();
+        try {
+          myFutureInvalidations.offer(invalidator);
+        }
   finally {
-            w.unlock();
-          }
-          return true;
+          w.unlock();
         }
       }
-);
     }
+    IndexingStamp.flushCache();
   }
 }
