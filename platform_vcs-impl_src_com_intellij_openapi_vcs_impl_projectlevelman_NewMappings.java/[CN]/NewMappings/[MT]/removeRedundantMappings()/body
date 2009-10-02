@@ -1,12 +1,53 @@
 {
-  final List<VcsDirectoryMapping> items=new ArrayList<VcsDirectoryMapping>(mySortedMappings.length);
-  Collections.addAll(items,mySortedMappings);
-  final MyMappingsFilter filter=new MyMappingsFilter();
-  filter.doFilter(items);
-  for (  VcsDirectoryMapping mapping : items) {
-    listForVcsFromMap(mapping.getVcs()).add(mapping);
+  final Set<Map.Entry<String,List<VcsDirectoryMapping>>> entries=myVcsToPaths.entrySet();
+  final LocalFileSystem lfs=LocalFileSystem.getInstance();
+  final AllVcsesI allVcses=AllVcses.getInstance(myProject);
+  final List<LocalFileSystem.WatchRequest> removedRequests=new LinkedList<LocalFileSystem.WatchRequest>();
+  for (Iterator<String> iterator=myVcsToPaths.keySet().iterator(); iterator.hasNext(); ) {
+    final String vcsName=iterator.next();
+    final List<VcsDirectoryMapping> mappings=myVcsToPaths.get(vcsName);
+    final List<Pair<VirtualFile,VcsDirectoryMapping>> objects=ObjectsConvertor.convert(mappings,new Convertor<VcsDirectoryMapping,Pair<VirtualFile,VcsDirectoryMapping>>(){
+      public Pair<VirtualFile,VcsDirectoryMapping> convert(      final VcsDirectoryMapping dm){
+        VirtualFile vf=lfs.findFileByPath(dm.getDirectory());
+        if (vf == null) {
+          vf=lfs.refreshAndFindFileByPath(dm.getDirectory());
+        }
+        return vf == null ? null : new Pair<VirtualFile,VcsDirectoryMapping>(vf,dm);
+      }
+    }
+,ObjectsConvertor.NOT_NULL);
+    final List<Pair<VirtualFile,VcsDirectoryMapping>> filteredFiles;
+    final Convertor<Pair<VirtualFile,VcsDirectoryMapping>,VirtualFile> fileConvertor=new Convertor<Pair<VirtualFile,VcsDirectoryMapping>,VirtualFile>(){
+      public VirtualFile convert(      Pair<VirtualFile,VcsDirectoryMapping> o){
+        return o.getFirst();
+      }
+    }
+;
+    if (StringUtil.isEmptyOrSpaces(vcsName)) {
+      filteredFiles=AbstractVcs.filterUniqueRootsDefault(objects,fileConvertor);
+    }
+ else {
+      final AbstractVcs vcs=allVcses.getByName(vcsName);
+      filteredFiles=vcs.filterUniqueRoots(objects,fileConvertor);
+    }
+    final List<VcsDirectoryMapping> filteredMappings=ObjectsConvertor.convert(filteredFiles,new Convertor<Pair<VirtualFile,VcsDirectoryMapping>,VcsDirectoryMapping>(){
+      public VcsDirectoryMapping convert(      final Pair<VirtualFile,VcsDirectoryMapping> o){
+        return o.getSecond();
+      }
+    }
+);
+    mappings.removeAll(filteredMappings);
+    for (    VcsDirectoryMapping mapping : mappings) {
+      removedRequests.add(myDirectoryMappingWatches.remove(mapping));
+    }
+    if (filteredMappings.isEmpty()) {
+      iterator.remove();
+    }
+ else {
+      mappings.clear();
+      mappings.addAll(filteredMappings);
+    }
   }
-  mySortedMappings=items.toArray(new VcsDirectoryMapping[items.size()]);
-  final List<LocalFileSystem.WatchRequest> watchRequestList=filter.getRemovedRequests();
-  return watchRequestList;
+  sortedMappingsByMap();
+  return removedRequests;
 }
