@@ -8,7 +8,9 @@
   final Future<?> future=Executors.newSingleThreadExecutor().submit(new Runnable(){
     public void run(){
       try {
+        checkCanceled();
         sendRequests(requests,connectionStreams,communicationProgressHandler);
+        checkCanceled();
         sendRequest(requests.getResponseExpectingRequest(),connectionStreams);
         connectionStreams.flushForReading();
         result.set(handleResponses(connectionStreams,new DefaultResponseHandler()));
@@ -25,10 +27,16 @@ catch (      CommandException e) {
     }
   }
 );
-  semaphore.waitFor((long)(1.2 * myTimeout));
+  final long tOut=(myTimeout < 20000) ? 20000 : myTimeout;
+  while (true) {
+    semaphore.waitFor(tOut);
+    if (future.isDone() || future.isCancelled())     break;
+    if (!commandStopper.isAlive())     break;
+    commandStopper.resetAlive();
+  }
   if (!ioExceptionRef.isNull())   throw new IOCommandException(ioExceptionRef.get());
   if (!commandExceptionRef.isNull())   throw commandExceptionRef.get();
-  if ((!future.isDone() && (!future.isCancelled()))) {
+  if ((!future.isDone() && (!future.isCancelled()) && (!commandStopper.isAlive()))) {
     future.cancel(true);
     throw new CommandException(new CommandAbortedException(),"Command execution timed out");
   }

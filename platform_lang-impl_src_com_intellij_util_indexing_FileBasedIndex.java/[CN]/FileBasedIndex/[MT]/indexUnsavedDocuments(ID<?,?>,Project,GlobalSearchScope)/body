@@ -1,0 +1,33 @@
+{
+  if (myUpToDateIndices.contains(indexId)) {
+    return;
+  }
+  final Set<Document> documents=getUnsavedOrTransactedDocuments();
+  if (!documents.isEmpty()) {
+    final StorageGuard.Holder guard=setDataBufferingEnabled(true);
+    try {
+      boolean allDocsProcessed=true;
+      final Semaphore semaphore=myUnsavedDataIndexingSemaphores.get(indexId);
+      semaphore.down();
+      try {
+        for (        Document document : documents) {
+          allDocsProcessed&=indexUnsavedDocument(document,indexId,project,filter);
+        }
+      }
+  finally {
+        semaphore.up();
+        while (!semaphore.waitFor(500)) {
+          if (Thread.holdsLock(PsiLock.LOCK)) {
+            break;
+          }
+        }
+        if (allDocsProcessed) {
+          myUpToDateIndices.add(indexId);
+        }
+      }
+    }
+  finally {
+      guard.leave();
+    }
+  }
+}
