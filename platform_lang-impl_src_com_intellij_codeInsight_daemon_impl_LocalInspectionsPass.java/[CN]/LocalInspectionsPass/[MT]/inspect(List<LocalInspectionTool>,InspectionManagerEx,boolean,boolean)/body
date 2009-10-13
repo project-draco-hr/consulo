@@ -1,0 +1,40 @@
+{
+  if (tools.isEmpty())   return;
+  final PsiElement[] elements=getElementsIntersectingRange(myFile,myStartOffset,myEndOffset);
+  setProgressLimit(1L * tools.size() * elements.length);
+  final LocalInspectionToolSession session=new LocalInspectionToolSession(myFile,myStartOffset,myEndOffset);
+  JobUtil.invokeConcurrentlyUnderMyProgress(tools,new Processor<LocalInspectionTool>(){
+    public boolean process(    final LocalInspectionTool tool){
+      final ProgressManager progressManager=ProgressManager.getInstance();
+      try {
+        progressManager.checkCanceled();
+      }
+ catch (      ProcessCanceledException e) {
+        return false;
+      }
+      ApplicationManager.getApplication().assertReadAccessAllowed();
+      ProblemsHolder holder=new ProblemsHolder(iManager,myFile);
+      progressManager.checkCanceled();
+      PsiElementVisitor elementVisitor=tool.buildVisitor(holder,isOnTheFly);
+      if (elementVisitor == null) {
+        LOG.error("Tool " + tool + " must not return null from the buildVisitor() method");
+      }
+      tool.inspectionStarted(session);
+      for (      PsiElement element : elements) {
+        progressManager.checkCanceled();
+        element.accept(elementVisitor);
+      }
+      tool.inspectionFinished(session);
+      advanceProgress(elements.length);
+      if (holder.hasResults()) {
+        appendDescriptors(holder.getResults(),tool,ignoreSuppressed);
+      }
+      return true;
+    }
+  }
+,"Inspection tools");
+  inspectInjectedPsi(elements,tools);
+  myInfos=new ArrayList<HighlightInfo>(myDescriptors.size());
+  addHighlightsFromDescriptors(myInfos);
+  addHighlightsFromInjectedPsiProblems(myInfos);
+}
