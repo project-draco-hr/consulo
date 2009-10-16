@@ -1,8 +1,12 @@
 {
   assertIsDispatchThread();
-  final Object oldElementFromDescriptor=getElementFromDescriptor(descriptor);
-  if (isLoadedInBackground(oldElementFromDescriptor))   return false;
-  addToLoadedInBackground(oldElementFromDescriptor);
+  final Object oldElementFromDescriptor=getElementFromDescriptor(updateInfo.getDescriptor());
+  UpdateInfo loaded=getLoadedInBackground(oldElementFromDescriptor);
+  if (loaded != null) {
+    loaded.apply(updateInfo);
+    return false;
+  }
+  addToLoadedInBackground(oldElementFromDescriptor,updateInfo);
   if (!isNodeBeingBuilt(node)) {
     LoadingNode loadingNode=new LoadingNode(getLoadingNodeText());
     myTreeModel.insertNodeInto(loadingNode,node,node.getChildCount());
@@ -14,19 +18,19 @@
       if (isReleased()) {
         return;
       }
-      if (!descriptorIsUpToDate) {
-        update(descriptor,true);
+      if (!updateInfo.isDescriptorIsUpToDate()) {
+        update(updateInfo.getDescriptor());
       }
-      Object element=getElementFromDescriptor(descriptor);
+      Object element=getElementFromDescriptor(updateInfo.getDescriptor());
       if (element == null) {
         removeFromLoadedInBackground(oldElementFromDescriptor);
         return;
       }
       elementFromDescriptor.set(element);
-      Object[] loadedElements=getChildrenFor(getBuilder().getTreeStructureElement(descriptor));
+      Object[] loadedElements=getChildrenFor(getBuilder().getTreeStructureElement(updateInfo.getDescriptor()));
       LoadedChildren loaded=new LoadedChildren(loadedElements);
       for (      Object each : loadedElements) {
-        NodeDescriptor eachChildDescriptor=getTreeStructure().createDescriptor(each,descriptor);
+        NodeDescriptor eachChildDescriptor=getTreeStructure().createDescriptor(each,updateInfo.getDescriptor());
         loaded.putDescriptor(each,eachChildDescriptor,eachChildDescriptor.update());
       }
       children.set(loaded);
@@ -38,22 +42,22 @@
     public void run(){
       if (isReleased())       return;
       if (children.get() == null)       return;
-      if (isRerunNeeded(pass)) {
+      if (isRerunNeeded(updateInfo.getPass())) {
         removeFromLoadedInBackground(elementFromDescriptor.get());
-        getUpdater().addSubtreeToUpdate(pass);
+        getUpdater().addSubtreeToUpdate(updateInfo.getPass());
         return;
       }
       removeFromLoadedInBackground(elementFromDescriptor.get());
       if (myUnbuiltNodes.contains(node)) {
-        Pair<Boolean,LoadedChildren> unbuilt=processUnbuilt(node,descriptor,pass,isExpanded(node,wasExpanded),children.get());
+        Pair<Boolean,LoadedChildren> unbuilt=processUnbuilt(node,updateInfo.getDescriptor(),updateInfo.getPass(),isExpanded(node,updateInfo.isWasExpanded()),children.get());
         if (unbuilt.getFirst()) {
           nodeToProcessActions[0]=node;
           return;
         }
       }
-      updateNodeChildren(node,pass,children.get(),true,canSmartExpand,forceUpdate,true);
-      if (isRerunNeeded(pass)) {
-        getUpdater().addSubtreeToUpdate(pass);
+      updateNodeChildren(node,updateInfo.getPass(),children.get(),true,updateInfo.isCanSmartExpand(),updateInfo.isForceUpdate(),true);
+      if (isRerunNeeded(updateInfo.getPass())) {
+        getUpdater().addSubtreeToUpdate(updateInfo.getPass());
         return;
       }
       Object element=elementFromDescriptor.get();
@@ -64,7 +68,7 @@
     }
   }
 ;
-  addTaskToWorker(buildRunnable,true,updateRunnable,new Runnable(){
+  queueToBackground(buildRunnable,updateRunnable,new Runnable(){
     public void run(){
       if (nodeToProcessActions[0] != null) {
         processNodeActionsIfReady(nodeToProcessActions[0]);
