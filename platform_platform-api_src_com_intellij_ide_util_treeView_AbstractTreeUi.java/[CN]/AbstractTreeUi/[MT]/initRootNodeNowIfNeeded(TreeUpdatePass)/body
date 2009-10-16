@@ -1,29 +1,48 @@
 {
   if (myRootNodeWasInitialized)   return;
   myRootNodeWasInitialized=true;
-  Object rootElement=getTreeStructure().getRootElement();
+  final Object rootElement=getTreeStructure().getRootElement();
   addNodeAction(rootElement,new NodeAction(){
     public void onReady(    final DefaultMutableTreeNode node){
       processDeferredActions();
     }
   }
 ,false);
-  NodeDescriptor rootDescriptor=getTreeStructure().createDescriptor(rootElement,null);
-  getRootNode().setUserObject(rootDescriptor);
-  update(rootDescriptor,false);
-  if (getElementFromDescriptor(rootDescriptor) != null) {
-    createMapping(getElementFromDescriptor(rootDescriptor),getRootNode());
+  final Ref<NodeDescriptor> rootDescriptor=new Ref<NodeDescriptor>(null);
+  final boolean bgLoading=getTreeStructure().isToBuildChildrenInBackground(rootElement);
+  Runnable build=new Runnable(){
+    public void run(){
+      rootDescriptor.set(getTreeStructure().createDescriptor(rootElement,null));
+      getRootNode().setUserObject(rootDescriptor.get());
+      update(rootDescriptor.get());
+    }
   }
-  insertLoadingNode(getRootNode(),true);
-  boolean willUpdate=false;
-  if (isAutoExpand(rootDescriptor)) {
-    willUpdate=myUnbuiltNodes.contains(getRootNode());
-    expand(getRootNode(),true);
+;
+  Runnable update=new Runnable(){
+    public void run(){
+      if (getElementFromDescriptor(rootDescriptor.get()) != null) {
+        createMapping(getElementFromDescriptor(rootDescriptor.get()),getRootNode());
+      }
+      insertLoadingNode(getRootNode(),true);
+      boolean willUpdate=false;
+      if (isAutoExpand(rootDescriptor.get())) {
+        willUpdate=myUnbuiltNodes.contains(getRootNode());
+        expand(getRootNode(),true);
+      }
+      if (!willUpdate) {
+        updateNodeChildren(getRootNode(),pass,null,false,false,false,true);
+      }
+      if (getRootNode().getChildCount() == 0) {
+        myTreeModel.nodeChanged(getRootNode());
+      }
+    }
   }
-  if (!willUpdate) {
-    updateNodeChildren(getRootNode(),pass,null,false,isAutoExpand(rootDescriptor),false,true);
+;
+  if (bgLoading) {
+    queueToBackground(build,update,null);
   }
-  if (getRootNode().getChildCount() == 0) {
-    myTreeModel.nodeChanged(getRootNode());
+ else {
+    build.run();
+    update.run();
   }
 }
