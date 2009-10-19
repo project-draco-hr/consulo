@@ -1,6 +1,30 @@
 {
-  PsiElement target=getAssignmentTarget(element);
-  if (target != null) {
+  Pair<PsiElement,PsiSubstitutor> pair=getAssignmentTarget(element,parent);
+  if (pair != null) {
+    PsiElement target=pair.getFirst();
+    final PsiSubstitutor substitutor=pair.getSecond();
+    if (target instanceof PsiParameter) {
+      PsiParameter parameter=(PsiParameter)target;
+      PsiElement declarationScope=parameter.getDeclarationScope();
+      if (declarationScope instanceof PsiMethod) {
+        final PsiMethod method=(PsiMethod)declarationScope;
+        final int parameterIndex=method.getParameterList().getParameterIndex(parameter);
+        Processor<PsiMethod> myProcessor=new Processor<PsiMethod>(){
+          public boolean process(          PsiMethod override){
+            if (!parent.getScope().contains(override))             return true;
+            final PsiSubstitutor superSubstitutor=method == override ? substitutor : MethodSignatureUtil.getSuperMethodSignatureSubstitutor(method.getSignature(substitutor),override.getSignature(substitutor));
+            PsiParameter[] parameters=override.getParameterList().getParameters();
+            if (parameters.length <= parameterIndex)             return true;
+            PsiParameter actualParam=parameters[parameterIndex];
+            SliceUsage usage=SliceUtil.createSliceUsage(actualParam,parent,superSubstitutor);
+            return processor.process(usage);
+          }
+        }
+;
+        if (!myProcessor.process(method))         return false;
+        return OverridingMethodsSearch.search(method,parent.getScope().toSearchScope(),true).forEach(myProcessor);
+      }
+    }
     SliceUsage usage=SliceUtil.createSliceUsage(target,parent,parent.getSubstitutor());
     return processor.process(usage);
   }
