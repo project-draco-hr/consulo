@@ -1,0 +1,80 @@
+{
+  assertIsDispatchThread();
+  final Object oldElementFromDescriptor=getElementFromDescriptor(updateInfo.getDescriptor());
+  UpdateInfo loaded=getLoadedInBackground(oldElementFromDescriptor);
+  if (loaded != null) {
+    loaded.apply(updateInfo);
+    return false;
+  }
+  addToLoadedInBackground(oldElementFromDescriptor,updateInfo);
+  if (!isNodeBeingBuilt(node)) {
+    LoadingNode loadingNode=new LoadingNode(getLoadingNodeText());
+    myTreeModel.insertNodeInto(loadingNode,node,node.getChildCount());
+  }
+  final Ref<LoadedChildren> children=new Ref<LoadedChildren>();
+  final Ref<Object> elementFromDescriptor=new Ref<Object>();
+  Runnable buildRunnable=new Runnable(){
+    public void run(){
+      if (isReleased()) {
+        return;
+      }
+      if (!updateInfo.isDescriptorIsUpToDate()) {
+        update(updateInfo.getDescriptor(),true);
+      }
+      Object element=getElementFromDescriptor(updateInfo.getDescriptor());
+      if (element == null) {
+        removeFromLoadedInBackground(oldElementFromDescriptor);
+        return;
+      }
+      elementFromDescriptor.set(element);
+      Object[] loadedElements=getChildrenFor(getBuilder().getTreeStructureElement(updateInfo.getDescriptor()));
+      LoadedChildren loaded=new LoadedChildren(loadedElements);
+      for (      Object each : loadedElements) {
+        NodeDescriptor eachChildDescriptor=getTreeStructure().createDescriptor(each,updateInfo.getDescriptor());
+        loaded.putDescriptor(each,eachChildDescriptor,update(eachChildDescriptor,true).getResult());
+      }
+      children.set(loaded);
+    }
+  }
+;
+  final DefaultMutableTreeNode[] nodeToProcessActions=new DefaultMutableTreeNode[1];
+  Runnable updateRunnable=new Runnable(){
+    public void run(){
+      if (isReleased())       return;
+      if (children.get() == null)       return;
+      if (isRerunNeeded(updateInfo.getPass())) {
+        removeFromLoadedInBackground(elementFromDescriptor.get());
+        getUpdater().addSubtreeToUpdate(updateInfo.getPass());
+        return;
+      }
+      removeFromLoadedInBackground(elementFromDescriptor.get());
+      if (myUnbuiltNodes.contains(node)) {
+        Pair<Boolean,LoadedChildren> unbuilt=processUnbuilt(node,updateInfo.getDescriptor(),updateInfo.getPass(),isExpanded(node,updateInfo.isWasExpanded()),children.get());
+        if (unbuilt.getFirst()) {
+          nodeToProcessActions[0]=node;
+          return;
+        }
+      }
+      updateNodeChildren(node,updateInfo.getPass(),children.get(),true,updateInfo.isCanSmartExpand(),updateInfo.isForceUpdate(),true);
+      if (isRerunNeeded(updateInfo.getPass())) {
+        getUpdater().addSubtreeToUpdate(updateInfo.getPass());
+        return;
+      }
+      Object element=elementFromDescriptor.get();
+      if (element != null) {
+        removeLoading(node,true);
+        nodeToProcessActions[0]=node;
+      }
+    }
+  }
+;
+  queueToBackground(buildRunnable,updateRunnable,new Runnable(){
+    public void run(){
+      if (nodeToProcessActions[0] != null) {
+        processNodeActionsIfReady(nodeToProcessActions[0]);
+      }
+    }
+  }
+);
+  return true;
+}

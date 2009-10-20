@@ -1,80 +1,88 @@
 {
+  final ActionCallback result=new ActionCallback();
   if (pass.isExpired()) {
     return new ActionCallback.Rejected();
   }
-  NodeDescriptor childDesc=childDescriptor;
-  if (childDesc == null) {
+  final Ref<NodeDescriptor> childDesc=new Ref<NodeDescriptor>(childDescriptor);
+  if (childDesc.get() == null) {
     pass.expire();
     return new ActionCallback.Rejected();
   }
-  Object oldElement=getElementFromDescriptor(childDesc);
+  final Object oldElement=getElementFromDescriptor(childDesc.get());
   if (oldElement == null) {
     pass.expire();
     return new ActionCallback.Rejected();
   }
-  boolean changes;
+  AsyncResult<Boolean> update=new AsyncResult<Boolean>();
   if (parentPreloadedChildren != null && parentPreloadedChildren.getDescriptor(oldElement) != null) {
-    changes=parentPreloadedChildren.isUpdated(oldElement);
+    update.setDone(parentPreloadedChildren.isUpdated(oldElement));
   }
  else {
-    changes=update(childDesc,false);
+    update=update(childDesc.get(),false);
   }
-  boolean forceRemapping=false;
-  Object newElement=getElementFromDescriptor(childDesc);
-  Integer index=newElement != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc)) : null;
-  if (index != null) {
-    final Object elementFromMap=elementToIndexMap.getKey(index);
-    if (elementFromMap != newElement && elementFromMap.equals(newElement)) {
-      if (isInStructure(elementFromMap) && isInStructure(newElement)) {
-        if (parentNode.getUserObject() instanceof NodeDescriptor) {
-          final NodeDescriptor parentDescriptor=getDescriptorFrom(parentNode);
-          childDesc=getTreeStructure().createDescriptor(elementFromMap,parentDescriptor);
-          childNode.setUserObject(childDesc);
-          newElement=elementFromMap;
-          forceRemapping=true;
-          update(childDesc,false);
+  update.doWhenDone(new AsyncResult.Handler<Boolean>(){
+    public void run(    Boolean isChanged){
+      boolean changes=isChanged;
+      boolean forceRemapping=false;
+      Object newElement=getElementFromDescriptor(childDesc.get());
+      Integer index=newElement != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get())) : null;
+      if (index != null) {
+        final Object elementFromMap=elementToIndexMap.getKey(index);
+        if (elementFromMap != newElement && elementFromMap.equals(newElement)) {
+          if (isInStructure(elementFromMap) && isInStructure(newElement)) {
+            if (parentNode.getUserObject() instanceof NodeDescriptor) {
+              final NodeDescriptor parentDescriptor=getDescriptorFrom(parentNode);
+              childDesc.set(getTreeStructure().createDescriptor(elementFromMap,parentDescriptor));
+              childNode.setUserObject(childDesc.get());
+              newElement=elementFromMap;
+              forceRemapping=true;
+              update(childDesc.get(),false);
+              changes=true;
+            }
+          }
+        }
+        if (childDesc.get().getIndex() != index.intValue()) {
           changes=true;
         }
+        childDesc.get().setIndex(index.intValue());
       }
-    }
-    if (childDesc.getIndex() != index.intValue()) {
-      changes=true;
-    }
-    childDesc.setIndex(index.intValue());
-  }
-  if (index != null && changes) {
-    updateNodeImageAndPosition(childNode,false);
-  }
-  if (!oldElement.equals(newElement) | forceRemapping) {
-    removeMapping(oldElement,childNode,newElement);
-    if (newElement != null) {
-      createMapping(newElement,childNode);
-    }
-  }
-  if (index == null) {
-    int selectedIndex=-1;
-    if (TreeBuilderUtil.isNodeOrChildSelected(myTree,childNode)) {
-      selectedIndex=parentNode.getIndex(childNode);
-    }
-    if (childNode.getParent() instanceof DefaultMutableTreeNode) {
-      final DefaultMutableTreeNode parent=(DefaultMutableTreeNode)childNode.getParent();
-      if (myTree.isExpanded(new TreePath(parent.getPath()))) {
-        if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
-          insertLoadingNode(parent,false);
+      if (index != null && changes) {
+        updateNodeImageAndPosition(childNode,false);
+      }
+      if (!oldElement.equals(newElement) | forceRemapping) {
+        removeMapping(oldElement,childNode,newElement);
+        if (newElement != null) {
+          createMapping(newElement,childNode);
         }
       }
-    }
-    Object disposedElement=getElementFor(childNode);
-    removeNodeFromParent(childNode,selectedIndex >= 0);
-    disposeNode(childNode);
-    adjustSelectionOnChildRemove(parentNode,selectedIndex,disposedElement);
-  }
+      if (index == null) {
+        int selectedIndex=-1;
+        if (TreeBuilderUtil.isNodeOrChildSelected(myTree,childNode)) {
+          selectedIndex=parentNode.getIndex(childNode);
+        }
+        if (childNode.getParent() instanceof DefaultMutableTreeNode) {
+          final DefaultMutableTreeNode parent=(DefaultMutableTreeNode)childNode.getParent();
+          if (myTree.isExpanded(new TreePath(parent.getPath()))) {
+            if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
+              insertLoadingNode(parent,false);
+            }
+          }
+        }
+        Object disposedElement=getElementFor(childNode);
+        removeNodeFromParent(childNode,selectedIndex >= 0);
+        disposeNode(childNode);
+        adjustSelectionOnChildRemove(parentNode,selectedIndex,disposedElement);
+      }
  else {
-    elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc));
-    updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true);
+        elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
+        updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true);
+      }
+      if (parentNode.equals(getRootNode())) {
+        myTreeModel.nodeChanged(getRootNode());
+      }
+      result.setDone();
+    }
   }
-  if (parentNode.equals(getRootNode())) {
-    myTreeModel.nodeChanged(getRootNode());
-  }
-  return new ActionCallback.Done();
+);
+  return result;
 }
