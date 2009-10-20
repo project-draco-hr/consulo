@@ -1,0 +1,99 @@
+{
+  super(new BorderLayout());
+  myState=state;
+  myModel=new MyTableModel(state);
+  myEntryTable=new Table(myModel);
+  myEntryTable.setShowGrid(false);
+  myEntryTable.setDragEnabled(false);
+  myEntryTable.setShowHorizontalLines(false);
+  myEntryTable.setShowVerticalLines(false);
+  myEntryTable.setIntercellSpacing(new Dimension(0,0));
+  myEntryTable.setDefaultRenderer(TableItem.class,new TableItemRenderer());
+  myEntryTable.setDefaultRenderer(Boolean.class,new ExportFlagRenderer(myEntryTable.getDefaultRenderer(Boolean.class)));
+  JComboBox scopeEditor=new JComboBox(new EnumComboBoxModel<DependencyScope>(DependencyScope.class));
+  myEntryTable.setDefaultEditor(DependencyScope.class,new DefaultCellEditor(scopeEditor));
+  myEntryTable.getSelectionModel().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+  new SpeedSearchBase<Table>(myEntryTable){
+    public int getSelectedIndex(){
+      return myEntryTable.getSelectedRow();
+    }
+    public Object[] getAllElements(){
+      final int count=myModel.getRowCount();
+      Object[] elements=new Object[count];
+      for (int idx=0; idx < count; idx++) {
+        elements[idx]=myModel.getItemAt(idx);
+      }
+      return elements;
+    }
+    public String getElementText(    Object element){
+      return getCellAppearance((TableItem)element,false).getText();
+    }
+    public void selectElement(    Object element,    String selectedText){
+      final int count=myModel.getRowCount();
+      for (int row=0; row < count; row++) {
+        if (element.equals(myModel.getItemAt(row))) {
+          myEntryTable.getSelectionModel().setSelectionInterval(row,row);
+          TableUtil.scrollSelectionToVisible(myEntryTable);
+          break;
+        }
+      }
+    }
+  }
+;
+  setFixedColumnWidth(MyTableModel.EXPORT_COLUMN,MyTableModel.EXPORT_COLUMN_NAME);
+  setFixedColumnWidth(MyTableModel.SCOPE_COLUMN,DependencyScope.COMPILE.toString() + "     ");
+  myEntryTable.registerKeyboardAction(new ActionListener(){
+    public void actionPerformed(    ActionEvent e){
+      final int[] selectedRows=myEntryTable.getSelectedRows();
+      boolean currentlyMarked=true;
+      for (      final int selectedRow : selectedRows) {
+        final TableItem item=myModel.getItemAt(selectedRow);
+        if (selectedRow < 0 || !item.isExportable()) {
+          return;
+        }
+        currentlyMarked&=item.isExported();
+      }
+      for (      final int selectedRow : selectedRows) {
+        myModel.getItemAt(selectedRow).setExported(!currentlyMarked);
+      }
+      myModel.fireTableDataChanged();
+      TableUtil.selectRows(myEntryTable,selectedRows);
+    }
+  }
+,KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,0),WHEN_FOCUSED);
+  add(ScrollPaneFactory.createScrollPane(myEntryTable),BorderLayout.CENTER);
+  add(createButtonsBlock(),BorderLayout.EAST);
+  if (myEntryTable.getRowCount() > 0) {
+    myEntryTable.getSelectionModel().setSelectionInterval(0,0);
+  }
+  myEntryTable.addMouseListener(new MouseAdapter(){
+    public void mouseClicked(    MouseEvent e){
+      if (e.getClickCount() == 2) {
+        navigate(true);
+      }
+    }
+  }
+);
+  DefaultActionGroup actionGroup=new DefaultActionGroup();
+  final AnAction navigateAction=new AnAction(ProjectBundle.message("classpath.panel.navigate.action.text")){
+    public void actionPerformed(    AnActionEvent e){
+      navigate(false);
+    }
+    public void update(    AnActionEvent e){
+      final Presentation presentation=e.getPresentation();
+      presentation.setEnabled(false);
+      if (myEntryTable.getSelectedRowCount() != 1)       return;
+      final OrderEntry entry=myModel.getItemAt(myEntryTable.getSelectedRow()).getEntry();
+      if (entry != null && entry.isValid()) {
+        if (!(entry instanceof ModuleSourceOrderEntry)) {
+          presentation.setEnabled(true);
+        }
+      }
+    }
+  }
+;
+  navigateAction.registerCustomShortcutSet(ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE).getShortcutSet(),myEntryTable);
+  actionGroup.add(navigateAction);
+  actionGroup.add(new MyFindUsagesAction());
+  PopupHandler.installPopupHandler(myEntryTable,actionGroup,ActionPlaces.UNKNOWN,ActionManager.getInstance());
+}
