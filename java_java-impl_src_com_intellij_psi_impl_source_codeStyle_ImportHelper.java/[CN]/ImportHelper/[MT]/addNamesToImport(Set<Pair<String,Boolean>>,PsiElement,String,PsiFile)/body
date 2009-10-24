@@ -1,0 +1,53 @@
+{
+  if (scope instanceof PsiImportList)   return;
+  final LinkedList<PsiElement> stack=new LinkedList<PsiElement>();
+  stack.add(scope);
+  while (!stack.isEmpty()) {
+    final PsiElement child=stack.removeFirst();
+    if (child instanceof PsiImportList)     continue;
+    stack.addAll(Arrays.asList(child.getChildren()));
+    for (    final PsiReference reference : child.getReferences()) {
+      if (!(reference instanceof PsiJavaReference))       continue;
+      final PsiJavaReference javaReference=(PsiJavaReference)reference;
+      if (javaReference instanceof JavaClassReference && ((JavaClassReference)javaReference).getContextReference() != null)       continue;
+      PsiJavaCodeReferenceElement referenceElement=null;
+      if (reference instanceof PsiJavaCodeReferenceElement) {
+        referenceElement=(PsiJavaCodeReferenceElement)child;
+        if (referenceElement.getQualifier() != null) {
+          continue;
+        }
+        if (reference instanceof PsiJavaCodeReferenceElementImpl && ((PsiJavaCodeReferenceElementImpl)reference).getKind() == PsiJavaCodeReferenceElementImpl.CLASS_IN_QUALIFIED_NEW_KIND) {
+          continue;
+        }
+      }
+      final JavaResolveResult resolveResult=javaReference.advancedResolve(true);
+      PsiElement refElement=resolveResult.getElement();
+      if (refElement == null && referenceElement != null) {
+        refElement=ResolveClassUtil.resolveClass(referenceElement);
+      }
+      if (refElement == null)       continue;
+      PsiElement currentFileResolveScope=resolveResult.getCurrentFileResolveScope();
+      if (!(currentFileResolveScope instanceof PsiImportStatementBase))       continue;
+      if (context != null && currentFileResolveScope instanceof JspxImportStatement && context != ((JspxImportStatement)currentFileResolveScope).getDeclarationFile()) {
+        continue;
+      }
+      if (referenceElement != null) {
+        if (currentFileResolveScope instanceof PsiImportStaticStatement) {
+          PsiImportStaticStatement importStaticStatement=(PsiImportStaticStatement)currentFileResolveScope;
+          String name=importStaticStatement.getImportReference().getCanonicalText();
+          if (importStaticStatement.isOnDemand()) {
+            String refName=referenceElement.getReferenceName();
+            if (refName != null)             name=name + "." + refName;
+          }
+          names.add(Pair.create(name,Boolean.TRUE));
+          continue;
+        }
+      }
+      if (refElement instanceof PsiClass) {
+        String qName=((PsiClass)refElement).getQualifiedName();
+        if (hasPackage(qName,thisPackageName))         continue;
+        names.add(Pair.create(qName,Boolean.FALSE));
+      }
+    }
+  }
+}
