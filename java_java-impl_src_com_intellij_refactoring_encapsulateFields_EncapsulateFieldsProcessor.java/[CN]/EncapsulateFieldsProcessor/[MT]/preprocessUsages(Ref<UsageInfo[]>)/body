@@ -1,17 +1,43 @@
 {
-  MultiMap<PsiElement,String> conflicts=new MultiMap<PsiElement,String>();
-  if (myDialog != null) {
-    checkExistingMethods(myDialog.getGetterPrototypes(),conflicts,true);
-    checkExistingMethods(myDialog.getSetterPrototypes(),conflicts,false);
-    if (conflicts.size() > 0) {
-      ConflictsDialog dialog=new ConflictsDialog(myProject,conflicts);
-      dialog.show();
-      if (!dialog.isOK()) {
-        if (dialog.isShowConflicts())         prepareSuccessful();
-        return false;
+  final MultiMap<PsiElement,String> conflicts=new MultiMap<PsiElement,String>();
+  checkExistingMethods(myDescriptor.getGetterPrototypes(),conflicts,true);
+  checkExistingMethods(myDescriptor.getSetterPrototypes(),conflicts,false);
+  final Collection<PsiClass> classes=ClassInheritorsSearch.search(myClass).findAll();
+  for (int i=0; i < myFields.length; i++) {
+    final PsiField field=myFields[i];
+    final Set<PsiMethod> setters=new HashSet<PsiMethod>();
+    final Set<PsiMethod> getters=new HashSet<PsiMethod>();
+    for (    PsiClass aClass : classes) {
+      final PsiMethod getterOverrider=aClass.findMethodBySignature(myDescriptor.getGetterPrototypes()[i],false);
+      if (getterOverrider != null) {
+        getters.add(getterOverrider);
+      }
+      final PsiMethod setterOverrider=aClass.findMethodBySignature(myDescriptor.getSetterPrototypes()[i],false);
+      if (setterOverrider != null) {
+        setters.add(setterOverrider);
+      }
+    }
+    if (!getters.isEmpty() || !setters.isEmpty()) {
+      for (      PsiReference reference : ReferencesSearch.search(field)) {
+        final PsiElement place=reference.getElement();
+        LOG.assertTrue(place instanceof PsiReferenceExpression);
+        final PsiExpression qualifierExpression=((PsiReferenceExpression)place).getQualifierExpression();
+        final PsiClass ancestor;
+        if (qualifierExpression == null) {
+          ancestor=PsiTreeUtil.getParentOfType(place,PsiClass.class,false);
+        }
+ else {
+          ancestor=PsiUtil.resolveClassInType(qualifierExpression.getType());
+        }
+        final boolean isGetter=!PsiUtil.isAccessedForWriting((PsiExpression)place);
+        for (        PsiMethod overridden : isGetter ? getters : setters) {
+          if (InheritanceUtil.isInheritorOrSelf(myClass,ancestor,true)) {
+            conflicts.putValue(overridden,"There is already a " + CommonRefactoringUtil.htmlEmphasize(RefactoringUIUtil.getDescription(overridden,true)) + " which would hide generated "+ (isGetter ? "getter" : "setter")+ " for "+ place.getText());
+            break;
+          }
+        }
       }
     }
   }
-  prepareSuccessful();
-  return true;
+  return showConflicts(conflicts);
 }
