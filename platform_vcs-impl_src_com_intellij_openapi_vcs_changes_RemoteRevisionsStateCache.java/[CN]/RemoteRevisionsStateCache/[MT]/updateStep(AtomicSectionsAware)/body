@@ -1,0 +1,47 @@
+{
+  final MultiMap<VcsRoot,String> dirty=new MultiMap<VcsRoot,String>();
+  final long oldPoint=System.currentTimeMillis() - DISCRETE;
+synchronized (myLock) {
+    for (    VcsRoot root : myQueries.keySet()) {
+      final Collection<String> collection=myQueries.get(root);
+      for (      String s : collection) {
+        dirty.putValue(root,s);
+      }
+    }
+    myQueries.clear();
+    final Set<VcsRoot> roots=new HashSet<VcsRoot>();
+    for (    Map.Entry<VcsRoot,Long> entry : myTs.entrySet()) {
+      if (!dirty.get(entry.getKey()).isEmpty())       continue;
+      final Long ts=entry.getValue();
+      if ((ts == null) || (oldPoint > ts)) {
+        roots.add(entry.getKey());
+      }
+    }
+    for (    Map.Entry<String,Pair<Boolean,VcsRoot>> entry : myChanged.entrySet()) {
+      final VcsRoot vcsRoot=entry.getValue().getSecond();
+      if ((!dirty.get(vcsRoot).isEmpty()) || roots.contains(vcsRoot)) {
+        dirty.putValue(vcsRoot,entry.getKey());
+      }
+    }
+  }
+  if (dirty.isEmpty())   return false;
+  final Map<String,Pair<Boolean,VcsRoot>> results=new HashMap<String,Pair<Boolean,VcsRoot>>();
+  for (  VcsRoot vcsRoot : dirty.keySet()) {
+    atomicSectionsAware.checkShouldExit();
+    final TreeDiffProvider provider=vcsRoot.vcs.getTreeDiffProvider();
+    if (provider == null)     continue;
+    final Collection<String> paths=dirty.get(vcsRoot);
+    final Collection<String> remotelyChanged=provider.getRemotelyChanged(vcsRoot.path,paths);
+    for (    String path : paths) {
+      results.put(path,new Pair<Boolean,VcsRoot>(remotelyChanged.contains(path),vcsRoot));
+    }
+  }
+  final long curTime=System.currentTimeMillis();
+synchronized (myLock) {
+    myChanged.putAll(results);
+    for (    VcsRoot vcsRoot : dirty.keySet()) {
+      myTs.put(vcsRoot,curTime);
+    }
+  }
+  return true;
+}
