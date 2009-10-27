@@ -1,0 +1,54 @@
+{
+  boolean generateDelegate=false;
+  Editor editor=myFixture.getEditor();
+  int startOffset=editor.getSelectionModel().getSelectionStart();
+  int endOffset=editor.getSelectionModel().getSelectionEnd();
+  final PsiFile file=myFixture.getFile();
+  PsiExpression expr=CodeInsightUtil.findExpressionInRange(file,startOffset,endOffset);
+  PsiLocalVariable localVariable=null;
+  if (expr == null) {
+    PsiElement element=CodeInsightUtil.findElementInRange(file,startOffset,endOffset,PsiElement.class);
+    localVariable=PsiTreeUtil.getParentOfType(element,PsiLocalVariable.class);
+    if (localVariable == null) {
+      return false;
+    }
+  }
+  PsiElement context=expr == null ? localVariable : expr;
+  PsiMethod method=Util.getContainingMethod(context);
+  if (method == null)   return false;
+  final PsiMethod methodToSearchFor;
+  if (searchForSuper) {
+    final PsiMethod[] superMethods=method.findDeepestSuperMethods();
+    methodToSearchFor=superMethods.length > 0 ? superMethods[0] : method;
+  }
+ else {
+    methodToSearchFor=method;
+  }
+  PsiExpression initializer=(expr == null) ? localVariable.getInitializer() : expr;
+  TIntArrayList parametersToRemove=removeUnusedParameters ? Util.findParametersToRemove(method,initializer) : new TIntArrayList();
+  final Project project=myFixture.getProject();
+  final IntroduceParameterProcessor processor=new IntroduceParameterProcessor(project,method,methodToSearchFor,initializer,expr,localVariable,true,parameterName,replaceAllOccurences,replaceFieldsWithGetters,declareFinal,generateDelegate,null,parametersToRemove);
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          try {
+            processor.run();
+            if (conflicts != null)             fail("Conflicts were expected");
+          }
+ catch (          Exception e) {
+            if (conflicts == null) {
+              e.printStackTrace();
+              fail("Conflicts were not expected");
+            }
+            assertEquals(conflicts,e.getMessage());
+          }
+        }
+      }
+);
+    }
+  }
+,"introduce Parameter",null);
+  editor.getSelectionModel().removeSelection();
+  return true;
+}
