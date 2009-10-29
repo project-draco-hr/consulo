@@ -18,69 +18,96 @@
     update.setDone(parentPreloadedChildren.isUpdated(oldElement));
   }
  else {
-    update=update(childDesc.get());
+    update=update(childDesc.get(),false);
   }
   update.doWhenDone(new AsyncResult.Handler<Boolean>(){
     public void run(    Boolean isChanged){
-      boolean changes=isChanged;
-      boolean forceRemapping=false;
-      Object newElement=getElementFromDescriptor(childDesc.get());
-      Integer index=newElement != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get())) : null;
+      final Ref<Boolean> changes=new Ref<Boolean>(isChanged);
+      final Ref<Boolean> forceRemapping=new Ref<Boolean>(false);
+      final Ref<Object> newElement=new Ref<Object>(getElementFromDescriptor(childDesc.get()));
+      final Integer index=newElement.get() != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get())) : null;
+      final AsyncResult<Boolean> updateIndexDone=new AsyncResult<Boolean>();
+      final ActionCallback indexReady=new ActionCallback();
       if (index != null) {
         final Object elementFromMap=elementToIndexMap.getKey(index);
-        if (elementFromMap != newElement && elementFromMap.equals(newElement)) {
-          if (isInStructure(elementFromMap) && isInStructure(newElement)) {
+        if (elementFromMap != newElement.get() && elementFromMap.equals(newElement.get())) {
+          if (isInStructure(elementFromMap) && isInStructure(newElement.get())) {
             if (parentNode.getUserObject() instanceof NodeDescriptor) {
               final NodeDescriptor parentDescriptor=getDescriptorFrom(parentNode);
               childDesc.set(getTreeStructure().createDescriptor(elementFromMap,parentDescriptor));
               childNode.setUserObject(childDesc.get());
-              newElement=elementFromMap;
-              forceRemapping=true;
-              update(childDesc.get());
-              changes=true;
+              newElement.set(elementFromMap);
+              forceRemapping.set(true);
+              update(childDesc.get(),false).doWhenDone(new AsyncResult.Handler<Boolean>(){
+                public void run(                Boolean isChanged){
+                  changes.set(isChanged);
+                  updateIndexDone.setDone(isChanged);
+                }
+              }
+);
             }
           }
-        }
-        if (childDesc.get().getIndex() != index.intValue()) {
-          changes=true;
-        }
-        childDesc.get().setIndex(index.intValue());
-      }
-      if (index != null && changes) {
-        updateNodeImageAndPosition(childNode,false);
-      }
-      if (!oldElement.equals(newElement) | forceRemapping) {
-        removeMapping(oldElement,childNode,newElement);
-        if (newElement != null) {
-          createMapping(newElement,childNode);
-        }
-      }
-      if (index == null) {
-        int selectedIndex=-1;
-        if (TreeBuilderUtil.isNodeOrChildSelected(myTree,childNode)) {
-          selectedIndex=parentNode.getIndex(childNode);
-        }
-        if (childNode.getParent() instanceof DefaultMutableTreeNode) {
-          final DefaultMutableTreeNode parent=(DefaultMutableTreeNode)childNode.getParent();
-          if (myTree.isExpanded(new TreePath(parent.getPath()))) {
-            if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
-              insertLoadingNode(parent,false);
-            }
+ else {
+            updateIndexDone.setDone(changes.get());
           }
         }
-        Object disposedElement=getElementFor(childNode);
-        removeNodeFromParent(childNode,selectedIndex >= 0);
-        disposeNode(childNode);
-        adjustSelectionOnChildRemove(parentNode,selectedIndex,disposedElement);
+ else {
+          updateIndexDone.setDone(changes.get());
+        }
+        updateIndexDone.doWhenDone(new Runnable(){
+          public void run(){
+            if (childDesc.get().getIndex() != index.intValue()) {
+              changes.set(true);
+            }
+            childDesc.get().setIndex(index.intValue());
+            indexReady.setDone();
+          }
+        }
+);
       }
  else {
-        elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
-        updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true);
+        updateIndexDone.setDone();
       }
-      if (parentNode.equals(getRootNode())) {
-        myTreeModel.nodeChanged(getRootNode());
+      updateIndexDone.doWhenDone(new Runnable(){
+        public void run(){
+          if (index != null && changes.get()) {
+            updateNodeImageAndPosition(childNode,false);
+          }
+          if (!oldElement.equals(newElement.get()) | forceRemapping.get()) {
+            removeMapping(oldElement,childNode,newElement.get());
+            if (newElement.get() != null) {
+              createMapping(newElement.get(),childNode);
+            }
+          }
+          if (index == null) {
+            int selectedIndex=-1;
+            if (TreeBuilderUtil.isNodeOrChildSelected(myTree,childNode)) {
+              selectedIndex=parentNode.getIndex(childNode);
+            }
+            if (childNode.getParent() instanceof DefaultMutableTreeNode) {
+              final DefaultMutableTreeNode parent=(DefaultMutableTreeNode)childNode.getParent();
+              if (myTree.isExpanded(new TreePath(parent.getPath()))) {
+                if (parent.getChildCount() == 1 && parent.getChildAt(0) == childNode) {
+                  insertLoadingNode(parent,false);
+                }
+              }
+            }
+            Object disposedElement=getElementFor(childNode);
+            removeNodeFromParent(childNode,selectedIndex >= 0);
+            disposeNode(childNode);
+            adjustSelectionOnChildRemove(parentNode,selectedIndex,disposedElement);
+          }
+ else {
+            elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
+            updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true);
+          }
+          if (parentNode.equals(getRootNode())) {
+            myTreeModel.nodeChanged(getRootNode());
+          }
+          result.setDone();
+        }
       }
-      result.setDone();
+);
     }
   }
 );

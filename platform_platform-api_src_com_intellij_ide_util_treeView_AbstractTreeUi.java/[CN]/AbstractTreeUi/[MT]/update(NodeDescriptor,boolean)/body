@@ -1,0 +1,68 @@
+{
+  final AsyncResult<Boolean> result=new AsyncResult<Boolean>();
+  if (now || isPassthroughMode()) {
+    return new AsyncResult<Boolean>().setDone(_update(nodeDescriptor));
+  }
+  Object element=getElementFromDescriptor(nodeDescriptor);
+  boolean bgLoading=getTreeStructure().isToBuildChildrenInBackground(element);
+  boolean edt=isEdt();
+  if (bgLoading) {
+    if (edt) {
+      final Ref<Boolean> changes=new Ref<Boolean>(false);
+      queueToBackground(new Runnable(){
+        public void run(){
+          changes.set(_update(nodeDescriptor));
+        }
+      }
+,new Runnable(){
+        public void run(){
+          result.setDone(changes.get());
+        }
+      }
+,null);
+    }
+ else {
+      result.setDone(_update(nodeDescriptor));
+    }
+  }
+ else {
+    if (edt || !myWasEverShown) {
+      result.setDone(_update(nodeDescriptor));
+    }
+ else {
+      UIUtil.invokeLaterIfNeeded(new Runnable(){
+        public void run(){
+          if (!isReleased()) {
+            result.setDone(_update(nodeDescriptor));
+          }
+ else {
+            result.setRejected();
+          }
+        }
+      }
+);
+    }
+  }
+  result.doWhenDone(new AsyncResult.Handler<Boolean>(){
+    public void run(    Boolean changes){
+      if (changes) {
+        final long updateStamp=nodeDescriptor.getUpdateCount();
+        UIUtil.invokeLaterIfNeeded(new Runnable(){
+          public void run(){
+            Object element=nodeDescriptor.getElement();
+            DefaultMutableTreeNode node=getNodeForElement(element,false);
+            if (node != null) {
+              TreePath path=getPathFor(node);
+              if (path != null && myTree.isVisible(path)) {
+                updateNodeImageAndPosition(node,false);
+              }
+            }
+          }
+        }
+);
+      }
+    }
+  }
+);
+  return result;
+}

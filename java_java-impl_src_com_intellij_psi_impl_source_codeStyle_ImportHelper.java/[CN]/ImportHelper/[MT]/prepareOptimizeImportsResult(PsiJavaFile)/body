@@ -1,38 +1,39 @@
 {
-  CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(file.getProject());
-  final Set<String> namesToImportStaticly=new THashSet<String>();
-  String[] names=collectNamesToImport(file,namesToImportStaticly);
-  Arrays.sort(names);
-  ArrayList<String> namesList=new ArrayList<String>();
-  ImportLayoutTable table=mySettings.IMPORT_LAYOUT_TABLE;
-  if (table != null) {
-    int[] entriesForName=ArrayUtil.newIntArray(names.length);
-    for (int i=0; i < names.length; i++) {
-      entriesForName[i]=findEntryIndex(names[i]);
+  List<Pair<String,Boolean>> names=new ArrayList<Pair<String,Boolean>>(collectNamesToImport(file));
+  Collections.sort(names,new Comparator<Pair<String,Boolean>>(){
+    public int compare(    Pair<String,Boolean> o1,    Pair<String,Boolean> o2){
+      return o1.getFirst().compareTo(o2.getFirst());
     }
-    Entry[] entries=table.getEntries();
-    for (int i=0; i < entries.length; i++) {
-      Entry entry=entries[i];
-      if (entry instanceof PackageEntry) {
-        for (int j=0; j < names.length; j++) {
-          if (entriesForName[j] == i) {
-            namesList.add(names[j]);
-            names[j]=null;
-          }
-        }
+  }
+);
+  int[] entryForName=ArrayUtil.newIntArray(names.size());
+  PackageEntry[] entries=mySettings.IMPORT_LAYOUT_TABLE.getEntries();
+  for (int i=0; i < names.size(); i++) {
+    Pair<String,Boolean> pair=names.get(i);
+    String packageName=pair.getFirst();
+    Boolean isStatic=pair.getSecond();
+    entryForName[i]=findEntryIndex(packageName,isStatic,entries);
+  }
+  List<Pair<String,Boolean>> resultList=new ArrayList<Pair<String,Boolean>>(names.size());
+  for (int i=0; i < entries.length; i++) {
+    for (int j=0; j < names.size(); j++) {
+      if (entryForName[j] == i) {
+        resultList.add(names.get(j));
+        names.set(j,null);
       }
     }
   }
-  for (  String name : names) {
-    if (name != null)     namesList.add(name);
+  for (  Pair<String,Boolean> name : names) {
+    if (name != null)     resultList.add(name);
   }
-  names=ArrayUtil.toStringArray(namesList);
   TObjectIntHashMap<String> packageToCountMap=new TObjectIntHashMap<String>();
   TObjectIntHashMap<String> classToCountMap=new TObjectIntHashMap<String>();
-  for (  String name : names) {
+  for (  Pair<String,Boolean> pair : resultList) {
+    String name=pair.getFirst();
+    Boolean isStatic=pair.getSecond();
     String packageOrClassName=getPackageOrClassName(name);
     if (packageOrClassName.length() == 0)     continue;
-    if (namesToImportStaticly.contains(name)) {
+    if (isStatic) {
       int count=classToCountMap.get(packageOrClassName);
       classToCountMap.put(packageOrClassName,count + 1);
     }
@@ -56,16 +57,21 @@ class MyVisitorProcedure implements TObjectIntProcedure<String> {
   }
   classToCountMap.forEachEntry(new MyVisitorProcedure(false));
   packageToCountMap.forEachEntry(new MyVisitorProcedure(true));
-  Set<String> classesToUseSingle=findSingleImports(file,names,classesOrPackagesToImportOnDemand,namesToImportStaticly);
+  Set<String> classesToUseSingle=findSingleImports(file,resultList,classesOrPackagesToImportOnDemand);
+  Set<String> toReimport=new THashSet<String>();
+  calcClassesConflictingViaOnDemandImports(file,classesOrPackagesToImportOnDemand,file.getResolveScope(),toReimport);
+  classesToUseSingle.addAll(toReimport);
   try {
-    final String text=buildImportListText(names,classesOrPackagesToImportOnDemand,classesToUseSingle,namesToImportStaticly);
+    StringBuilder text=buildImportListText(resultList,classesOrPackagesToImportOnDemand,classesToUseSingle);
     String ext=StdFileTypes.JAVA.getDefaultExtension();
-    final PsiJavaFile dummyFile=(PsiJavaFile)PsiFileFactory.getInstance(file.getProject()).createFileFromText("_Dummy_." + ext,StdFileTypes.JAVA,text);
+    PsiFileFactory factory=PsiFileFactory.getInstance(file.getProject());
+    final PsiJavaFile dummyFile=(PsiJavaFile)factory.createFileFromText("_Dummy_." + ext,StdFileTypes.JAVA,text);
+    CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(file.getProject());
     codeStyleManager.reformat(dummyFile);
-    PsiImportList resultList=dummyFile.getImportList();
+    PsiImportList result=dummyFile.getImportList();
     PsiImportList oldList=file.getImportList();
-    if (oldList.isReplaceEquivalent(resultList))     return null;
-    return resultList;
+    if (oldList.isReplaceEquivalent(result))     return null;
+    return result;
   }
  catch (  IncorrectOperationException e) {
     LOG.error(e);

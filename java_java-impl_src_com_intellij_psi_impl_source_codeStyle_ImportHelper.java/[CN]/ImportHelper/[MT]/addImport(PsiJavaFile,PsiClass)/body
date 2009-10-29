@@ -22,7 +22,7 @@
   if (conflictPackageRef != null) {
     useOnDemand=false;
   }
-  List<PsiElement> classesToReimport=new ArrayList<PsiElement>();
+  List<PsiClass> classesToReimport=new ArrayList<PsiClass>();
   List<PsiJavaCodeReferenceElement> importRefs=getImportsFromPackage(file,packageName);
   if (useOnDemand) {
     if (mySettings.USE_SINGLE_CLASS_IMPORTS && importRefs.size() + 1 < mySettings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND && !mySettings.PACKAGES_TO_USE_IMPORT_ON_DEMAND.contains(packageName)) {
@@ -33,58 +33,28 @@
     }
     if (useOnDemand) {
       PsiElement[] onDemandRefs=file.getOnDemandImports(false,true);
-      if (onDemandRefs.length > 0) {
-        PsiPackage aPackage=facade.findPackage(packageName);
-        if (aPackage != null) {
-          PsiDirectory[] dirs=aPackage.getDirectories();
-          for (          PsiDirectory dir : dirs) {
-            PsiFile[] files=dir.getFiles();
-            for (            PsiFile aFile : files) {
-              if (aFile instanceof PsiJavaFile) {
-                String name=aFile.getVirtualFile().getNameWithoutExtension();
-                for (                PsiElement ref : onDemandRefs) {
-                  String refName=ref instanceof PsiClass ? ((PsiClass)ref).getQualifiedName() : ((PsiPackage)ref).getQualifiedName();
-                  String conflictClassName=refName + "." + name;
-                  GlobalSearchScope resolveScope=file.getResolveScope();
-                  PsiClass conflictClass=facade.findClass(conflictClassName,resolveScope);
-                  if (conflictClass != null && helper.isAccessible(conflictClass,file,null)) {
-                    String conflictClassName2=aPackage.getQualifiedName() + "." + name;
-                    PsiClass conflictClass2=facade.findClass(conflictClassName2,resolveScope);
-                    if (conflictClass2 != null && helper.isAccessible(conflictClass2,file,null)) {
-                      if (ReferencesSearch.search(conflictClass,new LocalSearchScope(file),false).findFirst() != null) {
-                        classesToReimport.add(conflictClass);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+      List<String> refTexts=new ArrayList<String>(onDemandRefs.length);
+      for (      PsiElement ref : onDemandRefs) {
+        String refName=ref instanceof PsiClass ? ((PsiClass)ref).getQualifiedName() : ((PsiPackage)ref).getQualifiedName();
+        refTexts.add(refName);
       }
+      calcClassesToReimport(file,facade,helper,packageName,classesToReimport,refTexts);
     }
   }
   try {
     PsiImportList importList=file.getImportList();
-    PsiImportStatement statement;
-    if (useOnDemand) {
-      statement=factory.createImportStatementOnDemand(packageName);
-    }
- else {
-      statement=factory.createImportStatement(refClass);
-    }
+    PsiImportStatement statement=useOnDemand ? factory.createImportStatementOnDemand(packageName) : factory.createImportStatement(refClass);
     importList.add(statement);
     if (useOnDemand) {
       for (      PsiJavaCodeReferenceElement ref : importRefs) {
         LOG.assertTrue(ref.getParent() instanceof PsiImportStatement);
         if (!ref.isValid())         continue;
-        classesToReimport.add(ref.resolve());
+        classesToReimport.add((PsiClass)ref.resolve());
         PsiImportStatement importStatement=(PsiImportStatement)ref.getParent();
         importStatement.delete();
       }
     }
-    for (    PsiElement aClassesToReimport : classesToReimport) {
-      PsiClass aClass=(PsiClass)aClassesToReimport;
+    for (    PsiClass aClass : classesToReimport) {
       if (aClass != null) {
         addImport(file,aClass);
       }

@@ -11,9 +11,15 @@
     boolean bgBuild=isToBuildInBackground(descriptor);
     boolean notRequiredToUpdateChildren=!forcedNow && !wasExpanded;
     if (notRequiredToUpdateChildren && forceUpdate && !wasExpanded) {
-      notRequiredToUpdateChildren=getBuilder().isAlwaysShowPlus(descriptor);
+      boolean alwaysPlus=getBuilder().isAlwaysShowPlus(descriptor);
+      if (alwaysPlus && wasLeaf) {
+        notRequiredToUpdateChildren=false;
+      }
+ else {
+        notRequiredToUpdateChildren=alwaysPlus;
+      }
     }
-    LoadedChildren preloaded=loadedChildren;
+    final Ref<LoadedChildren> preloaded=new Ref<LoadedChildren>(loadedChildren);
     boolean descriptorWasUpdated=descriptorIsUpToDate;
     if (notRequiredToUpdateChildren) {
       if (myUnbuiltNodes.contains(node) && node.getChildCount() == 0) {
@@ -25,25 +31,32 @@
       if (!bgBuild) {
         if (myUnbuiltNodes.contains(node)) {
           if (!descriptorWasUpdated) {
-            update(descriptor);
+            update(descriptor,true);
             descriptorWasUpdated=true;
           }
           Pair<Boolean,LoadedChildren> unbuilt=processUnbuilt(node,descriptor,pass,wasExpanded,null);
           if (unbuilt.getFirst())           return;
-          preloaded=unbuilt.getSecond();
+          preloaded.set(unbuilt.getSecond());
         }
       }
     }
-    boolean childForceUpdate=isChildNodeForceUpdate(node,forceUpdate,wasExpanded);
+    final boolean childForceUpdate=isChildNodeForceUpdate(node,forceUpdate,wasExpanded);
     if (!forcedNow && isToBuildInBackground(descriptor)) {
       queueBackgroundUpdate(new UpdateInfo(descriptor,pass,canSmartExpand(node,toSmartExpand),wasExpanded,childForceUpdate,descriptorWasUpdated),node);
       return;
     }
  else {
       if (!descriptorWasUpdated) {
-        update(descriptor);
+        update(descriptor,false).doWhenDone(new Runnable(){
+          public void run(){
+            updateNodeChildrenNow(node,pass,preloaded.get(),toSmartExpand,wasExpanded,wasLeaf,childForceUpdate);
+          }
+        }
+);
       }
-      updateNodeChildrenNow(node,pass,preloaded,toSmartExpand,wasExpanded,wasLeaf,childForceUpdate);
+ else {
+        updateNodeChildrenNow(node,pass,preloaded.get(),toSmartExpand,wasExpanded,wasLeaf,childForceUpdate);
+      }
     }
   }
   finally {
