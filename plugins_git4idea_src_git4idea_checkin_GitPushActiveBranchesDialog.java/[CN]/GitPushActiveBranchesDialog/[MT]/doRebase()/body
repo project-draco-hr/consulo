@@ -1,0 +1,78 @@
+{
+  final Set<VirtualFile> roots=new HashSet<VirtualFile>();
+  final Set<VirtualFile> rootsWithMerges=new HashSet<VirtualFile>();
+  final Map<VirtualFile,List<String>> reorderedCommits=new HashMap<VirtualFile,List<String>>();
+  final Map<VirtualFile,Set<String>> uncheckedCommits=new HashMap<VirtualFile,Set<String>>();
+  for (int i=0; i < myTreeRoot.getChildCount(); i++) {
+    CheckedTreeNode node=(CheckedTreeNode)myTreeRoot.getChildAt(i);
+    Root r=(Root)node.getUserObject();
+    Set<String> unchecked=new HashSet<String>();
+    uncheckedCommits.put(r.root,unchecked);
+    if (r.commits.size() == 0) {
+      continue;
+    }
+    boolean seenCheckedNode=false;
+    boolean reorderNeeded=false;
+    boolean seenMerges=false;
+    for (int j=0; j < node.getChildCount(); j++) {
+      if (node.getChildAt(j) instanceof CheckedTreeNode) {
+        CheckedTreeNode commitNode=(CheckedTreeNode)node.getChildAt(j);
+        Commit commit=(Commit)commitNode.getUserObject();
+        seenMerges|=commit.isMerge;
+        if (commitNode.isChecked()) {
+          seenCheckedNode=true;
+        }
+ else {
+          unchecked.add(commit.commitId());
+          if (seenCheckedNode) {
+            reorderNeeded=true;
+          }
+        }
+      }
+    }
+    if (seenMerges) {
+      rootsWithMerges.add(r.root);
+    }
+    if (r.remoteCommits > 0 && seenCheckedNode || reorderNeeded) {
+      roots.add(r.root);
+    }
+    if (reorderNeeded) {
+      List<String> reordered=new ArrayList<String>();
+      for (int j=0; j < node.getChildCount(); j++) {
+        if (node.getChildAt(j) instanceof CheckedTreeNode) {
+          CheckedTreeNode commitNode=(CheckedTreeNode)node.getChildAt(j);
+          if (!commitNode.isChecked()) {
+            Commit commit=(Commit)commitNode.getUserObject();
+            reordered.add(commit.revision.asString());
+          }
+        }
+      }
+      for (int j=0; j < node.getChildCount(); j++) {
+        if (node.getChildAt(j) instanceof CheckedTreeNode) {
+          CheckedTreeNode commitNode=(CheckedTreeNode)node.getChildAt(j);
+          if (commitNode.isChecked()) {
+            Commit commit=(Commit)commitNode.getUserObject();
+            reordered.add(commit.revision.asString());
+          }
+        }
+      }
+      Collections.reverse(reordered);
+      reorderedCommits.put(r.root,reordered);
+    }
+  }
+  final List<VcsException> exceptions=new ArrayList<VcsException>();
+  final boolean autoStash=myAutoStashCheckBox.isSelected();
+  final ProgressManager progressManager=ProgressManager.getInstance();
+  final GitVcs vcs=GitVcs.getInstance(myProject);
+  progressManager.runProcessWithProgressSynchronously(new Runnable(){
+    public void run(){
+      GitPushRebaseProcess process=new GitPushRebaseProcess(vcs,myProject,exceptions,autoStash,reorderedCommits,rootsWithMerges);
+      process.doUpdate(progressManager.getProgressIndicator(),roots);
+    }
+  }
+,GitBundle.getString("push.active.rebasing"),false,myProject);
+  refreshTree(false,uncheckedCommits);
+  if (!exceptions.isEmpty()) {
+    GitUIUtil.showOperationErrors(myProject,exceptions,"git rebase");
+  }
+}
