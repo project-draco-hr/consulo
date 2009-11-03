@@ -7,7 +7,7 @@
     return false;
   }
   final PsiFile dominantContentFile=findDominantPsiForDocument(document,project);
-  DocumentContent content;
+  final DocumentContent content;
   if (dominantContentFile != null && dominantContentFile.getModificationStamp() != document.getModificationStamp()) {
     content=new PsiContent(document,dominantContentFile);
   }
@@ -16,21 +16,36 @@
   }
   final long currentDocStamp=content.getModificationStamp();
   if (currentDocStamp != myLastIndexedDocStamps.getAndSet(document,requestedIndexId,currentDocStamp).longValue()) {
-    final FileContent newFc=new FileContent(vFile,content.getText(),vFile.getCharset());
-    if (dominantContentFile != null) {
-      dominantContentFile.putUserData(PsiFileImpl.BUILDING_STUB,true);
-      newFc.putUserData(PSI_FILE,dominantContentFile);
+    final Ref<StorageException> exRef=new Ref<StorageException>(null);
+    ProgressManager.getInstance().executeNonCancelableSection(new Runnable(){
+      public void run(){
+        try {
+          final FileContent newFc=new FileContent(vFile,content.getText(),vFile.getCharset());
+          if (dominantContentFile != null) {
+            dominantContentFile.putUserData(PsiFileImpl.BUILDING_STUB,true);
+            newFc.putUserData(PSI_FILE,dominantContentFile);
+          }
+          if (content instanceof AuthenticContent) {
+            newFc.putUserData(EDITOR_HIGHLIGHTER,document instanceof DocumentImpl ? ((DocumentImpl)document).getEditorHighlighterForCachesBuilding() : null);
+          }
+          if (getInputFilter(requestedIndexId).acceptInput(vFile)) {
+            newFc.putUserData(PROJECT,project);
+            final int inputId=Math.abs(getFileId(vFile));
+            getIndex(requestedIndexId).update(inputId,newFc);
+          }
+          if (dominantContentFile != null) {
+            dominantContentFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
+          }
+        }
+ catch (        StorageException e) {
+          exRef.set(e);
+        }
+      }
     }
-    if (content instanceof AuthenticContent) {
-      newFc.putUserData(EDITOR_HIGHLIGHTER,document instanceof DocumentImpl ? ((DocumentImpl)document).getEditorHighlighterForCachesBuilding() : null);
-    }
-    if (getInputFilter(requestedIndexId).acceptInput(vFile)) {
-      newFc.putUserData(PROJECT,project);
-      final int inputId=Math.abs(getFileId(vFile));
-      getIndex(requestedIndexId).update(inputId,newFc);
-    }
-    if (dominantContentFile != null) {
-      dominantContentFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
+);
+    final StorageException storageException=exRef.get();
+    if (storageException != null) {
+      throw storageException;
     }
   }
   return true;

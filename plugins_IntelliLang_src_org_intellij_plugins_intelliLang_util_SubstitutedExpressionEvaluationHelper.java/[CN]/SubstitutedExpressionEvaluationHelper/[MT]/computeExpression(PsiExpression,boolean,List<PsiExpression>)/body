@@ -2,6 +2,7 @@
   final ConcurrentMap<PsiElement,Object> map=new ConcurrentHashMap<PsiElement,Object>();
   return myHelper.computeExpression(e,false,new PsiConstantEvaluationHelper.AuxEvaluator(){
     @Nullable public Object computeExpression(    final PsiExpression o,    final PsiConstantEvaluationHelper.AuxEvaluator auxEvaluator){
+      PsiType resolvedType=null;
       if (o instanceof PsiMethodCallExpression) {
         final PsiMethodCallExpression c=(PsiMethodCallExpression)o;
         final PsiMethod m=(PsiMethod)c.getMethodExpression().resolve();
@@ -10,6 +11,7 @@
           final Object substituted=calcSubstituted(m);
           if (substituted != null)           return substituted;
         }
+        resolvedType=returnType;
       }
  else       if (o instanceof PsiReferenceExpression) {
         final PsiElement resolved=((PsiReferenceExpression)o).resolve();
@@ -17,6 +19,7 @@
           final Object substituted=calcSubstituted((PsiModifierListOwner)resolved);
           if (substituted != null)           return substituted;
           if (resolved instanceof PsiVariable) {
+            resolvedType=((PsiVariable)resolved).getType();
             final Collection<PsiExpression> values=DfaUtil.getCachedVariableValues(((PsiVariable)resolved),o);
             for (            PsiExpression value : values) {
               final Object computedValue=auxEvaluator.computeExpression(value,this);
@@ -29,9 +32,22 @@
       }
       if (uncomputables != null)       uncomputables.add(o);
       if (includeUncomputablesAsLiterals) {
-        final PsiExpression expression=o instanceof PsiMethodCallExpression ? ((PsiMethodCallExpression)o).getMethodExpression() : o;
-        final String text=expression.getText().replaceAll("\\s","");
-        return "\"" + StringUtil.escapeStringCharacters(text) + "\"";
+        if (resolvedType != null) {
+          if (PsiPrimitiveType.DOUBLE.isAssignableFrom(resolvedType))           return 1;
+        }
+        final StringBuilder sb=new StringBuilder();
+        o.accept(new PsiRecursiveElementWalkingVisitor(){
+          @Override public void visitElement(          PsiElement element){
+            if (element instanceof PsiExpressionList)             return;
+            if (element instanceof PsiIdentifier) {
+              if (sb.length() > 0)               sb.append(".");
+              sb.append(element.getText());
+            }
+            super.visitElement(element);
+          }
+        }
+);
+        return sb.toString();
       }
       return null;
     }
