@@ -1,21 +1,43 @@
 {
-  final List<Root> roots=loadRoots(project,vcsRoots,exceptions);
+  final List<Root> roots=loadRoots(project,vcsRoots,exceptions,true);
   if (!exceptions.isEmpty()) {
     Messages.showErrorDialog(project,GitBundle.getString("push.active.fetch.failed"),GitBundle.getString("push.active.fetch.failed.title"));
     return;
   }
-  GitPushActiveBranchesDialog d=new GitPushActiveBranchesDialog(project,roots);
+  GitPushActiveBranchesDialog d=new GitPushActiveBranchesDialog(project,vcsRoots,roots);
   d.show();
   if (d.isOK()) {
+    final ArrayList<Root> rootsToPush=new ArrayList<Root>();
+    for (int i=0; i < d.myTreeRoot.getChildCount(); i++) {
+      CheckedTreeNode node=(CheckedTreeNode)d.myTreeRoot.getChildAt(i);
+      Root r=(Root)node.getUserObject();
+      if (r.remote == null || r.commits.size() == 0) {
+        continue;
+      }
+      boolean topCommit=true;
+      for (int j=0; j < node.getChildCount(); j++) {
+        if (node.getChildAt(j) instanceof CheckedTreeNode) {
+          CheckedTreeNode commitNode=(CheckedTreeNode)node.getChildAt(j);
+          if (commitNode.isChecked()) {
+            Commit commit=(Commit)commitNode.getUserObject();
+            if (!topCommit) {
+              r.commitToPush=commit.revision.asString();
+            }
+            rootsToPush.add(r);
+            break;
+          }
+          topCommit=false;
+        }
+      }
+    }
     final ProgressManager manager=ProgressManager.getInstance();
     manager.runProcessWithProgressSynchronously(new Runnable(){
       public void run(){
-        for (        Root r : roots) {
-          if (r.remote != null && r.commits.size() != 0) {
-            GitLineHandler h=new GitLineHandler(project,r.root,GitHandler.PUSH);
-            h.addParameters("-v",r.remote,r.branch + ":" + r.remoteBranch);
-            GitHandlerUtil.doSynchronouslyWithExceptions(h);
-          }
+        for (        Root r : rootsToPush) {
+          GitLineHandler h=new GitLineHandler(project,r.root,GitHandler.PUSH);
+          String src=r.commitToPush != null ? r.commitToPush : r.branch;
+          h.addParameters("-v",r.remote,src + ":" + r.remoteBranch);
+          GitHandlerUtil.doSynchronouslyWithExceptions(h);
         }
       }
     }
