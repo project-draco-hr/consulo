@@ -1,0 +1,62 @@
+{
+  super(project,true);
+  myCallback=callback;
+  setModal(false);
+  setTitle(VcsBundle.message("patch.apply.dialog.title"));
+  final FileChooserDescriptor descriptor=new FileChooserDescriptor(true,false,false,false,false,false){
+    @Override public boolean isFileSelectable(    VirtualFile file){
+      return file.getFileType() == StdFileTypes.PATCH || file.getFileType() == FileTypes.PLAIN_TEXT;
+    }
+  }
+;
+  myUpdater=new MyUpdater();
+  myPatchFile=new TextFieldWithBrowseButton();
+  myPatchFile.addBrowseFolderListener(VcsBundle.message("patch.apply.select.title"),"",project,descriptor);
+  myPatchFile.getTextField().getDocument().addDocumentListener(new DocumentAdapter(){
+    protected void textChanged(    DocumentEvent e){
+      setPathFileChangeDefault();
+      myLoadQueue.queue(myUpdater);
+    }
+  }
+);
+  myProject=project;
+  myLoadQueue=new ZipperUpdater(500);
+  myPatches=new LinkedList<FilePatchInProgress>();
+  myRecentPathFileChange=new AtomicReference<FilePresentation>();
+  myChangesTreeList=new MyChangeTreeList(project,Collections.<FilePatchInProgress.PatchChange>emptyList(),new Runnable(){
+    public void run(){
+      final NamedTrinity includedTrinity=new NamedTrinity();
+      final Collection<FilePatchInProgress.PatchChange> includedChanges=myChangesTreeList.getIncludedChanges();
+      final Set<Pair<String,String>> set=new HashSet<Pair<String,String>>();
+      for (      FilePatchInProgress.PatchChange change : includedChanges) {
+        final TextFilePatch patch=change.getPatchInProgress().getPatch();
+        final Pair<String,String> pair=new Pair<String,String>(patch.getBeforeName(),patch.getAfterName());
+        if (set.contains(pair))         continue;
+        set.add(pair);
+        acceptChange(includedTrinity,change);
+      }
+      myInfoCalculator.setIncluded(includedTrinity);
+      myCommitLegendPanel.update();
+    }
+  }
+,new MyChangeNodeDecorator());
+  myReset=new Runnable(){
+    public void run(){
+      reset();
+    }
+  }
+;
+  myChangeListChooser=new ChangeListChooserPanel(null,new Consumer<Boolean>(){
+    public void consume(    final Boolean aBoolean){
+      setOKActionEnabled(aBoolean);
+    }
+  }
+);
+  ChangeListManager changeListManager=ChangeListManager.getInstance(project);
+  myChangeListChooser.setChangeLists(changeListManager.getChangeListsCopy());
+  myChangeListChooser.setDefaultSelection(changeListManager.getDefaultChangeList());
+  myChangeListChooser.init(project);
+  myInfoCalculator=new ChangesLegendCalculator();
+  myCommitLegendPanel=new CommitLegendPanel(myInfoCalculator);
+  init();
+}
