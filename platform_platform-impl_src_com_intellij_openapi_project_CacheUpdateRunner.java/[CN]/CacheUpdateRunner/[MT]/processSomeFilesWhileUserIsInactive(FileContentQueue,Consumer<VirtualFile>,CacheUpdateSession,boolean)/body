@@ -1,0 +1,55 @@
+{
+  final ProgressIndicatorBase innerIndicator=new ProgressIndicatorBase();
+  final ApplicationAdapter canceller=new ApplicationAdapter(){
+    @Override public void beforeWriteActionStart(    Object action){
+      innerIndicator.cancel();
+    }
+  }
+;
+  final Application application=ApplicationManager.getApplication();
+  application.addApplicationListener(canceller);
+  final boolean[] isFinished=new boolean[1];
+  try {
+    ProgressManager.getInstance().runProcess(new Runnable(){
+      public void run(){
+        while (true) {
+          if (myProject.isDisposed())           return;
+          if (innerIndicator.isCanceled())           return;
+          final FileContent fileContent=queue.take();
+          if (fileContent == null) {
+            isFinished[0]=true;
+            return;
+          }
+          try {
+            Runnable action=new Runnable(){
+              public void run(){
+                innerIndicator.checkCanceled();
+                VirtualFile file=fileContent.getVirtualFile();
+                if (!file.isValid())                 return;
+                if (myProject.isDisposed())                 return;
+                progressUpdater.consume(file);
+                session.processFile(fileContent);
+              }
+            }
+;
+            if (processInReadAction) {
+              application.runReadAction(action);
+            }
+ else {
+              action.run();
+            }
+          }
+ catch (          ProcessCanceledException e) {
+            queue.pushback(fileContent);
+            return;
+          }
+        }
+      }
+    }
+,innerIndicator);
+  }
+  finally {
+    application.removeApplicationListener(canceller);
+  }
+  return isFinished[0];
+}
