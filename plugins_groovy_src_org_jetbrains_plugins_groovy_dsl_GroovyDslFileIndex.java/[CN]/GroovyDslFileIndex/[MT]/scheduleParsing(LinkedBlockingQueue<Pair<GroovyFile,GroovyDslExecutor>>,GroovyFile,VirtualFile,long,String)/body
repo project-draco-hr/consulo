@@ -1,19 +1,30 @@
 {
   final Project project=file.getProject();
-  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+  final String fileUrl=vfile.getUrl();
+  final Runnable parseScript=new Runnable(){
     public void run(){
-synchronized (vfile) {
-        GroovyDslExecutor executor=getCachedExecutor(vfile,stamp);
-        if (executor == null) {
-          executor=createExecutor(text,vfile,project);
-          ourMapping.put(vfile.getUrl(),Pair.create(executor,stamp));
-          if (executor != null) {
-            activateUntilModification(vfile);
-          }
+      GroovyDslExecutor executor=getCachedExecutor(vfile,stamp);
+      if (executor == null) {
+        executor=createExecutor(text,vfile,project);
+        ourMapping.put(vfile.getUrl(),Pair.create(executor,stamp));
+        if (executor != null) {
+          activateUntilModification(vfile);
         }
-        queue.offer(Pair.create(file,executor));
+      }
+synchronized (vfile) {
+        final Collection<LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>>> queuesForFile=filesInProcessing.remove(fileUrl);
+        for (        LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>> queue : queuesForFile) {
+          queue.offer(Pair.create(file,executor));
+        }
       }
     }
   }
-);
+;
+synchronized (vfile) {
+    final boolean isNewRequest=!filesInProcessing.containsKey(fileUrl);
+    filesInProcessing.putValue(fileUrl,queue);
+    if (isNewRequest) {
+      ApplicationManager.getApplication().executeOnPooledThread(parseScript);
+    }
+  }
 }
