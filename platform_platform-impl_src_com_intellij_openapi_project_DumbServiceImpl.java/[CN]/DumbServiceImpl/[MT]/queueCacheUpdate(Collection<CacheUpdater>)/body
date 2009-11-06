@@ -1,29 +1,33 @@
 {
-  final Collection<CacheUpdater> updatersCopy=new ArrayList<CacheUpdater>(updaters);
-  CacheUpdateRunner runner=new CacheUpdateRunner(myProject,updatersCopy);
-  if (ApplicationManager.getApplication().isUnitTestMode() || ApplicationManager.getApplication().isHeadlessEnvironment()) {
-    EmptyProgressIndicator i=new EmptyProgressIndicator();
-    runner.queryNeededFiles(i);
-    runner.processFiles(i,false);
-    runner.updatingDone();
-    return;
-  }
-  ProgressIndicator indicator=new EmptyProgressIndicator();
-  if (ApplicationManager.getApplication().isDispatchThread() && !isDumb()) {
-    int size=runner.queryNeededFiles(indicator);
-    if (size < 10) {
+  final CacheUpdateRunner runner=new CacheUpdateRunner(myProject,new ArrayList<CacheUpdater>(updaters));
+  final Application application=ApplicationManager.getApplication();
+  if (application.isDispatchThread() && !myDumb && application.isWriteAccessAllowed()) {
+    ProgressIndicator indicator=new EmptyProgressIndicator();
+    final int size=runner.queryNeededFiles(indicator);
+    if (size < 50) {
       if (size > 0) {
         runner.processFiles(indicator,false);
       }
       runner.updatingDone();
       return;
     }
-    updateStarted();
   }
-  try {
-    myUpdatesQueue.put(runner);
+  final IndexUpdateRunnable updateRunnable=new IndexUpdateRunnable(runner);
+  invokeOnEDT(new DumbAwareRunnable(){
+    public void run(){
+      if (myProject.isDisposed()) {
+        return;
+      }
+      final boolean wasDumb=myDumb;
+      if (!wasDumb) {
+        myDumb=true;
+        myPublisher.enteredDumbMode();
+        updateRunnable.run();
+      }
+ else {
+        myUpdatesQueue.addLast(updateRunnable);
+      }
+    }
   }
- catch (  InterruptedException e) {
-    throw new RuntimeException(e);
-  }
+);
 }
