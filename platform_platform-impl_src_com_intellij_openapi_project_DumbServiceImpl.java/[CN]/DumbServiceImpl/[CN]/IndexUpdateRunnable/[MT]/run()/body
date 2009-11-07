@@ -1,0 +1,83 @@
+{
+  if (myProject.isDisposed()) {
+    return;
+  }
+  ProgressManager.getInstance().run(new Task.Backgroundable(myProject,IdeBundle.message("progress.indexing"),false){
+    private final ArrayBlockingQueue<Ref<CacheUpdateRunner>> myActionQueue=new ArrayBlockingQueue<Ref<CacheUpdateRunner>>(1);
+    @Override public void run(    @NotNull final ProgressIndicator indicator){
+      final ProgressIndicator proxy=(ProgressIndicator)Proxy.newProxyInstance(indicator.getClass().getClassLoader(),new Class[]{ProgressIndicator.class},new InvocationHandler(){
+        public Object invoke(        Object proxy,        Method method,        Object[] args) throws Throwable {
+          if ("setFraction".equals(method.getName())) {
+            final double fraction=(Double)args[0];
+            args[0]=new Double((myProcessedItems + fraction * myCurrentBaseTotal) / myTotalItems);
+          }
+          try {
+            return method.invoke(indicator,args);
+          }
+ catch (          InvocationTargetException e) {
+            final Throwable cause=e.getCause();
+            if (cause instanceof ProcessCanceledException) {
+              throw cause;
+            }
+            throw e;
+          }
+        }
+      }
+);
+      runAction(proxy,myAction);
+    }
+    private void runAction(    ProgressIndicator indicator,    CacheUpdateRunner updateRunner){
+      do {
+        int count=0;
+        try {
+          indicator.setIndeterminate(true);
+          indicator.setText(IdeBundle.message("progress.indexing.scanning"));
+          count=updateRunner.queryNeededFiles(indicator);
+          myCurrentBaseTotal=count;
+          myTotalItems+=count;
+          indicator.setIndeterminate(false);
+          indicator.setText(IdeBundle.message("progress.indexing.updaing"));
+          updateRunner.processFiles(indicator,true);
+        }
+  finally {
+          updateRunner.updatingDone();
+          myProcessedItems+=count;
+          invokeOnEDT(new DumbAwareRunnable(){
+            public void run(){
+              if (myUpdatesQueue.isEmpty()) {
+                myActionQueue.offer(NULL_ACTION);
+                updateFinished();
+              }
+ else {
+                final IndexUpdateRunnable nextUpdateRunnable=myUpdatesQueue.pullFirst();
+                if (!myActionQueue.offer(new Ref<CacheUpdateRunner>(nextUpdateRunnable.myAction))) {
+                  LOG.assertTrue(false,"Action queue rejected next updateRunnable!");
+                  nextUpdateRunnable.run();
+                }
+              }
+            }
+          }
+);
+          try {
+            Ref<CacheUpdateRunner> ref;
+            do {
+              ref=myActionQueue.poll(500,TimeUnit.MILLISECONDS);
+              updateRunner=ref != null ? ref.get() : null;
+              if (myProject.isDisposed()) {
+                break;
+              }
+            }
+ while (ref == null);
+          }
+ catch (          InterruptedException ignored) {
+            LOG.info(ignored);
+            break;
+          }
+        }
+      }
+ while (updateRunner != null);
+      myActionQueue.offer(NULL_ACTION);
+    }
+  }
+);
+}
