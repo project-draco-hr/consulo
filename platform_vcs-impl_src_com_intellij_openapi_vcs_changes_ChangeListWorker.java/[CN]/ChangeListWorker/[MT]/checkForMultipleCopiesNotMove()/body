@@ -1,0 +1,40 @@
+{
+  final MultiMap<FilePath,Pair<Change,String>> moves=new MultiMap<FilePath,Pair<Change,String>>(){
+    protected Collection<Pair<Change,String>> createCollection(){
+      return new LinkedList<Pair<Change,String>>();
+    }
+    protected Collection<Pair<Change,String>> createEmptyCollection(){
+      return Collections.emptyList();
+    }
+  }
+;
+  for (  LocalChangeList changeList : myMap.values()) {
+    final Collection<Change> changes=changeList.getChanges();
+    for (    Change change : changes) {
+      if (change.isMoved() || change.isRenamed()) {
+        moves.putValue(change.getBeforeRevision().getFile(),new Pair<Change,String>(change,changeList.getName()));
+      }
+    }
+  }
+  boolean somethingChanged=false;
+  for (  FilePath filePath : moves.keySet()) {
+    final List<Pair<Change,String>> copies=(List<Pair<Change,String>>)moves.get(filePath);
+    if (copies.size() == 1)     continue;
+    Collections.sort(copies,MyChangesAfterRevisionComparator.getInstance());
+    for (int i=0; i < (copies.size() - 1); i++) {
+      somethingChanged=true;
+      final Pair<Change,String> item=copies.get(i);
+      final Change oldChange=item.getFirst();
+      final Change newChange=new Change(null,oldChange.getAfterRevision());
+      final LocalChangeListImpl list=(LocalChangeListImpl)myMap.get(item.getSecond());
+      list.removeChange(oldChange);
+      list.addChange(newChange);
+      final VcsKey key=myIdx.getVcsFor(oldChange);
+      myIdx.changeRemoved(oldChange);
+      myIdx.changeAdded(newChange,key);
+    }
+  }
+  if (somethingChanged) {
+    FileStatusManager.getInstance(myProject).fileStatusesChanged();
+  }
+}
