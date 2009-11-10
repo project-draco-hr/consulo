@@ -1,55 +1,31 @@
 {
-  EditorFactory editorFactory=EditorFactory.getInstance();
-  Document document=editorFactory.createDocument("");
+  initBorders();
+  final List<Presentation> items=new ArrayList<Presentation>();
+  final EditorFactory editorFactory=EditorFactory.getInstance();
+  final Document document=editorFactory.createDocument("");
   myEditor=editorFactory.createEditor(document,myProject);
   myEditor.getSettings().setFoldingOutlineShown(false);
   for (  PsiViewerExtension extension : Extensions.getExtensions(PsiViewerExtension.EP_NAME)) {
-    JRadioButton button=new JRadioButton(extension.getName());
-    button.putClientProperty(EXTENSION_KEY,extension);
-    myExtensionButtons.add(button);
+    final Presentation p=new Presentation(extension.getName());
+    p.setIcon(extension.getIcon());
+    handlers.put(p.getText(),extension);
+    items.add(p);
   }
-  FileType[] fileTypes=FileTypeManager.getInstance().getRegisteredFileTypes();
-  Arrays.sort(fileTypes,new Comparator<FileType>(){
-    public int compare(    final FileType o1,    final FileType o2){
-      return o1.getName().compareTo(o2.getName());
+  for (  FileType fileType : FileTypeManager.getInstance().getRegisteredFileTypes()) {
+    if (fileType != StdFileTypes.GUI_DESIGNER_FORM && fileType != StdFileTypes.IDEA_MODULE && fileType != StdFileTypes.IDEA_PROJECT && fileType != StdFileTypes.IDEA_WORKSPACE && fileType != FileTypes.ARCHIVE && fileType != FileTypes.UNKNOWN && fileType != FileTypes.PLAIN_TEXT && !(fileType instanceof AbstractFileType) && !fileType.isBinary() && !fileType.isReadOnly()) {
+      final Presentation p=new Presentation(fileType.getName() + " file");
+      p.setIcon(fileType.getIcon());
+      handlers.put(p.getText(),fileType);
+      items.add(p);
+    }
+  }
+  final Presentation[] popupItems=items.toArray(new Presentation[items.size()]);
+  Arrays.sort(popupItems,new Comparator<Presentation>(){
+    public int compare(    Presentation p1,    Presentation p2){
+      return p1.getText().toUpperCase().compareTo(p2.getText().toUpperCase());
     }
   }
 );
-  List<FileType> customFileTypes=new ArrayList<FileType>();
-  for (  FileType fileType : fileTypes) {
-    if (fileType != StdFileTypes.GUI_DESIGNER_FORM && fileType != StdFileTypes.IDEA_MODULE && fileType != StdFileTypes.IDEA_PROJECT && fileType != StdFileTypes.IDEA_WORKSPACE && fileType != FileTypes.ARCHIVE && fileType != FileTypes.UNKNOWN && fileType != FileTypes.PLAIN_TEXT && !(fileType instanceof AbstractFileType) && !fileType.isBinary() && !fileType.isReadOnly()) {
-      customFileTypes.add(fileType);
-    }
-  }
-  myFileTypes=customFileTypes.toArray(new FileType[customFileTypes.size()]);
-  myFileTypeButtons=new JRadioButton[myFileTypes.length];
-  ButtonGroup bg=new ButtonGroup();
-  for (  JRadioButton button : myExtensionButtons) {
-    bg.add(button);
-  }
-  final int rows=1 + myFileTypes.length / 7;
-  JPanel choicesBox=new JPanel(new GridLayout(rows,7));
-  for (  JRadioButton extensionButton : myExtensionButtons) {
-    choicesBox.add(extensionButton);
-  }
-  for (int i=0; i < myFileTypes.length; i++) {
-    FileType fileType=myFileTypes[i];
-    JRadioButton button=new JRadioButton(fileType.getName() + " file");
-    bg.add(button);
-    choicesBox.add(button);
-    myFileTypeButtons[i]=button;
-  }
-  final ActionListener updateDialectsListener=new ActionListener(){
-    public void actionPerformed(    final ActionEvent e){
-      updateDialectsCombo();
-    }
-  }
-;
-  final Enumeration<AbstractButton> buttonEnum=bg.getElements();
-  while (buttonEnum.hasMoreElements()) {
-    buttonEnum.nextElement().addActionListener(updateDialectsListener);
-  }
-  updateDialectsCombo();
   myDialectsComboBox.setRenderer(new DefaultListCellRenderer(){
     @Override public Component getListCellRendererComponent(    final JList list,    final Object value,    final int index,    final boolean isSelected,    final boolean cellHasFocus){
       final Component result=super.getListCellRendererComponent(list,value,index,isSelected,cellHasFocus);
@@ -58,30 +34,51 @@
     }
   }
 );
-  if (myExtensionButtons.size() > 0) {
-    myExtensionButtons.get(0).setSelected(true);
-  }
- else {
-    myFileTypeButtons[0].setSelected(true);
-  }
-  myChoicesPanel.setLayout(new BorderLayout());
-  myChoicesPanel.add(choicesBox,BorderLayout.CENTER);
   final ViewerTreeStructure treeStructure=(ViewerTreeStructure)myTreeBuilder.getTreeStructure();
   myShowWhiteSpacesBox.addActionListener(new ActionListener(){
     public void actionPerformed(    ActionEvent e){
       treeStructure.setShowWhiteSpaces(myShowWhiteSpacesBox.isSelected());
-      myTreeBuilder.updateFromRoot();
+      myTreeBuilder.queueUpdate();
     }
   }
 );
   myShowTreeNodesCheckBox.addActionListener(new ActionListener(){
     public void actionPerformed(    ActionEvent e){
       treeStructure.setShowTreeNodes(myShowTreeNodesCheckBox.isSelected());
-      myTreeBuilder.updateFromRoot();
+      myTreeBuilder.queueUpdate();
     }
   }
 );
   myTextPanel.setLayout(new BorderLayout());
   myTextPanel.add(myEditor.getComponent(),BorderLayout.CENTER);
+  myGroup=new DefaultActionGroup();
+  for (  final Presentation popupItem : popupItems) {
+    myGroup.add(new AnAction(popupItem.getText(),popupItem.getText(),popupItem.getIcon()){
+      public void actionPerformed(      AnActionEvent e){
+        updatePresentation(e.getPresentation());
+      }
+    }
+);
+  }
+  final PsiViewerSettings settings=PsiViewerSettings.getSettings();
+  final String type=settings.type;
+  for (  Presentation popupItem : popupItems) {
+    if (popupItem.getText().equals(type)) {
+      updatePresentation(popupItem);
+      break;
+    }
+  }
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      myEditor.getDocument().setText(settings.text);
+    }
+  }
+);
+  myShowWhiteSpacesBox.setSelected(settings.showWhiteSpaces);
+  myShowTreeNodesCheckBox.setSelected(settings.showTreeNodes);
+  final ChoosePsiTypeButton typeButton=new ChoosePsiTypeButton();
+  myButtonPanel.add(typeButton.createCustomComponent(myPresentation),BorderLayout.CENTER);
+  updateDialectsCombo();
+  registerCustomKeyboardActions();
   super.init();
 }
