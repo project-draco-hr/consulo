@@ -1,0 +1,62 @@
+{
+  if (myToUpdate.isEmpty()) {
+    return;
+  }
+  final long updateStart=System.currentTimeMillis();
+  final int[] namesToUpdate=myToUpdate.toArray();
+  final Cache cache=getCache();
+  final Cache newCache=getNewClassesCache();
+  final DependencyCacheNavigator navigator=getCacheNavigator();
+  for (  final int qName : namesToUpdate) {
+    for (    int referencedClassQName : cache.getReferencedClasses(qName)) {
+      if (!cache.containsClass(referencedClassQName)) {
+        continue;
+      }
+      cache.removeClassReferencer(referencedClassQName,qName);
+    }
+    cache.clearReferencedClasses(qName);
+    navigator.walkSuperClasses(qName,new ClassInfoProcessor(){
+      public boolean process(      int classQName) throws CacheCorruptedException {
+        cache.removeSubclass(classQName,qName);
+        return true;
+      }
+    }
+);
+  }
+  for (  final int qName : namesToUpdate) {
+    cache.importClassInfo(newCache,qName);
+  }
+  final SymbolTable symbolTable=getSymbolTable();
+  for (  final int qName : namesToUpdate) {
+    if (!newCache.containsClass(qName)) {
+      continue;
+    }
+    buildForwardDependencies(qName,newCache.getReferences(qName));
+    boolean isRemote=false;
+    final int[] superInterfaces=cache.getSuperInterfaces(qName);
+    if (superInterfaces.length > 0) {
+      final int remoteInterfaceName=symbolTable.getId(REMOTE_INTERFACE_NAME);
+      for (      int superInterface : superInterfaces) {
+        if (isRemoteInterface(cache,superInterface,remoteInterfaceName)) {
+          isRemote=true;
+          break;
+        }
+      }
+    }
+    final boolean wasRemote=cache.isRemote(qName);
+    if (wasRemote && !isRemote) {
+synchronized (myPreviouslyRemoteClasses) {
+        myPreviouslyRemoteClasses.add(qName);
+      }
+    }
+    cache.setRemote(qName,isRemote);
+  }
+  for (  final int qName : namesToUpdate) {
+    buildSubclassDependencies(getCache(),qName,qName);
+  }
+  for (  final int qName : myClassesWithSourceRemoved.toArray()) {
+    cache.removeClass(qName);
+  }
+  myToUpdate=new TIntHashSet();
+  CompilerUtil.logDuration("Dependency cache update",System.currentTimeMillis() - updateStart);
+}
