@@ -8,11 +8,33 @@ synchronized (lock) {
         DbConnection.markDirty();
         incModCount(myFileId);
         encodedAttId=DbConnection.getAttributeId(myAttributeId);
-        page=findAttributePage(myFileId,encodedAttId,true);
+        page=findAttributePage(myFileId,encodedAttId,true,((ByteArrayOutputStream)out).size());
       }
-      final DataOutputStream sinkStream=getAttributes(encodedAttId).writeStream(page);
+      AbstractStorage storage=getAttributes(encodedAttId);
+      AbstractStorage.StorageDataOutput sinkStream=storage.writeStream(page);
       sinkStream.write(((ByteArrayOutputStream)out).toByteArray());
       sinkStream.close();
+      final int recordId=sinkStream.getRecordId();
+      if (recordId != page) {
+        int attrsRecord=getAttributeRecordId(myFileId,encodedAttId);
+        DataInputStream stream=storage.readStream(attrsRecord);
+        try {
+          while (stream.available() > 0) {
+            if (encodedAttId == stream.readInt()) {
+              ((CompactStorage)storage).replaceIntInData(attrsRecord + 4,recordId,page);
+              break;
+            }
+            if (stream.available() < 4) {
+              LOG.error("wtf");
+            }
+            stream.readInt();
+            attrsRecord+=8;
+          }
+        }
+  finally {
+          stream.close();
+        }
+      }
     }
   }
  catch (  Throwable e) {
