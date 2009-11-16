@@ -6,12 +6,11 @@
       if (application.isUnitTestMode()) {
         saveTestData();
       }
-      final Map<Module,List<VirtualFile>> moduleToFilesMap=CompilerUtil.buildModuleToFilesMap(myCompileContext,myFilesToCompile);
-      compileModules(moduleToFilesMap);
+      compileModules(buildModuleToFilesMap(myFilesToCompile));
     }
     Collection<VirtualFile> dependentFiles;
     do {
-      dependentFiles=findDependentFiles();
+      dependentFiles=CacheUtils.findDependentFiles(myCompileContext,mySuccesfullyCompiledJavaFiles,myCompiler.getDependencyProcessor(),DEPENDENCY_FILTER);
       if (!dependentFiles.isEmpty()) {
         myFilesToRecompile.addAll(dependentFiles);
         allDependent.addAll(dependentFiles);
@@ -22,9 +21,8 @@
         if (filesInScope.isEmpty()) {
           break;
         }
-        final Map<Module,List<VirtualFile>> moduleToFilesMap=CompilerUtil.buildModuleToFilesMap(myCompileContext,filesInScope);
         myCompileContext.getDependencyCache().clearTraverseRoots();
-        compileModules(moduleToFilesMap);
+        compileModules(buildModuleToFilesMap(filesInScope));
       }
     }
  while (!dependentFiles.isEmpty() && myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) == 0);
@@ -45,19 +43,18 @@ catch (  IllegalArgumentException e) {
     }
     myModuleToTempDirMap.clear();
   }
-  if (myCompileContext.getProgressIndicator().isCanceled()) {
-    myFilesToRecompile.clear();
-    return Collections.emptyList();
-  }
   if (CompilerConfiguration.MAKE_ENABLED) {
-    ProgressIndicator indicator=myCompileContext.getProgressIndicator();
-    final DependencyCache cache=myCompileContext.getDependencyCache();
-    indicator.setText(CompilerBundle.message("progress.updating.caches"));
-    indicator.setText2("");
-    cache.update(indicator);
-    indicator.setText(CompilerBundle.message("progress.saving.caches"));
-    cache.resetState();
-    indicator.setText("");
+    if (!myCompileContext.getProgressIndicator().isCanceled()) {
+      final ProgressIndicator indicator=myCompileContext.getProgressIndicator();
+      final DependencyCache cache=myCompileContext.getDependencyCache();
+      indicator.pushState();
+      indicator.setText(CompilerBundle.message("progress.updating.caches"));
+      indicator.setText2("");
+      cache.update();
+      indicator.setText(CompilerBundle.message("progress.saving.caches"));
+      cache.resetState();
+      indicator.popState();
+    }
   }
   myFilesToRecompile.removeAll(mySuccesfullyCompiledJavaFiles);
   if (myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) != 0) {
@@ -65,7 +62,6 @@ catch (  IllegalArgumentException e) {
   }
   final List<TranslatingCompiler.OutputItem> outputs=processPackageInfoFiles();
   if (myFilesToRecompile.size() > 0 || outputs.size() > 0) {
-    mySink.add(null,outputs,myFilesToRecompile.toArray(new VirtualFile[myFilesToRecompile.size()]));
+    mySink.add(null,outputs,VfsUtil.toVirtualFileArray(myFilesToRecompile));
   }
-  return null;
 }

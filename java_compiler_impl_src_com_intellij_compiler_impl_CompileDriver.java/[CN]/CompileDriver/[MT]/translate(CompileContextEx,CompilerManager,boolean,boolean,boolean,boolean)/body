@@ -1,56 +1,111 @@
 {
   boolean didSomething=false;
   final TranslatingCompiler[] translators=compilerManager.getCompilers(TranslatingCompiler.class,myCompilerFilter);
-  final Set<FileType> generatedTypes=new HashSet<FileType>();
-  VirtualFile[] snapshot=null;
-  final TranslatorsOutputSink sink=new TranslatorsOutputSink(context,translators);
-  try {
-    for (int currentCompiler=0, translatorsLength=translators.length; currentCompiler < translatorsLength; currentCompiler++) {
-      sink.setCurrentCompilerIndex(currentCompiler);
-      final TranslatingCompiler translator=translators[currentCompiler];
-      if (context.getProgressIndicator().isCanceled()) {
-        throw new ExitException(ExitStatus.CANCELLED);
-      }
-      DumbService.getInstance(myProject).waitForSmartMode();
-      if (snapshot == null || ContainerUtil.intersects(generatedTypes,compilerManager.getRegisteredInputTypes(translator))) {
-        snapshot=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
-          public VirtualFile[] compute(){
-            return context.getCompileScope().getFiles(null,true);
-          }
-        }
-);
-      }
-      final CompileContextEx _context;
-      if (translator instanceof IntermediateOutputCompiler) {
-        final IntermediateOutputCompiler _translator=(IntermediateOutputCompiler)translator;
-        _context=new CompileContextExProxy(context){
-          public VirtualFile getModuleOutputDirectory(          final Module module){
-            return getGenerationOutputDir(_translator,module,false);
-          }
-          public VirtualFile getModuleOutputDirectoryForTests(          final Module module){
-            return getGenerationOutputDir(_translator,module,true);
-          }
-        }
-;
-      }
- else {
-        _context=context;
-      }
-      final boolean compiledSomething=compileSources(_context,translators,currentCompiler,snapshot,forceCompile,isRebuild,trackDependencies,onlyCheckStatus,sink);
-      if (compiledSomething) {
-        generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(translator));
-      }
-      if (_context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-        throw new ExitException(ExitStatus.ERRORS);
-      }
-      didSomething|=compiledSomething;
+  final List<Chunk<Module>> sortedChunks=Collections.unmodifiableList(ApplicationManager.getApplication().runReadAction(new Computable<List<Chunk<Module>>>(){
+    public List<Chunk<Module>> compute(){
+      final ModuleManager moduleManager=ModuleManager.getInstance(myProject);
+      return ModuleCompilerUtil.getSortedModuleChunks(myProject,Arrays.asList(moduleManager.getModules()));
     }
   }
+));
+  try {
+    VirtualFile[] snapshot=null;
+    final Map<Chunk<Module>,Collection<VirtualFile>> chunkMap=new HashMap<Chunk<Module>,Collection<VirtualFile>>();
+    int total=0;
+    int processed=0;
+    for (    final Chunk<Module> currentChunk : sortedChunks) {
+      final TranslatorsOutputSink sink=new TranslatorsOutputSink(context,translators);
+      final Set<FileType> generatedTypes=new HashSet<FileType>();
+      Collection<VirtualFile> chunkFiles=chunkMap.get(currentChunk);
+      try {
+        for (int currentCompiler=0, translatorsLength=translators.length; currentCompiler < translatorsLength; currentCompiler++) {
+          sink.setCurrentCompilerIndex(currentCompiler);
+          final TranslatingCompiler compiler=translators[currentCompiler];
+          if (context.getProgressIndicator().isCanceled()) {
+            throw new ExitException(ExitStatus.CANCELLED);
+          }
+          DumbService.getInstance(myProject).waitForSmartMode();
+          if (snapshot == null || ContainerUtil.intersects(generatedTypes,compilerManager.getRegisteredInputTypes(compiler))) {
+            snapshot=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
+              public VirtualFile[] compute(){
+                return context.getCompileScope().getFiles(null,true);
+              }
+            }
+);
+            final Map<Module,List<VirtualFile>> moduleToFilesMap=CompilerUtil.buildModuleToFilesMap(context,snapshot);
+            for (            Chunk<Module> moduleChunk : sortedChunks) {
+              List<VirtualFile> files=Collections.emptyList();
+              for (              Module module : moduleChunk.getNodes()) {
+                final List<VirtualFile> moduleFiles=moduleToFilesMap.get(module);
+                if (moduleFiles != null) {
+                  files=ContainerUtil.concat(files,moduleFiles);
+                }
+              }
+              chunkMap.put(moduleChunk,files);
+            }
+            total=snapshot.length * translatorsLength;
+            chunkFiles=chunkMap.get(currentChunk);
+          }
+          final CompileContextEx _context;
+          if (compiler instanceof IntermediateOutputCompiler) {
+            final IntermediateOutputCompiler _compiler=(IntermediateOutputCompiler)compiler;
+            _context=new CompileContextExProxy(context){
+              public VirtualFile getModuleOutputDirectory(              final Module module){
+                return getGenerationOutputDir(_compiler,module,false);
+              }
+              public VirtualFile getModuleOutputDirectoryForTests(              final Module module){
+                return getGenerationOutputDir(_compiler,module,true);
+              }
+            }
+;
+          }
+ else {
+            _context=context;
+          }
+          final boolean compiledSomething=compileSources(_context,currentChunk,compiler,chunkFiles,forceCompile,isRebuild,trackDependencies,onlyCheckStatus,sink);
+          processed+=chunkFiles.size();
+          _context.getProgressIndicator().setFraction(((double)processed) / total);
+          if (compiledSomething) {
+            generatedTypes.addAll(compilerManager.getRegisteredOutputTypes(compiler));
+          }
+          if (_context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+            throw new ExitException(ExitStatus.ERRORS);
+          }
+          didSomething|=compiledSomething;
+        }
+      }
   finally {
-    if (context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
-      sink.flushPostponedItems();
+        if (context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+          sink.flushPostponedItems();
+        }
+      }
     }
+  }
+ catch (  ProcessCanceledException e) {
+    ProgressManager.getInstance().executeNonCancelableSection(new Runnable(){
+      public void run(){
+        try {
+          final Collection<VirtualFile> deps=CacheUtils.findDependentFiles(context,Collections.<VirtualFile>emptySet(),null,null);
+          if (deps.size() > 0) {
+            TranslatingCompilerFilesMonitor.getInstance().update(context,null,Collections.<TranslatingCompiler.OutputItem>emptyList(),VfsUtil.toVirtualFileArray(deps));
+          }
+        }
+ catch (        IOException ignored) {
+          LOG.info(ignored);
+        }
+catch (        CacheCorruptedException ignored) {
+          LOG.info(ignored);
+        }
+      }
+    }
+);
+    throw e;
+  }
+ finally {
     dropDependencyCache(context);
+    if (didSomething) {
+      TranslatingCompilerFilesMonitor.getInstance().updateOutputRootsLayout(myProject);
+    }
   }
   return didSomething;
 }

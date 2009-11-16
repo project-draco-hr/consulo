@@ -1,0 +1,59 @@
+{
+  final Set<VirtualFile> toCompile=new HashSet<VirtualFile>();
+  final List<Trinity<File,String,Boolean>> toDelete=new ArrayList<Trinity<File,String,Boolean>>();
+  context.getProgressIndicator().pushState();
+  final boolean[] wereFilesDeleted=new boolean[]{false};
+  boolean traverseRootsProcessed=false;
+  try {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        TranslatingCompilerFilesMonitor.getInstance().collectFiles(context,compiler,srcSnapshot.iterator(),forceCompile,isRebuild,toCompile,toDelete);
+        if (trackDependencies && !toCompile.isEmpty()) {
+          final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
+          final PsiManager psiManager=PsiManager.getInstance(myProject);
+          for (          final VirtualFile file : VfsUtil.toVirtualFileArray(toCompile)) {
+            if (fileTypeManager.getFileTypeByFile(file) == StdFileTypes.JAVA) {
+              final PsiFile psiFile=psiManager.findFile(file);
+              if (psiFile != null) {
+                addDependentFiles(psiFile,toCompile,compiler,context);
+              }
+            }
+          }
+        }
+      }
+    }
+);
+    if (onlyCheckStatus) {
+      if (toDelete.isEmpty() && toCompile.isEmpty()) {
+        return false;
+      }
+      if (LOG.isDebugEnabled()) {
+        if (!toDelete.isEmpty()) {
+          LOG.debug("Found items to delete, compiler " + compiler.getDescription());
+        }
+        if (!toCompile.isEmpty()) {
+          LOG.debug("Found items to compile, compiler " + compiler.getDescription());
+        }
+      }
+      throw new ExitException(ExitStatus.CANCELLED);
+    }
+    if (!toDelete.isEmpty()) {
+      try {
+        wereFilesDeleted[0]=syncOutputDir(context,toDelete);
+      }
+ catch (      CacheCorruptedException e) {
+        LOG.info(e);
+        context.requestRebuildNextTime(e.getMessage());
+      }
+    }
+    final boolean hadUnprocessedTraverseRoots=context.getDependencyCache().hasUnprocessedTraverseRoots();
+    if ((wereFilesDeleted[0] || hadUnprocessedTraverseRoots || !toCompile.isEmpty()) && context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+      compiler.compile(context,moduleChunk,VfsUtil.toVirtualFileArray(toCompile),sink);
+      traverseRootsProcessed=hadUnprocessedTraverseRoots != context.getDependencyCache().hasUnprocessedTraverseRoots();
+    }
+  }
+  finally {
+    context.getProgressIndicator().popState();
+  }
+  return !toCompile.isEmpty() || traverseRootsProcessed || wereFilesDeleted[0];
+}
