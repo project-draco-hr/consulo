@@ -1,0 +1,44 @@
+{
+  if (!myConfig.isAnnotationProcessorsEnabled()) {
+    return;
+  }
+  final LocalFileSystem lfs=LocalFileSystem.getInstance();
+  final CompileContextEx _context=new CompileContextExProxy((CompileContextEx)context){
+    public VirtualFile getModuleOutputDirectory(    Module module){
+      final String path=CompilerPaths.getAnnotationProcessorsGenerationPath(module);
+      return path != null ? lfs.findFileByPath(path) : null;
+    }
+  }
+;
+  final JavacCompiler javacCompiler=getBackEndCompiler();
+  final boolean processorMode=javacCompiler.setAnnotationProcessorMode(true);
+  final BackendCompilerWrapper wrapper=new BackendCompilerWrapper(moduleChunk,myProject,Arrays.asList(files),_context,javacCompiler,sink);
+  try {
+    wrapper.compile();
+  }
+ catch (  CompilerException e) {
+    _context.addMessage(CompilerMessageCategory.ERROR,e.getMessage(),null,-1,-1);
+  }
+catch (  CacheCorruptedException e) {
+    LOG.info(e);
+    _context.requestRebuildNextTime(e.getMessage());
+  }
+ finally {
+    javacCompiler.setAnnotationProcessorMode(processorMode);
+    final Set<VirtualFile> dirsToRefresh=new HashSet<VirtualFile>();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (        Module module : moduleChunk.getNodes()) {
+          final VirtualFile out=_context.getModuleOutputDirectory(module);
+          if (out != null) {
+            dirsToRefresh.add(out);
+          }
+        }
+      }
+    }
+);
+    for (    VirtualFile root : dirsToRefresh) {
+      root.refresh(false,true);
+    }
+  }
+}

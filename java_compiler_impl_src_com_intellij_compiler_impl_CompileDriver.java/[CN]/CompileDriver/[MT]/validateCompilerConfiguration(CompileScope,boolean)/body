@@ -1,8 +1,10 @@
 {
   final Module[] scopeModules=scope.getAffectedModules();
   final List<String> modulesWithoutOutputPathSpecified=new ArrayList<String>();
+  boolean isProjectCompilePathSpecified=true;
   final List<String> modulesWithoutJdkAssigned=new ArrayList<String>();
   final Set<File> nonExistingOutputPaths=new HashSet<File>();
+  final CompilerConfiguration config=CompilerConfiguration.getInstance(myProject);
   for (  final Module module : scopeModules) {
     final boolean hasSources=hasSources(module,false);
     final boolean hasTestSources=hasSources(module,true);
@@ -41,10 +43,36 @@
           modulesWithoutOutputPathSpecified.add(module.getName());
         }
       }
+      if (config.isAnnotationProcessorsEnabled() && !config.getExcludedModules().contains(module)) {
+        final String path=CompilerPaths.getAnnotationProcessorsGenerationPath(module);
+        if (path == null) {
+          if (CompilerProjectExtension.getInstance(module.getProject()).getCompilerOutputUrl() == null) {
+            isProjectCompilePathSpecified=false;
+          }
+ else {
+            modulesWithoutOutputPathSpecified.add(module.getName());
+          }
+        }
+ else {
+          final File file=new File(path);
+          if (!file.exists()) {
+            nonExistingOutputPaths.add(file);
+          }
+        }
+      }
     }
   }
   if (!modulesWithoutJdkAssigned.isEmpty()) {
     showNotSpecifiedError("error.jdk.not.specified",modulesWithoutJdkAssigned,ProjectBundle.message("modules.classpath.title"));
+    return false;
+  }
+  if (!isProjectCompilePathSpecified) {
+    final String message=CompilerBundle.message("error.project.output.not.specified");
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      LOG.error(message);
+    }
+    Messages.showMessageDialog(myProject,message,CommonBundle.getErrorTitle(),Messages.getErrorIcon());
+    ProjectSettingsService.getInstance(myProject).openProjectSettings();
     return false;
   }
   if (!modulesWithoutOutputPathSpecified.isEmpty()) {
@@ -87,7 +115,6 @@
     }
   }
   final List<Chunk<Module>> chunks=ModuleCompilerUtil.getSortedModuleChunks(myProject,Arrays.asList(scopeModules));
-  final CompilerConfiguration config=CompilerConfiguration.getInstance(myProject);
   for (  final Chunk<Module> chunk : chunks) {
     final Set<Module> chunkModules=chunk.getNodes();
     if (chunkModules.size() <= 1) {
