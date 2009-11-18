@@ -4,39 +4,30 @@
   if (isInUseCategory && method.hasModifierProperty(PsiModifier.STATIC) && parameters.length > 0) {
     parameters=ArrayUtil.remove(parameters,0);
   }
-  PsiType[] parameterTypes=skipOptionalParametersAndSubstitute(argumentTypes.length,parameters,substitutor);
-  if (parameterTypes.length - 1 > argumentTypes.length)   return false;
-  if (parameterTypes.length == 0 && argumentTypes.length > 0)   return false;
-  final GlobalSearchScope scope=method.getResolveScope();
-  if (parameterTypes.length - 1 == argumentTypes.length) {
-    final PsiType firstType=parameterTypes[0];
-    final PsiClassType mapType=createMapType(method.getManager(),scope);
-    if (mapType.isAssignableFrom(firstType)) {
-      final PsiType[] trimmed=new PsiType[parameterTypes.length - 1];
-      System.arraycopy(parameterTypes,1,trimmed,0,trimmed.length);
-      parameterTypes=trimmed;
+  if (parameters.length == 0)   return argumentTypes.length == 0;
+  final PsiParameter lastParameter=parameters[parameters.length - 1];
+  boolean hasVarArgs=lastParameter.isVarArgs() || lastParameter.getType() instanceof PsiArrayType;
+  if (!hasVarArgs && argumentTypes.length > parameters.length)   return false;
+  int allOptionalParameterCount=0;
+  for (  PsiParameter parameter : parameters) {
+    if (isOptionalParameter(parameter)) {
+      allOptionalParameterCount++;
     }
- else     if (!method.isVarArgs())     return false;
   }
-  for (int i=0; i < argumentTypes.length; i++) {
-    PsiType argType=argumentTypes[i];
-    PsiType parameterTypeToCheck;
-    if (i < parameterTypes.length - 1) {
-      parameterTypeToCheck=parameterTypes[i];
-    }
- else {
-      PsiType lastParameterType=parameterTypes[parameterTypes.length - 1];
-      if (lastParameterType instanceof PsiArrayType && !(argType instanceof PsiArrayType)) {
-        parameterTypeToCheck=((PsiArrayType)lastParameterType).getComponentType();
-      }
- else       if (parameterTypes.length == argumentTypes.length) {
-        parameterTypeToCheck=lastParameterType;
-      }
- else {
-        return false;
+  int optionalParameterCount;
+  if (hasVarArgs) {
+    optionalParameterCount=allOptionalParameterCount - (parameters.length - 1) + argumentTypes.length;
+    if (optionalParameterCount < 0)     return false;
+    for (int i=optionalParameterCount; i >= 0; i--) {
+      if (checkMethodApplicability(parameters,argumentTypes,i,hasVarArgs,substitutor,method.getResolveScope(),method.getManager())) {
+        return true;
       }
     }
-    if (!TypesUtil.isAssignableByMethodCallConversion(parameterTypeToCheck,argType,method.getManager(),scope))     return false;
+    return false;
   }
-  return true;
+ else {
+    optionalParameterCount=allOptionalParameterCount - parameters.length + argumentTypes.length;
+    if (optionalParameterCount < 0)     return false;
+    return checkMethodApplicability(parameters,argumentTypes,optionalParameterCount,hasVarArgs,substitutor,method.getResolveScope(),method.getManager());
+  }
 }
