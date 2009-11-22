@@ -1,10 +1,8 @@
 {
-  config.setClasspathList(Collections.EMPTY_LIST);
+  config.setClasspath("");
   final GroovyClassLoader classLoader=buildClassLoaderFor(config);
   final GroovyClassLoader transformLoader=new GroovyClassLoader(classLoader){
     public Enumeration getResources(    String name) throws IOException {
-      if (forStubs) {
-      }
       if (name.endsWith("org.codehaus.groovy.transform.ASTTransformation")) {
         final Enumeration resources=super.getResources(name);
         final ArrayList list=Collections.list(resources);
@@ -20,40 +18,35 @@
     }
   }
 ;
-  final CompilationUnit unit=new CompilationUnit(config,null,classLoader,transformLoader){
-    public void gotoPhase(    int phase) throws CompilationFailedException {
-      super.gotoPhase(phase);
-      if (phase <= Phases.ALL) {
-        System.out.println(PRESENTABLE_MESSAGE + (forStubs ? "Groovy stub generator: " : "Groovy compiler: ") + getPhaseDescription());
+  CompilationUnit unit;
+  try {
+    unit=new CompilationUnit(config,null,classLoader,transformLoader){
+      public void gotoPhase(      int phase) throws CompilationFailedException {
+        super.gotoPhase(phase);
+        if (phase <= Phases.ALL) {
+          System.out.println(PRESENTABLE_MESSAGE + (forStubs ? "Groovy stub generator: " : "Groovy compiler: ") + getPhaseDescription());
+        }
       }
     }
-  }
 ;
+  }
+ catch (  NoSuchMethodError e) {
+    unit=new CompilationUnit(config,null,classLoader){
+      public void gotoPhase(      int phase) throws CompilationFailedException {
+        super.gotoPhase(phase);
+        if (phase <= Phases.ALL) {
+          System.out.println(PRESENTABLE_MESSAGE + (forStubs ? "Groovy stub generator: " : "Groovy compiler: ") + getPhaseDescription());
+        }
+      }
+    }
+;
+  }
   if (forStubs) {
-    boolean useJava5=config.getTargetBytecode().equals(CompilerConfiguration.POST_JDK5);
-    final JavaStubGenerator stubGenerator=new JavaStubGenerator(config.getTargetDirectory(),false,useJava5);
-    unit.addPhaseOperation(new CompilationUnit.PrimaryClassNodeOperation(){
-      public void call(      SourceUnit source,      GeneratorContext context,      ClassNode node) throws CompilationFailedException {
-        new JavaAwareResolveVisitor(unit).startResolving(node,source);
-      }
+    try {
+      addStubGeneration(config,unit);
     }
-,Phases.CONVERSION);
-    unit.addPhaseOperation(new CompilationUnit.PrimaryClassNodeOperation(){
-      public void call(      final SourceUnit source,      final GeneratorContext context,      final ClassNode node) throws CompilationFailedException {
-        final String name=node.getNameWithoutPackage();
-        if ("package-info".equals(name)) {
-          return;
-        }
-        System.out.println(PRESENTABLE_MESSAGE + "Generating stub for " + name);
-        try {
-          stubGenerator.generateClass(node);
-        }
- catch (        FileNotFoundException e) {
-          source.addException(e);
-        }
-      }
+ catch (    LinkageError e) {
     }
-,Phases.CONVERSION);
   }
   return unit;
 }
