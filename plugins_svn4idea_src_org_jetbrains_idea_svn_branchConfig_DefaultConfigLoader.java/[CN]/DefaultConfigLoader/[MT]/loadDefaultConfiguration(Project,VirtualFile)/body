@@ -1,0 +1,54 @@
+{
+  try {
+    SVNURL baseUrl=null;
+    final SVNWCAccess wcAccess=SVNWCAccess.newInstance(null);
+    File rootFile=new File(vcsRoot.getPath());
+    wcAccess.open(rootFile,false,0);
+    try {
+      SVNEntry entry=wcAccess.getEntry(rootFile,false);
+      if (entry != null) {
+        baseUrl=entry.getSVNURL();
+      }
+ else {
+        LOG.info("Directory is not a working copy: " + vcsRoot.getPresentableUrl());
+        return null;
+      }
+    }
+  finally {
+      wcAccess.close();
+    }
+    final SvnBranchConfigurationNew result=new SvnBranchConfigurationNew();
+    result.setTrunkUrl(baseUrl.toString());
+    while (true) {
+      final String s=SVNPathUtil.tail(baseUrl.getPath());
+      if (s.equalsIgnoreCase(DEFAULT_TRUNK_NAME) || s.equalsIgnoreCase(DEFAULT_BRANCHES_NAME) || s.equalsIgnoreCase(DEFAULT_TAGS_NAME)) {
+        final SVNURL rootPath=baseUrl.removePathTail();
+        SVNLogClient client=SvnVcs.getInstance(project).createLogClient();
+        client.doList(rootPath,SVNRevision.UNDEFINED,SVNRevision.HEAD,false,false,new ISVNDirEntryHandler(){
+          public void handleDirEntry(          final SVNDirEntry dirEntry) throws SVNException {
+            if (("".equals(dirEntry.getRelativePath())) || (!SVNNodeKind.DIR.equals(dirEntry.getKind()))) {
+              return;
+            }
+            if (dirEntry.getName().toLowerCase().endsWith(DEFAULT_TRUNK_NAME)) {
+              result.setTrunkUrl(rootPath.appendPath(dirEntry.getName(),false).toString());
+            }
+ else {
+              result.addBranches(rootPath.appendPath(dirEntry.getName(),false).toString(),new InfoStorage<List<SvnBranchItem>>(new ArrayList<SvnBranchItem>(0),InfoReliability.defaultValues));
+            }
+          }
+        }
+);
+        break;
+      }
+      if (SVNPathUtil.removeTail(baseUrl.getPath()).length() == 0) {
+        break;
+      }
+      baseUrl=baseUrl.removePathTail();
+    }
+    return result;
+  }
+ catch (  SVNException e) {
+    LOG.info(e);
+    return null;
+  }
+}
