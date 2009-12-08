@@ -1,9 +1,36 @@
 {
-  try {
-    return cached ? myConfiguration.getBranches(selectedBranchesHolder,myProject,true,true) : myConfiguration.reloadBranches(selectedBranchesHolder,myProject,myVcsRoot);
+  if (cached) {
+    return myConfiguration.getBranches(selectedBranchesHolder);
   }
- catch (  SVNException e) {
-    Messages.showErrorDialog(myProject,e.getMessage(),SvnBundle.message("compare.with.branch.list.error"));
-    return null;
+  final List<SvnBranchItem> result=new ArrayList<SvnBranchItem>();
+  final ProgressManager pm=ProgressManager.getInstance();
+  final boolean wasCanceled=!pm.runProcessWithProgressSynchronously(new Runnable(){
+    public void run(){
+      final ProgressIndicator pi=pm.getProgressIndicator();
+      final Semaphore s=new Semaphore();
+      s.down();
+      final Ref<Boolean> completedRef=new Ref<Boolean>();
+      final SvnBranchConfigManager manager=SvnBranchConfigurationManager.getInstance(myProject).getSvnBranchConfigManager();
+      manager.reloadBranches(myVcsRoot,selectedBranchesHolder,new Consumer<List<SvnBranchItem>>(){
+        public void consume(        final List<SvnBranchItem> svnBranchItems){
+          result.addAll(svnBranchItems);
+          completedRef.set(true);
+          s.up();
+        }
+      }
+);
+      while (true) {
+        s.waitFor(500);
+        if (Boolean.TRUE.equals(completedRef.get()))         break;
+        pi.checkCanceled();
+      }
+    }
+  }
+,SvnBundle.message("compare.with.branch.progress.loading.branches"),true,myProject);
+  if (wasCanceled) {
+    return myConfiguration.getBranches(selectedBranchesHolder);
+  }
+ else {
+    return result;
   }
 }
