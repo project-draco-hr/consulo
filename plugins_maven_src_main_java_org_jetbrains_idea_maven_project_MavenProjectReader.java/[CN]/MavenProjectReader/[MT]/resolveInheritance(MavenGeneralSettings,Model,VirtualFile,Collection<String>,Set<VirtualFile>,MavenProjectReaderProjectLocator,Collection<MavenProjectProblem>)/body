@@ -1,0 +1,51 @@
+{
+  if (recursionGuard.contains(file)) {
+    problems.add(createProblem(file,ProjectBundle.message("maven.project.problem.recursiveInheritance"),MavenProjectProblem.ProblemType.PARENT));
+    return;
+  }
+  recursionGuard.add(file);
+  try {
+    Parent parent=model.getParent();
+    final MavenParentDesc[] parentDesc=new MavenParentDesc[1];
+    if (parent != null) {
+      MavenId parentId=new MavenId(parent.getGroupId(),parent.getArtifactId(),parent.getVersion());
+      if (parentId.equals(model.getGroupId(),model.getArtifactId(),model.getVersion())) {
+        problems.add(createProblem(file,ProjectBundle.message("maven.project.problem.selfInheritance"),MavenProjectProblem.ProblemType.PARENT));
+        return;
+      }
+      parentDesc[0]=new MavenParentDesc(parentId,parent.getRelativePath());
+    }
+    Pair<VirtualFile,RawModelReadResult> parentModelWithProblems=new MavenParentProjectFileProcessor<Pair<VirtualFile,RawModelReadResult>>(){
+      @Nullable protected VirtualFile findManagedFile(      @NotNull MavenId id){
+        return locator.findProjectFile(id);
+      }
+      @Override @Nullable protected Pair<VirtualFile,RawModelReadResult> processRelativeParent(      VirtualFile parentFile){
+        Model parentModel=doReadProjectModel(parentFile,true).model;
+        MavenId parentId=parentDesc[0].getParentId();
+        if (!parentId.equals(new MavenId(parentModel)))         return null;
+        return super.processRelativeParent(parentFile);
+      }
+      @Override protected Pair<VirtualFile,RawModelReadResult> processSuperParent(      VirtualFile parentFile){
+        return null;
+      }
+      @Override protected Pair<VirtualFile,RawModelReadResult> doProcessParent(      VirtualFile parentFile){
+        RawModelReadResult result=doReadProjectModel(generalSettings,parentFile,explicitProfiles,recursionGuard,locator).first;
+        return Pair.create(parentFile,result);
+      }
+    }
+.process(generalSettings,file,parentDesc[0]);
+    if (parentModelWithProblems == null)     return;
+    Model parentModel=parentModelWithProblems.second.model;
+    if (!parentModelWithProblems.second.problems.isEmpty()) {
+      problems.add(createProblem(parentModelWithProblems.first,ProjectBundle.message("maven.project.problem.parentHasProblems",new MavenId(parentModel)),MavenProjectProblem.ProblemType.PARENT));
+    }
+    new DefaultModelInheritanceAssembler().assembleModelInheritance(model,parentModel);
+    List<Profile> profiles=model.getProfiles();
+    for (    Profile each : parentModel.getProfiles()) {
+      addProfileIfDoesNotExist(each,profiles);
+    }
+  }
+  finally {
+    recursionGuard.remove(file);
+  }
+}
