@@ -6,20 +6,25 @@
   PsiImportStaticStatement importStaticStatement=JavaPsiFacade.getInstance(file.getProject()).getElementFactory().createImportStaticStatement(aClass,"*");
   ((PsiJavaFile)file).getImportList().add(importStaticStatement);
   PsiFile[] roots=file.getPsiRoots();
-  for (  PsiFile root : roots) {
-    root.accept(new JavaRecursiveElementWalkingVisitor(){
+  for (  final PsiFile root : roots) {
+    PsiElement copy=root.copy();
+    final PsiManager manager=root.getManager();
+    final TIntArrayList expressionToDequalifyOffsets=new TIntArrayList();
+    copy.accept(new JavaRecursiveElementWalkingVisitor(){
+      int delta=0;
       @Override public void visitReferenceExpression(      PsiReferenceExpression expression){
         if (isParameterizedReference(expression))         return;
         PsiExpression qualifierExpression=expression.getQualifierExpression();
         if (qualifierExpression instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifierExpression).isReferenceTo(aClass)) {
           try {
-            PsiReferenceExpression copy=(PsiReferenceExpression)expression.copy();
-            PsiElement resolved=copy.resolve();
-            copy.getQualifierExpression().delete();
-            PsiManager manager=expression.getManager();
-            if (manager.areElementsEquivalent(copy.resolve(),resolved)) {
-              qualifierExpression.delete();
-              HighlightManager.getInstance(project).addRangeHighlight(editor,expression.getTextRange().getStartOffset(),expression.getTextRange().getEndOffset(),EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES),false,null);
+            PsiElement resolved=expression.resolve();
+            if (resolved == null)             return;
+            int end=expression.getTextRange().getEndOffset();
+            qualifierExpression.delete();
+            delta+=end - expression.getTextRange().getEndOffset();
+            PsiElement after=expression.resolve();
+            if (manager.areElementsEquivalent(after,resolved)) {
+              expressionToDequalifyOffsets.add(expression.getTextRange().getStartOffset() + delta);
             }
           }
  catch (          IncorrectOperationException e) {
@@ -27,6 +32,18 @@
           }
         }
         super.visitElement(expression);
+      }
+    }
+);
+    expressionToDequalifyOffsets.forEachDescending(new TIntProcedure(){
+      public boolean execute(      int offset){
+        PsiReferenceExpression expression=PsiTreeUtil.findElementOfClassAtOffset(root,offset,PsiReferenceExpression.class,false);
+        PsiExpression qualifierExpression=expression.getQualifierExpression();
+        if (qualifierExpression instanceof PsiReferenceExpression && ((PsiReferenceExpression)qualifierExpression).isReferenceTo(aClass)) {
+          qualifierExpression.delete();
+          HighlightManager.getInstance(project).addRangeHighlight(editor,expression.getTextRange().getStartOffset(),expression.getTextRange().getEndOffset(),EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES),false,null);
+        }
+        return true;
       }
     }
 );
