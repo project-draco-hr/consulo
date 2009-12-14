@@ -3,6 +3,7 @@
   final Map<String,SvnBranchConfiguration> map=object.myConfigurationMap;
   final Map<String,SvnBranchConfiguration> newMap=new HashMap<String,SvnBranchConfiguration>(map.size(),1);
   final LocalFileSystem lfs=LocalFileSystem.getInstance();
+  final Set<Pair<VirtualFile,SvnBranchConfigurationNew>> whatToInit=new HashSet<Pair<VirtualFile,SvnBranchConfigurationNew>>();
   for (  Map.Entry<String,SvnBranchConfiguration> entry : map.entrySet()) {
     final SvnBranchConfiguration configuration=entry.getValue();
     final VirtualFile root=lfs.refreshAndFindFileByIoFile(new File(entry.getKey()));
@@ -24,12 +25,21 @@
     for (    String branchUrl : configToConvert.getBranchUrls()) {
       List<SvnBranchItem> items=oldMap.get(branchUrl);
       items=((items == null) || (items.isEmpty())) ? new ArrayList<SvnBranchItem>() : items;
+      whatToInit.add(new Pair<VirtualFile,SvnBranchConfigurationNew>(root,newConfig));
       newConfig.addBranches(branchUrl,new InfoStorage<List<SvnBranchItem>>(items,(items.isEmpty()) ? InfoReliability.defaultValues : InfoReliability.setByUser));
     }
-    final BranchesPreloader branchesPreloader=new BranchesPreloader(myProject,myBunch,root);
-    branchesPreloader.setAll(true);
-    myBunch.updateForRoot(root,new InfoStorage<SvnBranchConfigurationNew>(newConfig,InfoReliability.setByUser),branchesPreloader);
+    myBunch.updateForRoot(root,new InfoStorage<SvnBranchConfigurationNew>(newConfig,InfoReliability.setByUser),null);
   }
+  ((ProjectLevelVcsManagerImpl)myVcsManager).addInitializationRequest(VcsInitObject.BRANCHES,new Runnable(){
+    public void run(){
+      for (      Pair<VirtualFile,SvnBranchConfigurationNew> pair : whatToInit) {
+        final BranchesPreloader branchesPreloader=new BranchesPreloader(myProject,myBunch,pair.getFirst());
+        branchesPreloader.setAll(true);
+        branchesPreloader.consume(null,pair.getSecond());
+      }
+    }
+  }
+);
   object.myConfigurationMap.clear();
   object.myConfigurationMap.putAll(newMap);
   myConfigurationBean=object;
