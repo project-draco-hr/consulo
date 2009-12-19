@@ -1,0 +1,81 @@
+{
+  boolean isModified=false;
+  final CompilerModuleExtension compilerModuleExtension=model.getModuleExtension(CompilerModuleExtension.class);
+  if (compilerModuleExtension.getCompilerOutputPathForTests() != null) {
+    final Element pathElement=new Element(IdeaXml.OUTPUT_TEST_TAG);
+    pathElement.setAttribute(IdeaXml.URL_ATTR,compilerModuleExtension.getCompilerOutputUrlForTests());
+    root.addContent(pathElement);
+    isModified=true;
+  }
+  if (compilerModuleExtension.isCompilerOutputPathInherited()) {
+    root.setAttribute(IdeaXml.INHERIT_COMPILER_OUTPUT_ATTR,String.valueOf(true));
+    isModified=true;
+  }
+  if (compilerModuleExtension.isExcludeOutput()) {
+    root.addContent(new Element(IdeaXml.EXCLUDE_OUTPUT_TAG));
+    isModified=true;
+  }
+  final LanguageLevelModuleExtension languageLevelModuleExtension=model.getModuleExtension(LanguageLevelModuleExtension.class);
+  final LanguageLevel languageLevel=languageLevelModuleExtension.getLanguageLevel();
+  if (languageLevel != null) {
+    languageLevelModuleExtension.writeExternal(root);
+    isModified=true;
+  }
+  for (  ContentEntry entry : model.getContentEntries()) {
+    final Element contentEntryElement=new Element(IdeaXml.CONTENT_ENTRY_TAG);
+    contentEntryElement.setAttribute(IdeaXml.URL_ATTR,entry.getUrl());
+    root.addContent(contentEntryElement);
+    for (    SourceFolder sourceFolder : entry.getSourceFolders()) {
+      if (sourceFolder.isTestSource()) {
+        Element element=new Element(IdeaXml.TEST_FOLDER_TAG);
+        contentEntryElement.addContent(element);
+        element.setAttribute(IdeaXml.URL_ATTR,sourceFolder.getUrl());
+        isModified=true;
+      }
+    }
+    final VirtualFile entryFile=entry.getFile();
+    for (    ExcludeFolder excludeFolder : entry.getExcludeFolders()) {
+      final String exludeFolderUrl=excludeFolder.getUrl();
+      final VirtualFile excludeFile=excludeFolder.getFile();
+      if (entryFile == null || excludeFile == null || VfsUtil.isAncestor(entryFile,excludeFile,false)) {
+        Element element=new Element(IdeaXml.EXCLUDE_FOLDER_TAG);
+        contentEntryElement.addContent(element);
+        element.setAttribute(IdeaXml.URL_ATTR,exludeFolderUrl);
+        isModified=true;
+      }
+    }
+  }
+  for (  OrderEntry entry : model.getOrderEntries()) {
+    if (entry instanceof LibraryOrderEntry && ((LibraryOrderEntry)entry).isModuleLevel()) {
+      final Element element=new Element("lib");
+      element.setAttribute("name",entry.getPresentableName());
+      final DependencyScope scope=((LibraryOrderEntry)entry).getScope();
+      element.setAttribute("scope",scope.name());
+      final String[] urls=entry.getUrls(OrderRootType.SOURCES);
+      if (urls.length > 1) {
+        for (int i=0; i < urls.length - 1; i++) {
+          Element srcElement=new Element(SRCROOT_ATTR);
+          srcElement.setAttribute("url",urls[i]);
+          element.addContent(srcElement);
+        }
+      }
+ else       if (urls.length == 1 && urls[0].contains(JarFileSystem.JAR_SEPARATOR)) {
+        final VirtualFile virtualFile=JarFileSystem.getInstance().findFileByPath(VfsUtil.urlToPath(urls[0]));
+        if (virtualFile != null) {
+          Element srcElement=new Element(SRCROOT_ATTR);
+          srcElement.setAttribute("url",urls[0]);
+          element.addContent(srcElement);
+        }
+      }
+      for (      String srcUrl : entry.getUrls(OrderRootType.SOURCES)) {
+        appendModuleRelatedRoot(element,srcUrl,RELATIVE_MODULE_SRC,model);
+      }
+      for (      String classesUrl : entry.getUrls(OrderRootType.CLASSES)) {
+        appendModuleRelatedRoot(element,classesUrl,RELATIVE_MODULE_CLS,model);
+      }
+      if (!element.getChildren().isEmpty() || !scope.equals(DependencyScope.COMPILE))       root.addContent(element);
+    }
+  }
+  PathMacroManager.getInstance(model.getModule()).collapsePaths(root);
+  return isModified;
+}
