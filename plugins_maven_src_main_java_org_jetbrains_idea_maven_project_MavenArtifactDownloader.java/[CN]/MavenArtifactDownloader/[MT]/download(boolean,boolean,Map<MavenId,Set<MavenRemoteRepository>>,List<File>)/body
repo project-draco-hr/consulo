@@ -1,4 +1,5 @@
 {
+  List<Future<?>> futures=new ArrayList<Future<?>>();
   List<String> classifiers=new ArrayList<String>(2);
   if (downloadSources)   classifiers.add(MavenConstants.CLASSIFIER_SOURCES);
   if (downloadJavadoc)   classifiers.add(MavenConstants.CLASSIFIER_JAVADOC);
@@ -8,13 +9,30 @@
     for (    final Map.Entry<MavenId,Set<MavenRemoteRepository>> eachEntry : libraryArtifacts.entrySet()) {
       myProgress.checkCanceled();
       for (      final String eachClassifier : classifiers) {
-        myProgress.checkCanceled();
-        myProgress.setFraction(((double)downloaded.getAndIncrement()) / total);
-        Artifact a=myEmbedder.resolve(eachEntry.getKey(),MavenConstants.TYPE_JAR,eachClassifier,new ArrayList<MavenRemoteRepository>(eachEntry.getValue()));
-        if (a.isResolved())         downloadedFiles.add(a.getFile());
+        futures.add(EXECUTOR.submit(new Runnable(){
+          public void run(){
+            try {
+              myProgress.checkCanceled();
+              myProgress.setFraction(((double)downloaded.getAndIncrement()) / total);
+              Artifact a=myEmbedder.resolve(eachEntry.getKey(),MavenConstants.TYPE_JAR,eachClassifier,new ArrayList<MavenRemoteRepository>(eachEntry.getValue()));
+              if (a.isResolved())               downloadedFiles.add(a.getFile());
+            }
+ catch (            MavenProcessCanceledException ignore) {
+            }
+          }
+        }
+));
       }
     }
   }
   finally {
+    for (    Future<?> each : futures) {
+      try {
+        each.get();
+      }
+ catch (      Exception e) {
+        MavenLog.LOG.error(e);
+      }
+    }
   }
 }
