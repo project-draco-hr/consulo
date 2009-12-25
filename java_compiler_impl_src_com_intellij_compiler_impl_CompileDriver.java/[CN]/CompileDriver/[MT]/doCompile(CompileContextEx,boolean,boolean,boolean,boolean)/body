@@ -2,12 +2,17 @@
   try {
     if (isRebuild) {
       deleteAll(context);
-      if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-        if (LOG.isDebugEnabled()) {
-          logErrorMessages(context);
-        }
-        return ExitStatus.ERRORS;
+    }
+ else     if (forceCompile) {
+      if (myShouldClearOutputDirectory) {
+        clearAffectedOutputPathsIfPossible(context);
       }
+    }
+    if (context.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      if (LOG.isDebugEnabled()) {
+        logErrorMessages(context);
+      }
+      return ExitStatus.ERRORS;
     }
     if (!onlyCheckStatus) {
       if (!executeCompileTasks(context,true)) {
@@ -72,7 +77,12 @@
           generated.getSecond().refresh(asyncMode,true,decCount);
         }
         try {
-          latch.await();
+          while (latch.getCount() > 0) {
+            latch.await(500,TimeUnit.MILLISECONDS);
+            if (progressIndicator.isCanceled()) {
+              return ExitStatus.CANCELLED;
+            }
+          }
         }
  catch (        InterruptedException e) {
           LOG.info(e);
@@ -85,7 +95,19 @@
       CompilerUtil.logDuration("Initial VFS refresh",initialRefreshTime);
       CompilerUtil.ourRefreshTime+=initialRefreshTime;
     }
-    DumbService.getInstance(myProject).waitForSmartMode();
+    final Semaphore semaphore=new Semaphore();
+    semaphore.down();
+    DumbService.getInstance(myProject).runWhenSmart(new Runnable(){
+      public void run(){
+        semaphore.up();
+      }
+    }
+);
+    while (!semaphore.waitFor(500)) {
+      if (context.getProgressIndicator().isCanceled()) {
+        return ExitStatus.CANCELLED;
+      }
+    }
     if (needRecalcOutputDirs) {
       context.recalculateOutputDirs();
     }
