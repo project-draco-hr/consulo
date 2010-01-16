@@ -5,6 +5,7 @@
     HashSet<VirtualFile> rootsToStash=new HashSet<VirtualFile>();
     List<LocalChangeList> listsCopy=null;
     ChangeListManagerEx changeManager=(ChangeListManagerEx)ChangeListManagerEx.getInstance(myProject);
+    Map<VirtualFile,List<Change>> sortedChanges=new HashMap<VirtualFile,List<Change>>();
     if (isAutoStash()) {
       listsCopy=changeManager.getChangeListsCopy();
       for (      LocalChangeList l : listsCopy) {
@@ -15,6 +16,12 @@
             VirtualFile r=GitUtil.getGitRootOrNull(c.getAfterRevision().getFile());
             if (r != null) {
               rootsToStash.add(r);
+              List<Change> changes=sortedChanges.get(r);
+              if (changes == null) {
+                changes=new ArrayList<Change>();
+                sortedChanges.put(r,changes);
+              }
+              changes.add(c);
             }
           }
  else           if (c.getBeforeRevision() != null) {
@@ -24,6 +31,14 @@
             }
           }
         }
+      }
+      GitVcsSettings settings=GitVcsSettings.getInstance(myProject);
+      boolean result=GitConvertFilesDialog.showDialogIfNeeded(myProject,settings,sortedChanges,myExceptions);
+      if (!result) {
+        if (myExceptions.isEmpty()) {
+          myExceptions.add(new VcsException("Conversion of line separators failed."));
+        }
+        return;
       }
     }
     if (areRootsUnderRebase(roots))     return;
@@ -41,7 +56,10 @@
         final Ref<Boolean> cancelled=new Ref<Boolean>(false);
         final Ref<Throwable> ex=new Ref<Throwable>();
         try {
-          boolean stashCreated=rootsToStash.contains(root) && GitStashUtils.saveStash(myProject,root,stashMessage);
+          boolean stashCreated=false;
+          if (rootsToStash.contains(root)) {
+            stashCreated=GitStashUtils.saveStash(myProject,root,stashMessage);
+          }
           try {
             markStart(root);
             try {
