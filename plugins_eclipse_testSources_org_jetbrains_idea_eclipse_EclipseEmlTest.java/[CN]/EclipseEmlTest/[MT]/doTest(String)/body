@@ -1,0 +1,30 @@
+{
+  final String path=getProject().getBaseDir().getPath() + relativePath;
+  final Module module=ApplicationManager.getApplication().runWriteAction(new Computable<Module>(){
+    public Module compute(){
+      return ModuleManager.getInstance(getProject()).newModule(path + "/" + EclipseProjectFinder.findProjectName(path)+ IdeaXml.IML_EXT,StdModuleTypes.JAVA);
+    }
+  }
+);
+  replaceRoot(path,module.getName() + EclipseXml.IDEA_SETTINGS_POSTFIX);
+  replaceRoot(path,EclipseXml.DOT_CLASSPATH_EXT);
+  final EclipseClasspathStorageProvider.EclipseClasspathConverter converter=new EclipseClasspathStorageProvider.EclipseClasspathConverter(module);
+  final ModifiableRootModel rootModel=ModuleRootManager.getInstance(module).getModifiableModel();
+  final Element classpathElement=JDOMUtil.loadDocument(new String(FileUtil.loadFileText(new File(path,EclipseXml.DOT_CLASSPATH_EXT)))).getRootElement();
+  converter.getClasspath(rootModel,classpathElement);
+  final File tempDirectory=FileUtil.createTempDirectory("","");
+  tempDirectory.deleteOnExit();
+  FileUtil.copyDir(new File(path),tempDirectory);
+  new EclipseClasspathStorageProvider.EclipseClasspathConverter(module){
+    @Override public CachedXmlDocumentSet getFileSet(){
+      CachedXmlDocumentSet fileCache=new CachedXmlDocumentSet(module.getProject());
+      EclipseModuleManager.getInstance(module).setDocumentSet(fileCache);
+      EclipseClasspathStorageProvider.registerFiles(fileCache,module,tempDirectory.getPath(),tempDirectory.getPath());
+      fileCache.preload();
+      return fileCache;
+    }
+  }
+.setClasspath(rootModel);
+  rootModel.dispose();
+  IdeaTestUtil.assertDirectoriesEqual(LocalFileSystem.getInstance().findFileByIoFile(new File(path,EclipseXml.DOT_CLASSPATH_EXT).getParentFile()),LocalFileSystem.getInstance().findFileByIoFile(tempDirectory),null);
+}
