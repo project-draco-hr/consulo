@@ -1,0 +1,52 @@
+{
+  if (newExpression.getArrayCount() > 0)   return;
+  GrCodeReferenceElement refElement=newExpression.getReferenceElement();
+  if (refElement == null)   return;
+  final PsiElement element=refElement.resolve();
+  if (element instanceof PsiClass) {
+    PsiClass clazz=(PsiClass)element;
+    if (clazz.hasModifierProperty(PsiModifier.ABSTRACT)) {
+      if (newExpression.getAnonymousClassDefinition() == null) {
+        String message=clazz.isInterface() ? GroovyBundle.message("cannot.instantiate.interface",clazz.getName()) : GroovyBundle.message("cannot.instantiate.abstract.class",clazz.getName());
+        myHolder.createErrorAnnotation(refElement,message);
+      }
+      return;
+    }
+    if (newExpression.getQualifier() != null) {
+      if (clazz.hasModifierProperty(PsiModifier.STATIC)) {
+        myHolder.createErrorAnnotation(newExpression,GroovyBundle.message("qualified.new.of.static.class"));
+      }
+    }
+ else {
+      final PsiClass outerClass=clazz.getContainingClass();
+      if (com.intellij.psi.util.PsiUtil.isInnerClass(clazz) && !PsiUtil.hasEnclosingInstanceInScope(outerClass,newExpression,true)) {
+        myHolder.createErrorAnnotation(newExpression,GroovyBundle.message("cannot.reference.nonstatic",clazz.getQualifiedName()));
+      }
+    }
+  }
+  final GroovyResolveResult constructorResolveResult=newExpression.resolveConstructorGenerics();
+  if (constructorResolveResult.getElement() != null) {
+    checkMethodApplicability(constructorResolveResult,refElement,myHolder);
+    final GrArgumentList argList=newExpression.getArgumentList();
+    if (argList != null && argList.getExpressionArguments().length == 0)     checkDefaultMapConstructor(myHolder,argList);
+  }
+ else {
+    final GroovyResolveResult[] results=newExpression.multiResolveConstructor();
+    final GrArgumentList argList=newExpression.getArgumentList();
+    PsiElement toHighlight=argList != null ? argList : refElement.getReferenceNameElement();
+    if (results.length > 0) {
+      String message=GroovyBundle.message("ambiguous.constructor.call");
+      myHolder.createWarningAnnotation(toHighlight,message);
+    }
+ else {
+      if (element instanceof PsiClass) {
+        PsiType[] argumentTypes=PsiUtil.getArgumentTypes(refElement,true,true);
+        if (argumentTypes != null && argumentTypes.length > 0) {
+          String message=GroovyBundle.message("cannot.find.default.constructor",((PsiClass)element).getName());
+          myHolder.createWarningAnnotation(toHighlight,message);
+        }
+ else         checkDefaultMapConstructor(myHolder,argList);
+      }
+    }
+  }
+}
