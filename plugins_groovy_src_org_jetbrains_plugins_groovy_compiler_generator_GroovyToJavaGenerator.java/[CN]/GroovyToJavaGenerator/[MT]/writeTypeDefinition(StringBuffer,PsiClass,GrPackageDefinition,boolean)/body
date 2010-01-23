@@ -1,0 +1,95 @@
+{
+  final boolean isScript=typeDefinition instanceof GroovyScriptClass;
+  writePackageStatement(text,packageDefinition);
+  GrMembersDeclaration[] membersDeclarations=typeDefinition instanceof GrTypeDefinition ? ((GrTypeDefinition)typeDefinition).getMemberDeclarations() : GrMembersDeclaration.EMPTY_ARRAY;
+  boolean isClassDef=typeDefinition instanceof GrClassDefinition;
+  boolean isInterface=typeDefinition instanceof GrInterfaceDefinition;
+  boolean isEnum=typeDefinition instanceof GrEnumTypeDefinition;
+  boolean isAtInterface=typeDefinition instanceof GrAnnotationTypeDefinition;
+  writeClassModifiers(text,typeDefinition.getModifierList(),typeDefinition.isInterface(),toplevel);
+  if (isInterface)   text.append("interface");
+ else   if (isEnum)   text.append("enum");
+ else   if (isAtInterface)   text.append("@interface");
+ else   text.append("class");
+  text.append(" ").append(typeDefinition.getName());
+  appendTypeParameters(text,typeDefinition);
+  text.append(" ");
+  if (isScript) {
+    text.append("extends groovy.lang.Script ");
+  }
+ else   if (!isEnum && !isAtInterface) {
+    final PsiClassType[] extendsClassesTypes=typeDefinition.getExtendsListTypes();
+    if (extendsClassesTypes.length > 0) {
+      text.append("extends ").append(computeTypeText(extendsClassesTypes[0],false)).append(" ");
+    }
+    PsiClassType[] implementsTypes=typeDefinition.getImplementsListTypes();
+    if (implementsTypes.length > 0) {
+      text.append(isInterface ? "extends " : "implements ");
+      int i=0;
+      while (i < implementsTypes.length) {
+        if (i > 0)         text.append(", ");
+        text.append(computeTypeText(implementsTypes[i],false)).append(" ");
+        i++;
+      }
+    }
+  }
+  text.append("{");
+  if (isEnum) {
+    writeEnumConstants(text,(GrEnumTypeDefinition)typeDefinition);
+  }
+  Set<MethodSignature> methodSignatures=new HashSet<MethodSignature>();
+  List<PsiMethod> methods=new ArrayList<PsiMethod>();
+  methods.addAll(Arrays.asList(typeDefinition.getMethods()));
+  if (isClassDef) {
+    final PsiElementFactory factory=JavaPsiFacade.getInstance(myProject).getElementFactory();
+    methods.add(factory.createMethodFromText("public groovy.lang.MetaClass getMetaClass() {}",null));
+    methods.add(factory.createMethodFromText("public void setMetaClass(groovy.lang.MetaClass mc) {}",null));
+    methods.add(factory.createMethodFromText("public Object invokeMethod(String name, Object args) {}",null));
+    methods.add(factory.createMethodFromText("public Object getProperty(String propertyName) {}",null));
+    methods.add(factory.createMethodFromText("public void setProperty(String propertyName, Object newValue) {}",null));
+  }
+  for (  PsiMethod method : methods) {
+    if (method instanceof GrSyntheticMethodImplementation) {
+      continue;
+    }
+    if (method instanceof GrConstructor) {
+      writeConstructor(text,(GrConstructor)method,isEnum);
+      continue;
+    }
+    PsiParameter[] parameters=method.getParameterList().getParameters();
+    if (parameters.length > 0) {
+      PsiParameter[] parametersCopy=new PsiParameter[parameters.length];
+      PsiType[] parameterTypes=new PsiType[parameters.length];
+      for (int i=0; i < parameterTypes.length; i++) {
+        parametersCopy[i]=parameters[i];
+        parameterTypes[i]=parameters[i].getType();
+      }
+      for (int i=parameters.length - 1; i >= 0; i--) {
+        MethodSignature signature=MethodSignatureUtil.createMethodSignature(method.getName(),parameterTypes,method.getTypeParameters(),PsiSubstitutor.EMPTY);
+        if (methodSignatures.add(signature)) {
+          writeMethod(text,method,parametersCopy);
+        }
+        PsiParameter parameter=parameters[i];
+        if (!(parameter instanceof GrParameter) || !((GrParameter)parameter).isOptional())         break;
+        parameterTypes=ArrayUtil.remove(parameterTypes,parameterTypes.length - 1);
+        parametersCopy=ArrayUtil.remove(parametersCopy,parametersCopy.length - 1);
+      }
+    }
+ else {
+      MethodSignature signature=method.getSignature(PsiSubstitutor.EMPTY);
+      if (methodSignatures.add(signature)) {
+        writeMethod(text,method,parameters);
+      }
+    }
+  }
+  for (  GrMembersDeclaration declaration : membersDeclarations) {
+    if (declaration instanceof GrVariableDeclaration) {
+      writeVariableDeclarations(text,(GrVariableDeclaration)declaration);
+    }
+  }
+  for (  PsiClass inner : typeDefinition.getInnerClasses()) {
+    writeTypeDefinition(text,inner,null,false);
+    text.append("\n");
+  }
+  text.append("}");
+}

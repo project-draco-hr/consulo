@@ -1,0 +1,62 @@
+{
+  GroovyResolveResult resolveResult=referenceExpression.advancedResolve();
+  GroovyResolveResult[] results=referenceExpression.multiResolve(false);
+  for (  GroovyResolveResult result : results) {
+    registerUsedImport(referenceExpression,result);
+  }
+  PsiElement resolved=resolveResult.getElement();
+  final PsiElement parent=referenceExpression.getParent();
+  if (resolved != null) {
+    if (resolved instanceof PsiMember) {
+      highlightMemberResolved(myHolder,referenceExpression,((PsiMember)resolved));
+    }
+    if (!resolveResult.isAccessible()) {
+      String message=GroovyBundle.message("cannot.access",referenceExpression.getReferenceName());
+      myHolder.createWarningAnnotation(referenceExpression.getReferenceNameElement(),message);
+    }
+    if (!resolveResult.isStaticsOK() && resolved instanceof PsiModifierListOwner) {
+      if (!((PsiModifierListOwner)resolved).hasModifierProperty(PsiModifier.STATIC)) {
+        myHolder.createWarningAnnotation(referenceExpression,GroovyBundle.message("cannot.reference.nonstatic",referenceExpression.getReferenceName()));
+      }
+    }
+  }
+ else {
+    GrExpression qualifier=referenceExpression.getQualifierExpression();
+    if (qualifier == null && isDeclarationAssignment(referenceExpression))     return;
+    if (parent instanceof GrReferenceExpression && "class".equals(((GrReferenceExpression)parent).getReferenceName())) {
+      checkSingleResolvedElement(myHolder,referenceExpression,resolveResult);
+    }
+  }
+  if (parent instanceof GrCall) {
+    if (resolved == null && results.length > 0) {
+      resolved=results[0].getElement();
+      resolveResult=results[0];
+    }
+    if (resolved instanceof PsiMethod && resolved.getUserData(GrMethod.BUILDER_METHOD) == null) {
+      checkMethodApplicability(resolveResult,referenceExpression,myHolder);
+    }
+ else {
+      checkClosureApplicability(resolveResult,referenceExpression.getType(),referenceExpression,myHolder);
+    }
+  }
+  if (isDeclarationAssignment(referenceExpression) || resolved instanceof PsiPackage)   return;
+  if (resolved == null) {
+    PsiElement refNameElement=referenceExpression.getReferenceNameElement();
+    PsiElement elt=refNameElement == null ? referenceExpression : refNameElement;
+    Annotation annotation=myHolder.createInfoAnnotation(elt,null);
+    final GrExpression qualifier=referenceExpression.getQualifierExpression();
+    if (qualifier == null) {
+      if (!(parent instanceof GrCall)) {
+        registerCreateClassByTypeFix(referenceExpression,annotation);
+        registerAddImportFixes(referenceExpression,annotation);
+      }
+    }
+ else {
+      if (qualifier.getType() == null) {
+        return;
+      }
+    }
+    registerReferenceFixes(referenceExpression,annotation);
+    annotation.setTextAttributes(DefaultHighlighter.UNRESOLVED_ACCESS);
+  }
+}
