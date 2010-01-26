@@ -1,22 +1,26 @@
 {
   if (!prepareWritable(usages))   return;
+  final List<PsiElement> importStatements=new ArrayList<PsiElement>();
+  if (!CodeStyleSettingsManager.getSettings(myProject).INSERT_INNER_CLASS_IMPORTS) {
+    usages=filterUsagesInImportStatements(usages,importStatements);
+  }
+  saveNonCodeUsages(usages);
+  final Map<PsiElement,PsiElement> oldToNewElementsMapping=new HashMap<PsiElement,PsiElement>();
   try {
-    saveNonCodeUsages(usages);
-    ChangeContextUtil.encodeContextInfo(myClassToMove,true);
-    PsiClass newClass=(PsiClass)myTargetClass.addBefore(myClassToMove,myTargetClass.getRBrace());
-    PsiUtil.setModifierProperty(newClass,PsiModifier.STATIC,true);
-    newClass=(PsiClass)ChangeContextUtil.decodeContextInfo(newClass,null,null);
-    retargetClassRefs(myClassToMove,newClass);
-    final List<PsiElement> importStatements=new ArrayList<PsiElement>();
-    if (!CodeStyleSettingsManager.getSettings(myProject).INSERT_INNER_CLASS_IMPORTS) {
-      usages=filterUsagesInImportStatements(usages,importStatements);
+    for (    PsiClass classToMove : myClassesToMove) {
+      ChangeContextUtil.encodeContextInfo(classToMove,true);
+      PsiClass newClass=(PsiClass)myTargetClass.addBefore(classToMove,myTargetClass.getRBrace());
+      PsiUtil.setModifierProperty(newClass,PsiModifier.STATIC,true);
+      newClass=(PsiClass)ChangeContextUtil.decodeContextInfo(newClass,null,null);
+      oldToNewElementsMapping.put(classToMove,newClass);
     }
-    Map<PsiElement,PsiElement> oldToNewElementsMapping=new HashMap<PsiElement,PsiElement>();
-    oldToNewElementsMapping.put(myClassToMove,newClass);
     myNonCodeUsages=MoveClassesOrPackagesProcessor.retargetUsages(usages,oldToNewElementsMapping);
-    retargetNonCodeUsages(newClass);
-    JavaCodeStyleManager.getInstance(myProject).removeRedundantImports((PsiJavaFile)newClass.getContainingFile());
-    myClassToMove.delete();
+    retargetNonCodeUsages(oldToNewElementsMapping);
+    retargetClassRefsInMoved(oldToNewElementsMapping);
+    JavaCodeStyleManager.getInstance(myProject).removeRedundantImports((PsiJavaFile)myTargetClass.getContainingFile());
+    for (    PsiClass classToMove : myClassesToMove) {
+      classToMove.delete();
+    }
     for (    PsiElement element : importStatements) {
       if (element.isValid()) {
         element.delete();
