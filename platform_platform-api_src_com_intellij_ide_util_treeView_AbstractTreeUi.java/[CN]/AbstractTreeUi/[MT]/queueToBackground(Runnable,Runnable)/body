@@ -1,5 +1,18 @@
 {
-  if (validateReleaseRequested())   return;
+  if (validateReleaseRequested())   return new ActionCallback.Rejected();
+  final ActionCallback result=new ActionCallback();
+  final Ref<Boolean> fail=new Ref<Boolean>(false);
+  final Runnable finalizer=new Runnable(){
+    public void run(){
+      if (fail.get()) {
+        result.setRejected();
+      }
+ else {
+        result.setDone();
+      }
+    }
+  }
+;
   registerWorkerTask(bgBuildAction);
   final Runnable pooledThreadWithProgressRunnable=new Runnable(){
     public void run(){
@@ -16,22 +29,26 @@
                     assertIsDispatchThread();
                     edtPostRunnable.run();
                   }
-  finally {
-                    unregisterWorkerTask(bgBuildAction,finalizeEdtRunnable);
+ catch (                  ProcessCanceledException e) {
+                    fail.set(true);
+                  }
+ finally {
+                    unregisterWorkerTask(bgBuildAction,finalizer);
                   }
                 }
               }
 );
             }
  else {
-              unregisterWorkerTask(bgBuildAction,finalizeEdtRunnable);
+              unregisterWorkerTask(bgBuildAction,finalizer);
             }
           }
  catch (          ProcessCanceledException e) {
-            unregisterWorkerTask(bgBuildAction,finalizeEdtRunnable);
+            fail.set(true);
+            unregisterWorkerTask(bgBuildAction,finalizer);
           }
 catch (          Throwable t) {
-            unregisterWorkerTask(bgBuildAction,finalizeEdtRunnable);
+            unregisterWorkerTask(bgBuildAction,finalizer);
             throw new RuntimeException(t);
           }
         }
@@ -51,6 +68,8 @@ catch (          Throwable t) {
         }
       }
  catch (      ProcessCanceledException e) {
+        fail.set(true);
+        unregisterWorkerTask(bgBuildAction,finalizer);
       }
     }
   }
@@ -68,4 +87,5 @@ catch (          Throwable t) {
       myWorker.addTaskFirst(pooledThreadRunnable);
     }
   }
+  return result;
 }
