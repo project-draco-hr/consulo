@@ -1,0 +1,91 @@
+{
+  if (validateReleaseRequested())   return new ActionCallback.Rejected();
+  final ActionCallback result=new ActionCallback();
+  final Ref<Boolean> fail=new Ref<Boolean>(false);
+  final Runnable finalizer=new Runnable(){
+    public void run(){
+      if (fail.get()) {
+        result.setRejected();
+      }
+ else {
+        result.setDone();
+      }
+    }
+  }
+;
+  registerWorkerTask(bgBuildAction);
+  final Runnable pooledThreadWithProgressRunnable=new Runnable(){
+    public void run(){
+      final AbstractTreeBuilder builder=getBuilder();
+      builder.runBackgroundLoading(new Runnable(){
+        public void run(){
+          assertNotDispatchThread();
+          try {
+            bgBuildAction.run();
+            if (edtPostRunnable != null) {
+              builder.updateAfterLoadedInBackground(new Runnable(){
+                public void run(){
+                  try {
+                    assertIsDispatchThread();
+                    edtPostRunnable.run();
+                  }
+ catch (                  ProcessCanceledException e) {
+                    fail.set(true);
+                  }
+ finally {
+                    unregisterWorkerTask(bgBuildAction,finalizer);
+                  }
+                }
+              }
+);
+            }
+ else {
+              unregisterWorkerTask(bgBuildAction,finalizer);
+            }
+          }
+ catch (          ProcessCanceledException e) {
+            fail.set(true);
+            unregisterWorkerTask(bgBuildAction,finalizer);
+          }
+catch (          Throwable t) {
+            unregisterWorkerTask(bgBuildAction,finalizer);
+            throw new RuntimeException(t);
+          }
+        }
+      }
+);
+    }
+  }
+;
+  Runnable pooledThreadRunnable=new Runnable(){
+    public void run(){
+      try {
+        if (myProgress != null) {
+          ProgressManager.getInstance().runProcess(pooledThreadWithProgressRunnable,myProgress);
+        }
+ else {
+          pooledThreadWithProgressRunnable.run();
+        }
+      }
+ catch (      ProcessCanceledException e) {
+        fail.set(true);
+        unregisterWorkerTask(bgBuildAction,finalizer);
+      }
+    }
+  }
+;
+  if (isPassthroughMode()) {
+  }
+ else {
+    if (myWorker == null || myWorker.isDisposed()) {
+      myWorker=new WorkerThread("AbstractTreeBuilder.Worker",1);
+      myWorker.start();
+      myWorker.addTaskFirst(pooledThreadRunnable);
+      myWorker.dispose(false);
+    }
+ else {
+      myWorker.addTaskFirst(pooledThreadRunnable);
+    }
+  }
+  return result;
+}
