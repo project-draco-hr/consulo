@@ -14,14 +14,31 @@
   }
   final Ref<LoadedChildren> children=new Ref<LoadedChildren>();
   final Ref<Object> elementFromDescriptor=new Ref<Object>();
+  final DefaultMutableTreeNode[] nodeToProcessActions=new DefaultMutableTreeNode[1];
+  final Runnable finalizeRunnable=new Runnable(){
+    public void run(){
+      removeLoading(node,true);
+      removeFromLoadedInBackground(elementFromDescriptor.get());
+      removeFromLoadedInBackground(oldElementFromDescriptor);
+      if (nodeToProcessActions[0] != null) {
+        processNodeActionsIfReady(nodeToProcessActions[0]);
+      }
+    }
+  }
+;
   Runnable buildRunnable=new Runnable(){
     public void run(){
+      if (updateInfo.getPass().isExpired()) {
+        finalizeRunnable.run();
+        return;
+      }
       if (!updateInfo.isDescriptorIsUpToDate()) {
         update(updateInfo.getDescriptor(),true);
       }
       Object element=getElementFromDescriptor(updateInfo.getDescriptor());
       if (element == null) {
         removeFromLoadedInBackground(oldElementFromDescriptor);
+        finalizeRunnable.run();
         return;
       }
       elementFromDescriptor.set(element);
@@ -35,10 +52,16 @@
     }
   }
 ;
-  final DefaultMutableTreeNode[] nodeToProcessActions=new DefaultMutableTreeNode[1];
   Runnable updateRunnable=new Runnable(){
     public void run(){
-      if (children.get() == null)       return;
+      if (updateInfo.getPass().isExpired()) {
+        finalizeRunnable.run();
+        return;
+      }
+      if (children.get() == null) {
+        finalizeRunnable.run();
+        return;
+      }
       if (isRerunNeeded(updateInfo.getPass())) {
         removeFromLoadedInBackground(elementFromDescriptor.get());
         getUpdater().addSubtreeToUpdate(updateInfo.getPass());
@@ -65,11 +88,9 @@
     }
   }
 ;
-  queueToBackground(buildRunnable,updateRunnable,new Runnable(){
+  queueToBackground(buildRunnable,updateRunnable).doWhenProcessed(finalizeRunnable).doWhenRejected(new Runnable(){
     public void run(){
-      if (nodeToProcessActions[0] != null) {
-        processNodeActionsIfReady(nodeToProcessActions[0]);
-      }
+      updateInfo.getPass().expire();
     }
   }
 );
