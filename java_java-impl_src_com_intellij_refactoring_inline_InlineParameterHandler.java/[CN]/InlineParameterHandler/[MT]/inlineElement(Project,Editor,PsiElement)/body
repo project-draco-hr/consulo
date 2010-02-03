@@ -20,13 +20,14 @@
   boolean result=ReferencesSearch.search(method).forEach(new Processor<PsiReference>(){
     public boolean process(    final PsiReference psiReference){
       PsiElement element=psiReference.getElement();
-      if (element.getParent() instanceof PsiCallExpression) {
+      final PsiElement parent=element.getParent();
+      if (parent instanceof PsiCallExpression) {
+        final PsiCallExpression methodCall=(PsiCallExpression)parent;
         occurrences.add(psiReference);
         containingFiles.add(element.getContainingFile());
-        PsiCallExpression methodCall=(PsiCallExpression)element.getParent();
         PsiExpression argument=methodCall.getArgumentList().getExpressions()[index];
         if (!refInitializer.isNull()) {
-          return false;
+          return argument != null && PsiEquivalenceUtil.areElementsEquivalent(refInitializer.get(),argument) && PsiEquivalenceUtil.areElementsEquivalent(refMethodCall.get(),methodCall);
         }
         if (InlineToAnonymousConstructorProcessor.isConstant(argument) || getReferencedFinalField(argument) != null) {
           if (refConstantInitializer.isNull()) {
@@ -37,6 +38,7 @@
           }
         }
  else {
+          if (!refConstantInitializer.isNull())           return false;
           refInitializer.set(argument);
           refMethodCall.set(methodCall);
         }
@@ -53,13 +55,14 @@
     CommonRefactoringUtil.showErrorHint(project,editor,"Cannot find constant initializer for parameter",RefactoringBundle.message("inline.parameter.refactoring"),null);
     return;
   }
-  final ApplicationEx app=(ApplicationEx)ApplicationManager.getApplication();
-  if ((app.isInternal() || app.isUnitTestMode()) && !refInitializer.isNull()) {
-    try {
-      new InlineParameterExpressionProcessor(refMethodCall.get(),method,psiParameter,refInitializer.get(),editor).run();
+  if (!refInitializer.isNull()) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      final InlineParameterExpressionProcessor processor=new InlineParameterExpressionProcessor(refMethodCall.get(),method,psiParameter,refInitializer.get(),method.getProject().getUserData(InlineParameterExpressionProcessor.CREATE_LOCAL_FOR_TESTS));
+      processor.run();
     }
- catch (    IncorrectOperationException e) {
-      LOG.error(e);
+ else {
+      InlineParameterDialog dlg=new InlineParameterDialog(refMethodCall.get(),method,psiParameter,refInitializer.get());
+      dlg.show();
     }
     return;
   }
@@ -67,9 +70,25 @@
     CommonRefactoringUtil.showErrorHint(project,editor,"Cannot find constant initializer for parameter",RefactoringBundle.message("inline.parameter.refactoring"),null);
     return;
   }
+  final Ref<Boolean> isNotConstantAccessible=new Ref<Boolean>();
+  final PsiExpression constantExpression=refConstantInitializer.get();
+  constantExpression.accept(new JavaRecursiveElementVisitor(){
+    @Override public void visitReferenceExpression(    PsiReferenceExpression expression){
+      super.visitReferenceExpression(expression);
+      final PsiElement resolved=expression.resolve();
+      if (resolved instanceof PsiMember && !PsiUtil.isAccessible((PsiMember)resolved,method,null)) {
+        isNotConstantAccessible.set(Boolean.TRUE);
+      }
+    }
+  }
+);
+  if (!isNotConstantAccessible.isNull() && isNotConstantAccessible.get()) {
+    CommonRefactoringUtil.showErrorHint(project,editor,"Constant initializer is not accessible in method body",RefactoringBundle.message("inline.parameter.refactoring"),null);
+    return;
+  }
   if (!ApplicationManager.getApplication().isUnitTestMode()) {
     String occurencesString=RefactoringBundle.message("occurences.string",occurrences.size());
-    String question=RefactoringBundle.message("inline.parameter.confirmation",psiParameter.getName(),refConstantInitializer.get().getText()) + " " + occurencesString;
+    String question=RefactoringBundle.message("inline.parameter.confirmation",psiParameter.getName(),constantExpression.getText()) + " " + occurencesString;
     RefactoringMessageDialog dialog=new RefactoringMessageDialog(REFACTORING_NAME,question,HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
     dialog.show();
     if (!dialog.isOK()) {
@@ -78,7 +97,7 @@
   }
   new WriteCommandAction(project,RefactoringBundle.message("inline.parameter.command.name",psiParameter.getName()),containingFiles.toArray(new PsiFile[containingFiles.size()])){
     protected void run(    final Result result) throws Throwable {
-      SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method,psiParameter,refConstantInitializer.get());
+      SameParameterValueInspection.InlineParameterValueFix.inlineSameParameterValue(method,psiParameter,constantExpression);
     }
     protected UndoConfirmationPolicy getUndoConfirmationPolicy(){
       return UndoConfirmationPolicy.DEFAULT;

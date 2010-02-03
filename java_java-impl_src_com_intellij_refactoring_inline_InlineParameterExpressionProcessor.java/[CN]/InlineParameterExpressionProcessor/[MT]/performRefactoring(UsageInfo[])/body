@@ -1,0 +1,53 @@
+{
+  final List<PsiClassType> thrownExceptions=ExceptionUtil.getThrownCheckedExceptions(new PsiElement[]{myInitializer});
+  final Set<PsiVariable> varsUsedInInitializer=new HashSet<PsiVariable>();
+  final Set<PsiJavaCodeReferenceElement> paramRefsToInline=new HashSet<PsiJavaCodeReferenceElement>();
+  final Map<PsiElement,PsiElement> replacements=new HashMap<PsiElement,PsiElement>();
+  for (  UsageInfo usage : usages) {
+    if (usage instanceof LocalReplacementUsageInfo) {
+      final LocalReplacementUsageInfo replacementUsageInfo=(LocalReplacementUsageInfo)usage;
+      final PsiElement element=replacementUsageInfo.getElement();
+      final PsiElement replacement=replacementUsageInfo.getReplacement();
+      if (element != null && replacement != null) {
+        replacements.put(element,replacement);
+      }
+      varsUsedInInitializer.add(replacementUsageInfo.getVariable());
+    }
+ else {
+      LOG.assertTrue(!myCreateLocal);
+      paramRefsToInline.add((PsiJavaCodeReferenceElement)usage.getElement());
+    }
+  }
+  myInitializer=(PsiExpression)RefactoringUtil.replaceElementsWithMap(myInitializer,replacements);
+  if (myCreateLocal) {
+    final PsiElementFactory factory=JavaPsiFacade.getInstance(myMethod.getProject()).getElementFactory();
+    PsiDeclarationStatement localDeclaration=factory.createVariableDeclarationStatement(myParameter.getName(),myParameter.getType(),myInitializer);
+    final PsiLocalVariable declaredVar=(PsiLocalVariable)localDeclaration.getDeclaredElements()[0];
+    PsiUtil.setModifierProperty(declaredVar,PsiModifier.FINAL,myParameter.hasModifierProperty(PsiModifier.FINAL));
+    final PsiCodeBlock body=myMethod.getBody();
+    if (body != null) {
+      body.addAfter(localDeclaration,body.getLBrace());
+    }
+  }
+ else {
+    for (    PsiJavaCodeReferenceElement paramRef : paramRefsToInline) {
+      InlineUtil.inlineVariable(myParameter,myInitializer,paramRef);
+    }
+  }
+  for (  PsiVariable variable : varsUsedInInitializer) {
+    if (variable != null && variable.isValid()) {
+      if (ReferencesSearch.search(variable).findFirst() == null) {
+        variable.delete();
+      }
+    }
+  }
+  SameParameterValueInspection.InlineParameterValueFix.removeParameter(myMethod,myParameter);
+  if (!thrownExceptions.isEmpty()) {
+    for (    PsiClassType exception : thrownExceptions) {
+      PsiClass exceptionClass=exception.resolve();
+      if (exceptionClass != null) {
+        PsiUtil.addException(myMethod,exceptionClass);
+      }
+    }
+  }
+}
