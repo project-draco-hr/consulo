@@ -1,0 +1,52 @@
+{
+  Project project=PlatformDataKeys.PROJECT.getData(dc);
+  ShelvedChangeList[] changeLists=ShelvedChangesViewManager.SHELVED_CHANGELIST_KEY.getData(dc);
+  if (changeLists == null) {
+    changeLists=ShelvedChangesViewManager.SHELVED_RECYCLED_CHANGELIST_KEY.getData(dc);
+  }
+  List<ShelvedChange> shelvedChanges=ShelvedChangesViewManager.SHELVED_CHANGE_KEY.getData(dc);
+  if (changeLists == null)   return;
+  final List<ShelvedChange> changesFromFirstList=changeLists[0].getChanges();
+  Collections.sort(changesFromFirstList,new MyComparator(project));
+  int toSelectIdx=0;
+  final ArrayList<DiffRequestPresentable> diffRequestPresentables=new ArrayList<DiffRequestPresentable>();
+  ApplyPatchContext context=new ApplyPatchContext(project.getBaseDir(),0,false,false);
+  final PatchesPreloader preloader=new PatchesPreloader();
+  final List<String> missing=new LinkedList<String>();
+  for (  final ShelvedChange shelvedChange : changesFromFirstList) {
+    final Change change=shelvedChange.getChange(project);
+    final String beforePath=shelvedChange.getBeforePath();
+    try {
+      VirtualFile f=FilePatch.findPatchTarget(context,beforePath,shelvedChange.getAfterPath(),beforePath == null);
+      if ((f == null) || (!f.exists())) {
+        if (beforePath != null) {
+          missing.add(beforePath);
+        }
+        continue;
+      }
+      if (isConflictingChange(change)) {
+        TextFilePatch patch=preloader.getPatch(shelvedChange);
+        if (patch == null)         continue;
+        final FilePath pathBeforeRename=context.getPathBeforeRename(f);
+        final ApplyPatchForBaseRevisionTexts threeTexts=ApplyPatchForBaseRevisionTexts.create(project,f,pathBeforeRename,patch);
+        if ((threeTexts == null) || (threeTexts.getStatus() == null) || (ApplyPatchStatus.FAILURE.equals(threeTexts.getStatus()))) {
+          continue;
+        }
+        diffRequestPresentables.add(new MergedDiffRequestPresentable(project,threeTexts,f,"Shelved Version"));
+      }
+ else {
+        diffRequestPresentables.add(new ChangeDiffRequestPresentable(project,change));
+      }
+    }
+ catch (    IOException e) {
+      continue;
+    }
+    if ((shelvedChanges != null) && shelvedChanges.contains(shelvedChange)) {
+      toSelectIdx=diffRequestPresentables.size() - 1;
+    }
+  }
+  if (!missing.isEmpty()) {
+    ChangesViewBalloonProblemNotifier.showMe(project,"Show Diff: Cannot find base for: " + StringUtil.join(missing,",\n"),MessageType.WARNING);
+  }
+  ShowDiffAction.showDiffImpl(project,diffRequestPresentables,toSelectIdx,ShowDiffAction.DiffExtendUIFactory.NONE,true);
+}
