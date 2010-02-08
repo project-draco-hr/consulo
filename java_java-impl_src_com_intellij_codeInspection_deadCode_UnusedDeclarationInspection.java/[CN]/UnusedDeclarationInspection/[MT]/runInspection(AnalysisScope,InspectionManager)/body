@@ -1,0 +1,97 @@
+{
+  getRefManager().iterate(new RefJavaVisitor(){
+    @Override public void visitElement(    final RefEntity refEntity){
+      if (refEntity instanceof RefJavaElement) {
+        final RefElementImpl refElement=(RefElementImpl)refEntity;
+        final PsiElement element=refElement.getElement();
+        if (element == null)         return;
+        final boolean isSuppressed=refElement.isSuppressed(getShortName());
+        if (!getContext().isToCheckMember(element,UnusedDeclarationInspection.this) || isSuppressed) {
+          if (isSuppressed || !scope.contains(element)) {
+            getEntryPointsManager().addEntryPoint(refElement,false);
+          }
+          return;
+        }
+        if (!refElement.isSuspicious())         return;
+        refElement.accept(new RefJavaVisitor(){
+          @Override public void visitElement(          final RefEntity elem){
+            if (elem instanceof RefElement) {
+              final RefElement element=(RefElement)elem;
+              if (isEntryPoint(element)) {
+                getEntryPointsManager().addEntryPoint(element,false);
+              }
+            }
+          }
+          @Override public void visitMethod(          RefMethod method){
+            if (isAddMainsEnabled() && method.isAppMain()) {
+              getEntryPointsManager().addEntryPoint(method,false);
+            }
+ else {
+              super.visitMethod(method);
+            }
+          }
+          @Override public void visitClass(          RefClass aClass){
+            final PsiClass psiClass=aClass.getElement();
+            if (isAddAppletEnabled() && aClass.isApplet() || isAddServletEnabled() && aClass.isServlet()) {
+              getEntryPointsManager().addEntryPoint(aClass,false);
+            }
+ else             if (psiClass.isAnnotationType()) {
+              getEntryPointsManager().addEntryPoint(aClass,false);
+              final PsiMethod[] psiMethods=psiClass.getMethods();
+              for (              PsiMethod psiMethod : psiMethods) {
+                getEntryPointsManager().addEntryPoint(getRefManager().getReference(psiMethod),false);
+              }
+            }
+ else             if (psiClass.isEnum()) {
+              getEntryPointsManager().addEntryPoint(aClass,false);
+            }
+ else {
+              super.visitClass(aClass);
+            }
+          }
+        }
+);
+      }
+    }
+  }
+);
+  if (isAddNonJavaUsedEnabled()) {
+    checkForReachables();
+    ProgressManager.getInstance().runProcess(new Runnable(){
+      public void run(){
+        final RefFilter filter=new StrictUnreferencedFilter(UnusedDeclarationInspection.this);
+        final PsiSearchHelper helper=PsiManager.getInstance(getRefManager().getProject()).getSearchHelper();
+        getRefManager().iterate(new RefJavaVisitor(){
+          @Override public void visitElement(          final RefEntity refEntity){
+            if (refEntity instanceof RefClass && filter.accepts((RefClass)refEntity)) {
+              findExternalClassReferences((RefClass)refEntity);
+            }
+ else             if (refEntity instanceof RefMethod) {
+              RefMethod refMethod=(RefMethod)refEntity;
+              if (refMethod.isConstructor() && filter.accepts(refMethod)) {
+                findExternalClassReferences(refMethod.getOwnerClass());
+              }
+            }
+          }
+          private void findExternalClassReferences(          final RefClass refElement){
+            PsiClass psiClass=refElement.getElement();
+            String qualifiedName=psiClass.getQualifiedName();
+            if (qualifiedName != null) {
+              helper.processUsagesInNonJavaFiles(qualifiedName,new PsiNonJavaFileReferenceProcessor(){
+                public boolean process(                PsiFile file,                int startOffset,                int endOffset){
+                  getEntryPointsManager().addEntryPoint(refElement,false);
+                  return false;
+                }
+              }
+,GlobalSearchScope.projectScope(getContext().getProject()));
+            }
+          }
+        }
+);
+      }
+    }
+,null);
+  }
+  myProcessedSuspicious=new HashSet<RefElement>();
+  myPhase=1;
+}
