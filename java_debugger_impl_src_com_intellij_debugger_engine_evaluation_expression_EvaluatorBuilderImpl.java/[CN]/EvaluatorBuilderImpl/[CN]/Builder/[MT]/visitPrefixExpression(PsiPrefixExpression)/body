@@ -1,12 +1,13 @@
 {
-  final PsiType type=expression.getType();
-  if (type == null) {
+  final PsiType expressionType=expression.getType();
+  if (expressionType == null) {
     throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.unknown.expression.type",expression.getText())));
   }
   final PsiExpression operandExpression=expression.getOperand();
   if (operandExpression == null) {
     throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.unknown.expression.operand",expression.getText())));
   }
+  final PsiType operandExpressionType=operandExpression.getType();
   operandExpression.accept(this);
   final Evaluator operand=myResult;
   final IElementType opType=expression.getOperationSign().getTokenType();
@@ -16,13 +17,29 @@
       PsiElementFactory elementFactory=JavaPsiFacade.getInstance(expression.getProject()).getElementFactory();
       PsiExpression one=elementFactory.createExpressionFromText("1",null);
       one.accept(this);
-      myResult=new AssignmentEvaluator(operand,new BinaryExpressionEvaluator(operand,myResult,isPlus ? JavaTokenType.PLUS : JavaTokenType.MINUS,type.getCanonicalText()));
+      Evaluator left=operand;
+      if (!(operandExpressionType instanceof PsiPrimitiveType)) {
+        left=new UnBoxingEvaluator(left);
+      }
+      PsiType expected=expressionType;
+      final PsiPrimitiveType unboxedExpectedType=PsiPrimitiveType.getUnboxedType(expected);
+      if (unboxedExpectedType != null) {
+        expected=unboxedExpectedType;
+      }
+      final BinaryExpressionEvaluator rightEval=new BinaryExpressionEvaluator(left,myResult,isPlus ? JavaTokenType.PLUS : JavaTokenType.MINUS,expected.getCanonicalText());
+      myResult=new AssignmentEvaluator(operand,unboxedExpectedType != null ? new BoxingEvaluator(rightEval) : rightEval);
     }
  catch (    IncorrectOperationException e) {
       LOG.error(e);
     }
   }
  else {
-    myResult=new UnaryExpressionEvaluator(opType,type.getCanonicalText(),operand,expression.getOperationSign().getText());
+    PsiType expected=expressionType;
+    final PsiPrimitiveType unboxedExpectedType=PsiPrimitiveType.getUnboxedType(expected);
+    if (unboxedExpectedType != null) {
+      expected=unboxedExpectedType;
+    }
+    final UnaryExpressionEvaluator unaryEvaluator=new UnaryExpressionEvaluator(opType,expected.getCanonicalText(),new UnBoxingEvaluator(operand),expression.getOperationSign().getText());
+    myResult=unboxedExpectedType != null ? new BoxingEvaluator(unaryEvaluator) : unaryEvaluator;
   }
 }
