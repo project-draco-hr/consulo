@@ -1,0 +1,65 @@
+{
+  final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(context.getProject());
+  final GroovyFile toEval=factory.createGroovyFile(text,false,context);
+  final GrClosableBlock closure=PsiTreeUtil.getParentOfType(context,GrClosableBlock.class);
+  final Map<String,String> parameters=new THashMap<String,String>();
+  toEval.accept(new GroovyRecursiveElementVisitor(){
+    public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
+      super.visitReferenceExpression(referenceExpression);
+      PsiElement resolved=referenceExpression.resolve();
+      if (resolved instanceof PsiMethod && "getDelegate".equals(((PsiMethod)resolved).getName()) && closure != null) {
+        replaceWithReference(referenceExpression,"owner");
+        return;
+      }
+      if (resolved instanceof GrField && !referenceExpression.isQualified()) {
+        replaceWithReference(referenceExpression,(closure == null ? "delegate" : "owner") + "." + referenceExpression.getReferenceName());
+        return;
+      }
+      if (resolved instanceof GrVariableBase && !(resolved instanceof GrField) && !PsiTreeUtil.isAncestor(toEval,resolved,false)) {
+        final String name=((GrVariableBase)resolved).getName();
+        if (resolved instanceof ClosureSyntheticParameter && PsiTreeUtil.isAncestor(toEval,((ClosureSyntheticParameter)resolved).getClosure(),false)) {
+          return;
+        }
+        String value;
+        if (closure != null && PsiTreeUtil.findCommonParent(resolved,closure) != closure && !(resolved instanceof ClosureSyntheticParameter)) {
+          value="this." + name;
+        }
+ else {
+          value=name;
+        }
+        parameters.put(name,value);
+      }
+    }
+    @Override public void visitThisExpression(    final GrThisReferenceExpression thisExpression){
+      super.visitThisExpression(thisExpression);
+      replaceWithReference(thisExpression,closure == null ? "delegate" : "owner");
+    }
+    @Override public void visitSuperExpression(    final GrSuperReferenceExpression superExpression){
+      super.visitSuperExpression(superExpression);
+      replaceWithReference(superExpression,closure == null ? "delegate" : "owner");
+    }
+    private void replaceWithReference(    GrExpression expr,    final String exprText){
+      final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(expr.getProject());
+      visitReferenceExpression((GrReferenceExpression)expr.replaceWithExpression(factory.createExpressionFromText(exprText),false));
+    }
+    public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
+      if (refElement.getQualifier() != null) {
+        super.visitCodeReferenceElement(refElement);
+      }
+ else {
+        PsiElement resolved=refElement.resolve();
+        if (resolved instanceof PsiClass) {
+          String qName=((PsiClass)resolved).getQualifiedName();
+          if (qName != null) {
+            int dotIndex=qName.lastIndexOf(".");
+            if (dotIndex < 0)             return;
+            String packageName=qName.substring(0,dotIndex);
+            refElement.setQualifier(factory.createReferenceElementFromText(packageName));
+          }
+        }
+      }
+    }
+  }
+);
+  return Pair.create(parameters,toEval);
+}
