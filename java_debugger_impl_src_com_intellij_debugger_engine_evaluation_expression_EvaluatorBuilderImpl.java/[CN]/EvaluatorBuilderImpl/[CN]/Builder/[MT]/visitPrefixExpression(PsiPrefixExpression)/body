@@ -7,39 +7,29 @@
   if (operandExpression == null) {
     throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.unknown.expression.operand",expression.getText())));
   }
-  final PsiType operandExpressionType=operandExpression.getType();
   operandExpression.accept(this);
-  final Evaluator operand=myResult;
-  final IElementType opType=expression.getOperationSign().getTokenType();
-  if (opType == JavaTokenType.PLUSPLUS || opType == JavaTokenType.MINUSMINUS) {
-    final boolean isPlus=opType == JavaTokenType.PLUSPLUS;
+  Evaluator operandEvaluator=myResult;
+  final PsiType operandType=operandExpression.getType();
+  @Nullable final PsiType unboxedOperandType=PsiPrimitiveType.getUnboxedType(operandType);
+  final IElementType operation=expression.getOperationSign().getTokenType();
+  if (operation == JavaTokenType.PLUSPLUS || operation == JavaTokenType.MINUSMINUS) {
     try {
-      PsiElementFactory elementFactory=JavaPsiFacade.getInstance(expression.getProject()).getElementFactory();
-      PsiExpression one=elementFactory.createExpressionFromText("1",null);
-      one.accept(this);
-      Evaluator left=operand;
-      if (!(operandExpressionType instanceof PsiPrimitiveType)) {
-        left=new UnBoxingEvaluator(left);
-      }
-      PsiType expected=expressionType;
-      final PsiPrimitiveType unboxedExpectedType=PsiPrimitiveType.getUnboxedType(expected);
-      if (unboxedExpectedType != null) {
-        expected=unboxedExpectedType;
-      }
-      final BinaryExpressionEvaluator rightEval=new BinaryExpressionEvaluator(left,myResult,isPlus ? JavaTokenType.PLUS : JavaTokenType.MINUS,expected.getCanonicalText());
-      myResult=new AssignmentEvaluator(operand,unboxedExpectedType != null ? new BoxingEvaluator(rightEval) : rightEval);
+      final BinaryExpressionEvaluator rightEval=createBinaryEvaluator(operandEvaluator,operandType,new LiteralEvaluator(Integer.valueOf(1),"int"),PsiType.INT,operation == JavaTokenType.PLUSPLUS ? JavaTokenType.PLUS : JavaTokenType.MINUS,unboxedOperandType != null ? unboxedOperandType : operandType);
+      myResult=new AssignmentEvaluator(operandEvaluator,unboxedOperandType != null ? new BoxingEvaluator(rightEval) : rightEval);
     }
  catch (    IncorrectOperationException e) {
       LOG.error(e);
     }
   }
  else {
-    PsiType expected=expressionType;
-    final PsiPrimitiveType unboxedExpectedType=PsiPrimitiveType.getUnboxedType(expected);
-    if (unboxedExpectedType != null) {
-      expected=unboxedExpectedType;
+    if (JavaTokenType.PLUS.equals(operation) || JavaTokenType.MINUS.equals(operation) || JavaTokenType.TILDE.equals(operation)) {
+      operandEvaluator=handleUnaryNumericPromotion(operandType,operandEvaluator);
     }
-    final UnaryExpressionEvaluator unaryEvaluator=new UnaryExpressionEvaluator(opType,expected.getCanonicalText(),new UnBoxingEvaluator(operand),expression.getOperationSign().getText());
-    myResult=unboxedExpectedType != null ? new BoxingEvaluator(unaryEvaluator) : unaryEvaluator;
+ else {
+      if (unboxedOperandType != null) {
+        operandEvaluator=new UnBoxingEvaluator(operandEvaluator);
+      }
+    }
+    myResult=new UnaryExpressionEvaluator(operation,expressionType.getCanonicalText(),operandEvaluator,expression.getOperationSign().getText());
   }
 }
