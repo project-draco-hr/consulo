@@ -1,5 +1,5 @@
 {
-  String tagName=tag.getName();
+  final String tagName=tag.getName();
   PsiDocTagValue value=tag.getValueElement();
   if (value == null)   return;
   final JavadocTagInfo info=manager.getTagInfo(tagName);
@@ -16,8 +16,28 @@
       if (textOffset != value.getTextRange().getEndOffset()) {
         final PsiDocTagValue valueElement=tag.getValueElement();
         if (valueElement != null) {
-          @NonNls String params="<code>" + value.getContainingFile().getViewProvider().getContents().subSequence(textOffset,value.getTextRange().getEndOffset()) + "</code>";
-          problems.add(createDescriptor(valueElement,InspectionsBundle.message("inspection.javadoc.problem.cannot.resolve",params),inspectionManager,onTheFly));
+          final CharSequence paramName=value.getContainingFile().getViewProvider().getContents().subSequence(textOffset,value.getTextRange().getEndOffset());
+          @NonNls String params="<code>" + paramName + "</code>";
+          final List<LocalQuickFix> fixes=new ArrayList<LocalQuickFix>();
+          if (onTheFly && "param".equals(tagName)) {
+            final PsiDocCommentOwner commentOwner=PsiTreeUtil.getParentOfType(tag,PsiDocCommentOwner.class);
+            if (commentOwner instanceof PsiMethod) {
+              final PsiMethod method=(PsiMethod)commentOwner;
+              final PsiParameter[] parameters=method.getParameterList().getParameters();
+              final PsiDocTag[] tags=tag.getContainingComment().getTags();
+              final Set<String> unboundParams=new HashSet<String>();
+              for (              PsiParameter parameter : parameters) {
+                if (!JavaDocLocalInspection.isFound(tags,parameter)) {
+                  unboundParams.add(parameter.getName());
+                }
+              }
+              if (!unboundParams.isEmpty()) {
+                fixes.add(new RenameReferenceQuickFix(unboundParams));
+              }
+            }
+          }
+          fixes.add(new RemoveTagFix(tagName,paramName,tag));
+          problems.add(inspectionManager.createProblemDescriptor(valueElement,cannotResolveSymbolMessage(params),onTheFly,fixes.toArray(new LocalQuickFix[fixes.size()]),ProblemHighlightType.LIKE_UNKNOWN_SYMBOL));
         }
       }
     }

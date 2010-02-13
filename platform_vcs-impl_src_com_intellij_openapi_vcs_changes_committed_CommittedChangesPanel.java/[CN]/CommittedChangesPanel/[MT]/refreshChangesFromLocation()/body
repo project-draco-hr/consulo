@@ -1,23 +1,52 @@
 {
-  final Ref<VcsException> refEx=new Ref<VcsException>();
-  final Ref<List<CommittedChangeList>> changes=new Ref<List<CommittedChangeList>>();
-  boolean completed=ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
-    public void run(){
+  myBrowser.reset();
+  myInLoad=true;
+  myBrowser.setLoading(true);
+  ProgressManager.getInstance().run(new Task.Backgroundable(myProject,"Loading changes",true,BackgroundFromStartOption.getInstance()){
+    @Override public void run(    @NotNull final ProgressIndicator indicator){
       try {
-        changes.set(myProvider.getCommittedChanges(mySettings,myLocation,myMaxCount));
+        final AsynchConsumer<List<CommittedChangeList>> appender=new AsynchConsumer<List<CommittedChangeList>>(){
+          public void finished(){
+          }
+          public void consume(          final List<CommittedChangeList> list){
+            new AbstractCalledLater(myProject,ModalityState.stateForComponent(myBrowser)){
+              public void run(){
+                myBrowser.append(list);
+              }
+            }
+.callMe();
+          }
+        }
+;
+        final BufferedListConsumer<CommittedChangeList> bufferedListConsumer=new BufferedListConsumer<CommittedChangeList>(30,appender);
+        myProvider.loadCommittedChanges(mySettings,myLocation,myMaxCount,new AsynchConsumer<CommittedChangeList>(){
+          public void finished(){
+            bufferedListConsumer.flush();
+          }
+          public void consume(          CommittedChangeList committedChangeList){
+            if (myDisposed) {
+              indicator.cancel();
+            }
+            ProgressManager.checkCanceled();
+            bufferedListConsumer.consumeOne(committedChangeList);
+          }
+        }
+);
       }
- catch (      VcsException ex) {
-        refEx.set(ex);
+ catch (      final VcsException e) {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          public void run(){
+            LOG.info(e);
+            Messages.showErrorDialog(myProject,"Error refreshing view: " + StringUtil.join(e.getMessages(),"\n"),"Committed Changes");
+          }
+        }
+);
+      }
+ finally {
+        myInLoad=false;
+        myBrowser.setLoading(false);
       }
     }
   }
-,"Loading changes",true,myProject);
-  if (!refEx.isNull()) {
-    LOG.info(refEx.get());
-    Messages.showErrorDialog(myProject,"Error refreshing view: " + StringUtil.join(refEx.get().getMessages(),"\n"),"Committed Changes");
-  }
- else   if (completed) {
-    myChangesFromProvider=changes.get();
-    updateFilteredModel(false);
-  }
+);
 }
