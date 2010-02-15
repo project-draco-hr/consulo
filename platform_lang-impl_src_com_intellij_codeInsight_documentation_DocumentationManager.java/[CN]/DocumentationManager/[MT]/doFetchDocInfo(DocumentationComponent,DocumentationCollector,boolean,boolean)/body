@@ -1,0 +1,92 @@
+{
+  final ActionCallback callback=new ActionCallback();
+  component.startWait();
+  if (cancelRequests) {
+    myUpdateDocAlarm.cancelAllRequests();
+  }
+  if (component.isEmpty()) {
+    component.setText(CodeInsightBundle.message("javadoc.fetching.progress"),null,clearHistory);
+  }
+  myUpdateDocAlarm.addRequest(new Runnable(){
+    public void run(){
+      final Throwable[] ex=new Throwable[1];
+      final String text=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+        @Nullable public String compute(){
+          try {
+            return provider.getDocumentation();
+          }
+ catch (          Throwable e) {
+            ex[0]=e;
+          }
+          return null;
+        }
+      }
+);
+      if (ex[0] != null) {
+        SwingUtilities.invokeLater(new Runnable(){
+          public void run(){
+            String message=ex[0] instanceof IndexNotReadyException ? "Documentation is not available until indices are built." : CodeInsightBundle.message("javadoc.external.fetch.error.message",ex[0].getLocalizedMessage());
+            component.setText(message,null,true);
+            callback.setDone();
+          }
+        }
+);
+        return;
+      }
+      final PsiElement element=ApplicationManager.getApplication().runReadAction(new Computable<PsiElement>(){
+        @Nullable public PsiElement compute(){
+          return provider.getElement();
+        }
+      }
+);
+      if (element == null) {
+        return;
+      }
+      SwingUtilities.invokeLater(new Runnable(){
+        public void run(){
+          ApplicationManager.getApplication().runWriteAction(new Runnable(){
+            public void run(){
+              PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+            }
+          }
+);
+          if (!element.isValid()) {
+            callback.setDone();
+            return;
+          }
+          if (text == null) {
+            component.setText(CodeInsightBundle.message("no.documentation.found"),element,true);
+          }
+ else           if (text.length() == 0) {
+            component.setText(component.getText(),element,true,clearHistory);
+          }
+ else {
+            component.setData(element,text,clearHistory);
+          }
+          final AbstractPopup jbPopup=(AbstractPopup)getDocInfoHint();
+          if (jbPopup == null) {
+            callback.setDone();
+            return;
+          }
+          jbPopup.setCaption(getTitle(element,false));
+          final String dimensionServiceKey=jbPopup.getDimensionServiceKey();
+          Dimension dimension=component.getPreferredSize();
+          final Dimension storedSize=dimensionServiceKey != null ? DimensionService.getInstance().getSize(dimensionServiceKey,getProject(element)) : null;
+          if (storedSize != null) {
+            dimension=storedSize;
+          }
+          final Window window=SwingUtilities.getWindowAncestor(component);
+          if (window != null) {
+            window.setBounds(window.getX(),window.getY(),dimension.width,dimension.height);
+            window.validate();
+            window.repaint();
+          }
+          callback.setDone();
+        }
+      }
+);
+    }
+  }
+,10);
+  return callback;
+}
