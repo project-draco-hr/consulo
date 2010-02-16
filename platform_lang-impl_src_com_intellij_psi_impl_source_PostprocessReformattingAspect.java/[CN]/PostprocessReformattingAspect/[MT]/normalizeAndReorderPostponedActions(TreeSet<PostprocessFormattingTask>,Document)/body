@@ -1,0 +1,84 @@
+{
+  final List<PostprocessFormattingTask> freeFormatingActions=new ArrayList<PostprocessFormattingTask>();
+  final List<ReindentTask> indentActions=new ArrayList<ReindentTask>();
+  PostprocessFormattingTask accumulatedTask=null;
+  Iterator<PostprocessFormattingTask> iterator=rangesToProcess.iterator();
+  while (iterator.hasNext()) {
+    final PostprocessFormattingTask currentTask=iterator.next();
+    if (accumulatedTask == null) {
+      accumulatedTask=currentTask;
+      iterator.remove();
+    }
+ else     if (accumulatedTask.getStartOffset() > currentTask.getEndOffset() || (accumulatedTask.getStartOffset() == currentTask.getEndOffset() && !canStickActionsTogether(accumulatedTask,currentTask))) {
+      if (accumulatedTask instanceof ReindentTask) {
+        indentActions.add((ReindentTask)accumulatedTask);
+      }
+ else {
+        freeFormatingActions.add(accumulatedTask);
+      }
+      accumulatedTask=currentTask;
+      iterator.remove();
+    }
+ else     if (accumulatedTask instanceof ReformatTask && currentTask instanceof ReindentTask) {
+      if (accumulatedTask.getStartOffset() < currentTask.getStartOffset()) {
+        final RangeMarker endOfRange=document.createRangeMarker(accumulatedTask.getStartOffset(),currentTask.getStartOffset());
+        rangesToProcess.add(new ReformatTask(endOfRange));
+        iterator=rangesToProcess.iterator();
+        while (iterator.next().getRange() != currentTask.getRange())         ;
+      }
+      final RangeMarker rangeToProcess=document.createRangeMarker(currentTask.getEndOffset(),accumulatedTask.getEndOffset());
+      freeFormatingActions.add(new ReformatWithHeadingWhitespaceTask(rangeToProcess));
+      accumulatedTask=currentTask;
+      iterator.remove();
+    }
+ else {
+      if (!(accumulatedTask instanceof ReindentTask)) {
+        iterator.remove();
+        boolean withLeadingWhitespace=(accumulatedTask instanceof ReformatWithHeadingWhitespaceTask);
+        if (accumulatedTask instanceof ReformatTask && currentTask instanceof ReformatWithHeadingWhitespaceTask && accumulatedTask.getStartOffset() == currentTask.getStartOffset()) {
+          withLeadingWhitespace=true;
+        }
+ else         if (accumulatedTask instanceof ReformatWithHeadingWhitespaceTask && currentTask instanceof ReformatTask && accumulatedTask.getStartOffset() < currentTask.getStartOffset()) {
+          withLeadingWhitespace=false;
+        }
+        RangeMarker rangeMarker=document.createRangeMarker(Math.min(accumulatedTask.getStartOffset(),currentTask.getStartOffset()),Math.max(accumulatedTask.getEndOffset(),currentTask.getEndOffset()));
+        if (withLeadingWhitespace) {
+          accumulatedTask=new ReformatWithHeadingWhitespaceTask(rangeMarker);
+        }
+ else {
+          accumulatedTask=new ReformatTask(rangeMarker);
+        }
+      }
+ else       if (currentTask instanceof ReindentTask) {
+        iterator.remove();
+      }
+    }
+  }
+  if (accumulatedTask != null) {
+    if (accumulatedTask instanceof ReindentTask) {
+      indentActions.add((ReindentTask)accumulatedTask);
+    }
+ else {
+      freeFormatingActions.add(accumulatedTask);
+    }
+  }
+  final List<PostponedAction> result=new ArrayList<PostponedAction>();
+  Collections.reverse(freeFormatingActions);
+  Collections.reverse(indentActions);
+  if (!freeFormatingActions.isEmpty()) {
+    FormatTextRanges ranges=new FormatTextRanges();
+    for (    PostprocessFormattingTask action : freeFormatingActions) {
+      TextRange range=new TextRange(action.getStartOffset(),action.getEndOffset());
+      ranges.add(range,action instanceof ReformatWithHeadingWhitespaceTask);
+    }
+    result.add(new ReformatRangesAction(ranges));
+  }
+  if (!indentActions.isEmpty()) {
+    ReindentRangesAction reindentRangesAction=new ReindentRangesAction();
+    for (    ReindentTask action : indentActions) {
+      reindentRangesAction.add(action.getRange(),action.getOldIndent());
+    }
+    result.add(reindentRangesAction);
+  }
+  return result;
+}
