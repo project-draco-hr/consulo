@@ -14,34 +14,24 @@
   if (ok) {
     if (myProject.isDefault() || (ProjectLevelVcsManager.getInstance(myProject).getAllActiveVcss().length == 0) || (!ModalityState.NON_MODAL.equals(ModalityState.current()))) {
       final List<CommittedChangeList> versions=new ArrayList<CommittedChangeList>();
-      final List<VcsException> exceptions=new ArrayList<VcsException>();
-      final Ref<CommittedChangesTableModel> tableModelRef=new Ref<CommittedChangesTableModel>();
-      final ChangeBrowserSettings settings1=settings;
-      final boolean done=ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
-        public void run(){
-          try {
-            versions.addAll(provider.getCommittedChanges(settings1,location,0));
-          }
- catch (          VcsException e) {
-            exceptions.add(e);
-          }
-          tableModelRef.set(new CommittedChangesTableModel(versions,provider.getColumns()));
-        }
+      if (parent == null || !parent.isValid()) {
+        parent=WindowManager.getInstance().suggestParentWindow(myProject);
       }
-,VcsBundle.message("browse.changes.progress.title"),true,myProject);
-      if (!done)       return;
+      final CommittedChangesTableModel model=new CommittedChangesTableModel(versions,true);
+      final ChangesBrowserDialog dlg=createChangesBrowserDialog(model,title,filterUI != null,parent);
+      final AsynchronousListsLoader task=new AsynchronousListsLoader(myProject,provider,location,settings,dlg);
+      ProgressManager.getInstance().run(task);
+      dlg.show();
+      dlg.startLoading();
+      task.cancel();
+      final List<VcsException> exceptions=task.getExceptions();
       if (!exceptions.isEmpty()) {
         Messages.showErrorDialog(myProject,VcsBundle.message("browse.changes.error.message",exceptions.get(0).getMessage()),VcsBundle.message("browse.changes.error.title"));
         return;
       }
-      if (versions.isEmpty()) {
+      if (!task.isRevisionsReturned()) {
         Messages.showInfoMessage(myProject,VcsBundle.message("browse.changes.nothing.found"),VcsBundle.message("browse.changes.nothing.found.title"));
-        return;
       }
-      if (parent == null || !parent.isValid()) {
-        parent=WindowManager.getInstance().suggestParentWindow(myProject);
-      }
-      showChangesBrowser(tableModelRef.get(),title,filterUI != null,parent);
     }
  else {
       openCommittedChangesTab(provider,location,settings,0,title);

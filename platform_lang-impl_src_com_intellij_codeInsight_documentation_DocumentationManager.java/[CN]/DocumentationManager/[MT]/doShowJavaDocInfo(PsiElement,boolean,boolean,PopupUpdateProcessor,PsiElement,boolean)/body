@@ -1,0 +1,76 @@
+{
+  Project project=getProject(element);
+  if (myToolWindow == null && PropertiesComponent.getInstance().isTrueValue(SHOW_DOCUMENTATION_IN_TOOL_WINDOW)) {
+    createToolWindow(element,originalElement,true);
+    return;
+  }
+ else   if (myToolWindow != null) {
+    final Content content=myToolWindow.getContentManager().getSelectedContent();
+    if (content != null) {
+      final DocumentationComponent component=(DocumentationComponent)content.getComponent();
+      if (component.getElement() != element) {
+        content.setDisplayName(getTitle(element,true));
+        fetchDocInfo(getDefaultCollector(element,originalElement),component,true);
+        if (!myToolWindow.isVisible())         myToolWindow.show(null);
+        return;
+      }
+ else {
+        if (element != null && !autoupdate) {
+          restorePopupBehavior();
+        }
+ else {
+          return;
+        }
+      }
+    }
+  }
+  final DocumentationComponent component=new DocumentationComponent(this);
+  Processor<JBPopup> pinCallback=new Processor<JBPopup>(){
+    public boolean process(    JBPopup popup){
+      createToolWindow(element,originalElement,true);
+      popup.cancel();
+      return false;
+    }
+  }
+;
+  final List<Pair<ActionListener,KeyStroke>> actions=Collections.singletonList(Pair.<ActionListener,KeyStroke>create(new ActionListener(){
+    public void actionPerformed(    ActionEvent e){
+      createToolWindow(element,originalElement,false);
+      final JBPopup hint=getDocInfoHint();
+      if (hint != null && hint.isVisible())       hint.cancel();
+    }
+  }
+,ActionManagerEx.getInstanceEx().getKeyboardShortcut("QuickJavaDoc").getFirstKeyStroke()));
+  final JBPopup hint=JBPopupFactory.getInstance().createComponentPopupBuilder(component,component).setRequestFocusCondition(project,NotLookupOrSearchCondition.INSTANCE).setProject(project).addListener(updateProcessor).addUserData(updateProcessor).setKeyboardActions(actions).setForceHeavyweight(heavyWeight).setDimensionServiceKey(myProject,JAVADOC_LOCATION_AND_SIZE,false).setResizable(true).setMovable(true).setTitle(getTitle(element,false)).setCouldPin(pinCallback).setCancelCallback(new Computable<Boolean>(){
+    public Boolean compute(){
+      if (fromQuickSearch()) {
+        ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).unregisterHint();
+      }
+      Disposer.dispose(component);
+      myEditor=null;
+      myPreviouslyFocused=null;
+      myParameterInfoController=null;
+      return Boolean.TRUE;
+    }
+  }
+).createPopup();
+  AbstractPopup oldHint=(AbstractPopup)getDocInfoHint();
+  if (oldHint != null) {
+    DocumentationComponent oldComponent=(DocumentationComponent)oldHint.getComponent();
+    PsiElement element1=oldComponent.getElement();
+    if (Comparing.equal(element,element1)) {
+      if (requestFocus) {
+        component.getComponent().requestFocus();
+      }
+      return;
+    }
+    oldHint.cancel();
+  }
+  component.setHint(hint);
+  fetchDocInfo(getDefaultCollector(element,originalElement),component);
+  myDocInfoHintRef=new WeakReference<JBPopup>(hint);
+  myPreviouslyFocused=WindowManagerEx.getInstanceEx().getFocusedComponent(project);
+  if (fromQuickSearch()) {
+    ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).registerHint(hint);
+  }
+}
