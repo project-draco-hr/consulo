@@ -1,0 +1,41 @@
+{
+  final Set<ASTNode> nodesToProcess=new HashSet<ASTNode>(astNodes);
+  final Document document=provider.getDocument();
+  for (  final ASTNode node : astNodes) {
+    nodesToProcess.remove(node);
+    final FileElement fileElement=TreeUtil.getFileElement((TreeElement)node);
+    if (fileElement == null || ((PsiFile)fileElement.getPsi()).getViewProvider() != provider)     continue;
+    final boolean isGenerated=CodeEditUtil.isNodeGenerated(node);
+    ((TreeElement)node).acceptTree(new RecursiveTreeElementVisitor(){
+      boolean inGeneratedContext=!isGenerated;
+      protected boolean visitNode(      TreeElement element){
+        if (nodesToProcess.contains(element))         return false;
+        final boolean currentNodeGenerated=CodeEditUtil.isNodeGenerated(element);
+        CodeEditUtil.setNodeGenerated(element,false);
+        if (currentNodeGenerated && !inGeneratedContext) {
+          rangesToProcess.add(new ReformatTask(document.createRangeMarker(element.getTextRange())));
+          inGeneratedContext=true;
+        }
+        if (!currentNodeGenerated && inGeneratedContext) {
+          if (element.getElementType() == TokenType.WHITE_SPACE)           return false;
+          final int oldIndent=CodeEditUtil.getOldIndentation(element);
+          LOG.assertTrue(oldIndent >= 0,"for not generated items old indentation must be defined");
+          rangesToProcess.add(new ReindentTask(document.createRangeMarker(element.getTextRange()),oldIndent));
+          inGeneratedContext=false;
+        }
+        return true;
+      }
+      @Override public void visitComposite(      CompositeElement composite){
+        boolean oldGeneratedContext=inGeneratedContext;
+        super.visitComposite(composite);
+        inGeneratedContext=oldGeneratedContext;
+      }
+      @Override public void visitLeaf(      LeafElement leaf){
+        boolean oldGeneratedContext=inGeneratedContext;
+        super.visitLeaf(leaf);
+        inGeneratedContext=oldGeneratedContext;
+      }
+    }
+);
+  }
+}

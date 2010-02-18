@@ -1,2 +1,73 @@
 {
+  MultiMap<PsiElement,String> conflicts=new MultiMap<PsiElement,String>();
+  final PsiClass existingClass=JavaPsiFacade.getInstance(myProject).findClass(myQualifiedName,GlobalSearchScope.allScope(myProject));
+  if (myUseExistingClass) {
+    if (existingClass == null) {
+      conflicts.putValue(existingClass,RefactorJBundle.message("could.not.find.selected.wrapping.class"));
+    }
+ else {
+      boolean foundConstructor=false;
+      final Set<PsiType> returnTypes=new HashSet<PsiType>();
+      returnTypes.add(method.getReturnType());
+      final PsiCodeBlock methodBody=method.getBody();
+      if (methodBody != null) {
+        methodBody.accept(new JavaRecursiveElementWalkingVisitor(){
+          @Override public void visitReturnStatement(          final PsiReturnStatement statement){
+            super.visitReturnStatement(statement);
+            if (PsiTreeUtil.getParentOfType(statement,PsiMethod.class) != method)             return;
+            final PsiExpression returnValue=statement.getReturnValue();
+            if (returnValue != null) {
+              returnTypes.add(returnValue.getType());
+            }
+          }
+        }
+);
+      }
+      final PsiMethod[] constructors=existingClass.getConstructors();
+      constr:       for (      PsiMethod constructor : constructors) {
+        final PsiParameter[] parameters=constructor.getParameterList().getParameters();
+        if (parameters.length == 1) {
+          final PsiParameter parameter=parameters[0];
+          final PsiType parameterType=parameter.getType();
+          for (          PsiType returnType : returnTypes) {
+            if (!TypeConversionUtil.isAssignable(parameterType,returnType)) {
+              continue constr;
+            }
+          }
+          final PsiCodeBlock body=constructor.getBody();
+          LOG.assertTrue(body != null);
+          final boolean[] found=new boolean[1];
+          body.accept(new JavaRecursiveElementWalkingVisitor(){
+            @Override public void visitAssignmentExpression(            final PsiAssignmentExpression expression){
+              super.visitAssignmentExpression(expression);
+              final PsiExpression lExpression=expression.getLExpression();
+              if (lExpression instanceof PsiReferenceExpression && ((PsiReferenceExpression)lExpression).resolve() == myDelegateField) {
+                final PsiExpression rExpression=expression.getRExpression();
+                if (rExpression instanceof PsiReferenceExpression && ((PsiReferenceExpression)rExpression).resolve() == parameter) {
+                  found[0]=true;
+                }
+              }
+            }
+          }
+);
+          if (found[0]) {
+            foundConstructor=true;
+            break;
+          }
+        }
+      }
+      if (!foundConstructor) {
+        conflicts.putValue(existingClass,"Existing class does not have appropriate constructor");
+      }
+    }
+    if (unwrapMethodName.length() == 0) {
+      conflicts.putValue(existingClass,"Existing class does not have getter for selected field");
+    }
+  }
+ else {
+    if (existingClass != null) {
+      conflicts.putValue(existingClass,RefactorJBundle.message("there.already.exists.a.class.with.the.selected.name"));
+    }
+  }
+  return showConflicts(conflicts);
 }
