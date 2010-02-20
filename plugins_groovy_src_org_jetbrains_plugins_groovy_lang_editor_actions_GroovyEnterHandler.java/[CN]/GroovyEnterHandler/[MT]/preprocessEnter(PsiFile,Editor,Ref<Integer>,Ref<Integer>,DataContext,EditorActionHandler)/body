@@ -1,5 +1,38 @@
 {
-  if (handleEnter(editor,dataContext,file.getProject(),originalHandler)) {
+  String text=editor.getDocument().getText();
+  if (StringUtil.isEmpty(text)) {
+    return Result.Continue;
+  }
+  final int caret=editor.getCaretModel().getOffset();
+  final EditorHighlighter highlighter=((EditorEx)editor).getHighlighter();
+  if (caret >= 1 && caret < text.length() && CodeInsightSettings.getInstance().SMART_INDENT_ON_ENTER) {
+    HighlighterIterator iterator=highlighter.createIterator(caret);
+    iterator.retreat();
+    while (!iterator.atEnd() && mWS == iterator.getTokenType()) {
+      iterator.retreat();
+    }
+    boolean afterArrow=!iterator.atEnd() && iterator.getTokenType() == mCLOSABLE_BLOCK_OP;
+    if (afterArrow) {
+      originalHandler.execute(editor,dataContext);
+      PsiDocumentManager.getInstance(file.getProject()).commitDocument(editor.getDocument());
+      CodeStyleManager.getInstance(file.getProject()).adjustLineIndent(file,editor.getCaretModel().getOffset());
+    }
+    iterator=highlighter.createIterator(editor.getCaretModel().getOffset());
+    while (mWS == iterator.getTokenType() && !iterator.atEnd()) {
+      iterator.advance();
+    }
+    if (!iterator.atEnd() && mRCURLY == iterator.getTokenType()) {
+      PsiDocumentManager.getInstance(file.getProject()).commitDocument(editor.getDocument());
+      final PsiElement element=file.findElementAt(iterator.getStart());
+      if (element != null && element.getNode().getElementType() == mRCURLY && element.getParent() instanceof GrClosableBlock && text.length() > caret) {
+        return Result.DefaultForceIndent;
+      }
+    }
+    if (afterArrow) {
+      return Result.Stop;
+    }
+  }
+  if (handleEnter(editor,dataContext,file.getProject(),originalHandler,file)) {
     return Result.Stop;
   }
   return Result.Continue;

@@ -1,5 +1,27 @@
 {
-  expression.getOperand().accept(this);
-  PsiType castType=expression.getCastType().getType();
-  myResult=new TypeCastEvaluator(myResult,castType.getCanonicalText(),castType instanceof PsiPrimitiveType);
+  final PsiExpression operandExpr=expression.getOperand();
+  operandExpr.accept(this);
+  Evaluator operandEvaluator=myResult;
+  final PsiType castType=expression.getCastType().getType();
+  final PsiType operandType=operandExpr.getType();
+  if (castType != null && operandType != null && !TypeConversionUtil.areTypesConvertible(operandType,castType)) {
+    throw new EvaluateRuntimeException(new EvaluateException(JavaErrorMessages.message("inconvertible.type.cast",HighlightUtil.formatType(operandType),HighlightUtil.formatType(castType))));
+  }
+  final boolean shouldPerformBoxingConversion=castType != null && operandType != null && TypeConversionUtil.boxingConversionApplicable(castType,operandType);
+  final boolean castingToPrimitive=castType instanceof PsiPrimitiveType;
+  if (shouldPerformBoxingConversion && castingToPrimitive) {
+    operandEvaluator=new UnBoxingEvaluator(operandEvaluator);
+  }
+  final boolean performCastToWrapperClass=shouldPerformBoxingConversion && !castingToPrimitive;
+  String castTypeName=castType.getCanonicalText();
+  if (performCastToWrapperClass) {
+    final PsiPrimitiveType unboxedType=PsiPrimitiveType.getUnboxedType(castType);
+    if (unboxedType != null) {
+      castTypeName=unboxedType.getCanonicalText();
+    }
+  }
+  myResult=new TypeCastEvaluator(operandEvaluator,castTypeName,castingToPrimitive);
+  if (performCastToWrapperClass) {
+    myResult=new BoxingEvaluator(myResult);
+  }
 }

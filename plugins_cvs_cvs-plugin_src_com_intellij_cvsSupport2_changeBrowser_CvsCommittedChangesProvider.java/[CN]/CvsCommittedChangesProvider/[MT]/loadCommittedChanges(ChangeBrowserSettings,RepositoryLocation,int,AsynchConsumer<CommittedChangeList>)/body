@@ -1,0 +1,41 @@
+{
+  try {
+    CvsRepositoryLocation cvsLocation=(CvsRepositoryLocation)location;
+    final String module=cvsLocation.getModuleName();
+    final CvsEnvironment connectionSettings=cvsLocation.getEnvironment();
+    if (connectionSettings.isOffline()) {
+      return;
+    }
+    final CvsChangeListsBuilder builder=new CvsChangeListsBuilder(module,connectionSettings,myProject,cvsLocation.getRootFile());
+    Date dateTo=settings.getDateBeforeFilter();
+    Date dateFrom=settings.getDateAfterFilter();
+    if (dateFrom == null) {
+      final Calendar calendar=Calendar.getInstance();
+      calendar.set(1970,2,2);
+      dateFrom=calendar.getTime();
+    }
+    final ChangeBrowserSettings.Filter filter=settings.createFilter();
+    final Set<Date> controlSet=new HashSet<Date>();
+    final CvsResult executionResult=runRLogOperation(connectionSettings,module,dateFrom,dateTo,new Consumer<LogInformationWrapper>(){
+      public void consume(      LogInformationWrapper wrapper){
+        final RevisionWrapper revisionWrapper=builder.revisionWrapperFromLog(wrapper);
+        final CvsChangeList changeList=builder.addRevision(revisionWrapper);
+        if (controlSet.contains(changeList.getCommitDate()))         return;
+        controlSet.add(changeList.getCommitDate());
+        if (filter.accepts(changeList)) {
+          consumer.consume(changeList);
+        }
+      }
+    }
+);
+    if (executionResult.isCanceled()) {
+      throw new ProcessCanceledException();
+    }
+ else     if (!executionResult.hasNoErrors()) {
+      throw executionResult.composeError();
+    }
+  }
+  finally {
+    consumer.finished();
+  }
+}

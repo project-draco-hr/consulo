@@ -1,0 +1,44 @@
+{
+  final List<PsiElement> sideEffects=new ArrayList<PsiElement>();
+  boolean hasSideEffects=RemoveUnusedVariableFix.checkSideEffects(qualifierExpression,null,sideEffects);
+  if (hasSideEffects && !myOnTheFly)   return false;
+  if (hasSideEffects && !ApplicationManager.getApplication().isUnitTestMode()) {
+    final TextAttributes attributes=EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+    final Editor editor=PlatformDataKeys.EDITOR.getData(DataManager.getInstance().getDataContext());
+    HighlightManager.getInstance(project).addOccurrenceHighlights(editor,sideEffects.toArray(new PsiElement[sideEffects.size()]),attributes,true,null);
+    try {
+      hasSideEffects=PsiUtil.isStatement(factory.createStatementFromText(qualifierExpression.getText(),qualifierExpression));
+    }
+ catch (    IncorrectOperationException e) {
+      hasSideEffects=false;
+    }
+    final PsiReferenceExpression qualifiedWithClassName=(PsiReferenceExpression)myExpression.copy();
+    qualifiedWithClassName.setQualifierExpression(factory.createReferenceExpression(containingClass));
+    final boolean canCopeWithSideEffects=hasSideEffects;
+    final SideEffectWarningDialog dialog=new SideEffectWarningDialog(project,false,null,sideEffects.get(0).getText(),qualifierExpression.getText(),canCopeWithSideEffects){
+      @Override protected String sideEffectsDescription(){
+        if (canCopeWithSideEffects) {
+          return "<html><body>" + "  There are possible side effects found in expression '" + qualifierExpression.getText() + "'<br>"+ "  You can:<ul><li><b>Remove</b> class reference along with whole expressions involved, or</li>"+ "  <li><b>Transform</b> qualified expression into the statement on its own.<br>"+ "  That is,<br>"+ "  <table border=1><tr><td><code>"+ myExpression.getText()+ "</code></td></tr></table><br> becomes: <br>"+ "  <table border=1><tr><td><code>"+ qualifierExpression.getText()+ ";<br>"+ qualifiedWithClassName.getText()+ "       </code></td></tr></table></li>"+ "  </body></html>";
+        }
+ else {
+          return "<html><body>  There are possible side effects found in expression '" + qualifierExpression.getText() + "'<br>"+ "You can:<ul><li><b>Remove</b> class reference along with whole expressions involved, or</li></body></html>";
+        }
+      }
+    }
+;
+    dialog.show();
+    int res=dialog.getExitCode();
+    if (res == SideEffectWarningDialog.CANCEL)     return false;
+    try {
+      if (res == SideEffectWarningDialog.MAKE_STATEMENT) {
+        final PsiStatement statementFromText=factory.createStatementFromText(qualifierExpression.getText() + ";",null);
+        final PsiStatement statement=PsiTreeUtil.getParentOfType(myExpression,PsiStatement.class);
+        statement.getParent().addBefore(statementFromText,statement);
+      }
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+  }
+  return true;
+}
