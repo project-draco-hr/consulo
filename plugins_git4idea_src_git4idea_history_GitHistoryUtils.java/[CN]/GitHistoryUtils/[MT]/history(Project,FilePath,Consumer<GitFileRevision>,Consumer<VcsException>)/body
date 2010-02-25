@@ -1,0 +1,49 @@
+{
+  path=getLastCommitName(project,path);
+  final VirtualFile root=GitUtil.getGitRoot(path);
+  GitLineHandler h=new GitLineHandler(project,root,GitCommand.LOG);
+  h.setNoSSH(true);
+  h.setStdoutSuppressed(true);
+  h.addParameters("-M","--follow","--name-only","--pretty=format:%H%x00%ct%x00%an%x20%x3C%ae%x3E%x00%cn%x20%x3C%ce%x3E%x00%s%n%n%b%x00","--encoding=UTF-8");
+  h.endOptions();
+  h.addRelativePaths(path);
+  final String prefix=root.getPath() + "/";
+  final MyTokenAccomulator accomulator=new MyTokenAccomulator(6);
+  final Consumer<List<String>> resultAdapter=new Consumer<List<String>>(){
+    public void consume(    List<String> result){
+      final GitRevisionNumber revision=new GitRevisionNumber(result.get(0),GitUtil.parseTimestamp(result.get(1)));
+      final String author=GitUtil.adjustAuthorName(result.get(2),result.get(3));
+      final String message=result.get(4).trim();
+      String path="";
+      try {
+        path=GitUtil.unescapePath(result.get(5));
+      }
+ catch (      VcsException e) {
+        exceptionConsumer.consume(e);
+      }
+      final FilePath revisionPath=VcsUtil.getFilePathForDeletedFile(prefix + path,false);
+      consumer.consume(new GitFileRevision(project,revisionPath,revision,author,message,null));
+    }
+  }
+;
+  final Semaphore semaphore=new Semaphore();
+  h.addLineListener(new GitLineHandlerAdapter(){
+    @Override public void onLineAvailable(    String line,    Key outputType){
+      final List<String> result=accomulator.acceptLine(line);
+      if (result != null) {
+        resultAdapter.consume(result);
+      }
+    }
+    @Override public void startFailed(    Throwable exception){
+      exceptionConsumer.consume(new VcsException(exception));
+    }
+    @Override public void processTerminated(    int exitCode){
+      super.processTerminated(exitCode);
+      semaphore.up();
+    }
+  }
+);
+  semaphore.down();
+  h.start();
+  semaphore.waitFor();
+}
