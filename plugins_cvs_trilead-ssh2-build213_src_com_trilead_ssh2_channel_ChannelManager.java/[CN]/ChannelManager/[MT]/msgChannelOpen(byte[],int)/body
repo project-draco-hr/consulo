@@ -1,0 +1,61 @@
+{
+  TypesReader tr=new TypesReader(msg,0,msglen);
+  tr.readByte();
+  String channelType=tr.readString();
+  int remoteID=tr.readUINT32();
+  int remoteWindow=tr.readUINT32();
+  int remoteMaxPacketSize=tr.readUINT32();
+  if ("x11".equals(channelType)) {
+synchronized (x11_magic_cookies) {
+      if (x11_magic_cookies.size() == 0) {
+        PacketChannelOpenFailure pcof=new PacketChannelOpenFailure(remoteID,Packets.SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,"X11 forwarding not activated","");
+        tm.sendAsynchronousMessage(pcof.getPayload());
+        if (log.isEnabled())         log.log(20,"Unexpected X11 request, denying it!");
+        return;
+      }
+    }
+    String remoteOriginatorAddress=tr.readString();
+    int remoteOriginatorPort=tr.readUINT32();
+    Channel c=new Channel(this);
+synchronized (c) {
+      c.remoteID=remoteID;
+      c.remoteWindow=remoteWindow & 0xFFFFffffL;
+      c.remoteMaxPacketSize=remoteMaxPacketSize;
+      c.localID=addChannel(c);
+    }
+    RemoteX11AcceptThread rxat=new RemoteX11AcceptThread(c,remoteOriginatorAddress,remoteOriginatorPort);
+    rxat.setDaemon(true);
+    rxat.start();
+    return;
+  }
+  if ("forwarded-tcpip".equals(channelType)) {
+    String remoteConnectedAddress=tr.readString();
+    int remoteConnectedPort=tr.readUINT32();
+    String remoteOriginatorAddress=tr.readString();
+    int remoteOriginatorPort=tr.readUINT32();
+    RemoteForwardingData rfd=null;
+synchronized (remoteForwardings) {
+      rfd=(RemoteForwardingData)remoteForwardings.get(new Integer(remoteConnectedPort));
+    }
+    if (rfd == null) {
+      PacketChannelOpenFailure pcof=new PacketChannelOpenFailure(remoteID,Packets.SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,"No thanks, unknown port in forwarded-tcpip request","");
+      tm.sendAsynchronousMessage(pcof.getPayload());
+      if (log.isEnabled())       log.log(20,"Unexpected forwarded-tcpip request, denying it!");
+      return;
+    }
+    Channel c=new Channel(this);
+synchronized (c) {
+      c.remoteID=remoteID;
+      c.remoteWindow=remoteWindow & 0xFFFFffffL;
+      c.remoteMaxPacketSize=remoteMaxPacketSize;
+      c.localID=addChannel(c);
+    }
+    RemoteAcceptThread rat=new RemoteAcceptThread(c,remoteConnectedAddress,remoteConnectedPort,remoteOriginatorAddress,remoteOriginatorPort,rfd.targetAddress,rfd.targetPort);
+    rat.setDaemon(true);
+    rat.start();
+    return;
+  }
+  PacketChannelOpenFailure pcof=new PacketChannelOpenFailure(remoteID,Packets.SSH_OPEN_UNKNOWN_CHANNEL_TYPE,"Unknown channel type","");
+  tm.sendAsynchronousMessage(pcof.getPayload());
+  if (log.isEnabled())   log.log(20,"The peer tried to open an unsupported channel type (" + channelType + ")");
+}
