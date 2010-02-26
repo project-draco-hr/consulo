@@ -1,0 +1,40 @@
+{
+  checkHandleValidAndOpen(handle);
+  if ((len > 32768) || (len <= 0))   throw new IllegalArgumentException("invalid len argument");
+  int req_id=generateNextRequestID();
+  TypesWriter tw=new TypesWriter();
+  tw.writeString(handle.fileHandle,0,handle.fileHandle.length);
+  tw.writeUINT64(fileOffset);
+  tw.writeUINT32(len);
+  if (debug != null) {
+    debug.println("Sending SSH_FXP_READ...");
+    debug.flush();
+  }
+  sendMessage(Packet.SSH_FXP_READ,req_id,tw.getBytes());
+  byte[] resp=receiveMessage(34000);
+  TypesReader tr=new TypesReader(resp);
+  int t=tr.readByte();
+  int rep_id=tr.readUINT32();
+  if (rep_id != req_id)   throw new IOException("The server sent an invalid id field.");
+  if (t == Packet.SSH_FXP_DATA) {
+    if (debug != null) {
+      debug.println("Got SSH_FXP_DATA...");
+      debug.flush();
+    }
+    int readLen=tr.readUINT32();
+    if ((readLen < 0) || (readLen > len))     throw new IOException("The server sent an invalid length field.");
+    tr.readBytes(dst,dstoff,readLen);
+    return readLen;
+  }
+  if (t != Packet.SSH_FXP_STATUS)   throw new IOException("The SFTP server sent an unexpected packet type (" + t + ")");
+  int errorCode=tr.readUINT32();
+  if (errorCode == ErrorCodes.SSH_FX_EOF) {
+    if (debug != null) {
+      debug.println("Got SSH_FX_EOF.");
+      debug.flush();
+    }
+    return -1;
+  }
+  String errorMessage=tr.readString();
+  throw new SFTPException(errorMessage,errorCode);
+}
