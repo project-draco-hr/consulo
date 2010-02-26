@@ -1,0 +1,80 @@
+{
+  Connection conn=new Connection(hostname);
+  try {
+    String[] hostkeyAlgos=database.getPreferredServerHostkeyAlgorithmOrder(hostname);
+    if (hostkeyAlgos != null)     conn.setServerHostKeyAlgorithms(hostkeyAlgos);
+    conn.connect(new AdvancedVerifier());
+    boolean enableKeyboardInteractive=true;
+    boolean enableDSA=true;
+    boolean enableRSA=true;
+    String lastError=null;
+    while (true) {
+      if ((enableDSA || enableRSA) && conn.isAuthMethodAvailable(username,"publickey")) {
+        if (enableDSA) {
+          File key=new File(idDSAPath);
+          if (key.exists()) {
+            EnterSomethingDialog esd=new EnterSomethingDialog(loginFrame,"DSA Authentication",new String[]{lastError,"Enter DSA private key password:"},true);
+            esd.setVisible(true);
+            boolean res=conn.authenticateWithPublicKey(username,key,esd.answer);
+            if (res == true)             break;
+            lastError="DSA authentication failed.";
+          }
+          enableDSA=false;
+        }
+        if (enableRSA) {
+          File key=new File(idRSAPath);
+          if (key.exists()) {
+            EnterSomethingDialog esd=new EnterSomethingDialog(loginFrame,"RSA Authentication",new String[]{lastError,"Enter RSA private key password:"},true);
+            esd.setVisible(true);
+            boolean res=conn.authenticateWithPublicKey(username,key,esd.answer);
+            if (res == true)             break;
+            lastError="RSA authentication failed.";
+          }
+          enableRSA=false;
+        }
+        continue;
+      }
+      if (enableKeyboardInteractive && conn.isAuthMethodAvailable(username,"keyboard-interactive")) {
+        InteractiveLogic il=new InteractiveLogic(lastError);
+        boolean res=conn.authenticateWithKeyboardInteractive(username,il);
+        if (res == true)         break;
+        if (il.getPromptCount() == 0) {
+          lastError="Keyboard-interactive does not work.";
+          enableKeyboardInteractive=false;
+        }
+ else {
+          lastError="Keyboard-interactive auth failed.";
+        }
+        continue;
+      }
+      if (conn.isAuthMethodAvailable(username,"password")) {
+        final EnterSomethingDialog esd=new EnterSomethingDialog(loginFrame,"Password Authentication",new String[]{lastError,"Enter password for " + username},true);
+        esd.setVisible(true);
+        if (esd.answer == null)         throw new IOException("Login aborted by user");
+        boolean res=conn.authenticateWithPassword(username,esd.answer);
+        if (res == true)         break;
+        lastError="Password authentication failed.";
+        continue;
+      }
+      throw new IOException("No supported authentication methods available.");
+    }
+    Session sess=conn.openSession();
+    int x_width=90;
+    int y_width=30;
+    sess.requestPTY("dumb",x_width,y_width,0,0,null);
+    sess.startShell();
+    TerminalDialog td=new TerminalDialog(loginFrame,username + "@" + hostname,sess,x_width,y_width);
+    td.setVisible(true);
+  }
+ catch (  IOException e) {
+    JOptionPane.showMessageDialog(loginFrame,"Exception: " + e.getMessage());
+  }
+  conn.close();
+  Runnable r=new Runnable(){
+    public void run(){
+      loginFrame.dispose();
+    }
+  }
+;
+  SwingUtilities.invokeLater(r);
+}
