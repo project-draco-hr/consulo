@@ -1,0 +1,44 @@
+{
+  if (padd < 4)   padd=4;
+ else   if (padd > 64)   padd=64;
+  int packet_len=5 + len + padd;
+  int slack=packet_len % send_padd_blocksize;
+  if (slack != 0) {
+    packet_len+=(send_padd_blocksize - slack);
+  }
+  if (packet_len < 16)   packet_len=16;
+  int padd_len=packet_len - (5 + len);
+  if (useRandomPadding) {
+    for (int i=0; i < padd_len; i=i + 4) {
+      int r=rnd.nextInt();
+      send_padding_buffer[i]=(byte)r;
+      send_padding_buffer[i + 1]=(byte)(r >> 8);
+      send_padding_buffer[i + 2]=(byte)(r >> 16);
+      send_padding_buffer[i + 3]=(byte)(r >> 24);
+    }
+  }
+ else {
+    for (int i=0; i < padd_len; i++)     send_padding_buffer[i]=0;
+  }
+  send_packet_header_buffer[0]=(byte)((packet_len - 4) >> 24);
+  send_packet_header_buffer[1]=(byte)((packet_len - 4) >> 16);
+  send_packet_header_buffer[2]=(byte)((packet_len - 4) >> 8);
+  send_packet_header_buffer[3]=(byte)((packet_len - 4));
+  send_packet_header_buffer[4]=(byte)padd_len;
+  cos.write(send_packet_header_buffer,0,5);
+  cos.write(message,off,len);
+  cos.write(send_padding_buffer,0,padd_len);
+  if (send_mac != null) {
+    send_mac.initMac(send_seq_number);
+    send_mac.update(send_packet_header_buffer,0,5);
+    send_mac.update(message,off,len);
+    send_mac.update(send_padding_buffer,0,padd_len);
+    send_mac.getMac(send_mac_buffer,0);
+    cos.writePlain(send_mac_buffer,0,send_mac_buffer.length);
+  }
+  cos.flush();
+  if (log.isEnabled()) {
+    log.log(90,"Sent " + Packets.getMessageName(message[off] & 0xff) + " "+ len+ " bytes payload");
+  }
+  send_seq_number++;
+}
