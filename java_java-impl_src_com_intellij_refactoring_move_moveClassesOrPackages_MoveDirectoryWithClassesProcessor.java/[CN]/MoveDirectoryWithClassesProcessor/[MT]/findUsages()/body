@@ -1,2 +1,36 @@
 {
+  final List<UsageInfo> usages=new ArrayList<UsageInfo>();
+  final Set<String> packageNames=new HashSet<String>();
+  for (  PsiFile psiFile : myFilesToMove.keySet()) {
+    if (psiFile instanceof PsiClassOwner) {
+      final PsiClass[] classes=((PsiClassOwner)psiFile).getClasses();
+      for (      PsiClass aClass : classes) {
+        Collections.addAll(usages,MoveClassesOrPackagesUtil.findUsages(aClass,mySearchInComments,mySearchInNonJavaFiles,aClass.getName()));
+      }
+      packageNames.add(((PsiClassOwner)psiFile).getPackageName());
+    }
+  }
+  final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(myProject);
+  for (  String packageName : packageNames) {
+    final PsiPackage aPackage=psiFacade.findPackage(packageName);
+    if (aPackage != null) {
+      boolean remainsNothing=true;
+      for (      PsiDirectory packageDirectory : aPackage.getDirectories()) {
+        if (!isUnderRefactoring(packageDirectory)) {
+          remainsNothing=false;
+          break;
+        }
+      }
+      if (remainsNothing) {
+        for (        PsiReference reference : ReferencesSearch.search(aPackage)) {
+          final PsiElement element=reference.getElement();
+          final PsiImportStatementBase statementBase=PsiTreeUtil.getParentOfType(element,PsiImportStatementBase.class);
+          if (statementBase != null && statementBase.isOnDemand()) {
+            usages.add(new RemoveOnDemandImportStatementsUsageInfo(statementBase));
+          }
+        }
+      }
+    }
+  }
+  return UsageViewUtil.removeDuplicatedUsages(usages.toArray(new UsageInfo[usages.size()]));
 }
