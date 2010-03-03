@@ -1,34 +1,67 @@
 {
   return new DocumentationCollector(){
     @Nullable public String getDocumentation() throws Exception {
-      final DocumentationProvider provider=getProviderFromElement(element,originalElement);
-      if (myParameterInfoController != null) {
-        final Object[] objects=myParameterInfoController.getSelectedElements();
-        if (objects.length > 0) {
-          @NonNls StringBuffer sb=null;
-          for (          Object o : objects) {
-            PsiElement parameter=null;
-            if (o instanceof PsiElement) {
-              parameter=(PsiElement)o;
-            }
-            if (parameter != null) {
-              final SmartPsiElementPointer originalElement=parameter.getUserData(ORIGINAL_ELEMENT_KEY);
-              final String str2=provider.generateDoc(parameter,originalElement != null ? originalElement.getElement() : null);
-              if (str2 == null)               continue;
-              if (sb == null)               sb=new StringBuffer();
-              sb.append(str2);
-              sb.append("<br>");
-            }
- else {
-              sb=null;
-              break;
-            }
-          }
-          if (sb != null)           return sb.toString();
+      final DocumentationProvider provider=ApplicationManager.getApplication().runReadAction(new Computable<DocumentationProvider>(){
+        public DocumentationProvider compute(){
+          return getProviderFromElement(element,originalElement);
         }
       }
-      final SmartPsiElementPointer originalElement=element.getUserData(ORIGINAL_ELEMENT_KEY);
-      return provider.generateDoc(element,originalElement != null ? originalElement.getElement() : null);
+);
+      if (myParameterInfoController != null) {
+        final String doc=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+          public String compute(){
+            return generateParameterInfoDocumentation(provider);
+          }
+        }
+);
+        if (doc != null)         return doc;
+      }
+      if (provider instanceof ExternalDocumentationProvider) {
+        final List<String> urls=ApplicationManager.getApplication().runReadAction(new Computable<List<String>>(){
+          public List<String> compute(){
+            final SmartPsiElementPointer originalElement=element.getUserData(ORIGINAL_ELEMENT_KEY);
+            return provider.getUrlFor(element,originalElement != null ? originalElement.getElement() : null);
+          }
+        }
+);
+        if (urls != null) {
+          final String doc=((ExternalDocumentationProvider)provider).fetchExternalDocumentation(myProject,element,urls);
+          if (doc != null)           return doc;
+        }
+      }
+      return ApplicationManager.getApplication().runReadAction(new Computable<String>(){
+        @Nullable public String compute(){
+          final SmartPsiElementPointer originalElement=element.getUserData(ORIGINAL_ELEMENT_KEY);
+          return provider.generateDoc(element,originalElement != null ? originalElement.getElement() : null);
+        }
+      }
+);
+    }
+    private String generateParameterInfoDocumentation(    DocumentationProvider provider){
+      final Object[] objects=myParameterInfoController.getSelectedElements();
+      if (objects.length > 0) {
+        @NonNls StringBuffer sb=null;
+        for (        Object o : objects) {
+          PsiElement parameter=null;
+          if (o instanceof PsiElement) {
+            parameter=(PsiElement)o;
+          }
+          if (parameter != null) {
+            final SmartPsiElementPointer originalElement=parameter.getUserData(ORIGINAL_ELEMENT_KEY);
+            final String str2=provider.generateDoc(parameter,originalElement != null ? originalElement.getElement() : null);
+            if (str2 == null)             continue;
+            if (sb == null)             sb=new StringBuffer();
+            sb.append(str2);
+            sb.append("<br>");
+          }
+ else {
+            sb=null;
+            break;
+          }
+        }
+        if (sb != null)         return sb.toString();
+      }
+      return null;
     }
     @Nullable public PsiElement getElement(){
       return element.isValid() ? element : null;
