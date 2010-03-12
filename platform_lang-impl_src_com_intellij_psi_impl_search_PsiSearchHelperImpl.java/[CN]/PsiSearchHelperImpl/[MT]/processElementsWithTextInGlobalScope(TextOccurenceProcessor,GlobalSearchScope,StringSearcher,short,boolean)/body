@@ -7,71 +7,46 @@
   }
   myManager.startBatchFilesProcessingMode();
   try {
-    List<String> words=StringUtil.getWordsIn(searcher.getPattern());
-    if (words.isEmpty())     return true;
-    Set<PsiFile> fileSet=new THashSet<PsiFile>();
-    Set<PsiFile> copy=new THashSet<PsiFile>();
-    final Application application=ApplicationManager.getApplication();
-    for (    final String word : words) {
-      PsiFile[] psiFiles=application.runReadAction(new Computable<PsiFile[]>(){
-        public PsiFile[] compute(){
-          return myManager.getCacheManager().getFilesWithWord(word,searchContext,scope,caseSensitively);
-        }
-      }
-);
-      if (fileSet.isEmpty()) {
-        fileSet.addAll(Arrays.asList(psiFiles));
-      }
- else {
-        for (        PsiFile psiFile : psiFiles) {
-          if (fileSet.contains(psiFile)) {
-            copy.add(psiFile);
-          }
-        }
-        Set<PsiFile> tmp=copy;
-        copy=fileSet;
-        fileSet=tmp;
-        copy.clear();
-      }
-      if (fileSet.isEmpty())       break;
-    }
+    String text=searcher.getPattern();
+    List<PsiFile> fileSet=getFilesWithText(scope,searchContext,caseSensitively,text);
     if (progress != null) {
-      progress.setText(PsiBundle.message("psi.search.for.word.progress",searcher.getPattern()));
+      progress.setText(PsiBundle.message("psi.search.for.word.progress",text));
     }
     final AtomicInteger counter=new AtomicInteger(0);
     final AtomicBoolean canceled=new AtomicBoolean(false);
     final AtomicBoolean pceThrown=new AtomicBoolean(false);
     final int size=fileSet.size();
-    boolean completed=JobUtil.invokeConcurrentlyUnderMyProgress(new ArrayList<PsiFile>(fileSet),new Processor<PsiFile>(){
+    boolean completed=JobUtil.invokeConcurrentlyUnderMyProgress(fileSet,new Processor<PsiFile>(){
       public boolean process(      final PsiFile file){
-        if (file instanceof PsiBinaryFile)         return true;
-        file.getViewProvider().getContents();
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          public void run(){
-            try {
-              PsiElement[] psiRoots=file.getPsiRoots();
-              Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
-              for (              PsiElement psiRoot : psiRoots) {
-                ProgressManager.checkCanceled();
-                if (!processed.add(psiRoot))                 continue;
-                if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher,false)) {
-                  canceled.set(true);
-                  return;
+        if (!(file instanceof PsiBinaryFile)) {
+          file.getViewProvider().getContents();
+          ApplicationManager.getApplication().runReadAction(new Runnable(){
+            public void run(){
+              try {
+                PsiElement[] psiRoots=file.getPsiRoots();
+                Set<PsiElement> processed=new HashSet<PsiElement>(psiRoots.length * 2,(float)0.5);
+                for (                PsiElement psiRoot : psiRoots) {
+                  ProgressManager.checkCanceled();
+                  if (!processed.add(psiRoot))                   continue;
+                  if (!LowLevelSearchUtil.processElementsContainingWordInElement(processor,psiRoot,searcher,false)) {
+                    canceled.set(true);
+                    return;
+                  }
                 }
+                myManager.dropResolveCaches();
               }
-              if (progress != null) {
-                double fraction=(double)counter.incrementAndGet() / size;
-                progress.setFraction(fraction);
+ catch (              ProcessCanceledException e) {
+                canceled.set(true);
+                pceThrown.set(true);
               }
-              myManager.dropResolveCaches();
-            }
- catch (            ProcessCanceledException e) {
-              canceled.set(true);
-              pceThrown.set(true);
             }
           }
-        }
 );
+        }
+        if (progress != null) {
+          double fraction=(double)counter.incrementAndGet() / size;
+          progress.setFraction(fraction);
+        }
         return !canceled.get();
       }
     }
