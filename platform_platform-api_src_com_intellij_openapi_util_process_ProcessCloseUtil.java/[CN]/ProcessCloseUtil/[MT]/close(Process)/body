@@ -2,23 +2,31 @@
   final Semaphore outerSemaphore=new Semaphore();
   outerSemaphore.down();
   final Application application=ApplicationManager.getApplication();
-  final Future<?> future=application.executeOnPooledThread(new Runnable(){
+  application.executeOnPooledThread(new Runnable(){
     public void run(){
-      final Semaphore semaphore=new Semaphore();
-      semaphore.down();
-      final Runnable closeRunnable=new Runnable(){
-        public void run(){
-          closeProcessImpl(process);
-          semaphore.up();
+      try {
+        final Semaphore semaphore=new Semaphore();
+        semaphore.down();
+        final Runnable closeRunnable=new Runnable(){
+          public void run(){
+            try {
+              closeProcessImpl(process);
+            }
+  finally {
+              semaphore.up();
+            }
+          }
+        }
+;
+        final Future<?> innerFuture=application.executeOnPooledThread(closeRunnable);
+        semaphore.waitFor(ourAsynchronousWaitTimeout);
+        if (!(innerFuture.isDone() || innerFuture.isCancelled())) {
+          innerFuture.cancel(true);
         }
       }
-;
-      final Future<?> innerFuture=application.executeOnPooledThread(closeRunnable);
-      semaphore.waitFor(ourAsynchronousWaitTimeout);
-      if (!(innerFuture.isDone() || innerFuture.isCancelled())) {
-        innerFuture.cancel(true);
+  finally {
+        outerSemaphore.up();
       }
-      outerSemaphore.up();
     }
   }
 );
