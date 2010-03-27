@@ -1,0 +1,55 @@
+{
+  Collection<MavenProject> projects=getMavenProjects(psiFile);
+  if (projects.isEmpty())   return Collections.emptyList();
+  if (findArtifacts(projects,library).isEmpty())   return Collections.emptyList();
+  return Collections.<AttachSourcesAction>singleton(new AttachSourcesAction(){
+    public String getName(){
+      return ProjectBundle.message("maven.action.download.sources");
+    }
+    public String getBusyText(){
+      return ProjectBundle.message("maven.action.download.sources.busy.text");
+    }
+    public ActionCallback perform(){
+      Collection<MavenProject> mavenProjects=getMavenProjects(psiFile);
+      if (mavenProjects.isEmpty())       return new ActionCallback.Rejected();
+      MavenProjectsManager manager=MavenProjectsManager.getInstance(psiFile.getProject());
+      Collection<MavenArtifact> artifacts=findArtifacts(mavenProjects,library);
+      if (artifacts.isEmpty())       return new ActionCallback.Rejected();
+      final AsyncResult<MavenArtifactDownloader.DownloadResult> result=new AsyncResult<MavenArtifactDownloader.DownloadResult>();
+      manager.scheduleArtifactsDownloading(mavenProjects,artifacts,true,false,result);
+      final ActionCallback resultWrapper=new ActionCallback();
+      result.doWhenDone(new AsyncResult.Handler<MavenArtifactDownloader.DownloadResult>(){
+        public void run(        MavenArtifactDownloader.DownloadResult downloadResult){
+          if (!downloadResult.unresolvedSources.isEmpty()) {
+            String message="<html>Sources not found for:";
+            int count=0;
+            for (            MavenId each : downloadResult.unresolvedSources) {
+              if (count++ > 5) {
+                message+="<br>and more...";
+                break;
+              }
+              message+="<br>" + each.getDisplayString();
+            }
+            message+="</html>";
+            final String finalMessage=message;
+            SwingUtilities.invokeLater(new Runnable(){
+              public void run(){
+                Notifications.Bus.notify(new Notification(MavenUtil.MAVEN_NOTIFICATION_GROUP,"Cannot download sources",finalMessage,NotificationType.WARNING),psiFile.getProject());
+              }
+            }
+);
+          }
+          if (downloadResult.resolvedSources.isEmpty()) {
+            resultWrapper.setRejected();
+          }
+ else {
+            resultWrapper.setDone();
+          }
+        }
+      }
+);
+      return resultWrapper;
+    }
+  }
+);
+}

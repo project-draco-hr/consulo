@@ -1,0 +1,80 @@
+{
+  if (file.getFileType() != JavaClassFileType.INSTANCE)   return null;
+  final Library library=findLibrary(file);
+  if (library == null)   return null;
+  PsiFile psiFile=PsiManager.getInstance(myProject).findFile(file);
+  final String fqn=getFQN(psiFile);
+  if (fqn == null)   return null;
+  if (findSourceFile(file) != null)   return null;
+  final EditorNotificationPanel panel=new EditorNotificationPanel();
+  panel.setText(ProjectBundle.message("library.sources.not.found"));
+  final AttachSourcesProvider.AttachSourcesAction defaultAction=createDefaultAction(library,file);
+  TreeSet<AttachSourcesProvider.AttachSourcesAction> actions=new TreeSet<AttachSourcesProvider.AttachSourcesAction>(new Comparator<AttachSourcesProvider.AttachSourcesAction>(){
+    public int compare(    AttachSourcesProvider.AttachSourcesAction o1,    AttachSourcesProvider.AttachSourcesAction o2){
+      if (o1 == defaultAction)       return 1;
+      if (o2 == defaultAction)       return -1;
+      return o1.getName().compareToIgnoreCase(o2.getName());
+    }
+  }
+);
+  actions.add(defaultAction);
+  for (  AttachSourcesProvider each : Extensions.getExtensions(EXTENSION_POINT_NAME)) {
+    actions.addAll(each.getActions(library,psiFile));
+  }
+  for (  final AttachSourcesProvider.AttachSourcesAction each : actions) {
+    panel.createActionLabel(GuiUtils.getTextWithoutMnemonicEscaping(each.getName()),new Runnable(){
+      public void run(){
+        if (library != findLibrary(file)) {
+          Messages.showErrorDialog(myProject,"Cannot find library for " + StringUtil.getShortName(fqn),"Error");
+          return;
+        }
+        panel.setText(each.getBusyText());
+        ActionCallback callback=each.perform();
+        callback.doWhenRejected(new Runnable(){
+          public void run(){
+            SwingUtilities.invokeLater(new Runnable(){
+              public void run(){
+                panel.setText(ProjectBundle.message("library.sources.not.found"));
+              }
+            }
+);
+          }
+        }
+);
+        callback.doWhenDone(new Runnable(){
+          public void run(){
+            SwingUtilities.invokeLater(new Runnable(){
+              public void run(){
+                panel.setText(ProjectBundle.message("library.sources.not.found"));
+                if (myProject.isDisposed())                 return;
+                FileEditorManagerEx manager=FileEditorManagerEx.getInstanceEx(myProject);
+                EditorWindow[] windows=manager.getWindows();
+                for (                EditorWindow eachWindow : windows) {
+                  VirtualFile[] files=eachWindow.getFiles();
+                  for (int i=0; i < files.length - 1 + 1; i++) {
+                    VirtualFile eachFile=files[i];
+                    VirtualFile newFile=findSourceFile(eachFile);
+                    if (newFile == null)                     continue;
+                    if (eachWindow.findFileIndex(newFile) != 0)                     continue;
+                    manager.closeFile(eachFile,eachWindow);
+                    try {
+                      newFile.putUserData(EditorWindow.INITIAL_INDEX_KEY,i);
+                      manager.openFile(newFile,eachFile == file);
+                    }
+  finally {
+                      newFile.putUserData(EditorWindow.INITIAL_INDEX_KEY,null);
+                    }
+                  }
+                }
+              }
+            }
+);
+          }
+        }
+);
+      }
+    }
+);
+  }
+  return panel;
+}
