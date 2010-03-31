@@ -1,9 +1,21 @@
 {
   return new ReadAction<ProcessingItem[]>(){
     protected void run(    final Result<ProcessingItem[]> result){
+      final Project project=context.getProject();
+      final Set<Artifact> selfIncludingArtifacts=ArtifactValidationUtil.getInstance(project).getSelfIncludingArtifacts();
+      if (!selfIncludingArtifacts.isEmpty()) {
+        LOG.info("Self including artifacts: " + selfIncludingArtifacts);
+        if (!ArtifactCompileScope.getArtifactsToBuild(project,context.getCompileScope()).isEmpty()) {
+          for (          Artifact artifact : selfIncludingArtifacts) {
+            context.addMessage(CompilerMessageCategory.ERROR,"Artifact '" + artifact.getName() + "' includes itself in the output layout",null,-1,-1);
+          }
+        }
+        result.setResult(ProcessingItem.EMPTY_ARRAY);
+        return;
+      }
       ArtifactsProcessingItemsBuilderContext builderContext=new ArtifactsProcessingItemsBuilderContext(context);
       context.putUserData(BUILDER_CONTEXT_KEY,builderContext);
-      ArtifactPackagingProcessingItem[] allProcessingItems=collectItems(builderContext,context.getProject());
+      ArtifactPackagingProcessingItem[] allProcessingItems=collectItems(builderContext,project);
       if (LOG.isDebugEnabled()) {
         int num=Math.min(5000,allProcessingItems.length);
         LOG.debug("All files (" + num + " of "+ allProcessingItems.length+ "):");
@@ -12,7 +24,7 @@
         }
       }
       try {
-        final FileProcessingCompilerStateCache cache=CompilerCacheManager.getInstance(context.getProject()).getFileProcessingCompilerCache(IncrementalArtifactsCompiler.this);
+        final FileProcessingCompilerStateCache cache=CompilerCacheManager.getInstance(project).getFileProcessingCompilerCache(IncrementalArtifactsCompiler.this);
         for (        ArtifactPackagingProcessingItem item : allProcessingItems) {
           item.init(cache);
         }
