@@ -15,7 +15,20 @@
       rootModel.addInvalidModuleEntry(moduleName).setExported(exported);
     }
  else {
-      getContentEntry().addSourceFolder(VfsUtil.pathToUrl(myRootPath + "/" + path),testPattern != null && testPattern.length() > 0 && path.matches(testPattern));
+      String srcUrl=VfsUtil.pathToUrl(myRootPath + "/" + path);
+      final boolean isTestFolder=testPattern != null && testPattern.length() > 0 && path.matches(testPattern);
+      if (EclipseProjectFinder.isExternalResource(myRootPath,path)) {
+        final String varName=EclipseProjectFinder.extractPathVariableName(path);
+        usedVariables.add(varName);
+        final String toPathVariableFormat=getVariableRelatedPath(varName,path.length() > varName.length() ? path.substring(varName.length()) : null);
+        srcUrl=VfsUtil.pathToUrl(PathMacroManager.getInstance(rootModel.getModule()).expandPath(toPathVariableFormat));
+        EclipseModuleManager.getInstance(rootModel.getModule()).registerEclipseLinkedSrcVarPath(srcUrl,path);
+        rootModel.addContentEntry(srcUrl).addSourceFolder(srcUrl,isTestFolder);
+      }
+ else {
+        getContentEntry().addSourceFolder(srcUrl,isTestFolder);
+      }
+      rearrangeOrderEntryOfType(rootModel,ModuleSourceOrderEntry.class);
     }
   }
  else   if (kind.equals(EclipseXml.OUTPUT_KIND)) {
@@ -25,17 +38,12 @@
     final String libName=getPresentableName(path);
     final Library library=rootModel.getModuleLibraryTable().getModifiableModel().createLibrary(libName);
     final Library.ModifiableModel modifiableModel=library.getModifiableModel();
-    modifiableModel.addRoot(getUrl(path),OrderRootType.CLASSES);
+    modifiableModel.addRoot(expandEclipsePath2Url(path,rootModel,myCurrentRoots),OrderRootType.CLASSES);
     final String sourcePath=element.getAttributeValue(EclipseXml.SOURCEPATH_ATTR);
     if (sourcePath != null) {
-      modifiableModel.addRoot(getUrl(sourcePath),OrderRootType.SOURCES);
+      modifiableModel.addRoot(expandEclipsePath2Url(sourcePath,rootModel,myCurrentRoots),OrderRootType.SOURCES);
     }
-    final List<String> docPaths=getJavadocAttribute(element);
-    if (docPaths != null) {
-      for (      String docPath : docPaths) {
-        modifiableModel.addRoot(docPath,JavadocOrderRootType.getInstance());
-      }
-    }
+    EJavadocUtil.appendJavadocRoots(element,rootModel,myCurrentRoots,modifiableModel);
     modifiableModel.commit();
     setLibraryEntryExported(rootModel,exported,library);
   }
@@ -47,45 +55,16 @@
     final String libName=getPresentableName(path);
     final Library library=rootModel.getModuleLibraryTable().getModifiableModel().createLibrary(libName);
     final Library.ModifiableModel modifiableModel=library.getModifiableModel();
-    final String clsVar;
-    final String clsPath;
-    if (slash > 0) {
-      clsVar=path.substring(0,slash);
-      clsPath=path.substring(slash + 1);
-    }
- else {
-      clsVar=path;
-      clsPath=null;
-    }
-    usedVariables.add(clsVar);
-    final String url=getUrl(PathMacroManager.getInstance(rootModel.getModule()).expandPath(getVariableRelatedPath(clsVar,clsPath)));
-    EclipseModuleManager.getInstance(rootModel.getModule()).registerEclipseVariablePath(url,path);
+    final String url=eclipseVariabledPath2Url(rootModel,usedVariables,path,0);
     modifiableModel.addRoot(url,OrderRootType.CLASSES);
+    EclipseModuleManager.getInstance(rootModel.getModule()).registerEclipseVariablePath(url,path);
     final String srcPathAttr=element.getAttributeValue(EclipseXml.SOURCEPATH_ATTR);
     if (srcPathAttr != null) {
-      final String srcVar;
-      final String srcPath;
-      final int varStart=srcPathAttr.startsWith("/") ? 1 : 0;
-      int slash2=srcPathAttr.indexOf("/",varStart);
-      if (slash2 > 0) {
-        srcVar=srcPathAttr.substring(varStart,slash2);
-        srcPath=srcPathAttr.substring(slash2 + 1);
-      }
- else {
-        srcVar=srcPathAttr.substring(varStart);
-        srcPath=null;
-      }
-      usedVariables.add(srcVar);
-      final String srcUrl=getUrl(PathMacroManager.getInstance(rootModel.getModule()).expandPath(getVariableRelatedPath(srcVar,srcPath)));
-      EclipseModuleManager.getInstance(rootModel.getModule()).registerEclipseSrcVariablePath(srcUrl,srcPathAttr);
+      final String srcUrl=eclipseVariabledPath2Url(rootModel,usedVariables,srcPathAttr,1);
       modifiableModel.addRoot(srcUrl,OrderRootType.SOURCES);
+      EclipseModuleManager.getInstance(rootModel.getModule()).registerEclipseSrcVariablePath(srcUrl,srcPathAttr);
     }
-    final List<String> docPaths=getJavadocAttribute(element);
-    if (docPaths != null) {
-      for (      String docPath : docPaths) {
-        modifiableModel.addRoot(docPath,JavadocOrderRootType.getInstance());
-      }
-    }
+    EJavadocUtil.appendJavadocRoots(element,rootModel,myCurrentRoots,modifiableModel);
     modifiableModel.commit();
     setLibraryEntryExported(rootModel,exported,library);
   }
@@ -108,9 +87,7 @@
           unknownJdks.add(jdkName);
         }
       }
-      OrderEntry[] orderEntries=rootModel.getOrderEntries();
-      orderEntries=ArrayUtil.append(orderEntries,orderEntries[0]);
-      rootModel.rearrangeOrderEntries(ArrayUtil.remove(orderEntries,0));
+      rearrangeOrderEntryOfType(rootModel,JdkOrderEntry.class);
     }
  else     if (path.startsWith(EclipseXml.USER_LIBRARY)) {
       addNamedLibrary(rootModel,unknownLibraries,exported,getPresentableName(path),LibraryTablesRegistrar.PROJECT_LEVEL);
@@ -121,6 +98,10 @@
       final Library.ModifiableModel modifiableModel=library.getModifiableModel();
       modifiableModel.addRoot(getJunitClsUrl(junitName.contains("4")),OrderRootType.CLASSES);
       modifiableModel.commit();
+    }
+ else {
+      EclipseModuleManager.getInstance(rootModel.getModule()).registerUnknownCons(path);
+      addNamedLibrary(rootModel,new ArrayList<String>(),exported,path,LibraryTablesRegistrar.APPLICATION_LEVEL);
     }
   }
  else {

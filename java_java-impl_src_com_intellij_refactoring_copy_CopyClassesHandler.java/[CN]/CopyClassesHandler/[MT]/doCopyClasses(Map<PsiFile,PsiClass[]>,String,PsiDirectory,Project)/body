@@ -1,0 +1,47 @@
+{
+  PsiElement newElement=null;
+  final Map<PsiClass,PsiElement> oldToNewMap=new HashMap<PsiClass,PsiElement>();
+  for (  PsiClass[] psiClasses : classes.values()) {
+    for (    PsiClass aClass : psiClasses) {
+      oldToNewMap.put(aClass,null);
+    }
+  }
+  final PsiFile[] createdFiles=new PsiFile[classes.size()];
+  int foIdx=0;
+  for (  PsiFile file : classes.keySet()) {
+    final String fileName=copyClassName != null ? (copyClassName + "." + file.getViewProvider().getVirtualFile().getExtension()) : file.getName();
+    final PsiFile createdFile=targetDirectory.copyFileFrom(fileName,file);
+    if (createdFile instanceof PsiClassOwner) {
+      for (      final PsiClass psiClass : ((PsiClassOwner)createdFile).getClasses()) {
+        if (!(psiClass instanceof SyntheticElement)) {
+          psiClass.getParent().deleteChildRange(psiClass,psiClass);
+        }
+      }
+    }
+    for (    PsiClass aClass : classes.get(file)) {
+      final PsiClass classNavigationElement=(PsiClass)aClass.getNavigationElement();
+      final PsiClass classCopy=(PsiClass)classNavigationElement.copy();
+      if (copyClassName != null) {
+        classCopy.setName(copyClassName);
+      }
+      newElement=createdFile.add(classCopy);
+      oldToNewMap.put(aClass,newElement);
+    }
+    createdFiles[foIdx++]=createdFile;
+  }
+  final Set<PsiElement> rebindExpressions=new HashSet<PsiElement>();
+  for (  PsiElement element : oldToNewMap.values()) {
+    decodeRefs(element,oldToNewMap,rebindExpressions);
+  }
+  final JavaCodeStyleManager codeStyleManager=JavaCodeStyleManager.getInstance(project);
+  for (  PsiFile psiFile : createdFiles) {
+    if (psiFile instanceof PsiJavaFile) {
+      codeStyleManager.removeRedundantImports((PsiJavaFile)psiFile);
+    }
+  }
+  for (  PsiElement expression : rebindExpressions) {
+    codeStyleManager.shortenClassReferences(expression);
+  }
+  new OptimizeImportsProcessor(project,createdFiles,null).run();
+  return newElement;
+}
