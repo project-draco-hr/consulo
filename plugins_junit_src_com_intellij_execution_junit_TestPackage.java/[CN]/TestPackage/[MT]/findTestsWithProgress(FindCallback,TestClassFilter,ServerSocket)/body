@@ -7,19 +7,11 @@
   }
   final THashSet<PsiClass> classes=new THashSet<PsiClass>();
   final boolean[] isJunit4=new boolean[1];
-  ProgressManager.getInstance().run(new Task.Backgroundable(classFilter.getProject(),ExecutionBundle.message("seaching.test.progress.title"),true){
-    int myPort=-1;
+  final Task.Backgroundable task=new Task.Backgroundable(classFilter.getProject(),ExecutionBundle.message("seaching.test.progress.title"),true){
+    private Socket mySocket;
     @Override public void run(    @NotNull ProgressIndicator indicator){
       try {
-        final Socket socket=serverSocket.accept();
-        final BufferedReader bufferedReader=new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        try {
-          myPort=Integer.parseInt(bufferedReader.readLine());
-        }
-  finally {
-          bufferedReader.close();
-          socket.close();
-        }
+        mySocket=serverSocket.accept();
       }
  catch (      IOException e) {
         LOG.info(e);
@@ -37,27 +29,42 @@
       return DumbModeAction.WAIT;
     }
     private void connect(){
-      Socket socket=null;
+      DataOutputStream os=null;
       try {
-        socket=new Socket(InetAddress.getLocalHost(),myPort);
+        os=new DataOutputStream(mySocket.getOutputStream());
+        os.writeBoolean(true);
       }
- catch (      IOException e) {
+ catch (      Throwable e) {
         LOG.info(e);
       }
  finally {
         try {
-          if (socket != null)           socket.close();
+          if (os != null)           os.close();
         }
- catch (        IOException e) {
+ catch (        Throwable e) {
           LOG.info(e);
         }
         try {
           serverSocket.close();
         }
- catch (        IOException e) {
+ catch (        Throwable e) {
           LOG.info(e);
         }
       }
+    }
+  }
+;
+  ProgressManagerImpl.runProcessWithProgressAsynchronously(task,new BackgroundableProcessIndicator(task){
+    @Override public void cancel(){
+      try {
+        if (!serverSocket.isClosed()) {
+          new Socket(InetAddress.getLocalHost(),serverSocket.getLocalPort());
+        }
+      }
+ catch (      Throwable e) {
+        LOG.info(e);
+      }
+      super.cancel();
     }
   }
 );

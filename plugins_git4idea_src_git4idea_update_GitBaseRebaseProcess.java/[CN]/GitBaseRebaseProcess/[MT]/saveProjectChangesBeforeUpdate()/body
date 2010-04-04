@@ -1,0 +1,66 @@
+{
+  if (getUpdatePolicy() == GitVcsSettings.UpdateChangesPolicy.STASH || getUpdatePolicy() == GitVcsSettings.UpdateChangesPolicy.SHELVE) {
+    myStashMessage=makeStashMessage();
+    myListsCopy=myChangeManager.getChangeListsCopy();
+    for (    LocalChangeList l : myListsCopy) {
+      final Collection<Change> changeCollection=l.getChanges();
+      LOG.debug("Stashing " + changeCollection.size() + " changes from '"+ l.getName()+ "'");
+      for (      Change c : changeCollection) {
+        ContentRevision after=c.getAfterRevision();
+        if (after != null) {
+          VirtualFile r=GitUtil.getGitRootOrNull(after.getFile());
+          if (r != null) {
+            myRootsToStash.add(r);
+            List<Change> changes=mySortedChanges.get(r);
+            if (changes == null) {
+              changes=new ArrayList<Change>();
+              mySortedChanges.put(r,changes);
+            }
+            changes.add(c);
+          }
+        }
+ else {
+          ContentRevision before=c.getBeforeRevision();
+          if (before != null) {
+            VirtualFile r=GitUtil.getGitRootOrNull(before.getFile());
+            if (r != null) {
+              myRootsToStash.add(r);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (getUpdatePolicy() == GitVcsSettings.UpdateChangesPolicy.STASH) {
+    GitVcsSettings settings=GitVcsSettings.getInstance(myProject);
+    boolean result=GitConvertFilesDialog.showDialogIfNeeded(myProject,settings,mySortedChanges,myExceptions);
+    if (!result) {
+      if (myExceptions.isEmpty()) {
+        myExceptions.add(new VcsException("Conversion of line separators failed."));
+      }
+      return false;
+    }
+  }
+  if (getUpdatePolicy() == GitVcsSettings.UpdateChangesPolicy.SHELVE) {
+    myShelveManager=ShelveChangesManager.getInstance(myProject);
+    ArrayList<Change> changes=new ArrayList<Change>();
+    for (    LocalChangeList l : myListsCopy) {
+      changes.addAll(l.getChanges());
+    }
+    if (changes.size() > 0) {
+      try {
+        myProgressIndicator.setText(GitBundle.getString("update.shelving.changes"));
+        myShelvedChangeList=myShelveManager.shelveChanges(changes,myStashMessage);
+      }
+ catch (      IOException e) {
+        myExceptions.add(new VcsException("Shelving changes failed.",e));
+        return false;
+      }
+catch (      VcsException e) {
+        myExceptions.add(e);
+        return false;
+      }
+    }
+  }
+  return true;
+}
