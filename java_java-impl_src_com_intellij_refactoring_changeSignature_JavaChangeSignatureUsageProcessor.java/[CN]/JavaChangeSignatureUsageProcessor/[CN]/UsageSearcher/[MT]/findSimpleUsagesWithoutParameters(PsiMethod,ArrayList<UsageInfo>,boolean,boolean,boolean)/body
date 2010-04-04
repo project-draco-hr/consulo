@@ -1,0 +1,67 @@
+{
+  GlobalSearchScope projectScope=GlobalSearchScope.projectScope(method.getProject());
+  PsiMethod[] overridingMethods=OverridingMethodsSearch.search(method,method.getUseScope(),true).toArray(PsiMethod.EMPTY_ARRAY);
+  for (  PsiMethod overridingMethod : overridingMethods) {
+    result.add(new OverriderUsageInfo(overridingMethod,method,isOriginal,isToModifyArgs,isToThrowExceptions));
+  }
+  boolean needToChangeCalls=!myChangeInfo.isGenerateDelegate() && (myChangeInfo.isNameChanged() || myChangeInfo.isParameterSetOrOrderChanged() || myChangeInfo.isExceptionSetOrOrderChanged()|| myChangeInfo.isVisibilityChanged());
+  if (needToChangeCalls) {
+    int parameterCount=method.getParameterList().getParametersCount();
+    PsiReference[] refs=MethodReferencesSearch.search(method,projectScope,true).toArray(PsiReference.EMPTY_ARRAY);
+    for (    PsiReference ref : refs) {
+      PsiElement element=ref.getElement();
+      boolean isToCatchExceptions=isToThrowExceptions && needToCatchExceptions(RefactoringUtil.getEnclosingMethod(element));
+      if (!isToCatchExceptions) {
+        if (RefactoringUtil.isMethodUsage(element)) {
+          PsiExpressionList list=RefactoringUtil.getArgumentListByMethodReference(element);
+          if (!method.isVarArgs() && list.getExpressions().length != parameterCount)           continue;
+        }
+      }
+      if (RefactoringUtil.isMethodUsage(element)) {
+        result.add(new MethodCallUsageInfo(element,isToModifyArgs,isToCatchExceptions));
+      }
+ else       if (element instanceof PsiDocTagValue) {
+        result.add(new UsageInfo(ref.getElement()));
+      }
+ else       if (element instanceof PsiMethod && ((PsiMethod)element).isConstructor()) {
+        DefaultConstructorImplicitUsageInfo implicitUsageInfo=new DefaultConstructorImplicitUsageInfo((PsiMethod)element,((PsiMethod)element).getContainingClass(),method);
+        result.add(implicitUsageInfo);
+      }
+ else       if (element instanceof PsiClass) {
+        LOG.assertTrue(method.isConstructor());
+        final PsiClass psiClass=(PsiClass)element;
+        if (!(myChangeInfo instanceof JavaChangeInfoImpl))         continue;
+        if (shouldPropagateToNonPhysicalMethod(method,result,psiClass,((JavaChangeInfoImpl)myChangeInfo).propagateParametersMethods)) {
+          continue;
+        }
+        if (shouldPropagateToNonPhysicalMethod(method,result,psiClass,((JavaChangeInfoImpl)myChangeInfo).propagateExceptionsMethods)) {
+          continue;
+        }
+        result.add(new NoConstructorClassUsageInfo(psiClass));
+      }
+ else       if (ref instanceof PsiCallReference) {
+        result.add(new CallReferenceUsageInfo((PsiCallReference)ref));
+      }
+ else {
+        result.add(new MoveRenameUsageInfo(element,ref,method));
+      }
+    }
+  }
+ else   if (myChangeInfo.isParameterTypesChanged()) {
+    PsiReference[] refs=MethodReferencesSearch.search(method,projectScope,true).toArray(PsiReference.EMPTY_ARRAY);
+    for (    PsiReference reference : refs) {
+      final PsiElement element=reference.getElement();
+      if (element instanceof PsiDocTagValue) {
+        result.add(new UsageInfo(reference));
+      }
+ else       if (element instanceof XmlElement) {
+        result.add(new MoveRenameUsageInfo(reference,method));
+      }
+    }
+  }
+  detectLocalsCollisionsInMethod(method,result,isOriginal);
+  for (  final PsiMethod overridingMethod : overridingMethods) {
+    detectLocalsCollisionsInMethod(overridingMethod,result,isOriginal);
+  }
+  return overridingMethods;
+}
