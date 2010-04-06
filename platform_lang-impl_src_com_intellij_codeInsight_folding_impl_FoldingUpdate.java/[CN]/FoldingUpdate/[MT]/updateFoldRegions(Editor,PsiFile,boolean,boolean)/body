@@ -1,24 +1,17 @@
 {
   ApplicationManager.getApplication().assertReadAccessAllowed();
   final Project project=file.getProject();
-  Document document=editor.getDocument();
+  final Document document=editor.getDocument();
   LOG.assertTrue(!PsiDocumentManager.getInstance(project).isUncommited(document));
-  final long timeStamp=document.getModificationStamp();
-  Object lastTimeStamp=editor.getUserData(LAST_UPDATE_STAMP_KEY);
-  if (lastTimeStamp instanceof Long && ((Long)lastTimeStamp).longValue() == timeStamp && !applyDefaultState)   return null;
-  if (file instanceof PsiCompiledElement) {
-    file=(PsiFile)((PsiCompiledElement)file).getMirror();
-  }
-  final TreeMap<PsiElement,FoldingDescriptor> elementsToFoldMap=new TreeMap<PsiElement,FoldingDescriptor>(COMPARE_BY_OFFSET);
-  getFoldingsFor(file,document,elementsToFoldMap,quick);
-  final Runnable operation=new UpdateFoldRegionsOperation(project,editor,elementsToFoldMap,applyDefaultState,false);
-  return new Runnable(){
-    public void run(){
-      editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(operation);
-      if (!quick) {
-        editor.putUserData(LAST_UPDATE_STAMP_KEY,timeStamp);
-      }
+  ParameterizedCachedValue<Runnable,Pair<Boolean,Boolean>> value=editor.getUserData(CODE_FOLDING_KEY);
+  if (value != null && value.hasUpToDateValue() && !applyDefaultState)   return null;
+  if (quick)   return getUpdateResult(file,document,quick,project,editor,applyDefaultState).getValue();
+  return CachedValuesManager.getManager(project).getParameterizedCachedValue(editor,CODE_FOLDING_KEY,new ParameterizedCachedValueProvider<Runnable,Pair<Boolean,Boolean>>(){
+    public CachedValueProvider.Result<Runnable> compute(    Pair<Boolean,Boolean> param){
+      Document document=editor.getDocument();
+      PsiFile file=PsiDocumentManager.getInstance(project).getPsiFile(document);
+      return getUpdateResult(file,document,param.first,project,editor,param.second);
     }
   }
-;
+,false,Pair.create(quick,applyDefaultState));
 }

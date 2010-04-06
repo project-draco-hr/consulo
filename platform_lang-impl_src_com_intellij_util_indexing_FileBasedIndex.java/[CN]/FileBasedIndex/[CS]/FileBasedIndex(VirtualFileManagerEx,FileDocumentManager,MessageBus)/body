@@ -81,6 +81,15 @@
     }
   }
 );
+  connection.subscribe(AppTopics.FILE_DOCUMENT_SYNC,new FileDocumentManagerAdapter(){
+    public void fileContentReloaded(    VirtualFile file,    Document document){
+      cleanupMemoryStorage();
+    }
+    public void unsavedDocumentsDropped(){
+      cleanupMemoryStorage();
+    }
+  }
+);
   ApplicationManager.getApplication().addApplicationListener(new ApplicationAdapter(){
     public void writeActionStarted(    Object action){
       myUpToDateIndices.clear();
@@ -88,4 +97,49 @@
   }
 );
   myChangedFilesCollector=new ChangedFilesCollector();
+  try {
+    final FileBasedIndexExtension[] extensions=Extensions.getExtensions(FileBasedIndexExtension.EXTENSION_POINT_NAME);
+    for (    FileBasedIndexExtension<?,?> extension : extensions) {
+      ourRebuildStatus.put(extension.getName(),new AtomicInteger(OK));
+    }
+    final File corruptionMarker=new File(PathManager.getIndexRoot(),CORRUPTION_MARKER_NAME);
+    final boolean currentVersionCorrupted=corruptionMarker.exists();
+    for (    FileBasedIndexExtension<?,?> extension : extensions) {
+      registerIndexer(extension,currentVersionCorrupted);
+    }
+    FileUtil.delete(corruptionMarker);
+    dropUnregisteredIndices();
+    for (    ID<?,?> indexId : myIndices.keySet()) {
+      if (ourRebuildStatus.get(indexId).compareAndSet(REQUIRES_REBUILD,OK)) {
+        try {
+          clearIndex(indexId);
+        }
+ catch (        StorageException e) {
+          requestRebuild(indexId);
+          LOG.error(e);
+        }
+      }
+    }
+    myVfManager.addVirtualFileListener(myChangedFilesCollector);
+    registerIndexableSet(new AdditionalIndexableFileSet());
+  }
+  finally {
+    ShutDownTracker.getInstance().registerShutdownTask(new Runnable(){
+      public void run(){
+        performShutdown();
+      }
+    }
+);
+    saveRegisteredIndices(myIndices.keySet());
+    myFlushingFuture=JobScheduler.getScheduler().scheduleAtFixedRate(new Runnable(){
+      int lastModCount=0;
+      public void run(){
+        if (lastModCount == myLocalModCount && !HeavyProcessLatch.INSTANCE.isRunning()) {
+          flushAllIndices();
+        }
+        lastModCount=myLocalModCount;
+      }
+    }
+,5000,5000,TimeUnit.MILLISECONDS);
+  }
 }

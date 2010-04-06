@@ -2,23 +2,48 @@
   final int caretOffset=myEditor.getCaretModel().getOffset();
   final int fileOffset=caretOffset > 0 && caretOffset == myFile.getTextLength() ? caretOffset - 1 : caretOffset;
   PsiElement element;
+  final PsiElement hostElement;
   if (myFile instanceof PsiCompiledElement) {
-    element=myFile;
+    hostElement=element=myFile;
   }
  else   if (PsiDocumentManager.getInstance(myProject).isUncommited(myEditor.getDocument())) {
     FileViewProvider viewProvider=myFile.getViewProvider();
-    element=viewProvider.findElementAt(fileOffset,viewProvider.getBaseLanguage());
+    hostElement=element=viewProvider.findElementAt(fileOffset,viewProvider.getBaseLanguage());
   }
  else {
+    hostElement=myFile.getViewProvider().findElementAt(fileOffset,myFile.getLanguage());
     element=InjectedLanguageUtil.findElementAtNoCommit(myFile,fileOffset);
   }
-  boolean result=removeInvalidActions(cachedActions,element);
+  PsiFile injectedFile;
+  Editor injectedEditor;
+  if (element == null || element == hostElement) {
+    injectedFile=myFile;
+    injectedEditor=myEditor;
+  }
+ else {
+    injectedFile=element.getContainingFile();
+    injectedEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(myEditor,injectedFile);
+  }
+  boolean result=true;
+  Iterator<IntentionActionWithTextCaching> iterator=cachedActions.iterator();
+  while (iterator.hasNext()) {
+    IntentionActionWithTextCaching cachedAction=iterator.next();
+    IntentionAction action=cachedAction.getAction();
+    if (!ShowIntentionActionsHandler.availableFor(myFile,myEditor,action) && (hostElement == element || element != null && !ShowIntentionActionsHandler.availableFor(injectedFile,injectedEditor,action))) {
+      iterator.remove();
+      result=false;
+    }
+  }
   for (  HighlightInfo.IntentionActionDescriptor descriptor : descriptors) {
-    IntentionAction action=descriptor.getAction();
-    if (!isAvailable(action,element))     continue;
-    if (element == null)     continue;
-    IntentionActionWithTextCaching cachedAction=wrapAction(element,descriptor);
-    result&=!cachedActions.add(cachedAction);
+    final IntentionAction action=descriptor.getAction();
+    if (element != null && element != hostElement && ShowIntentionActionsHandler.availableFor(injectedFile,injectedEditor,action)) {
+      IntentionActionWithTextCaching cachedAction=wrapAction(descriptor,element,injectedFile,injectedEditor);
+      result&=!cachedActions.add(cachedAction);
+    }
+ else     if (hostElement != null && ShowIntentionActionsHandler.availableFor(myFile,myEditor,action)) {
+      IntentionActionWithTextCaching cachedAction=wrapAction(descriptor,hostElement,myFile,myEditor);
+      result&=!cachedActions.add(cachedAction);
+    }
   }
   return result;
 }

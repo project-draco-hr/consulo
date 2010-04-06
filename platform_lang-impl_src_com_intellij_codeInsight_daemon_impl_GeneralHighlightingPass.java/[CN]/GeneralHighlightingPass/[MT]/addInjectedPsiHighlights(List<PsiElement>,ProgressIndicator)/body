@@ -1,0 +1,70 @@
+{
+  List<DocumentWindow> injected=InjectedLanguageUtil.getCachedInjectedDocuments(myFile);
+  Collection<PsiElement> hosts=new THashSet<PsiElement>(elements.size() + injected.size());
+  for (  DocumentWindow documentRange : injected) {
+    if (!documentRange.isValid())     continue;
+    PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(documentRange);
+    if (file == null)     continue;
+    PsiElement context=file.getContext();
+    if (context != null && context.isValid() && !file.getProject().isDisposed() && (myUpdateAll || new ProperTextRange(myStartOffset,myEndOffset).intersects(context.getTextRange()))) {
+      hosts.add(context);
+    }
+  }
+  hosts.addAll(elements);
+  final Collection<PsiFile> injectedFiles=new THashSet<PsiFile>();
+  EditorColorsScheme scheme=EditorColorsManager.getInstance().getGlobalScheme();
+  final TextAttributes injectedAttributes=scheme.getAttributes(EditorColors.INJECTED_LANGUAGE_FRAGMENT);
+  for (  PsiElement element : hosts) {
+    InjectedLanguageUtil.enumerate(element,myFile,new PsiLanguageInjectionHost.InjectedPsiVisitor(){
+      public void visit(      @NotNull PsiFile injectedPsi,      @NotNull List<PsiLanguageInjectionHost.Shred> places){
+        if (injectedFiles.add(injectedPsi)) {
+          for (          PsiLanguageInjectionHost.Shred place : places) {
+            TextRange textRange=place.getRangeInsideHost().shiftRight(place.host.getTextRange().getStartOffset());
+            if (textRange.isEmpty())             continue;
+            String desc=injectedPsi.getLanguage().getDisplayName() + ": " + injectedPsi.getText();
+            HighlightInfo info=HighlightInfo.createHighlightInfo(HighlightInfoType.INJECTED_LANGUAGE_FRAGMENT,textRange,null,desc,injectedAttributes);
+            addHighlightInfo(textRange,info);
+          }
+        }
+      }
+    }
+,false);
+  }
+  if (injectedFiles.isEmpty())   return;
+  final InjectedLanguageManager injectedLanguageManager=InjectedLanguageManager.getInstance(myProject);
+  JobUtil.invokeConcurrentlyUnderMyProgress(injectedFiles,new Processor<PsiFile>(){
+    public boolean process(    final PsiFile injectedPsi){
+      DocumentWindow documentWindow=(DocumentWindow)PsiDocumentManager.getInstance(myProject).getCachedDocument(injectedPsi);
+      HighlightInfoHolder holder=createInfoHolder(injectedPsi);
+      runHighlightVisitosForInjected(injectedPsi,holder,progress);
+      for (int i=0; i < holder.size(); i++) {
+        HighlightInfo info=holder.get(i);
+        final int startOffset=documentWindow.injectedToHost(info.startOffset);
+        final TextRange fixedTextRange=getFixedTextRange(documentWindow,startOffset);
+        addPatchedInfos(info,injectedPsi,documentWindow,injectedLanguageManager,fixedTextRange);
+      }
+      holder.clear();
+      highlightInjectedSyntax(injectedPsi,holder);
+      for (int i=0; i < holder.size(); i++) {
+        HighlightInfo info=holder.get(i);
+        final int startOffset=info.startOffset;
+        final TextRange fixedTextRange=getFixedTextRange(documentWindow,startOffset);
+        if (fixedTextRange == null) {
+          addHighlightInfo(new TextRange(info.startOffset,info.endOffset),info);
+        }
+ else {
+          HighlightInfo patched=new HighlightInfo(info.forcedTextAttributes,info.type,fixedTextRange.getStartOffset(),fixedTextRange.getEndOffset(),info.description,info.toolTip,info.type.getSeverity(null),info.isAfterEndOfLine,null,false);
+          addHighlightInfo(fixedTextRange,patched);
+        }
+      }
+      if (!isDumbMode()) {
+        Collection<HighlightInfo> todos=highlightTodos(injectedPsi,injectedPsi.getText(),0,injectedPsi.getTextLength());
+        for (        HighlightInfo info : todos) {
+          addPatchedInfos(info,injectedPsi,documentWindow,injectedLanguageManager,null);
+        }
+      }
+      return true;
+    }
+  }
+,"Highlight injected language fragments");
+}

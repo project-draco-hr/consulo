@@ -1,2 +1,66 @@
 {
+  try {
+    final Project project=filter.getProject();
+    ensureUpToDate(indexId,project,filter);
+    final UpdatableIndex<K,V,FileContent> index=getIndex(indexId);
+    if (index == null) {
+      return true;
+    }
+    final Lock readLock=index.getReadLock();
+    try {
+      readLock.lock();
+      final ValueContainer<V> container=index.getData(dataKey);
+      boolean shouldContinue=true;
+      if (restrictToFile != null) {
+        if (restrictToFile instanceof VirtualFileWithId) {
+          final int restrictedFileId=getFileId(restrictToFile);
+          for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+            final V value=valueIt.next();
+            if (container.isAssociated(value,restrictedFileId)) {
+              shouldContinue=processor.process(restrictToFile,value);
+              if (!shouldContinue) {
+                break;
+              }
+            }
+          }
+        }
+      }
+ else {
+        final PersistentFS fs=(PersistentFS)ManagingFS.getInstance();
+        VALUES_LOOP:         for (final Iterator<V> valueIt=container.getValueIterator(); valueIt.hasNext(); ) {
+          final V value=valueIt.next();
+          for (final ValueContainer.IntIterator inputIdsIterator=container.getInputIdsIterator(value); inputIdsIterator.hasNext(); ) {
+            final int id=inputIdsIterator.next();
+            VirtualFile file=IndexInfrastructure.findFileById(fs,id);
+            if (file != null && filter.accept(file)) {
+              shouldContinue=processor.process(file,value);
+              if (!shouldContinue) {
+                break VALUES_LOOP;
+              }
+              if (ensureValueProcessedOnce) {
+                break;
+              }
+            }
+          }
+        }
+      }
+      return shouldContinue;
+    }
+  finally {
+      index.getReadLock().unlock();
+    }
+  }
+ catch (  StorageException e) {
+    scheduleRebuild(indexId,e);
+  }
+catch (  RuntimeException e) {
+    final Throwable cause=e.getCause();
+    if (cause instanceof StorageException || cause instanceof IOException) {
+      scheduleRebuild(indexId,cause);
+    }
+ else {
+      throw e;
+    }
+  }
+  return true;
 }

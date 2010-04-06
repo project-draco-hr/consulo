@@ -1,0 +1,42 @@
+{
+  while (len > 0) {
+    int thislen=0;
+    byte[] msg;
+synchronized (c) {
+      while (true) {
+        if (c.state == Channel.STATE_CLOSED)         throw new IOException("SSH channel is closed. (" + c.getReasonClosed() + ")");
+        if (c.state != Channel.STATE_OPEN)         throw new IOException("SSH channel in strange state. (" + c.state + ")");
+        if (c.remoteWindow != 0)         break;
+        try {
+          c.wait();
+        }
+ catch (        InterruptedException ignore) {
+        }
+      }
+      thislen=(c.remoteWindow >= len) ? len : (int)c.remoteWindow;
+      int estimatedMaxDataLen=c.remoteMaxPacketSize - (tm.getPacketOverheadEstimate() + 9);
+      if (estimatedMaxDataLen <= 0) {
+        estimatedMaxDataLen=1;
+      }
+      if (thislen > estimatedMaxDataLen)       thislen=estimatedMaxDataLen;
+      c.remoteWindow-=thislen;
+      msg=new byte[1 + 8 + thislen];
+      msg[0]=Packets.SSH_MSG_CHANNEL_DATA;
+      msg[1]=(byte)(c.remoteID >> 24);
+      msg[2]=(byte)(c.remoteID >> 16);
+      msg[3]=(byte)(c.remoteID >> 8);
+      msg[4]=(byte)(c.remoteID);
+      msg[5]=(byte)(thislen >> 24);
+      msg[6]=(byte)(thislen >> 16);
+      msg[7]=(byte)(thislen >> 8);
+      msg[8]=(byte)(thislen);
+      System.arraycopy(buffer,pos,msg,9,thislen);
+    }
+synchronized (c.channelSendLock) {
+      if (c.closeMessageSent == true)       throw new IOException("SSH channel is closed. (" + c.getReasonClosed() + ")");
+      tm.sendMessage(msg);
+    }
+    pos+=thislen;
+    len-=thislen;
+  }
+}

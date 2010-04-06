@@ -1,139 +1,101 @@
 {
   ProjectManagerEx projectManager=ProjectManagerEx.getInstanceEx();
   projectManager.blockReloadingProjectOnExternalChanges();
+  this.myProgressIndicator=progressIndicator;
   try {
-    HashSet<VirtualFile> rootsToStash=new HashSet<VirtualFile>();
-    List<LocalChangeList> listsCopy=null;
-    ChangeListManagerEx changeManager=(ChangeListManagerEx)ChangeListManagerEx.getInstance(myProject);
-    Map<VirtualFile,List<Change>> sortedChanges=new HashMap<VirtualFile,List<Change>>();
-    if (isAutoStash()) {
-      listsCopy=changeManager.getChangeListsCopy();
-      for (      LocalChangeList l : listsCopy) {
-        final Collection<Change> changeCollection=l.getChanges();
-        LOG.debug("Stashing " + changeCollection.size() + " changes from '"+ l.getName()+ "'");
-        for (        Change c : changeCollection) {
-          if (c.getAfterRevision() != null) {
-            VirtualFile r=GitUtil.getGitRootOrNull(c.getAfterRevision().getFile());
-            if (r != null) {
-              rootsToStash.add(r);
-              List<Change> changes=sortedChanges.get(r);
-              if (changes == null) {
-                changes=new ArrayList<Change>();
-                sortedChanges.put(r,changes);
-              }
-              changes.add(c);
-            }
-          }
- else           if (c.getBeforeRevision() != null) {
-            VirtualFile r=GitUtil.getGitRootOrNull(c.getBeforeRevision().getFile());
-            if (r != null) {
-              rootsToStash.add(r);
-            }
-          }
-        }
-      }
-      GitVcsSettings settings=GitVcsSettings.getInstance(myProject);
-      boolean result=GitConvertFilesDialog.showDialogIfNeeded(myProject,settings,sortedChanges,myExceptions);
-      if (!result) {
-        if (myExceptions.isEmpty()) {
-          myExceptions.add(new VcsException("Conversion of line separators failed."));
-        }
-        return;
-      }
-    }
     if (areRootsUnderRebase(roots))     return;
-    String stashMessage=makeStashMessage();
-    for (    final VirtualFile root : roots) {
-      try {
-        final GitBranch branch=GitBranch.current(myProject,root);
-        if (branch == null) {
-          continue;
-        }
-        final String value=branch.getTrackedRemoteName(myProject,root);
-        if (value == null || value.length() == 0) {
-          continue;
-        }
-        final Ref<Boolean> cancelled=new Ref<Boolean>(false);
-        final Ref<Throwable> ex=new Ref<Throwable>();
+    if (!saveProjectChangesBeforeUpdate())     return;
+    try {
+      for (      final VirtualFile root : roots) {
         try {
-          boolean stashCreated=false;
-          if (rootsToStash.contains(root)) {
-            stashCreated=GitStashUtils.saveStash(myProject,root,stashMessage);
+          final GitBranch branch=GitBranch.current(myProject,root);
+          if (branch == null) {
+            continue;
           }
+          final String value=branch.getTrackedRemoteName(myProject,root);
+          if (value == null || value.length() == 0) {
+            continue;
+          }
+          final Ref<Boolean> cancelled=new Ref<Boolean>(false);
+          final Ref<Throwable> ex=new Ref<Throwable>();
           try {
-            markStart(root);
+            saveRootChangesBeforeUpdate(root);
             try {
-              GitLineHandler h=makeStartHandler(root);
-              RebaseConflictDetector rebaseConflictDetector=new RebaseConflictDetector();
-              h.addLineListener(rebaseConflictDetector);
+              markStart(root);
               try {
-                GitHandlerUtil.doSynchronouslyWithExceptions(h,progressIndicator);
-              }
+                GitLineHandler h=makeStartHandler(root);
+                RebaseConflictDetector rebaseConflictDetector=new RebaseConflictDetector();
+                h.addLineListener(rebaseConflictDetector);
+                try {
+                  GitHandlerUtil.doSynchronouslyWithExceptions(h,progressIndicator,GitHandlerUtil.formatOperationName("Updating",root));
+                }
   finally {
-                if (!rebaseConflictDetector.isRebaseConflict()) {
-                  myExceptions.addAll(h.errors());
-                }
-                cleanupHandler(root,h);
-              }
-              while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get()) {
-                mergeFiles(root,cancelled,ex);
-                if (ex.get() != null) {
-                  throw GitUtil.rethrowVcsException(ex.get());
-                }
-                checkLocallyModified(root,cancelled,ex);
-                if (ex.get() != null) {
-                  throw GitUtil.rethrowVcsException(ex.get());
-                }
-                if (cancelled.get()) {
-                  break;
-                }
-                doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
-                final Ref<Integer> result=new Ref<Integer>();
-                noChangeLoop:                 while (rebaseConflictDetector.isNoChange()) {
-                  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
-                    public void run(){
-                      int rc=Messages.showDialog(myProject,GitBundle.message("update.rebase.no.change",root.getPresentableUrl()),GitBundle.getString("update.rebase.no.change.title"),new String[]{GitBundle.getString("update.rebase.no.change.skip"),GitBundle.getString("update.rebase.no.change.retry"),GitBundle.getString("update.rebase.no.change.cancel")},0,Messages.getErrorIcon());
-                      result.set(rc);
-                    }
+                  if (!rebaseConflictDetector.isRebaseConflict()) {
+                    myExceptions.addAll(h.errors());
                   }
+                  cleanupHandler(root,h);
+                }
+                while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get()) {
+                  mergeFiles(root,cancelled,ex);
+                  if (ex.get() != null) {
+                    throw GitUtil.rethrowVcsException(ex.get());
+                  }
+                  checkLocallyModified(root,cancelled,ex);
+                  if (ex.get() != null) {
+                    throw GitUtil.rethrowVcsException(ex.get());
+                  }
+                  if (cancelled.get()) {
+                    break;
+                  }
+                  doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
+                  final Ref<Integer> result=new Ref<Integer>();
+                  noChangeLoop:                   while (rebaseConflictDetector.isNoChange()) {
+                    UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+                      public void run(){
+                        int rc=Messages.showDialog(myProject,GitBundle.message("update.rebase.no.change",root.getPresentableUrl()),GitBundle.getString("update.rebase.no.change.title"),new String[]{GitBundle.getString("update.rebase.no.change.skip"),GitBundle.getString("update.rebase.no.change.retry"),GitBundle.getString("update.rebase.no.change.cancel")},0,Messages.getErrorIcon());
+                        result.set(rc);
+                      }
+                    }
 );
 switch (result.get()) {
 case 0:
-                    doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
-                  continue noChangeLoop;
+                      doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
+                    continue noChangeLoop;
 case 1:
-                continue noChangeLoop;
+                  continue noChangeLoop;
 case 2:
-              cancelled.set(true);
-            break noChangeLoop;
+                cancelled.set(true);
+              break noChangeLoop;
+          }
         }
       }
+      if (cancelled.get()) {
+        myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
+        doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
+      }
     }
-    if (cancelled.get()) {
-      myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
-      doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
+  finally {
+      markEnd(root,cancelled.get());
     }
   }
   finally {
-    markEnd(root,cancelled.get());
+    restoreRootChangesAfterUpdate(root);
   }
 }
   finally {
-  if (stashCreated) {
-    unstash(listsCopy,changeManager,root);
+  mergeFiles(root,cancelled,ex);
+  if (ex.get() != null) {
+    myExceptions.add(GitUtil.rethrowVcsException(ex.get()));
   }
-}
-}
-  finally {
-mergeFiles(root,cancelled,ex);
-if (ex.get() != null) {
-  myExceptions.add(GitUtil.rethrowVcsException(ex.get()));
-}
 }
 }
  catch (VcsException ex) {
 myExceptions.add(ex);
 }
+}
+}
+  finally {
+restoreProjectChangesAfterUpdate();
 }
 }
   finally {

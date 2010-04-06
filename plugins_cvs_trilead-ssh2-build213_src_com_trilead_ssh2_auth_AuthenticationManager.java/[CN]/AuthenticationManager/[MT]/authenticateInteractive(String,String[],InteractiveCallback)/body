@@ -1,0 +1,42 @@
+{
+  try {
+    initialize(user);
+    if (methodPossible("keyboard-interactive") == false)     throw new IOException("Authentication method keyboard-interactive not supported by the server at this stage.");
+    if (submethods == null)     submethods=new String[0];
+    PacketUserauthRequestInteractive ua=new PacketUserauthRequestInteractive("ssh-connection",user,submethods);
+    tm.sendMessage(ua.getPayload());
+    while (true) {
+      byte[] ar=getNextMessage();
+      if (ar[0] == Packets.SSH_MSG_USERAUTH_SUCCESS) {
+        authenticated=true;
+        tm.removeMessageHandler(this,0,255);
+        return true;
+      }
+      if (ar[0] == Packets.SSH_MSG_USERAUTH_FAILURE) {
+        PacketUserauthFailure puf=new PacketUserauthFailure(ar,0,ar.length);
+        remainingMethods=puf.getAuthThatCanContinue();
+        isPartialSuccess=puf.isPartialSuccess();
+        return false;
+      }
+      if (ar[0] == Packets.SSH_MSG_USERAUTH_INFO_REQUEST) {
+        PacketUserauthInfoRequest pui=new PacketUserauthInfoRequest(ar,0,ar.length);
+        String[] responses;
+        try {
+          responses=cb.replyToChallenge(pui.getName(),pui.getInstruction(),pui.getNumPrompts(),pui.getPrompt(),pui.getEcho());
+        }
+ catch (        Exception e) {
+          throw (IOException)new IOException("Exception in callback.").initCause(e);
+        }
+        if (responses == null)         throw new IOException("Your callback may not return NULL!");
+        PacketUserauthInfoResponse puir=new PacketUserauthInfoResponse(responses);
+        tm.sendMessage(puir.getPayload());
+        continue;
+      }
+      throw new IOException("Unexpected SSH message (type " + ar[0] + ")");
+    }
+  }
+ catch (  IOException e) {
+    tm.close(e,false);
+    throw (IOException)new IOException("Keyboard-interactive authentication failed.").initCause(e);
+  }
+}
