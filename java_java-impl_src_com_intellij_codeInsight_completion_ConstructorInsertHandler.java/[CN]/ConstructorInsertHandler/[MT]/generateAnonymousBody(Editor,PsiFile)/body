@@ -1,0 +1,61 @@
+{
+  final Project project=file.getProject();
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  int offset=editor.getCaretModel().getOffset();
+  PsiElement element=file.findElementAt(offset);
+  if (element == null)   return null;
+  if (element.getParent() instanceof PsiAnonymousClass) {
+    try {
+      CodeStyleManager.getInstance(project).reformat(element.getParent());
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+    offset=element.getParent().getTextRange().getEndOffset() - 1;
+    editor.getCaretModel().moveToOffset(offset);
+    editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    editor.getSelectionModel().removeSelection();
+  }
+  final SmartPsiElementPointer<PsiElement> pointer=SmartPointerManager.getInstance(project).createSmartPsiElementPointer(element);
+  return new Runnable(){
+    public void run(){
+      CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+        public void run(){
+          PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
+          PsiElement element=pointer.getElement();
+          if (element == null)           return;
+          while (true) {
+            if (element instanceof PsiFile)             return;
+            PsiElement parent=element.getParent();
+            if (parent instanceof PsiAnonymousClass)             break;
+            element=parent;
+          }
+          final PsiAnonymousClass aClass=(PsiAnonymousClass)element.getParent();
+          final Collection<CandidateInfo> candidatesToImplement=OverrideImplementUtil.getMethodsToOverrideImplement(aClass,true);
+          boolean invokeOverride=candidatesToImplement.isEmpty();
+          if (invokeOverride) {
+            chooseAndOverrideMethodsInAdapter(project,editor,aClass);
+          }
+ else {
+            ApplicationManager.getApplication().runWriteAction(new Runnable(){
+              public void run(){
+                try {
+                  List<PsiMethod> methods=OverrideImplementUtil.overrideOrImplementMethodCandidates(aClass,candidatesToImplement,false);
+                  List<PsiGenerationInfo<PsiMethod>> prototypes=OverrideImplementUtil.convert2GenerationInfos(methods);
+                  List<PsiGenerationInfo<PsiMethod>> resultMembers=GenerateMembersUtil.insertMembersBeforeAnchor(aClass,null,prototypes);
+                  GenerateMembersUtil.positionCaret(editor,resultMembers.get(0).getPsiMember(),true);
+                }
+ catch (                IncorrectOperationException ioe) {
+                  LOG.error(ioe);
+                }
+              }
+            }
+);
+          }
+        }
+      }
+,CompletionBundle.message("completion.smart.type.generate.anonymous.body"),null,UndoConfirmationPolicy.DEFAULT,editor.getDocument());
+    }
+  }
+;
+}
