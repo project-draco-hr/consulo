@@ -1,0 +1,85 @@
+{
+  myHighlightedIds=Collections.emptySet();
+  final JPanel actionsPanel=new MyPanel(new BorderLayout());
+  final DefaultActionGroup group=new DefaultActionGroup();
+  final MyOpenCloseFilters openFilters=new MyOpenCloseFilters();
+  group.add(openFilters);
+  openFilters.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_F,KeyEvent.ALT_DOWN_MASK | KeyEvent.CTRL_DOWN_MASK)),myPanel);
+  final MyOpenCloseInheritance openShow=new MyOpenCloseInheritance();
+  group.add(openShow);
+  openShow.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_E,KeyEvent.ALT_DOWN_MASK | KeyEvent.CTRL_DOWN_MASK)),myPanel);
+  final MyPreviousAction previousAction=new MyPreviousAction();
+  group.add(previousAction);
+  previousAction.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT,KeyEvent.ALT_DOWN_MASK | KeyEvent.CTRL_DOWN_MASK)),myPanel);
+  final MyNextAction nextAction=new MyNextAction();
+  group.add(nextAction);
+  nextAction.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT,KeyEvent.ALT_DOWN_MASK | KeyEvent.CTRL_DOWN_MASK)),myPanel);
+  final ActionManager am=ActionManager.getInstance();
+  final ActionToolbar tb=am.createActionToolbar("GitLogTree",group,true);
+  group.add(new MyRefreshAction());
+  actionsPanel.add(tb.getComponent(),BorderLayout.WEST);
+  actionsPanel.add(myStateLabel,BorderLayout.CENTER);
+  final ActionPopupMenu popup=am.createActionPopupMenu("GitLogTree",group);
+  myCommitsList.addMouseListener(new PopupHandler(){
+    @Override public void invokePopup(    Component comp,    int x,    int y){
+      popup.getComponent().show(comp,x,y);
+    }
+  }
+);
+  myPanel.add(actionsPanel,BorderLayout.NORTH);
+  myCommitsList.setCellRenderer(myListCellRenderer);
+  myMainSplitter.setFirstComponent(myFiltersSplitter);
+  final JScrollPane sp=new JScrollPane(myCommitsList,JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+  myRepositoryChangesBrowser=new RepositoryChangesBrowser(myProject,Collections.<CommittedChangeList>emptyList(),Collections.<Change>emptyList(),null);
+  myRepositoryChangesBrowser.getDiffAction().registerCustomShortcutSet(CommonShortcuts.getDiff(),myCommitsList);
+  myListWithDetails=new Splitter(false,0.7f);
+  myListWithDetails.setFirstComponent(sp);
+  myListWithDetails.setSecondComponent(myRepositoryChangesBrowser);
+  myListWithDetails.setDividerWidth(2);
+  myCommitsList.addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      final Object[] selected=myCommitsList.getSelectedValues();
+      myRepositoryChangesBrowser.setChangesToDisplay(Collections.<Change>emptyList());
+      if (selected != null && selected.length > 0) {
+        myWaitAlarm.addRequest(new Runnable(){
+          public void run(){
+            final Object[] values=myCommitsList.getSelectedValues();
+            if (Comparing.equal(selected,values)) {
+              final List<SHAHash> hashes=new ArrayList<SHAHash>(values.length);
+              for (              Object value : values) {
+                hashes.add(((GitCommit)value).getHash());
+              }
+              myController.getDetails(hashes);
+            }
+          }
+        }
+,100);
+      }
+    }
+  }
+);
+  myMainSplitter.setSecondComponent(myListWithDetails);
+  final JPanel filtersPanel=new JPanel(new BorderLayout());
+  final MyFiltersTree filterControl=new MyFiltersTree(myProject,myController.getFiltering(),myController,myParentDisposable,"Filter",null,myCommitsList);
+  filtersPanel.add(filterControl.getComponent(),BorderLayout.CENTER);
+  myFiltersPane=filtersPanel;
+  final JPanel inheritancePanel=new JPanel(new BorderLayout());
+  final MyFiltersTree showControl=new MyFiltersTree(myProject,myController.getHighlighting(),myController,myParentDisposable,"Emphasize",null,myCommitsList);
+  inheritancePanel.add(showControl.getComponent(),BorderLayout.CENTER);
+  myInheritancePane=inheritancePanel;
+  myFiltersOnOff=new CommonOnOff(myFiltersPane,true,filterControl.getTree());
+  myInheritanceOnOff=new CommonOnOff(myInheritancePane,false,showControl.getTree());
+  myFiltersOnOff.setPeer(myInheritanceOnOff);
+  myInheritanceOnOff.setPeer(myFiltersOnOff);
+  myPanel.add(myMainSplitter,BorderLayout.CENTER);
+  new ListSpeedSearch(myCommitsList,new Function<Object,String>(){
+    public String fun(    Object o){
+      if (o instanceof GitCommit) {
+        final GitCommit gc=(GitCommit)o;
+        return gc.getDescription() + gc.getHash() + gc.getCommitter();
+      }
+      return null;
+    }
+  }
+);
+}
