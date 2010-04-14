@@ -1,100 +1,19 @@
 {
-  PsiElementFactory factory=JavaPsiFacade.getInstance(myManager.getProject()).getElementFactory();
   try {
-    if (myChangeInfo.isNameChanged) {
-      myChangeInfo.newNameIdentifier=factory.createIdentifier(myChangeInfo.newName);
-    }
-    if (myChangeInfo.isReturnTypeChanged) {
-      myChangeInfo.newTypeElement=myChangeInfo.newReturnType.getType(myChangeInfo.getMethod(),myManager);
-    }
-    if (myChangeInfo.isGenerateDelegate) {
-      generateDelegate();
-    }
+    final ChangeSignatureUsageProcessor[] processors=ChangeSignatureUsageProcessor.EP_NAME.getExtensions();
     for (    UsageInfo usage : usages) {
-      if (usage instanceof CallerUsageInfo) {
-        final CallerUsageInfo callerUsageInfo=(CallerUsageInfo)usage;
-        processCallerMethod(callerUsageInfo.getMethod(),null,callerUsageInfo.isToInsertParameter(),callerUsageInfo.isToInsertException());
-      }
- else       if (usage instanceof OverriderUsageInfo) {
-        OverriderUsageInfo info=(OverriderUsageInfo)usage;
-        final PsiMethod method=info.getElement();
-        final PsiMethod baseMethod=info.getBaseMethod();
-        if (info.isOriginalOverrider()) {
-          processPrimaryMethod(method,baseMethod,false);
-        }
- else {
-          processCallerMethod(method,baseMethod,info.isToInsertArgs(),info.isToCatchExceptions());
-        }
+      for (      ChangeSignatureUsageProcessor processor : processors) {
+        if (processor.processUsage(myChangeInfo,usage,true,usages))         break;
       }
     }
     LOG.assertTrue(myChangeInfo.getMethod().isValid());
-    processPrimaryMethod(myChangeInfo.getMethod(),null,true);
-    List<UsageInfo> postponedUsages=new ArrayList<UsageInfo>();
-    for (    UsageInfo usage : usages) {
-      PsiElement element=usage.getElement();
-      if (element == null)       continue;
-      if (usage instanceof DefaultConstructorImplicitUsageInfo) {
-        final DefaultConstructorImplicitUsageInfo defConstructorUsage=(DefaultConstructorImplicitUsageInfo)usage;
-        PsiMethod constructor=defConstructorUsage.getConstructor();
-        if (!constructor.isPhysical()) {
-          final boolean toPropagate=myChangeInfo.propagateParametersMethods.remove(constructor);
-          final PsiClass containingClass=defConstructorUsage.getContainingClass();
-          constructor=(PsiMethod)containingClass.add(constructor);
-          PsiUtil.setModifierProperty(constructor,VisibilityUtil.getVisibilityModifier(containingClass.getModifierList()),true);
-          if (toPropagate) {
-            myChangeInfo.propagateParametersMethods.add(constructor);
-          }
-        }
-        addSuperCall(constructor,defConstructorUsage.getBaseConstructor(),usages);
-      }
- else       if (usage instanceof NoConstructorClassUsageInfo) {
-        addDefaultConstructor(((NoConstructorClassUsageInfo)usage).getPsiClass(),usages);
-      }
- else       if (element instanceof PsiJavaCodeReferenceElement) {
-        if (usage instanceof MethodCallUsageInfo) {
-          final MethodCallUsageInfo methodCallInfo=(MethodCallUsageInfo)usage;
-          processMethodUsage(methodCallInfo.getElement(),myChangeInfo,methodCallInfo.isToChangeArguments(),methodCallInfo.isToCatchExceptions(),methodCallInfo.getReferencedMethod(),usages);
-        }
- else         if (usage instanceof MyParameterUsageInfo) {
-          String newName=((MyParameterUsageInfo)usage).newParameterName;
-          String oldName=((MyParameterUsageInfo)usage).oldParameterName;
-          processParameterUsage((PsiReferenceExpression)element,oldName,newName);
-        }
- else {
-          postponedUsages.add(usage);
-        }
-      }
- else       if (usage instanceof CallReferenceUsageInfo) {
-        ((CallReferenceUsageInfo)usage).getReference().handleChangeSignature(myChangeInfo);
-      }
- else       if (element instanceof PsiEnumConstant) {
-        fixActualArgumentsList(((PsiEnumConstant)element).getArgumentList(),myChangeInfo,true);
-      }
- else       if (!(usage instanceof OverriderUsageInfo)) {
-        postponedUsages.add(usage);
-      }
+    for (    ChangeSignatureUsageProcessor processor : processors) {
+      if (processor.processPrimaryMethod(myChangeInfo))       break;
     }
-    for (    UsageInfo usageInfo : postponedUsages) {
-      PsiElement element=usageInfo.getElement();
-      if (element == null)       continue;
-      PsiReference reference=usageInfo instanceof MoveRenameUsageInfo ? usageInfo.getReference() : element.getReference();
-      if (reference != null) {
-        PsiElement target=null;
-        if (usageInfo instanceof MyParameterUsageInfo) {
-          String newParameterName=((MyParameterUsageInfo)usageInfo).newParameterName;
-          PsiParameter[] newParams=myChangeInfo.getMethod().getParameterList().getParameters();
-          for (          PsiParameter newParam : newParams) {
-            if (newParam.getName().equals(newParameterName)) {
-              target=newParam;
-              break;
-            }
-          }
-        }
- else {
-          target=myChangeInfo.getMethod();
-        }
-        if (target != null) {
-          reference.bindToElement(target);
+    for (    UsageInfo usage : usages) {
+      for (      ChangeSignatureUsageProcessor processor : processors) {
+        if (processor.processUsage(myChangeInfo,usage,false,usages)) {
+          break;
         }
       }
     }
