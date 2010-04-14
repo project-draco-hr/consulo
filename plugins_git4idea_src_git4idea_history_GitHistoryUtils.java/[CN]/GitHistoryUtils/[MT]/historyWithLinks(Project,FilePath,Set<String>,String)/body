@@ -1,0 +1,59 @@
+{
+  path=getLastCommitName(project,path);
+  final VirtualFile root=GitUtil.getGitRoot(path);
+  GitSimpleHandler h=new GitSimpleHandler(project,root,GitCommand.LOG);
+  h.setNoSSH(true);
+  h.setStdoutSuppressed(true);
+  h.addParameters(parameters);
+  h.addParameters("--name-only","--pretty=format:%x03%H%x00%ct%x00%an%x00%ae%x00%cn%x00%ce%x00[%P]%x00[%d]%x00%s%n%n%b%x00","--encoding=UTF-8");
+  h.endOptions();
+  h.addRelativePaths(path);
+  String output=h.run();
+  final List<GitCommit> rc=new ArrayList<GitCommit>();
+  StringTokenizer tk=new StringTokenizer(output,"\u0003",false);
+  final String prefix=root.getPath() + "/";
+  while (tk.hasMoreTokens()) {
+    final String line=tk.nextToken();
+    final StringTokenizer tk2=new StringTokenizer(line,"\u0000\n",false);
+    final String hash=tk2.nextToken("\u0000\n");
+    final String dateString=tk2.nextToken("\u0000");
+    final Date date=GitUtil.parseTimestamp(dateString);
+    final String authorName=tk2.nextToken("\u0000");
+    final String authorEmail=tk2.nextToken("\u0000");
+    final String committerName=tk2.nextToken("\u0000");
+    final String committerEmail=tk2.nextToken("\u0000");
+    final String parents=removeSquareBraces(tk2.nextToken("\u0000"));
+    final Set<SHAHash> parentsHashes;
+    if (!StringUtil.isEmptyOrSpaces(parents)) {
+      final String[] parentsSplit=parents.split(" ");
+      parentsHashes=new HashSet<SHAHash>();
+      for (      String s : parentsSplit) {
+        parentsHashes.add(new SHAHash(s));
+      }
+    }
+ else {
+      parentsHashes=Collections.emptySet();
+    }
+    final String decorate=tk2.nextToken("\u0000");
+    final String[] refNames=parseRefNames(decorate);
+    final List<String> tags=refNames.length > 0 ? new LinkedList<String>() : Collections.<String>emptyList();
+    final List<String> branches=refNames.length > 0 ? new LinkedList<String>() : Collections.<String>emptyList();
+    for (    String refName : refNames) {
+      if (allBranchesSet.contains(refName)) {
+        branches.add(refName);
+      }
+ else {
+        tags.add(refName);
+      }
+    }
+    final String message=tk2.nextToken("\u0000").trim();
+    final List<FilePath> pathsList=new LinkedList<FilePath>();
+    tk2.reset("\u0000\n");
+    while (tk2.hasMoreTokens()) {
+      final FilePath revisionPath=VcsUtil.getFilePathForDeletedFile(prefix + GitUtil.unescapePath(tk2.nextToken()),false);
+      pathsList.add(revisionPath);
+    }
+    rc.add(new GitCommit(new SHAHash(hash),authorName,committerName,date,message,parentsHashes,pathsList,authorEmail,committerEmail,tags,branches));
+  }
+  return rc;
+}
