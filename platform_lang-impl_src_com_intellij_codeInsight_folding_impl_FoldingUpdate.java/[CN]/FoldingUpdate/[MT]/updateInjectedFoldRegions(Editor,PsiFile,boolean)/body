@@ -1,0 +1,41 @@
+{
+  if (file instanceof PsiCompiledElement)   return null;
+  ApplicationManager.getApplication().assertReadAccessAllowed();
+  final Project project=file.getProject();
+  Document document=editor.getDocument();
+  LOG.assertTrue(!PsiDocumentManager.getInstance(project).isUncommited(document));
+  final long timeStamp=document.getModificationStamp();
+  Object lastTimeStamp=editor.getUserData(LAST_UPDATE_INJECTED_STAMP_KEY);
+  if (lastTimeStamp instanceof Long && ((Long)lastTimeStamp).longValue() == timeStamp)   return null;
+  List<DocumentWindow> injectedDocuments=InjectedLanguageUtil.getCachedInjectedDocuments(file);
+  if (injectedDocuments.isEmpty())   return null;
+  final List<EditorWindow> injectedEditors=new ArrayList<EditorWindow>();
+  final List<Map<PsiElement,FoldingDescriptor>> maps=new ArrayList<Map<PsiElement,FoldingDescriptor>>();
+  for (  DocumentWindow injectedDocument : injectedDocuments) {
+    PsiFile injectedFile=PsiDocumentManager.getInstance(project).getPsiFile(injectedDocument);
+    if (injectedFile == null || !injectedFile.isValid() || !injectedDocument.isValid())     continue;
+    Editor injectedEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor,injectedFile);
+    if (!(injectedEditor instanceof EditorWindow))     continue;
+    injectedEditors.add((EditorWindow)injectedEditor);
+    Map<PsiElement,FoldingDescriptor> map=new TreeMap<PsiElement,FoldingDescriptor>(COMPARE_BY_OFFSET);
+    maps.add(map);
+    getFoldingsFor(injectedFile,injectedDocument,map,false);
+  }
+  final Runnable operation=new Runnable(){
+    public void run(){
+      for (int i=0; i < injectedEditors.size(); i++) {
+        EditorWindow injectedEditor=injectedEditors.get(i);
+        Map<PsiElement,FoldingDescriptor> map=maps.get(i);
+        new UpdateFoldRegionsOperation(project,injectedEditor,map,applyDefaultState,true).run();
+      }
+    }
+  }
+;
+  return new Runnable(){
+    public void run(){
+      editor.getFoldingModel().runBatchFoldingOperationDoNotCollapseCaret(operation);
+      editor.putUserData(LAST_UPDATE_INJECTED_STAMP_KEY,timeStamp);
+    }
+  }
+;
+}
