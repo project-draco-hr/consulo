@@ -1,0 +1,62 @@
+{
+  final List<VcsException> exceptions=new LinkedList<VcsException>();
+  final List<VcsException> warnings=new LinkedList<VcsException>();
+  final List<FilePath> dirtyFiles=new LinkedList<FilePath>();
+  final List<String> messagesInOrder=new ArrayList<String>(hashes.size());
+  final Map<String,Collection<FilePath>> filesToMove=new HashMap<String,Collection<FilePath>>();
+  final GitVcs vcs=GitVcs.getInstance(myProject);
+  final CheckinEnvironment ce=vcs.getCheckinEnvironment();
+  for (  SHAHash hash : hashes) {
+    try {
+      myAccess.cherryPick(hash);
+    }
+ catch (    VcsException e) {
+      exceptions.add(e);
+    }
+    final CommittedChangeList cl=myListsCache.get(hash);
+    final Collection<FilePath> paths=ChangesUtil.getPaths(new ArrayList<Change>(cl.getChanges()));
+    String message=ce.getDefaultMessageFor(paths.toArray(new FilePath[paths.size()]));
+    message=(message == null) ? new StringBuilder().append(cl.getComment()).append("(cherry picked from commit ").append(hash.getValue()).append(")").toString() : message;
+    messagesInOrder.add(message);
+    filesToMove.put(message,paths);
+    dirtyFiles.addAll(paths);
+  }
+  final GroupOfListsProcessor listsProcessor=new GroupOfListsProcessor();
+  listsProcessor.process(messagesInOrder,filesToMove);
+  final Set<String> lostSet=listsProcessor.getHaveLostSomething();
+  markFilesMovesToNewerLists(warnings,lostSet,filesToMove);
+  final ChangeListManager clm=PeriodicalTasksCloser.safeGetComponent(myProject,ChangeListManager.class);
+  clm.invokeAfterUpdate(new Runnable(){
+    public void run(){
+      for (      Map.Entry<String,Collection<FilePath>> entry : filesToMove.entrySet()) {
+        final Collection<FilePath> filePaths=entry.getValue();
+        final String message=entry.getKey();
+        if (filePaths.isEmpty())         continue;
+        final List<Change> changes=new ArrayList<Change>(filePaths.size());
+        for (        FilePath filePath : filePaths) {
+          changes.add(clm.getChange(filePath));
+        }
+        if (!changes.isEmpty()) {
+          final LocalChangeList cl=clm.addChangeList(message,null);
+          clm.moveChangesTo(cl,changes.toArray(new Change[changes.size()]));
+        }
+      }
+    }
+  }
+,InvokeAfterUpdateMode.SILENT,"",new Consumer<VcsDirtyScopeManager>(){
+    public void consume(    VcsDirtyScopeManager vcsDirtyScopeManager){
+      vcsDirtyScopeManager.filePathsDirty(dirtyFiles,null);
+    }
+  }
+,ModalityState.NON_MODAL);
+  if (exceptions.isEmpty()) {
+    ChangesViewBalloonProblemNotifier.showMe(myProject,"Successful cherry-pick into working tree, please commit changes",MessageType.INFO);
+  }
+ else {
+    ChangesViewBalloonProblemNotifier.showMe(myProject,"Errors in cherry-pick",MessageType.ERROR);
+  }
+  if ((!exceptions.isEmpty()) || (!warnings.isEmpty())) {
+    exceptions.addAll(warnings);
+    AbstractVcsHelper.getInstance(myProject).showErrors(exceptions,"Cherry-pick problems");
+  }
+}
