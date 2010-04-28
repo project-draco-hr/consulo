@@ -1,0 +1,36 @@
+{
+  final List<BeforeAfter<AirContentRevision>> result=new ArrayList<BeforeAfter<AirContentRevision>>(changes.size());
+  final Convertor<Change,FilePath> beforePrefferingConvertor=new Convertor<Change,FilePath>(){
+    public FilePath convert(    Change o){
+      final FilePath before=ChangesUtil.getBeforePath(o);
+      return before == null ? ChangesUtil.getAfterPath(o) : before;
+    }
+  }
+;
+  final MultiMap<VcsRoot,Change> byRoots=new SortByVcsRoots<Change>(project,beforePrefferingConvertor).sort(changes);
+  for (  VcsRoot root : byRoots.keySet()) {
+    final VcsOutgoingChangesProvider<?> provider=root.vcs.getOutgoingChangesProvider();
+    final Collection<Change> rootChanges=byRoots.get(root);
+    if (provider == null) {
+      addConvertChanges(rootChanges,result);
+      continue;
+    }
+    final Collection<Change> outGoingOnly=provider.whichAreOutgoingChanges(rootChanges,new Convertor<Change,VcsRevisionNumber>(){
+      public VcsRevisionNumber convert(      Change ch){
+        return (ch.getBeforeRevision() == null ? ch.getAfterRevision() : ch.getBeforeRevision()).getRevisionNumber();
+      }
+    }
+,new Convertor<Change,FilePath>(){
+      public FilePath convert(      Change ch){
+        return (ch.getBeforeRevision() == null ? ch.getAfterRevision() : ch.getBeforeRevision()).getFile();
+      }
+    }
+,root.path);
+    changes.removeAll(outGoingOnly);
+    addConvertChanges(changes,result);
+    for (    Change change : outGoingOnly) {
+      result.add(new BeforeAfter<AirContentRevision>(convertRevision(change.getBeforeRevision(),provider),convertRevision(change.getAfterRevision(),provider)));
+    }
+  }
+  return result;
+}
