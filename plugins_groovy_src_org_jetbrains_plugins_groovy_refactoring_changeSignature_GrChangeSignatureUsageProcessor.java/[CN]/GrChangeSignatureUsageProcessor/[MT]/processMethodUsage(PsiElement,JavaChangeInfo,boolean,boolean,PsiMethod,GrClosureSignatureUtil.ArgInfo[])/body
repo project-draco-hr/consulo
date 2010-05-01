@@ -1,0 +1,79 @@
+{
+  if (map == null)   return;
+  if (changeInfo.isNameChanged()) {
+    if (element instanceof GrReferenceElement) {
+      element=((GrReferenceElement)element).bindToElement(method);
+    }
+  }
+  if (toChangeArguments) {
+    JavaParameterInfo[] parameters=changeInfo.getNewParameters();
+    GrArgumentList argumentList=((GrCall)element.getParent()).getArgumentList();
+    if (argumentList == null)     return;
+    Set<PsiElement> argsToDelete=new HashSet<PsiElement>(map.length * 2);
+    for (    GrClosureSignatureUtil.ArgInfo argInfo : map) {
+      argsToDelete.addAll(argInfo.args);
+    }
+    for (    JavaParameterInfo parameter : parameters) {
+      int index=parameter.getOldIndex();
+      if (index >= 0) {
+        argsToDelete.removeAll(map[index].args);
+      }
+    }
+    for (    PsiElement arg : argsToDelete) {
+      arg.delete();
+    }
+    GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(element.getProject());
+    boolean skipOptionals=false;
+    PsiElement anchor=null;
+    for (int i=0; i < parameters.length; i++) {
+      JavaParameterInfo parameter=parameters[i];
+      int index=parameter.getOldIndex();
+      if (index >= 0) {
+        GrClosureSignatureUtil.ArgInfo argInfo=map[index];
+        List<PsiElement> arguments=argInfo.args;
+        if (argInfo.isMultiArg) {
+          if ((i != 0 || !(arguments.size() > 0 && arguments.iterator().next() instanceof GrNamedArgument)) && (i != parameters.length - 1 || !parameter.isVarargType())) {
+            StringBuilder argText=new StringBuilder();
+            argText.append("[");
+            for (            PsiElement argument : arguments) {
+              argText.append(argument.getText()).append(", ");
+              argument.delete();
+            }
+            argText.replace(argText.length() - 2,argText.length(),"]");
+            if (!(arguments.size() > 0 && arguments.iterator().next() instanceof GrNamedArgument)) {
+              argText.append(" as ").append(parameter.getTypeText());
+            }
+            anchor=argumentList.addAfter(factory.createExpressionFromText(argText.toString()),anchor);
+          }
+        }
+ else {
+          if (arguments.size() == 1) {
+            PsiElement arg=arguments.iterator().next();
+            PsiElement curArg=getNextArg(anchor,argumentList);
+            if (curArg == arg) {
+              anchor=arg;
+            }
+ else {
+              anchor=argumentList.addBefore(arg,anchor);
+            }
+          }
+ else {
+            skipOptionals=true;
+          }
+        }
+      }
+ else {
+        if (skipOptionals && isParameterOptional(parameter))         continue;
+        GrExpression fromText=null;
+        try {
+          fromText=factory.createExpressionFromText(parameter.getDefaultValue());
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e.getMessage());
+        }
+        anchor=argumentList.addBefore(fromText,getNextArg(anchor,argumentList));
+      }
+    }
+    CodeStyleManager.getInstance(argumentList.getProject()).reformat(argumentList);
+  }
+}
