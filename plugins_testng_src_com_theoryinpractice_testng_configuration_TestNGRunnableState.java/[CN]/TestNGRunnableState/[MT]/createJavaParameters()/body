@@ -32,7 +32,12 @@
     LOG.info("Configuring for module:" + config.getConfigurationModule().getModuleName());
     JavaParametersUtil.configureModule(config.getConfigurationModule(),javaParameters,JavaParameters.JDK_AND_CLASSES_AND_TESTS,config.ALTERNATIVE_JRE_PATH_ENABLED ? config.ALTERNATIVE_JRE_PATH : null);
   }
-  calculateServerPort();
+  try {
+    port=NetUtils.findAvailableSocketPort();
+  }
+ catch (  IOException e) {
+    throw new ExecutionException("Unable to bind to port " + port,e);
+  }
   final TestData data=config.getPersistantData();
   javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.PORT_COMMAND_OPT,String.valueOf(port));
   if (!is15) {
@@ -79,125 +84,13 @@
     }
     javaParameters.getProgramParametersList().add(TestNGCommandLineArgs.SRC_COMMAND_OPT,sb.toString());
   }
-  final Runnable runnable=new Runnable(){
-    public void run(){
-      Map<PsiClass,Collection<PsiMethod>> classes=new HashMap<PsiClass,Collection<PsiMethod>>();
-      try {
-        fillTestObjects(classes,project,is15);
-        if (classes.size() > 0) {
-          Map<String,Collection<String>> map=new HashMap<String,Collection<String>>();
-          for (          final Map.Entry<PsiClass,Collection<PsiMethod>> entry : classes.entrySet()) {
-            Collection<String> methods=new HashSet<String>(entry.getValue().size());
-            for (            PsiMethod method : entry.getValue()) {
-              methods.add(method.getName());
-            }
-            map.put(ApplicationManager.getApplication().runReadAction(new Computable<String>(){
-              @Nullable public String compute(){
-                return entry.getKey().getQualifiedName();
-              }
-            }
-),methods);
-          }
-          Collection<String> groupNames=null;
-          if (TestType.GROUP.getType().equals(data.TEST_OBJECT)) {
-            String groupName=data.getGroupName();
-            if (groupName != null && groupName.length() > 0) {
-              groupNames=new HashSet<String>(1);
-              groupNames.add(groupName);
-            }
-          }
-          Map<String,String> testParams=buildTestParameters(data);
-          String annotationType=data.ANNOTATION_TYPE;
-          if (annotationType == null || "".equals(annotationType)) {
-            annotationType=is15 ? TestNG.JDK_ANNOTATION_TYPE : TestNG.JAVADOC_ANNOTATION_TYPE;
-          }
-          LOG.info("Using annotationType of " + annotationType);
-          int logLevel=1;
-          try {
-            final Properties properties=new Properties();
-            properties.load(new ByteArrayInputStream(config.getPersistantData().VM_PARAMETERS.getBytes()));
-            final String verbose=properties.getProperty("-Dtestng.verbose");
-            if (verbose != null) {
-              logLevel=Integer.parseInt(verbose);
-            }
-          }
- catch (          Exception e) {
-            logLevel=1;
-          }
-          LaunchSuite suite=SuiteGenerator.createSuite(project.getName(),null,map,groupNames,testParams,annotationType,logLevel);
-          File xmlFile=suite.save(new File(PathManager.getSystemPath()));
-          String path=xmlFile.getAbsolutePath() + "\n";
-          try {
-            FileUtil.writeToFile(myTempFile,path.getBytes(),true);
-          }
- catch (          IOException e) {
-            LOG.error(e);
-          }
-        }
- else         if (TestType.SUITE.getType().equals(data.TEST_OBJECT)) {
-          try {
-            Collection<XmlSuite> suites;
-            FileInputStream in=new FileInputStream(data.getSuiteName());
-            try {
-              suites=new Parser(in).parse();
-            }
-  finally {
-              in.close();
-            }
-            for (            XmlSuite suite : suites) {
-              Map<String,String> params=suite.getParameters();
-              params.putAll(buildTestParameters(data));
-              String annotationType=data.ANNOTATION_TYPE;
-              if (annotationType != null && !"".equals(annotationType)) {
-                suite.setAnnotations(annotationType);
-              }
-              LOG.info("Using annotationType of " + annotationType);
-              final String fileId=(project.getName() + '_' + suite.getName()+ '_'+ Integer.toHexString(suite.getName().hashCode())+ ".xml").replace(' ','_');
-              final File suiteFile=new File(PathManager.getSystemPath(),fileId);
-              FileWriter fileWriter=new FileWriter(suiteFile);
-              try {
-                fileWriter.write(suite.toXml());
-              }
-  finally {
-                fileWriter.close();
-              }
-              String path=suiteFile.getAbsolutePath() + "\n";
-              FileUtil.writeToFile(myTempFile,path.getBytes(),true);
-            }
-          }
- catch (          Exception e) {
-            throw new CantRunException("Unable to parse suite: " + e.getMessage());
-          }
-        }
-        try {
-          FileUtil.writeToFile(myTempFile,"end".getBytes(),true);
-        }
- catch (        IOException e) {
-          LOG.error(e);
-        }
-      }
- catch (      CantRunException e) {
-        try {
-          final String message="CantRunException" + e.getMessage();
-          FileUtil.writeToFile(myTempFile,message.getBytes());
-        }
- catch (        IOException e1) {
-          LOG.error(e1);
-        }
-      }
-    }
-  }
-;
   try {
+    final ServerSocket serverSocket=new ServerSocket(0);
+    javaParameters.getProgramParametersList().add("-socket" + serverSocket.getLocalPort());
     myTempFile=File.createTempFile("idea_testng",".tmp");
     myTempFile.deleteOnExit();
     javaParameters.getProgramParametersList().add("-temp",myTempFile.getAbsolutePath());
-    ProgressManager.getInstance().run(new Task.Backgroundable(project,"Searching For Tests ...",true){
-      public void run(      @NotNull ProgressIndicator indicator){
-        runnable.run();
-      }
-    }
-);
+    ProgressManager.getInstance().run(new SearchingForTestsTask(serverSocket,is15,config,myTempFile));
   }
  catch (  IOException e) {
     LOG.error(e);
