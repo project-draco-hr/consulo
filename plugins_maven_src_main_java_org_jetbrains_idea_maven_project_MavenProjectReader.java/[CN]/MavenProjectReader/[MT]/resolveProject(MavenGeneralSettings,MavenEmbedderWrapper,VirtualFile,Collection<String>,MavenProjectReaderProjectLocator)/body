@@ -1,33 +1,28 @@
 {
-  MavenProject mavenProject=null;
-  Collection<MavenProjectProblem> problems=createProblemsList();
-  Set<MavenId> unresolvedArtifactsIds=new THashSet<MavenId>();
-  Collection<DependencyNode> dependencyTree=Collections.emptyList();
   try {
-    MavenWrapperResolutionResult result=doResolveProject(embedder,file,explicitProfiles,problems);
-    mavenProject=result.getMavenProject();
-    unresolvedArtifactsIds=result.getUnresolvedArtifactIds();
-    dependencyTree=result.getOriginalDependencyTree();
+    MavenWrapperExecutionResult result=embedder.resolveProject(file,explicitProfiles);
+    if (result.projectData == null) {
+      MavenProjectReaderResult temp=readProject(generalSettings,file,explicitProfiles,locator);
+      temp.readingProblems.addAll(result.problems);
+      temp.unresolvedArtifactIds.addAll(result.unresolvedArtifacts);
+      return temp;
+    }
+    return new MavenProjectReaderResult(result.projectData.mavenModel,result.projectData.mavenModelMap,result.projectData.activatedProfiles,result.projectData.nativeMavenProject,result.problems,result.unresolvedArtifacts);
   }
  catch (  MavenProcessCanceledException e) {
     throw e;
   }
 catch (  Throwable e) {
-    String message=e.getMessage();
-    if (e instanceof RuntimeException && e.getCause() != null) {
-      message=e.getCause().getMessage();
-    }
-    if (message != null) {
-      problems.add(createStructureProblem(file,message));
-    }
     MavenLog.LOG.info(e);
     MavenLog.printInTests(e);
-  }
-  if (mavenProject == null) {
-    if (problems.isEmpty()) {
-      problems.add(createSyntaxProblem(file,MavenProjectProblem.ProblemType.SYNTAX));
+    MavenProjectReaderResult result=readProject(generalSettings,file,explicitProfiles,locator);
+    String message=e.getMessage();
+    if (message != null) {
+      result.readingProblems.add(MavenProjectProblem.createStructureProblem(file.getPath(),message));
     }
-    mavenProject=readProject(generalSettings,file,explicitProfiles,locator).nativeMavenProject;
+ else {
+      result.readingProblems.add(MavenProjectProblem.createSyntaxProblem(file.getPath(),MavenProjectProblem.ProblemType.SYNTAX));
+    }
+    return result;
   }
-  return new MavenProjectReaderResult(generalSettings,mavenProject,dependencyTree,problems,unresolvedArtifactsIds,embedder.getLocalRepositoryFile());
 }
