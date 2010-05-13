@@ -1,0 +1,65 @@
+{
+  final int toContinueFrom;
+  document.deleteString(textOffset.get(),textOffset.get() + (matcher.end() - matcher.start()));
+  int groupIdx=1;
+  final String marker=matcher.group(groupIdx++);
+  @NonNls String descr=matcher.group(groupIdx++);
+  final String typeString=matcher.group(groupIdx++);
+  final String foregroundColor=matcher.group(groupIdx++);
+  final String backgroundColor=matcher.group(groupIdx++);
+  final String effectColor=matcher.group(groupIdx++);
+  final String effectType=matcher.group(groupIdx++);
+  final String fontType=matcher.group(groupIdx++);
+  final boolean closed=matcher.group(groupIdx) != null;
+  if (descr == null) {
+    descr=ANY_TEXT;
+  }
+ else   if (descr.equals("null")) {
+    descr=null;
+  }
+  if (descr != null) {
+    descr=descr.replaceAll("\\\\\\\\\"","\"");
+  }
+  HighlightInfoType type=WHATEVER;
+  if (typeString != null) {
+    try {
+      Field field=HighlightInfoType.class.getField(typeString);
+      type=(HighlightInfoType)field.get(null);
+    }
+ catch (    Exception ignore) {
+    }
+    LOG.assertTrue(type != null,"Wrong highlight type: " + typeString);
+  }
+  TextAttributes forcedAttributes=null;
+  if (foregroundColor != null) {
+    forcedAttributes=new TextAttributes(Color.decode(foregroundColor),Color.decode(backgroundColor),Color.decode(effectColor),EffectType.valueOf(effectType),Integer.parseInt(fontType));
+  }
+  final int rangeStart=textOffset.get();
+  if (closed) {
+    toContinueFrom=matcher.end();
+  }
+ else {
+    int pos=matcher.end();
+    final Matcher closingTagMatcher=Pattern.compile("</" + marker + ">").matcher(text);
+    while (true) {
+      if (!closingTagMatcher.find(pos)) {
+        LOG.assertTrue(closingTagMatcher.matches(),"Cannot find closing </" + marker + ">");
+      }
+      final int nextTagStart=matcher.find(pos) ? matcher.start() : text.length();
+      if (closingTagMatcher.start() < nextTagStart) {
+        textOffset.set(textOffset.get() + (closingTagMatcher.start() - pos));
+        document.deleteString(textOffset.get(),textOffset.get() + (closingTagMatcher.end() - closingTagMatcher.start()));
+        toContinueFrom=closingTagMatcher.end();
+        break;
+      }
+      textOffset.set(textOffset.get() + (nextTagStart - pos));
+      pos=extractExpectedHighlight(matcher,text,document,textOffset);
+    }
+  }
+  final ExpectedHighlightingSet expectedHighlightingSet=highlightingTypes.get(marker);
+  if (expectedHighlightingSet.enabled) {
+    final HighlightInfo highlightInfo=new HighlightInfo(forcedAttributes,type,rangeStart,textOffset.get(),descr,descr,expectedHighlightingSet.severity,expectedHighlightingSet.endOfLine,null,false);
+    expectedHighlightingSet.infos.add(highlightInfo);
+  }
+  return toContinueFrom;
+}
