@@ -1,0 +1,55 @@
+{
+  final XmlElement xmlElement=value.getXmlElement();
+  if (!(xmlElement instanceof XmlAttribute)) {
+    return PsiReference.EMPTY_ARRAY;
+  }
+  final XmlAttributeValue valueElement=((XmlAttribute)xmlElement).getValueElement();
+  if (valueElement == null) {
+    return PsiReference.EMPTY_ARRAY;
+  }
+  final TargetResolver.Result result=value.getValue();
+  if (result == null) {
+    return PsiReference.EMPTY_ARRAY;
+  }
+  final List<PsiReference> refs=new ArrayList<PsiReference>();
+  final StringTokenizer tokenizer=new StringTokenizer(value.getRawText(),",",false);
+  final TextRange wholeStringRange=ElementManipulators.getValueTextRange(valueElement);
+  final Set<String> existingRefs=new HashSet<String>();
+  while (tokenizer.hasMoreTokens()) {
+    final String token=tokenizer.nextToken();
+    int tokenStartOffset=tokenizer.getCurrentPosition() - token.length();
+    final String ref=token.trim();
+    if (ref.length() != token.length()) {
+      for (int idx=0; idx < token.length(); idx++) {
+        if (Character.isWhitespace(token.charAt(idx))) {
+          tokenStartOffset++;
+        }
+ else {
+          break;
+        }
+      }
+    }
+    final Pair<AntDomTarget,String> antTarget=result.getResolvedTarget(ref);
+    final DomTarget domTarget=(antTarget != null && antTarget.getFirst() != null) ? DomTarget.getTarget(antTarget.getFirst()) : null;
+    if (domTarget != null) {
+      existingRefs.add(antTarget.getSecond());
+    }
+    refs.add(new PsiReferenceBase<PsiElement>(valueElement,TextRange.from(wholeStringRange.getStartOffset() + tokenStartOffset,ref.length()),true){
+      public PsiElement resolve(){
+        return domTarget != null ? PomService.convertToPsi(domTarget) : null;
+      }
+      @NotNull public Object[] getVariants(){
+        final List<Object> variants=new ArrayList<Object>();
+        for (        Map.Entry<String,AntDomTarget> entry : result.getVariants().entrySet()) {
+          final String targetEffectiveName=entry.getKey();
+          if (!existingRefs.contains(targetEffectiveName)) {
+            variants.add(LookupElementBuilder.create(targetEffectiveName));
+          }
+        }
+        return variants.toArray();
+      }
+    }
+);
+  }
+  return refs.toArray(new PsiReference[refs.size()]);
+}
