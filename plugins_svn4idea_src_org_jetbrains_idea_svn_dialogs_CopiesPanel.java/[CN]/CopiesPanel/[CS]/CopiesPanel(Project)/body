@@ -2,23 +2,38 @@
   myProject=project;
   myConnection=myProject.getMessageBus().connect(myProject);
   myVcs=SvnVcs.getInstance(myProject);
+  myCurrentInfoList=null;
   final Runnable focus=new Runnable(){
     public void run(){
       IdeFocusManager.getInstance(myProject).requestFocus(myRefreshLabel,true);
     }
   }
 ;
+  final Runnable refreshView=new Runnable(){
+    public void run(){
+      final List<WCInfo> infoList=myVcs.getAllWcInfos();
+      if (myCurrentInfoList != null) {
+        final List<OverrideEqualsWrapper<WCInfo>> newList=ObjectsConvertor.convert(infoList,new Convertor<WCInfo,OverrideEqualsWrapper<WCInfo>>(){
+          public OverrideEqualsWrapper<WCInfo> convert(          WCInfo o){
+            return new OverrideEqualsWrapper<WCInfo>(InfoEqualityPolicy.getInstance(),o);
+          }
+        }
+,ObjectsConvertor.NOT_NULL);
+        if (Comparing.haveEqualElements(newList,myCurrentInfoList)) {
+          myRefreshLabel.setEnabled(true);
+          return;
+        }
+        myCurrentInfoList=newList;
+      }
+      updateList(infoList);
+      myRefreshLabel.setEnabled(true);
+      SwingUtilities.invokeLater(focus);
+    }
+  }
+;
   myConnection.subscribe(SvnVcs.ROOTS_RELOADED,new Runnable(){
     public void run(){
-      ApplicationManager.getApplication().invokeLater(new Runnable(){
-        public void run(){
-          final List<WCInfo> infoList=myVcs.getAllWcInfos();
-          updateList(infoList);
-          myRefreshLabel.setEnabled(true);
-          SwingUtilities.invokeLater(focus);
-        }
-      }
-,ModalityState.NON_MODAL);
+      ApplicationManager.getApplication().invokeLater(refreshView,ModalityState.NON_MODAL);
     }
   }
 );
@@ -38,5 +53,6 @@
 );
   myHolder=new JScrollPane(holderPanel);
   setFocusableForLinks(myRefreshLabel);
+  refreshView.run();
   initView();
 }
