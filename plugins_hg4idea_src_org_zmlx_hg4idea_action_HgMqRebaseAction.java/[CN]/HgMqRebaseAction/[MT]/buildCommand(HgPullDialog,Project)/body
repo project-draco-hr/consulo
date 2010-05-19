@@ -1,0 +1,33 @@
+{
+  final VirtualFile repository=dialog.getRepository();
+  return new HgGlobalCommand(){
+    public VirtualFile getRepo(){
+      return repository;
+    }
+    public void execute(){
+      HgMQCommand mqCommand=new HgMQCommand(project);
+      boolean notFoundAppliedPatches=mqCommand.qapplied(repository).isEmpty();
+      if (notFoundAppliedPatches) {
+        return;
+      }
+      HgPullCommand pullCommand=new HgPullCommand(project,repository);
+      pullCommand.setSource(dialog.getSource());
+      pullCommand.setRebase(true);
+      pullCommand.setUpdate(false);
+      new HgCommandResultNotifier(project).process(pullCommand.execute());
+      String currentBranch=new HgTagBranchCommand(project,repository).getCurrentBranch();
+      if (StringUtils.isBlank(currentBranch)) {
+        return;
+      }
+      List<HgRevisionNumber> heads=new HgHeadsCommand(project,repository).execute(currentBranch);
+      new HgConflictResolver(project,Collections.max(heads),Collections.min(heads)).resolve(repository);
+      HgResolveCommand resolveCommand=new HgResolveCommand(project);
+      Map<HgFile,HgResolveStatusEnum> status=resolveCommand.list(repository);
+      if (status.containsValue(HgResolveStatusEnum.UNRESOLVED)) {
+        return;
+      }
+      new HgRebaseCommand(project,repository).continueRebase();
+    }
+  }
+;
+}
