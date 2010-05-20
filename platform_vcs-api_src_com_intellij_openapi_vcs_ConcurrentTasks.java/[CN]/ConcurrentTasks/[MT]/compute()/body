@@ -1,0 +1,57 @@
+{
+  final EmptyProgressIndicator pi=new EmptyProgressIndicator(){
+    @Override public void checkCanceled(){
+      if (myResultKnown || (myParentIndicator != null) && myParentIndicator.isCanceled()) {
+        super.cancel();
+      }
+      super.checkCanceled();
+    }
+  }
+;
+  myCntAlive=myTasks.length;
+  mySemaphore.down();
+  final List<Future<?>> futures=new LinkedList<Future<?>>();
+  for (  final Consumer<Consumer<T>> task : myTasks) {
+    if (myResultKnown)     break;
+    final Runnable computableProxy=new Runnable(){
+      public void run(){
+        try {
+          task.consume(new Consumer<T>(){
+            public void consume(            T t){
+              myResult=t;
+              myResultKnown=true;
+              --myCntAlive;
+              mySemaphore.up();
+            }
+          }
+);
+        }
+ catch (        ProcessCanceledException e) {
+          --myCntAlive;
+          if (myCntAlive == 0) {
+            mySemaphore.up();
+          }
+          throw e;
+        }
+      }
+    }
+;
+    final Future<?> future=ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+      public void run(){
+        ProgressManager.getInstance().runProcess(computableProxy,pi);
+      }
+    }
+);
+    futures.add(future);
+  }
+  while (true) {
+    mySemaphore.waitFor(1000);
+    if (myResultKnown)     break;
+    pi.checkCanceled();
+  }
+  for (  Future<?> future : futures) {
+    if ((!future.isCancelled() && (!future.isDone()))) {
+      future.cancel(true);
+    }
+  }
+}
