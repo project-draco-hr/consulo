@@ -1,0 +1,50 @@
+{
+  if (limit <= REVISION_INDEX || hgFile == null || hgFile.getRepo() == null) {
+    return Collections.emptyList();
+  }
+  HgCommandService hgCommandService=HgCommandService.getInstance(project);
+  HgCommandResult result=execute(hgCommandService,hgFile.getRepo(),TEMPLATE,limit,hgFile);
+  List<HgFileRevision> revisions=new LinkedList<HgFileRevision>();
+  for (  String line : result.getOutputLines()) {
+    try {
+      String[] attributes=StringUtils.splitPreserveAllTokens(line,'|');
+      if (attributes.length != ITEM_COUNT) {
+        LOG.debug("Wrong format. Skipping line " + line);
+        continue;
+      }
+      HgRevisionNumber vcsRevisionNumber=HgRevisionNumber.getInstance(attributes[REVISION_INDEX],attributes[CHANGESET_INDEX]);
+      Date revisionDate=DATE_FORMAT.parse(attributes[DATE_INDEX]);
+      String author=attributes[AUTHOR_INDEX];
+      String branchName=attributes[BRANCH_INDEX];
+      String commitMessage=attributes[MESSAGE_INDEX];
+      Set<String> filesAdded=parseFileList(attributes[FILES_ADDED_INDEX]);
+      Set<String> filesModified=parseFileList(attributes[FILES_MODIFIED_INDEX]);
+      Set<String> filesDeleted=parseFileList(attributes[FILES_DELETED_INDEX]);
+      Map<String,String> filesCopied=parseCopiesFileList(attributes[FILES_COPIES_INDEX]);
+      filesModified.removeAll(filesAdded);
+      filesModified.removeAll(filesDeleted);
+      filesCopied.keySet().removeAll(filesDeleted);
+      filesCopied.values().removeAll(filesAdded);
+      if (filesAdded.isEmpty() && filesModified.isEmpty() && filesCopied.isEmpty()&& filesDeleted.isEmpty()) {
+        continue;
+      }
+      HgFileRevision revision=new HgFileRevision(project,hgFile,vcsRevisionNumber);
+      revision.setBranchName(branchName);
+      revision.setRevisionDate(revisionDate);
+      revision.setAuthor(author);
+      revision.setCommitMessage(commitMessage);
+      revision.setFilesModified(filesModified);
+      revision.setFilesAdded(filesAdded);
+      revision.setFilesDeleted(filesDeleted);
+      revision.setFilesCopied(filesCopied);
+      revisions.add(revision);
+    }
+ catch (    NumberFormatException e) {
+      LOG.warn("Error parsing rev in line " + line);
+    }
+catch (    ParseException e) {
+      LOG.warn("Error parsing date in line " + line);
+    }
+  }
+  return revisions;
+}
