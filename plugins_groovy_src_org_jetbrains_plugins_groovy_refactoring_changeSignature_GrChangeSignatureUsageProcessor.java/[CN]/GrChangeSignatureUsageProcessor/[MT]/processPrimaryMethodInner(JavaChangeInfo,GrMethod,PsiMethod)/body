@@ -8,6 +8,8 @@
   if (changeInfo.isVisibilityChanged()) {
     method.getModifierList().setModifierProperty(changeInfo.getNewVisibility(),true);
   }
+  PsiSubstitutor substitutor=baseMethod != null ? calculateSubstitutor(method,baseMethod) : PsiSubstitutor.EMPTY;
+  final PsiMethod context=changeInfo.getMethod();
   if (changeInfo.isReturnTypeChanged()) {
     CanonicalTypes.Type newReturnType=changeInfo.getNewReturnType();
     GrTypeElement element=method.getReturnTypeElementGroovy();
@@ -21,8 +23,11 @@
       }
     }
  else {
-      PsiType type=newReturnType.getType(method.getParameterList(),method.getManager());
-      method.setReturnType(type);
+      PsiType type=newReturnType.getType(context,method.getManager());
+      final PsiType oldReturnType=method.getReturnType();
+      if (!TypesUtil.isAssignable(type,oldReturnType,context.getManager(),context.getResolveScope())) {
+        method.setReturnType(substitutor.substitute(type));
+      }
     }
   }
   JavaParameterInfo[] newParameters=changeInfo.getNewParameters();
@@ -33,19 +38,20 @@
   GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(method.getProject());
   GrParameter anchor=null;
   for (  JavaParameterInfo newParameter : newParameters) {
-    String typeText;
+    PsiType type;
     if (newParameter instanceof GrParameterInfo && ((GrParameterInfo)newParameter).hasNoType()) {
-      typeText=null;
+      type=null;
     }
  else {
-      typeText=newParameter.getTypeText();
+      type=substitutor.substitute(newParameter.createType(context,method.getManager()));
     }
-    GrParameter grParameter=factory.createParameter(newParameter.getName(),typeText,getInitializer(newParameter),parameterList);
+    GrParameter grParameter=factory.createParameter(newParameter.getName(),type == null ? null : type.getCanonicalText(),getInitializer(newParameter),parameterList);
     anchor=(GrParameter)parameterList.addAfter(grParameter,anchor);
   }
   for (  GrParameter oldParameter : toRemove) {
     oldParameter.delete();
   }
+  PsiUtil.shortenReferences(parameterList);
   CodeStyleManager.getInstance(parameterList.getProject()).reformat(parameterList);
   if (changeInfo.isExceptionSetOrOrderChanged()) {
     final ThrownExceptionInfo[] infos=changeInfo.getNewExceptions();

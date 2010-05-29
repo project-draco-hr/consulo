@@ -7,8 +7,17 @@
   }
   if (toChangeArguments) {
     JavaParameterInfo[] parameters=changeInfo.getNewParameters();
-    GrArgumentList argumentList=((GrCall)element.getParent()).getArgumentList();
-    if (argumentList == null)     return;
+    GrArgumentList argumentList=PsiUtil.getArgumentsList(element);
+    GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(element.getProject());
+    if (argumentList == null) {
+      if (element instanceof GrEnumConstant) {
+        argumentList=factory.createArgumentList();
+        argumentList=(GrArgumentList)element.add(argumentList);
+      }
+ else {
+        return;
+      }
+    }
     Set<PsiElement> argsToDelete=new HashSet<PsiElement>(map.length * 2);
     for (    GrClosureSignatureUtil.ArgInfo argInfo : map) {
       argsToDelete.addAll(argInfo.args);
@@ -22,7 +31,6 @@
     for (    PsiElement arg : argsToDelete) {
       arg.delete();
     }
-    GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(element.getProject());
     boolean skipOptionals=false;
     PsiElement anchor=null;
     for (int i=0; i < parameters.length; i++) {
@@ -49,14 +57,28 @@
  else {
           if (arguments.size() == 1) {
             PsiElement arg=arguments.iterator().next();
+            if (i == parameters.length - 1 && parameter.isVarargType()) {
+              if (arg instanceof GrSafeCastExpression) {
+                PsiElement expr=((GrSafeCastExpression)arg).getOperand();
+                if (expr instanceof GrListOrMap && !((GrListOrMap)expr).isMap()) {
+                  final PsiElement copy=expr.copy();
+                  PsiElement[] newVarargs=((GrListOrMap)copy).getInitializers();
+                  for (                  PsiElement vararg : newVarargs) {
+                    anchor=argumentList.addAfter(vararg,anchor);
+                  }
+                  arg.delete();
+                  continue;
+                }
+              }
+            }
             PsiElement curArg=getNextOfType(argumentList,anchor,GrExpression.class);
             if (curArg == arg) {
               anchor=arg;
             }
  else {
               final PsiElement copy=arg.copy();
-              arg.delete();
               anchor=argumentList.addAfter(copy,anchor);
+              arg.delete();
             }
           }
  else {
