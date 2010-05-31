@@ -1,11 +1,34 @@
 {
-  ApplicationManager.getApplication().invokeLater(new Runnable(){
+  if (!started) {
+    return;
+  }
+  LocalFileSystem.getInstance().addVirtualFileListener(virtualFileListener);
+  ChangeListManager.getInstance(myProject).registerCommitExecutor(commitExecutor);
+  StatusBar statusBar=WindowManager.getInstance().getStatusBar(myProject);
+  if (statusBar != null) {
+    statusBar.addCustomIndicationComponent(hgCurrentBranchStatus);
+    statusBar.addCustomIndicationComponent(incomingChangesStatus);
+    statusBar.addCustomIndicationComponent(outgoingChangesStatus);
+  }
+  final HgIncomingStatusUpdater incomingUpdater=new HgIncomingStatusUpdater(incomingChangesStatus,projectSettings);
+  final HgOutgoingStatusUpdater outgoingUpdater=new HgOutgoingStatusUpdater(outgoingChangesStatus,projectSettings);
+  changesUpdaterScheduledFuture=JobScheduler.getScheduler().scheduleWithFixedDelay(new Runnable(){
     public void run(){
-      if (!validateHgExecutable()) {
-        return;
-      }
-      addListeners();
+      incomingUpdater.update(myProject);
+      outgoingUpdater.update(myProject);
     }
   }
-,myProject.getDisposed());
+,0,globalSettings.getIncomingCheckIntervalSeconds(),TimeUnit.SECONDS);
+  MessageBus messageBus=myProject.getMessageBus();
+  messageBusConnection=messageBus.connect();
+  messageBusConnection.subscribe(INCOMING_TOPIC,incomingUpdater);
+  messageBusConnection.subscribe(OUTGOING_TOPIC,outgoingUpdater);
+  messageBusConnection.subscribe(BRANCH_TOPIC,new HgCurrentBranchStatusUpdater(hgCurrentBranchStatus));
+  messageBusConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER,new FileEditorManagerAdapter(){
+    @Override public void selectionChanged(    FileEditorManagerEvent event){
+      Project project=event.getManager().getProject();
+      project.getMessageBus().asyncPublisher(BRANCH_TOPIC).update(project);
+    }
+  }
+);
 }
