@@ -1,0 +1,73 @@
+{
+  if ((limit <= 0 && limit != -1) || hgFile == null || hgFile.getRepo() == null) {
+    return Collections.emptyList();
+  }
+  HgCommandService hgCommandService=HgCommandService.getInstance(project);
+  String template=includeFiles ? LONG_TEMPLATE : SHORT_TEMPLATE;
+  int itemCount=includeFiles ? LONG_ITEM_COUNT : SHORT_ITEM_COUNT;
+  HgCommandResult result=execute(hgCommandService,hgFile.getRepo(),template,limit,hgFile);
+  List<HgFileRevision> revisions=new LinkedList<HgFileRevision>();
+  String output=result.getRawOutput();
+  String[] changeSets=output.split(SEPARATOR_STRING);
+  for (  String line : changeSets) {
+    try {
+      String[] attributes=StringUtils.splitPreserveAllTokens(line,'|');
+      if (attributes.length != itemCount) {
+        LOG.debug("Wrong format. Skipping line " + line);
+        continue;
+      }
+      String revisionString=attributes[REVISION_INDEX];
+      String changeset=attributes[CHANGESET_INDEX];
+      String parentsString=attributes[PARENTS_INDEX];
+      List<HgRevisionNumber> parents=new ArrayList<HgRevisionNumber>(2);
+      if (StringUtils.isEmpty(parentsString)) {
+        Long revision=Long.valueOf(revisionString);
+        HgRevisionNumber parentRevision=HgRevisionNumber.getLocalInstance(String.valueOf(revision - 1));
+        parents.add(parentRevision);
+      }
+ else {
+        String[] parentStrings=parentsString.trim().split(" ");
+        for (        String parentString : parentStrings) {
+          String[] parentParts=parentString.split(":");
+          parents.add(HgRevisionNumber.getInstance(parentParts[0],parentParts[1]));
+        }
+      }
+      HgRevisionNumber vcsRevisionNumber=HgRevisionNumber.getInstance(revisionString,changeset,parents);
+      Date revisionDate=DATE_FORMAT.parse(attributes[DATE_INDEX]);
+      String author=attributes[AUTHOR_INDEX];
+      String branchName=attributes[BRANCH_INDEX];
+      String commitMessage=attributes[MESSAGE_INDEX];
+      Set<String> filesAdded;
+      Set<String> filesModified;
+      Set<String> filesDeleted;
+      Map<String,String> copies;
+      if (FILES_ADDED_INDEX < itemCount) {
+        filesAdded=parseFileList(attributes[FILES_ADDED_INDEX]);
+        filesModified=parseFileList(attributes[FILES_MODIFIED_INDEX]);
+        filesDeleted=parseFileList(attributes[FILES_DELETED_INDEX]);
+        copies=parseCopiesFileList(attributes[FILES_COPIED_INDEX]);
+        Iterator<String> keys=copies.keySet().iterator();
+        while (keys.hasNext()) {
+          String s=keys.next();
+          if (!filesDeleted.contains(s)) {
+            keys.remove();
+          }
+        }
+      }
+ else {
+        filesAdded=Collections.emptySet();
+        filesModified=Collections.emptySet();
+        filesDeleted=Collections.emptySet();
+        copies=Collections.emptyMap();
+      }
+      revisions.add(new HgFileRevision(project,hgFile,vcsRevisionNumber,branchName,revisionDate,author,commitMessage,filesModified,filesAdded,filesDeleted,copies));
+    }
+ catch (    NumberFormatException e) {
+      LOG.warn("Error parsing rev in line " + line);
+    }
+catch (    ParseException e) {
+      LOG.warn("Error parsing date in line " + line);
+    }
+  }
+  return revisions;
+}
