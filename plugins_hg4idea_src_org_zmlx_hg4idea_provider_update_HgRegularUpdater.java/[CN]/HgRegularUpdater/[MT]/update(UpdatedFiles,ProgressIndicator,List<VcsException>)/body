@@ -1,0 +1,39 @@
+{
+  indicator.setText(HgVcsMessages.message("hg4idea.progress.updating",repository.getPath()));
+  HgShowConfigCommand configCommand=new HgShowConfigCommand(project);
+  String defaultPath=configCommand.getDefaultPath(repository);
+  if (StringUtils.isBlank(defaultPath)) {
+    throw new VcsException(HgVcsMessages.message("hg4idea.warning.no-default-update-path",repository.getPath()));
+  }
+  List<HgRevisionNumber> branchHeadsBeforePull=new HgHeadsCommand(project,repository).execute();
+  if (branchHeadsBeforePull.size() > 1) {
+    reportWarning(warnings,HgVcsMessages.message("hg4idea.update.warning.multipleHeadsBeforeUpdate",repository.getPath()));
+  }
+  if (shouldPull()) {
+    pull(repository,indicator);
+  }
+  if (shouldUpdate()) {
+    List<HgRevisionNumber> parentsBeforeUpdate=new HgWorkingCopyRevisionsCommand(project).parents(repository);
+    if (parentsBeforeUpdate.size() > 1) {
+      throw new VcsException(HgVcsMessages.message("hg4idea.update.error.uncommittedMerge",repository.getPath()));
+    }
+    indicator.setText2(HgVcsMessages.message("hg4idea.progress.countingHeads"));
+    List<HgRevisionNumber> branchHeadsAfterPull=new HgHeadsCommand(project,repository).execute();
+    List<HgRevisionNumber> pulledBranchHeads=determinePulledBranchHeads(branchHeadsBeforePull,branchHeadsAfterPull);
+    List<HgRevisionNumber> remainingOriginalBranchHeads=determingRemainingOriginalBranchHeads(branchHeadsBeforePull,branchHeadsAfterPull);
+    if (branchHeadsAfterPull.size() > 1 && shouldMerge()) {
+      abortOnLocalChanges();
+      abortOnMultiplePulledHeads(pulledBranchHeads);
+      abortOnMultipleLocalHeads(remainingOriginalBranchHeads);
+      updateToPulledHead(pulledBranchHeads.get(0),indicator);
+      HgCommandResult mergeResult=doMerge(updatedFiles,indicator,warnings,remainingOriginalBranchHeads.get(0));
+      if (shouldCommitAfterMerge()) {
+        commitOrWarnAboutConflicts(warnings,mergeResult);
+      }
+    }
+ else {
+      update(repository,indicator,updatedFiles,warnings);
+    }
+    resolvePossibleConflicts(updatedFiles);
+  }
+}
