@@ -1,2 +1,28 @@
 {
+  final SearchScope searchScope=options.searchScope;
+  final PsiManager psiManager=PsiManager.getInstance(method.getProject());
+  final PsiClass aClass=method.getContainingClass();
+  if (aClass == null)   return;
+  if (method.isConstructor()) {
+    collector.addRequest(PsiSearchRequest.custom(new Computable<Boolean>(){
+      public Boolean compute(){
+        return new ConstructorReferencesSearchHelper(psiManager).processConstructorReferences(consumer,method,searchScope,!strictSignatureSearch,strictSignatureSearch);
+      }
+    }
+));
+  }
+  boolean needStrictSignatureSearch=method.isValid() && strictSignatureSearch && (aClass instanceof PsiAnonymousClass || aClass.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.STATIC)|| method.hasModifierProperty(PsiModifier.FINAL)|| method.hasModifierProperty(PsiModifier.PRIVATE));
+  if (needStrictSignatureSearch) {
+    return;
+  }
+  final String textToSearch=method.getName();
+  final PsiMethod[] methods=strictSignatureSearch ? new PsiMethod[]{method} : aClass.findMethodsByName(textToSearch,false);
+  SearchScope accessScope=methods[0].getUseScope();
+  for (int i=1; i < methods.length; i++) {
+    PsiMethod method1=methods[i];
+    accessScope=accessScope.union(method1.getUseScope());
+  }
+  final SearchScope restrictedByAccess=searchScope.intersectWith(accessScope);
+  short searchContext=UsageSearchContext.IN_CODE | UsageSearchContext.IN_COMMENTS | UsageSearchContext.IN_FOREIGN_LANGUAGES;
+  collector.addRequest(PsiSearchRequest.elementsWithWord(restrictedByAccess,textToSearch,searchContext,true,new MethodTextOccurenceProcessor(consumer,aClass,strictSignatureSearch,methods)));
 }
