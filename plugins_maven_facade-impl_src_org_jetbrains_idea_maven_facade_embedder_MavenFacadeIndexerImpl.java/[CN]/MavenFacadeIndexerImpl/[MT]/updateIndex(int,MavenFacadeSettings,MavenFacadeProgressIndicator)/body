@@ -1,0 +1,42 @@
+{
+  IndexingContext index=getIndex(id);
+  MavenFacadeProgressIndicatorWrapper indicatorWrapper=new MavenFacadeProgressIndicatorWrapper(indicator);
+  try {
+    if (isLocal(index)) {
+      indicatorWrapper.setIndeterminate(true);
+      try {
+        myIndexer.scan(index,new MyScanningListener(indicatorWrapper),false);
+      }
+  finally {
+        indicatorWrapper.setIndeterminate(false);
+      }
+    }
+ else {
+      IndexUpdateRequest request=new IndexUpdateRequest(index);
+      MavenFacadeEmbedderImpl embedder=MavenFacadeEmbedderImpl.create(settings);
+      try {
+        request.setResourceFetcher(new MavenIndexFetcher(index.getRepositoryId(),index.getRepositoryUrl(),embedder.getComponent(WagonManager.class),new TransferListenerAdapter(indicatorWrapper){
+          @Override protected void doUpdateProgress(          long downloaded,          long total){
+            super.doUpdateProgress(downloaded,total);
+            myIndicator.setFraction(((double)downloaded) / total);
+          }
+          @Override public void transferCompleted(          TransferEvent event){
+            super.transferCompleted(event);
+            myIndicator.setText2("Processing indices...");
+          }
+        }
+));
+        myUpdater.fetchAndUpdateIndex(request);
+      }
+  finally {
+        embedder.release();
+      }
+    }
+  }
+ catch (  MavenFacadeProgressIndicatorWrapper.RuntimeCanceledException e) {
+    throw new MavenFacadeProcessCanceledException();
+  }
+catch (  Exception e) {
+    throw new MavenFacadeIndexerException(wrapException(e));
+  }
+}
