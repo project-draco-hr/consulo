@@ -1,0 +1,63 @@
+{
+  final List<FixableUsageInfo> result=new ArrayList<FixableUsageInfo>();
+  if (!myEnumConstants.isEmpty()) {
+    final Set<PsiSwitchStatement> switchStatements=new HashSet<PsiSwitchStatement>();
+    for (    UsageInfo usage : fieldUsages) {
+      if (usage instanceof ReplaceStaticVariableAccess) {
+        final PsiElement element=usage.getElement();
+        final PsiSwitchStatement switchStatement=PsiTreeUtil.getParentOfType(element,PsiSwitchStatement.class);
+        if (switchStatement != null) {
+          switchStatements.add(switchStatement);
+        }
+      }
+    }
+    final PsiConstantEvaluationHelper evaluationHelper=JavaPsiFacade.getInstance(myProject).getConstantEvaluationHelper();
+    final Set<Object> enumValues=new HashSet<Object>();
+    for (    PsiField enumConstant : myEnumConstants) {
+      enumValues.add(evaluationHelper.computeConstantExpression(enumConstant.getInitializer()));
+    }
+    final PsiType enumValueType=myEnumConstants.get(0).getType();
+    final Set<PsiElement> toMigrate=new HashSet<PsiElement>();
+    for (    PsiSwitchStatement switchStatement : switchStatements) {
+      final PsiStatement errStatement=EnumConstantsUtil.isEnumSwitch(switchStatement,enumValueType,enumValues);
+      if (errStatement != null) {
+        String description=null;
+        if (errStatement instanceof PsiSwitchLabelStatement) {
+          final PsiExpression caseValue=((PsiSwitchLabelStatement)errStatement).getCaseValue();
+          if (caseValue != null) {
+            description=caseValue.getText() + " can't be replaced with enum";
+          }
+        }
+        result.add(new ConflictUsageInfo(errStatement,description));
+      }
+ else {
+        final PsiExpression expression=switchStatement.getExpression();
+        if (expression instanceof PsiReferenceExpression) {
+          final PsiElement element=((PsiReferenceExpression)expression).resolve();
+          if (element != null) {
+            if (!element.getManager().isInProject(element)) {
+              result.add(new ConflictUsageInfo(expression,StringUtil.capitalize(RefactoringUIUtil.getDescription(element,false)) + " is out of project"));
+            }
+ else {
+              toMigrate.add(element);
+            }
+          }
+        }
+ else {
+          result.add(new ConflictUsageInfo(expression,null));
+        }
+      }
+    }
+    if (!toMigrate.isEmpty()) {
+      final TypeMigrationRules rules=new TypeMigrationRules(this.myEnumConstants.get(0).getType());
+      rules.addConversionDescriptor(new EnumTypeConversionRule());
+      rules.setMigrationRootType(JavaPsiFacade.getElementFactory(myProject).createType(myClass));
+      rules.setBoundScope(GlobalSearchScope.projectScope(myProject));
+      myTypeMigrationProcessor=new TypeMigrationProcessor(myProject,toMigrate.toArray(new PsiElement[toMigrate.size()]),rules);
+      for (      UsageInfo usageInfo : myTypeMigrationProcessor.findUsages()) {
+        result.add(new EnumTypeMigrationUsageInfo(usageInfo));
+      }
+    }
+  }
+  return result;
+}
