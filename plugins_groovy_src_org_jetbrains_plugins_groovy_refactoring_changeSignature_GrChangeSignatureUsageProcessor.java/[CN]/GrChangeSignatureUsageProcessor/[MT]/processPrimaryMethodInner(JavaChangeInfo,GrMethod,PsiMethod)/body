@@ -1,0 +1,69 @@
+{
+  if (changeInfo.isNameChanged()) {
+    String newName=baseMethod == null ? changeInfo.getNewName() : RefactoringUtil.suggestNewOverriderName(method.getName(),baseMethod.getName(),changeInfo.getNewName());
+    if (newName != null && !newName.equals(method.getName())) {
+      method.setName(changeInfo.getNewName());
+    }
+  }
+  if (changeInfo.isVisibilityChanged()) {
+    method.getModifierList().setModifierProperty(changeInfo.getNewVisibility(),true);
+  }
+  PsiSubstitutor substitutor=baseMethod != null ? calculateSubstitutor(method,baseMethod) : PsiSubstitutor.EMPTY;
+  final PsiMethod context=changeInfo.getMethod();
+  if (changeInfo.isReturnTypeChanged()) {
+    CanonicalTypes.Type newReturnType=changeInfo.getNewReturnType();
+    GrTypeElement element=method.getReturnTypeElementGroovy();
+    if (newReturnType == null) {
+      if (element != null) {
+        element.delete();
+        GrModifierList modifierList=method.getModifierList();
+        if (modifierList.getModifiers().length == 0) {
+          modifierList.setModifierProperty(GrModifier.DEF,true);
+        }
+      }
+    }
+ else {
+      PsiType type=newReturnType.getType(context,method.getManager());
+      final PsiType oldReturnType=method.getReturnType();
+      if (!TypesUtil.isAssignable(type,oldReturnType,context.getManager(),context.getResolveScope())) {
+        method.setReturnType(substitutor.substitute(type));
+      }
+    }
+  }
+  JavaParameterInfo[] newParameters=changeInfo.getNewParameters();
+  final GrParameterList parameterList=method.getParameterList();
+  GrParameter[] oldParameters=parameterList.getParameters();
+  Set<GrParameter> toRemove=new HashSet<GrParameter>(oldParameters.length);
+  toRemove.addAll(Arrays.asList(oldParameters));
+  GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(method.getProject());
+  GrParameter anchor=null;
+  for (  JavaParameterInfo newParameter : newParameters) {
+    PsiType type;
+    if (newParameter instanceof GrParameterInfo && ((GrParameterInfo)newParameter).hasNoType()) {
+      type=null;
+    }
+ else {
+      type=substitutor.substitute(newParameter.createType(context,method.getManager()));
+    }
+    GrParameter grParameter=factory.createParameter(newParameter.getName(),type == null ? null : type.getCanonicalText(),getInitializer(newParameter),parameterList);
+    anchor=(GrParameter)parameterList.addAfter(grParameter,anchor);
+  }
+  for (  GrParameter oldParameter : toRemove) {
+    oldParameter.delete();
+  }
+  PsiUtil.shortenReferences(parameterList);
+  CodeStyleManager.getInstance(parameterList.getProject()).reformat(parameterList);
+  if (changeInfo.isExceptionSetOrOrderChanged()) {
+    final ThrownExceptionInfo[] infos=changeInfo.getNewExceptions();
+    PsiClassType[] exceptionTypes=new PsiClassType[infos.length];
+    for (int i=0; i < infos.length; i++) {
+      ThrownExceptionInfo info=infos[i];
+      exceptionTypes[i]=(PsiClassType)info.createType(method,method.getManager());
+    }
+    PsiReferenceList thrownList=GroovyPsiElementFactory.getInstance(method.getProject()).createThrownList(exceptionTypes);
+    thrownList=(PsiReferenceList)method.getThrowsList().replace(thrownList);
+    PsiUtil.shortenReferences((GroovyPsiElement)thrownList);
+    CodeStyleManager.getInstance(method.getProject()).reformat(method.getThrowsList());
+  }
+  return true;
+}
