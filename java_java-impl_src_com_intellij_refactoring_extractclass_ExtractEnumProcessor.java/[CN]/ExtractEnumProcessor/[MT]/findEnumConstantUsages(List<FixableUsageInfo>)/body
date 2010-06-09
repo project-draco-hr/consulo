@@ -17,7 +17,6 @@
       enumValues.add(evaluationHelper.computeConstantExpression(enumConstant.getInitializer()));
     }
     final PsiType enumValueType=myEnumConstants.get(0).getType();
-    final Set<PsiElement> toMigrate=new HashSet<PsiElement>();
     for (    PsiSwitchStatement switchStatement : switchStatements) {
       final PsiStatement errStatement=EnumConstantsUtil.isEnumSwitch(switchStatement,enumValueType,enumValues);
       if (errStatement != null) {
@@ -25,7 +24,7 @@
         if (errStatement instanceof PsiSwitchLabelStatement) {
           final PsiExpression caseValue=((PsiSwitchLabelStatement)errStatement).getCaseValue();
           if (caseValue != null) {
-            description=caseValue.getText() + " can't be replaced with enum";
+            description=caseValue.getText() + " can not be replaced with enum";
           }
         }
         result.add(new ConflictUsageInfo(errStatement,description));
@@ -38,9 +37,6 @@
             if (!element.getManager().isInProject(element)) {
               result.add(new ConflictUsageInfo(expression,StringUtil.capitalize(RefactoringUIUtil.getDescription(element,false)) + " is out of project"));
             }
- else {
-              toMigrate.add(element);
-            }
           }
         }
  else {
@@ -48,15 +44,20 @@
         }
       }
     }
-    if (!toMigrate.isEmpty()) {
-      final TypeMigrationRules rules=new TypeMigrationRules(this.myEnumConstants.get(0).getType());
-      rules.addConversionDescriptor(new EnumTypeConversionRule());
-      rules.setMigrationRootType(JavaPsiFacade.getElementFactory(myProject).createType(myClass));
-      rules.setBoundScope(GlobalSearchScope.projectScope(myProject));
-      myTypeMigrationProcessor=new TypeMigrationProcessor(myProject,toMigrate.toArray(new PsiElement[toMigrate.size()]),rules);
-      for (      UsageInfo usageInfo : myTypeMigrationProcessor.findUsages()) {
-        result.add(new EnumTypeMigrationUsageInfo(usageInfo));
+    final TypeMigrationRules rules=new TypeMigrationRules(myEnumConstants.get(0).getType());
+    rules.addConversionDescriptor(new EnumTypeConversionRule(myEnumConstants));
+    rules.setMigrationRootType(JavaPsiFacade.getElementFactory(myProject).createType(myClass));
+    rules.setBoundScope(GlobalSearchScope.projectScope(myProject));
+    myTypeMigrationProcessor=new TypeMigrationProcessor(myProject,myEnumConstants.toArray(new PsiElement[myEnumConstants.size()]),rules);
+    for (    UsageInfo usageInfo : myTypeMigrationProcessor.findUsages()) {
+      final PsiElement migrateElement=usageInfo.getElement();
+      if (migrateElement instanceof PsiField) {
+        final PsiField enumConstantField=(PsiField)migrateElement;
+        if (enumConstantField.hasModifierProperty(PsiModifier.STATIC) && enumConstantField.hasModifierProperty(PsiModifier.FINAL) && enumConstantField.hasInitializer()&& !myEnumConstants.contains(enumConstantField)) {
+          continue;
+        }
       }
+      result.add(new EnumTypeMigrationUsageInfo(usageInfo));
     }
   }
   return result;
