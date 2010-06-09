@@ -1,0 +1,85 @@
+{
+  PsiType originalType=expr.getType();
+  LOG.assertTrue(originalType != null);
+  if (originalType.equals(migrationType))   return;
+  if (originalType.equals(PsiType.NULL)) {
+    if (migrationType instanceof PsiPrimitiveType) {
+      markFailedConversion(new Pair<PsiType,PsiType>(originalType,migrationType),expr);
+    }
+    return;
+  }
+  if (expr instanceof PsiConditionalExpression) {
+  }
+ else   if (expr instanceof PsiClassObjectAccessExpression) {
+    if (!TypeConversionUtil.isAssignable(migrationType,expr.getType())) {
+      markFailedConversion(new Pair<PsiType,PsiType>(expr.getType(),migrationType),expr);
+      return;
+    }
+  }
+ else   if (expr instanceof PsiArrayInitializerExpression && migrationType instanceof PsiArrayType) {
+    final PsiExpression[] initializers=((PsiArrayInitializerExpression)expr).getInitializers();
+    for (    PsiExpression initializer : initializers) {
+      migrateExpressionType(initializer,((PsiArrayType)migrationType).getComponentType(),expr,alreadyProcessed,true);
+    }
+    getTypeEvaluator().setType(new TypeMigrationUsageInfo(expr),migrationType);
+    return;
+  }
+ else   if (expr instanceof PsiArrayAccessExpression) {
+    migrateExpressionType(((PsiArrayAccessExpression)expr).getArrayExpression(),migrationType.createArrayType(),place,alreadyProcessed,isCovariant);
+    return;
+  }
+ else   if (expr instanceof PsiReferenceExpression) {
+    final PsiElement resolved=((PsiReferenceExpression)expr).resolve();
+    if (resolved != null) {
+      if (!addMigrationRoot(resolved,migrationType,place,alreadyProcessed,!isCovariant)) {
+        convertExpression(expr,migrationType,getTypeEvaluator().evaluateType(expr),isCovariant);
+      }
+    }
+    return;
+  }
+ else   if (expr instanceof PsiMethodCallExpression) {
+    final PsiMethod resolved=((PsiMethodCallExpression)expr).resolveMethod();
+    if (resolved != null) {
+      if (!addMigrationRoot(resolved,migrationType,place,alreadyProcessed,!isCovariant)) {
+        convertExpression(expr,migrationType,getTypeEvaluator().evaluateType(expr),isCovariant);
+      }
+    }
+    return;
+  }
+ else   if (expr instanceof PsiNewExpression) {
+    if (originalType.getArrayDimensions() == migrationType.getArrayDimensions()) {
+      if (migrationType.getArrayDimensions() > 0) {
+        final PsiType elemenType=((PsiArrayType)migrationType).getComponentType();
+        final PsiArrayInitializerExpression arrayInitializer=((PsiNewExpression)expr).getArrayInitializer();
+        if (arrayInitializer != null) {
+          final PsiExpression[] initializers=arrayInitializer.getInitializers();
+          for (int i=initializers.length - 1; i >= 0; i--) {
+            migrateExpressionType(initializers[i],elemenType,place,alreadyProcessed,true);
+          }
+        }
+        if (isGenericsArrayType(elemenType)) {
+          markFailedConversion(new Pair<PsiType,PsiType>(originalType,migrationType),expr);
+          return;
+        }
+        myNewExpressionTypeChange.put(new TypeMigrationUsageInfo(expr),migrationType);
+        getTypeEvaluator().setType(new TypeMigrationUsageInfo(expr),migrationType);
+        return;
+      }
+ else {
+        if (migrationType instanceof PsiClassType && originalType instanceof PsiClassType && ((PsiClassType)migrationType).rawType().isAssignableFrom(((PsiClassType)originalType).rawType())) {
+          final PsiClass originalClass=PsiUtil.resolveClassInType(originalType);
+          if (originalClass instanceof PsiAnonymousClass) {
+            originalType=((PsiAnonymousClass)originalClass).getBaseClassType();
+          }
+          final PsiType type=TypeEvaluator.substituteType(migrationType,originalType,true,((PsiClassType)originalType).resolveGenerics().getElement(),JavaPsiFacade.getElementFactory(expr.getProject()).createType(((PsiClassType)originalType).resolve(),PsiSubstitutor.EMPTY));
+          if (type != null) {
+            myNewExpressionTypeChange.put(new TypeMigrationUsageInfo(expr),type);
+            getTypeEvaluator().setType(new TypeMigrationUsageInfo(expr),type);
+            return;
+          }
+        }
+      }
+    }
+  }
+  convertExpression(expr,migrationType,originalType,isCovariant);
+}
