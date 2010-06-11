@@ -6,9 +6,14 @@
       px-=EditorUtil.charWidth(c,myPrefixAttributes.getFontType(),this);
     }
   }
-  int offset=logicalPositionToOffset(visualToLogicalPosition(new VisualPosition(line,0)));
+  LogicalPosition logicalPosition=visualToLogicalPosition(new VisualPosition(line,0));
+  int offset=logicalPositionToOffset(logicalPosition);
   int textLength=myDocument.getTextLength();
   if (offset >= textLength)   return new VisualPosition(line,0);
+  boolean activeSoftWrapProcessed=true;
+  if (logicalPosition.isOnSoftWrappedLine()) {
+    activeSoftWrapProcessed=false;
+  }
   int column=0;
   int prevX=0;
   CharSequence text=myDocument.getCharsNoThreadCheck();
@@ -18,7 +23,9 @@
   int spaceSize=EditorUtil.getSpaceWidth(fontType,this);
   int x=0;
   outer:   while (true) {
-    if (offset >= textLength)     break;
+    if (offset >= textLength) {
+      break;
+    }
     if (offset >= state.getEndOffset()) {
       state.advance();
       fontType=state.getMergedAttributes().getFontType();
@@ -29,30 +36,52 @@
       for (      char aPlaceholder : placeholder) {
         c=aPlaceholder;
         x+=EditorUtil.charWidth(c,fontType,this);
-        if (x >= px)         break outer;
+        if (x >= px) {
+          break outer;
+        }
         column++;
       }
       offset=region.getEndOffset();
     }
  else {
+      TextChange softWrap=mySoftWrapModel.getSoftWrap(offset);
+      if (softWrap != null) {
+        int softWrapLinesToSkip=activeSoftWrapProcessed ? 0 : logicalPosition.linesFromActiveSoftWrap;
+        CharSequence softWrapText=softWrap.getText();
+        for (int i=0; i < softWrapText.length(); i++) {
+          c=softWrapText.charAt(i);
+          if (softWrapLinesToSkip > 0) {
+            if (c == '\n') {
+              softWrapLinesToSkip--;
+            }
+            continue;
+          }
+          prevX=x;
+          int diff=charToVisibleWidth(c,fontType,x);
+          if (diff == 0) {
+            break outer;
+          }
+          x+=diff;
+          if (x >= px) {
+            break outer;
+          }
+          column+=columnsNumber(c,x,prevX,spaceSize);
+        }
+        activeSoftWrapProcessed=true;
+      }
       prevX=x;
       c=text.charAt(offset);
-      if (c == '\n') {
+      int diff=charToVisibleWidth(c,fontType,x);
+      if (diff == 0) {
         break;
       }
-      if (c == '\t') {
-        x=EditorUtil.nextTabStop(x,this);
-      }
  else {
-        x+=EditorUtil.charWidth(c,fontType,this);
+        x+=diff;
       }
-      if (x >= px)       break;
-      if (c == '\t') {
-        column+=(x - prevX) / spaceSize;
+      if (x >= px) {
+        break;
       }
- else {
-        column++;
-      }
+      column+=columnsNumber(c,x,prevX,spaceSize);
       offset++;
     }
   }
