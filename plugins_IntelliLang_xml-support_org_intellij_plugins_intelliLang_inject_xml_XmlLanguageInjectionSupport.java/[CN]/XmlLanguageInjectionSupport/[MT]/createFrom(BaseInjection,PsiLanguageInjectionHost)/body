@@ -1,56 +1,53 @@
 {
   if (injection.getInjectionPlaces().size() > 1)   return null;
-  final PsiElement element;
   AbstractTagInjection result;
-  if (host instanceof XmlText) {
-    final XmlTag xmlTag=((XmlText)host).getParentTag();
-    if (xmlTag == null)     return null;
-    element=xmlTag;
-    result=new XmlTagInjection().copyFrom(injection);
-  }
- else   if (host instanceof XmlAttributeValue) {
-    final PsiElement parent=host.getParent();
-    if (!(parent instanceof XmlAttribute))     return null;
-    element=parent;
+  final InjectionPlace place=injection.getInjectionPlaces().get(0);
+  final ElementPattern<PsiElement> rootPattern=place.getElementPattern();
+  final ElementPatternCondition<PsiElement> rootCondition=rootPattern.getCondition();
+  final Class<PsiElement> elementClass=rootCondition.getInitialCondition().getAcceptedClass();
+  if (XmlAttribute.class.equals(elementClass)) {
     result=new XmlAttributeInjection().copyFrom(injection);
   }
- else {
-    result=null;
-    element=null;
+ else   if (XmlTag.class.equals(elementClass)) {
+    result=new XmlTagInjection().copyFrom(injection);
   }
-  final Pattern pattern=Pattern.compile("withLocalName[^\"]*\"([^\"]*)\"\\)+(?:\\.withNamespace[^\"]*\"([^\"]*)\")?");
-  for (  InjectionPlace place : injection.getInjectionPlaces()) {
-    if (element == null || place.getElementPattern() != null && place.getElementPattern().accepts(element)) {
-      final Matcher matcher=pattern.matcher(place.getText());
-      if (matcher.find()) {
-        final Pair<String,String> pair1=Pair.create(matcher.group(1),matcher.group(2));
-        final Pair<String,String> pair2;
-        if (matcher.find(Math.max(matcher.end(1),matcher.end(2)))) {
-          pair2=Pair.create(matcher.group(1),matcher.group(2));
-        }
- else         pair2=null;
-        if (result == null) {
-          if (place.getText().startsWith("xmlTag"))           result=new XmlTagInjection().copyFrom(injection);
- else           if (place.getText().startsWith("xmlAttribute"))           result=new XmlAttributeInjection().copyFrom(injection);
- else           continue;
-        }
-        if (result instanceof XmlAttributeInjection) {
-          ((XmlAttributeInjection)result).setAttributeName(pair1.first);
-          ((XmlAttributeInjection)result).setAttributeNamespace(StringUtil.notNullize(pair1.second));
-          if (pair2 != null) {
-            result.setTagName(pair2.first);
-            result.setTagNamespace(StringUtil.notNullize(pair2.second));
-          }
-        }
- else         if (result instanceof XmlTagInjection) {
-          result.setTagName(pair1.first);
-          result.setTagNamespace(StringUtil.notNullize(pair1.second));
-        }
- else         continue;
-        break;
+ else   return null;
+  result.getInjectionPlaces().clear();
+  for (  PatternCondition<? super PsiElement> condition : rootCondition.getConditions()) {
+    final String value=extractValue(condition);
+    if (condition.getDebugMethodName().equals("withLocalName")) {
+      if (value == null)       return null;
+      if (result instanceof XmlAttributeInjection) {
+        ((XmlAttributeInjection)result).setAttributeName(value);
+      }
+ else {
+        result.setTagName(value);
       }
     }
+ else     if (condition.getDebugMethodName().equals("withNamespace")) {
+      if (value == null)       return null;
+      if (result instanceof XmlAttributeInjection) {
+        ((XmlAttributeInjection)result).setAttributeNamespace(value);
+      }
+ else {
+        result.setTagNamespace(value);
+      }
+    }
+ else     if (result instanceof XmlAttributeInjection && condition.getDebugMethodName().equals("inside") && condition instanceof PatternConditionPlus) {
+      final ElementPattern<?> insidePattern=((PatternConditionPlus)condition).getValuePattern();
+      if (!XmlTag.class.equals(insidePattern.getCondition().getInitialCondition().getAcceptedClass()))       return null;
+      for (      PatternCondition<?> insideCondition : insidePattern.getCondition().getConditions()) {
+        final String tagValue=extractValue(insideCondition);
+        if (tagValue == null)         return null;
+        if (insideCondition.getDebugMethodName().equals("withLocalName")) {
+          result.setTagName(tagValue);
+        }
+ else         if (insideCondition.getDebugMethodName().equals("withNamespace")) {
+          result.setTagNamespace(tagValue);
+        }
+      }
+    }
+ else     return null;
   }
-  if (result != null)   result.getInjectionPlaces().clear();
   return result;
 }
