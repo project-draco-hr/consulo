@@ -1,74 +1,17 @@
 {
-  final PsiMethod method=p.getMethod();
-  final SearchScope searchScope=p.getScope();
-  final PsiManager psiManager=PsiManager.getInstance(method.getProject());
-  final boolean isStrictSignatureSearch=p.isStrictSignatureSearch();
-  final PsiClass aClass=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>(){
-    public PsiClass compute(){
-      return method.getContainingClass();
-    }
-  }
-);
-  if (aClass == null)   return true;
-  if (method.isConstructor()) {
-    final ConstructorReferencesSearchHelper helper=new ConstructorReferencesSearchHelper(psiManager);
-    if (!helper.processConstructorReferences(consumer,method,searchScope,!isStrictSignatureSearch,isStrictSignatureSearch)) {
-      return false;
-    }
-  }
-  boolean needStrictSignatureSearch=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
-    public Boolean compute(){
-      return method.isValid() && isStrictSignatureSearch && (aClass instanceof PsiAnonymousClass || aClass.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.STATIC)|| method.hasModifierProperty(PsiModifier.FINAL)|| method.hasModifierProperty(PsiModifier.PRIVATE));
-    }
-  }
-).booleanValue();
-  if (needStrictSignatureSearch) {
-    return ReferencesSearch.search(method,searchScope,false).forEach(new ReadActionProcessor<PsiReference>(){
-      public boolean processInReadAction(      final PsiReference psiReference){
-        return consumer.process(psiReference);
-      }
-    }
-);
-  }
-  final String textToSearch=method.getName();
-  final PsiMethod[] methods=isStrictSignatureSearch ? new PsiMethod[]{method} : getOverloads(method);
-  SearchScope accessScope=ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>(){
-    public SearchScope compute(){
-      if (!method.isValid())       return searchScope;
-      SearchScope accessScope=methods[0].getUseScope();
-      for (int i=1; i < methods.length; i++) {
-        PsiMethod method1=methods[i];
-        accessScope=accessScope.union(method1.getUseScope());
-      }
-      return accessScope;
-    }
-  }
-);
-  final TextOccurenceProcessor processor1=new MethodTextOccurenceProcessor(consumer,aClass,isStrictSignatureSearch,methods);
-  final SearchScope restrictedByAccess=searchScope.intersectWith(accessScope);
-  short searchContext=UsageSearchContext.IN_CODE | UsageSearchContext.IN_COMMENTS | UsageSearchContext.IN_FOREIGN_LANGUAGES;
-  PsiSearchHelper helper=psiManager.getSearchHelper();
-  if (!helper.processElementsWithWord(processor1,restrictedByAccess,textToSearch,searchContext,true))   return false;
-  final String propertyName=ApplicationManager.getApplication().runReadAction(new Computable<String>(){
-    public String compute(){
-      if (!method.isValid())       return null;
-      return PropertyUtil.getPropertyName(method);
-    }
-  }
-);
-  if (StringUtil.isEmpty(propertyName)) {
+  if (p instanceof MySearchParameters) {
     return true;
   }
-  final SearchScope scope=ApplicationManager.getApplication().runReadAction(new Computable<SearchScope>(){
-    public SearchScope compute(){
-      SearchScope additional=GlobalSearchScope.getScopeRestrictedByFileTypes(GlobalSearchScope.allScope(psiManager.getProject()),StdFileTypes.JSP,StdFileTypes.JSPX,StdFileTypes.XML,StdFileTypes.XHTML);
-      for (      CustomPropertyScopeProvider provider : Extensions.getExtensions(CustomPropertyScopeProvider.EP_NAME)) {
-        SearchScope s=provider.getScope(psiManager.getProject());
-        additional=additional.union(s);
-      }
-      return restrictedByAccess.intersectWith(additional);
+  final PsiMethod method=p.getMethod();
+  final SearchRequestCollector collector=new SearchRequestCollector();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      final FindUsagesOptions options=new MyFindUsagesOptions(p);
+      options.isUsages=true;
+      contributeSearchTargets(method,options,collector,p.isStrictSignatureSearch());
+      SearchRequestor.collectRequests(method,options,collector);
     }
   }
 );
-  return helper.processElementsWithWord(processor1,scope,propertyName,UsageSearchContext.IN_FOREIGN_LANGUAGES,true);
+  return method.getManager().getSearchHelper().processRequests(collector,consumer);
 }
