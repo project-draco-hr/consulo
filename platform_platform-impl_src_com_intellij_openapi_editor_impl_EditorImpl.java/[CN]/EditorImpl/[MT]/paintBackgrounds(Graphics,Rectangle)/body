@@ -27,7 +27,8 @@
   int fontType=attributes.getFontType();
   CharSequence text=myDocument.getCharsNoThreadCheck();
   int lastLineIndex=Math.max(0,myDocument.getLineCount() - 1);
-  while (!iterationState.atEnd() && !lIterator.atEnd()) {
+  int newSoftWrapOffset=-1;
+  outer:   while (!iterationState.atEnd() && !lIterator.atEnd()) {
     int hEnd=iterationState.getEndOffset();
     int lEnd=lIterator.getEnd();
     if (hEnd >= lEnd) {
@@ -57,6 +58,32 @@
         position.x=drawBackground(g,backColor,collapsedFolderAt.getPlaceholderText(),position,fontType,defaultBackground,clip);
       }
  else {
+        TextChange softWrap=getSoftWrapModel().getSoftWrap(start);
+        if (softWrap == null && getSoftWrapModel().shouldWrap(myDocument.getRawChars(),start,hEnd,position)) {
+          softWrap=getSoftWrapModel().wrap(start);
+          if (newSoftWrapOffset < 0)           newSoftWrapOffset=start;
+        }
+        if (softWrap != null) {
+          CharSequence softWrapText=softWrap.getText();
+          int softWrapStart=0;
+          int softWrapEnd=0;
+          while (softWrapEnd < softWrapText.length()) {
+            for (; softWrapEnd < softWrapText.length() && softWrapText.charAt(softWrapEnd) != '\n'; softWrapEnd++)             ;
+            if (softWrapStart >= softWrapText.length() || softWrapEnd >= softWrapText.length()) {
+              position.x=drawBackground(g,backColor,softWrapText.subSequence(softWrapStart,softWrapText.length()),position,fontType,defaultBackground,clip);
+            }
+ else {
+              if (softWrapEnd > softWrapStart + 1) {
+                drawBackground(g,backColor,softWrapText.subSequence(softWrapStart,softWrapEnd - 1),position,fontType,defaultBackground,clip);
+              }
+              if (position.y > clip.y + clip.height)               break outer;
+              position.x=0;
+              position.y+=lineHeight;
+              softWrapStart=softWrapEnd + 1;
+              softWrapEnd=softWrapStart;
+            }
+          }
+        }
         if (hEnd > lEnd - lIterator.getSeparatorLength()) {
           position.x=drawBackground(g,backColor,text.subSequence(start,lEnd - lIterator.getSeparatorLength()),position,fontType,defaultBackground,clip);
         }
@@ -74,5 +101,11 @@
   flushBackground(g,clip);
   if (lIterator.getLineNumber() >= lastLineIndex && position.y <= clip.y + clip.height) {
     paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground);
+  }
+  if (newSoftWrapOffset >= 0) {
+    myGutterComponent.repaint(0,position.y,myGutterComponent.getWidth(),myGutterComponent.getHeight() - position.y);
+    if (getCaretModel().getOffset() >= newSoftWrapOffset) {
+      getCaretModel().moveToOffset(getCaretModel().getOffset());
+    }
   }
 }

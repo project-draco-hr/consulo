@@ -1,0 +1,70 @@
+{
+  Context context=new Context();
+  DocumentImpl document=(DocumentImpl)myEditor.getDocument();
+  CharSequence chars=document.getCharsNoThreadCheck();
+  FoldingModel foldingModel=myEditor.getFoldingModel();
+  int softWrapLinesToSkip=myFirstLineLogicalPosition.linesFromActiveSoftWrap;
+  int start=document.getLineStartOffset(myFirstLineLogicalPosition.line);
+  for (int i=start, max=chars.length(); i < max && getCurrentVisualLine(context) <= visual.line; i++) {
+    if (getCurrentVisualLine(context) == visual.line && context.symbolsOnCurrentVisibleLine >= visual.column) {
+      int softWrapColumns=context.softWrapsSymbolsOnCurrentVisibleLine > 0 ? context.symbolsOnCurrentVisibleLine - context.symbolsOnCurrentLogicalLine : 0;
+      return context.buildLogicalPosition(softWrapColumns);
+    }
+    FoldRegion region=foldingModel.getCollapsedRegionAtOffset(i);
+    if (region != null && !region.isExpanded()) {
+      i=region.getEndOffset();
+      continue;
+    }
+    TextChange softWrap=myWraps.get(i);
+    if (softWrap != null) {
+      CharSequence softWrapText=softWrap.getText();
+      for (int j=0; j < softWrapText.length(); j++) {
+        if (getCurrentVisualLine(context) == visual.line && context.symbolsOnCurrentVisibleLine >= visual.column) {
+          return context.buildLogicalPosition(context.softWrapsSymbolsOnCurrentVisibleLine - context.symbolsOnCurrentLogicalLine);
+        }
+        if (softWrapText.charAt(j) == '\n') {
+          if (softWrapLinesToSkip-- > 0) {
+            continue;
+          }
+          if (getCurrentVisualLine(context) == visual.line) {
+            return context.buildLogicalPosition(visual.column - context.symbolsOnCurrentLogicalLine);
+          }
+ else {
+            context.onLineFeedInsideSoftWrap();
+            updateLogicalByVisualCache(context);
+          }
+        }
+ else {
+          context.onNonLineFeedInsideSoftWrap(softWrapText.charAt(j));
+        }
+      }
+    }
+    if (softWrapLinesToSkip > 0) {
+      continue;
+    }
+    if (getCurrentVisualLine(context) == visual.line && context.symbolsOnCurrentVisibleLine >= visual.column) {
+      return context.buildLogicalPosition(context.softWrapsSymbolsOnCurrentVisibleLine - context.symbolsOnCurrentLogicalLine);
+    }
+    char c=chars.charAt(i);
+    if (c != '\n') {
+      context.onNonLineFeedOutsideSoftWrap(c);
+      continue;
+    }
+    if (getCurrentVisualLine(context) != visual.line) {
+      context.onLineFeedOutsideSoftWrap();
+      updateLogicalByVisualCache(context);
+      continue;
+    }
+    int column=context.symbolsOnCurrentLogicalLine;
+    int columnDiff=visual.column - context.symbolsOnCurrentVisibleLine;
+    if (columnDiff > 0) {
+      column+=columnDiff;
+    }
+    LogicalPosition result=new LogicalPosition(myFirstLineLogicalPosition.line + context.visualLineOnCurrentScreen - context.softWrapIntroducedLines,column,context.softWrapIntroducedLines + myFirstLineLogicalPosition.softWrapLines,context.linesFromCurrentSoftWrap,visual.column - column);
+    if (visual.column == 0) {
+      myLogicalPositionsByVisual.put(visual,result);
+    }
+    return result;
+  }
+  return defaultLogical;
+}
