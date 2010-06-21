@@ -1,29 +1,44 @@
 {
-  final Project project=e.getData(PlatformDataKeys.PROJECT);
-  if (project == null) {
+  myProject=e.getData(PlatformDataKeys.PROJECT);
+  if (myProject == null) {
     LOG.warn("[actionPerformed] project is null");
     return;
   }
-  final FileChooserDescriptor fcd=FileChooserDescriptorFactory.createSingleFolderDescriptor();
-  fcd.setTitle(HgVcsMessages.message("hg4idea.init.destination.directory.title"));
-  fcd.setDescription(HgVcsMessages.message("hg4idea.init.destination.directory.description"));
-  fcd.setHideIgnored(false);
-  final VirtualFile baseDir=project.getBaseDir();
-  final VirtualFile[] files=FileChooser.chooseFiles(project,fcd,baseDir);
-  if (files.length == 0) {
+  final HgInitDialog hgInitDialog=new HgInitDialog(myProject);
+  hgInitDialog.show();
+  if (!hgInitDialog.isOK()) {
     return;
   }
-  final VirtualFile root=files[0];
-  final HgVcs hgVcs=HgVcs.getInstance(project);
-  if (hgVcs.isVersionedDirectory(root)) {
-    Messages.showErrorDialog(project,HgVcsMessages.message("hg4idea.init.error.already.under.hg",root.getPresentableUrl()),HgVcsMessages.message("hg4idea.init.error.title"));
+  final VirtualFile selectedRoot=hgInitDialog.getSelectedFolder();
+  if (selectedRoot == null) {
     return;
   }
-  (new HgInitCommand(project)).execute(root);
-  root.refresh(false,false);
-  final String path=root.equals(baseDir) ? "" : root.getPath();
-  ProjectLevelVcsManager vcs=ProjectLevelVcsManager.getInstance(project);
-  final List<VcsDirectoryMapping> vcsDirectoryMappings=new ArrayList<VcsDirectoryMapping>(vcs.getDirectoryMappings());
+  final VirtualFile vcsRoot=HgUtil.getNearestHgRoot(selectedRoot);
+  VirtualFile mapRoot=selectedRoot;
+  if (vcsRoot != null) {
+    final HgInitAlreadyUnderHgDialog dialog=new HgInitAlreadyUnderHgDialog(myProject,selectedRoot.getPresentableUrl(),vcsRoot.getPresentableUrl());
+    dialog.show();
+    if (!dialog.isOK()) {
+      return;
+    }
+    if (dialog.getAnswer() == HgInitAlreadyUnderHgDialog.Answer.CREATE_PROJECT_AT_PARENT) {
+      NewProjectUtil.createNewProject(myProject,vcsRoot.getPath());
+      return;
+    }
+ else     if (dialog.getAnswer() == HgInitAlreadyUnderHgDialog.Answer.USE_PARENT_REPO_BUT_THIS_PROJECT) {
+      mapRoot=vcsRoot;
+    }
+ else     if (dialog.getAnswer() == HgInitAlreadyUnderHgDialog.Answer.CREATE_REPO_HERE) {
+      createRepository(selectedRoot);
+    }
+  }
+ else {
+    createRepository(selectedRoot);
+  }
+  mapRoot.refresh(false,false);
+  final String path=mapRoot.equals(myProject.getBaseDir()) ? "" : mapRoot.getPath();
+  final ProjectLevelVcsManager vcsManager=ProjectLevelVcsManager.getInstance(myProject);
+  final List<VcsDirectoryMapping> vcsDirectoryMappings=new ArrayList<VcsDirectoryMapping>(vcsManager.getDirectoryMappings());
   VcsDirectoryMapping mapping=new VcsDirectoryMapping(path,HgVcs.VCS_NAME);
   for (int i=0; i < vcsDirectoryMappings.size(); i++) {
     final VcsDirectoryMapping m=vcsDirectoryMappings.get(i);
@@ -42,6 +57,6 @@
   if (mapping != null) {
     vcsDirectoryMappings.add(mapping);
   }
-  vcs.setDirectoryMappings(vcsDirectoryMappings);
-  vcs.updateActiveVcss();
+  vcsManager.setDirectoryMappings(vcsDirectoryMappings);
+  vcsManager.updateActiveVcss();
 }
