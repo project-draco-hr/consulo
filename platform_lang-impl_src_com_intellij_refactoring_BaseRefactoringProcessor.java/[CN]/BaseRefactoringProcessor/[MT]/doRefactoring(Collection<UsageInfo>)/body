@@ -1,5 +1,4 @@
 {
-  ApplicationManager.getApplication().assertWriteAccessAllowed();
   for (Iterator<UsageInfo> iterator=usageInfoSet.iterator(); iterator.hasNext(); ) {
     UsageInfo usageInfo=iterator.next();
     final PsiElement element=usageInfo.getElement();
@@ -13,16 +12,33 @@
     PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     RefactoringListenerManagerImpl listenerManager=(RefactoringListenerManagerImpl)RefactoringListenerManager.getInstance(myProject);
     myTransaction=listenerManager.startTransaction();
-    Map<RefactoringHelper,Object> preparedData=new HashMap<RefactoringHelper,Object>();
-    for (    RefactoringHelper helper : Extensions.getExtensions(RefactoringHelper.EP_NAME)) {
-      preparedData.put(helper,helper.prepareOperation(writableUsageInfos));
+    final Map<RefactoringHelper,Object> preparedData=new HashMap<RefactoringHelper,Object>();
+    final Runnable prepareHelpersRunnable=new Runnable(){
+      public void run(){
+        for (        RefactoringHelper helper : Extensions.getExtensions(RefactoringHelper.EP_NAME)) {
+          preparedData.put(helper,helper.prepareOperation(writableUsageInfos));
+        }
+      }
     }
-    performRefactoring(writableUsageInfos);
+;
+    ProgressManager.getInstance().runProcessWithProgressSynchronously(prepareHelpersRunnable,"Prepare ...",false,myProject);
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        ApplicationManager.getApplication().assertWriteAccessAllowed();
+        performRefactoring(writableUsageInfos);
+      }
+    }
+);
     for (    Map.Entry<RefactoringHelper,Object> e : preparedData.entrySet()) {
       e.getKey().performOperation(myProject,e.getValue());
     }
     myTransaction.commit();
-    performPsiSpoilingRefactoring();
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        performPsiSpoilingRefactoring();
+      }
+    }
+);
   }
   finally {
     action.finish();
