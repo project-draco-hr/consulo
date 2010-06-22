@@ -1,0 +1,76 @@
+{
+  myFile.accept(new GroovyRecursiveElementVisitor(){
+    public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
+      visitRefElement(refElement);
+      super.visitCodeReferenceElement(refElement);
+    }
+    public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
+      visitRefElement(referenceExpression);
+      super.visitReferenceExpression(referenceExpression);
+    }
+    private void visitRefElement(    GrReferenceElement refElement){
+      final GroovyResolveResult[] resolveResults=refElement.multiResolve(false);
+      for (      GroovyResolveResult resolveResult : resolveResults) {
+        final GroovyPsiElement context=resolveResult.getCurrentFileResolveContext();
+        final PsiElement element=resolveResult.getElement();
+        if (element == null)         return;
+        if (context instanceof GrImportStatement) {
+          final GrImportStatement importStatement=(GrImportStatement)context;
+          usedImports.add(importStatement);
+          if (!importStatement.isAliasedImport()) {
+            String importedName=null;
+            if (importStatement.isOnDemand()) {
+              if (importStatement.isStatic()) {
+                if (element instanceof PsiMember) {
+                  final PsiMember member=(PsiMember)element;
+                  final PsiClass clazz=member.getContainingClass();
+                  if (clazz != null) {
+                    final String classQName=clazz.getQualifiedName();
+                    if (classQName != null) {
+                      final String name=member.getName();
+                      if (name != null) {
+                        importedName=classQName + "." + name;
+                      }
+                    }
+                  }
+                }
+              }
+ else {
+                importedName=getTargetQualifiedName(element);
+              }
+            }
+ else {
+              final GrCodeReferenceElement importReference=importStatement.getImportReference();
+              if (importReference != null) {
+                importedName=PsiUtil.getQualifiedReferenceText(importReference);
+              }
+            }
+            if (importedName == null)             return;
+            if (importStatement.isStatic()) {
+              staticallyImportedMembers.add(importedName);
+            }
+ else {
+              importedClasses.add(importedName);
+            }
+          }
+        }
+ else         if (context == null && !(refElement.getParent() instanceof GrImportStatement) && refElement.getQualifier() == null) {
+          final String qname=getTargetQualifiedName(element);
+          if (qname != null) {
+            implicitlyImported.add(qname);
+            importedClasses.add(qname);
+          }
+        }
+      }
+    }
+  }
+);
+  final List<GrImportStatement> oldImports=new ArrayList<GrImportStatement>();
+  for (  GrImportStatement statement : myFile.getImportStatements()) {
+    final GrCodeReferenceElement reference=statement.getImportReference();
+    if (reference != null && reference.multiResolve(false).length > 0) {
+      oldImports.add(statement);
+    }
+  }
+  return oldImports;
+}
