@@ -1,0 +1,58 @@
+{
+  DocumentImpl document=(DocumentImpl)myEditor.getDocument();
+  int maxOffset=document.getLineEndOffset(Math.min(defaultLogical.line,document.getLineCount() - 1));
+  int endIndex=getSoftWrapIndex(maxOffset + 1);
+  if (endIndex < 0) {
+    endIndex=-endIndex - 1;
+  }
+  int softWrapIntroducedLineFeeds=0;
+  FoldingModel foldingModel=myEditor.getFoldingModel();
+  int i=0;
+  int max=Math.min(myWraps.size(),endIndex);
+  for (; i < max; i++) {
+    TextChange softWrap=myWraps.get(i);
+    if (foldingModel.isOffsetCollapsed(softWrap.getStart())) {
+      continue;
+    }
+    int currentSoftWrapLineFeeds=StringUtil.countNewLines(softWrap.getText());
+    int softWrapLine=document.getLineNumber(softWrap.getStart());
+    int visualLineBeforeSoftWrapAppliance=myEditor.logicalToVisualPosition(new LogicalPosition(softWrapLine,0)).line + softWrapIntroducedLineFeeds;
+    if (visualLineBeforeSoftWrapAppliance > visual.line) {
+      int logicalLine=defaultLogical.line - softWrapIntroducedLineFeeds;
+      LogicalPosition foldingUnawarePosition=new LogicalPosition(logicalLine,defaultLogical.column,softWrapIntroducedLineFeeds,0,0,0,0);
+      return adjustFoldingData(foldingModel,foldingUnawarePosition);
+    }
+    int visualLineAfterSoftWrapAppliance=visualLineBeforeSoftWrapAppliance + currentSoftWrapLineFeeds;
+    if (visualLineAfterSoftWrapAppliance < visual.line) {
+      softWrapIntroducedLineFeeds+=currentSoftWrapLineFeeds;
+      continue;
+    }
+    Context context=new Context(defaultLogical,visual,softWrapIntroducedLineFeeds,visualLineBeforeSoftWrapAppliance,foldingModel);
+    int startLineOffset=document.getLineStartOffset(softWrapLine);
+    int endLineOffset=document.getLineEndOffset(softWrapLine);
+    CharSequence documentText=document.getCharsNoThreadCheck();
+    for (int j=startLineOffset; j < endLineOffset; j++) {
+      if (j == softWrap.getStart()) {
+        CharSequence softWrapText=softWrap.getText();
+        for (int k=0; k < softWrapText.length(); k++) {
+          LogicalPosition result=context.onSoftWrapSymbol(softWrapText.charAt(k));
+          if (result != null) {
+            return result;
+          }
+        }
+      }
+      LogicalPosition result=context.onNonSoftWrapSymbol(documentText.charAt(j));
+      if (result != null) {
+        return result;
+      }
+    }
+    int logicalLine=defaultLogical.line - softWrapIntroducedLineFeeds - context.lineFeedsFromCurrentSoftWrap;
+    int logicalColumn=context.symbolsOnCurrentLogicalLine + visual.column - context.symbolsOnCurrentVisualLine;
+    int softWrapColumnDiff=visual.column - logicalColumn;
+    LogicalPosition foldingUnawarePosition=new LogicalPosition(logicalLine,logicalColumn,softWrapIntroducedLineFeeds + context.lineFeedsFromCurrentSoftWrap,context.lineFeedsFromCurrentSoftWrap,softWrapColumnDiff,0,0);
+    return adjustFoldingData(foldingModel,foldingUnawarePosition);
+  }
+  int logicalLine=defaultLogical.line - softWrapIntroducedLineFeeds;
+  LogicalPosition foldingUnaware=new LogicalPosition(logicalLine,defaultLogical.column,softWrapIntroducedLineFeeds,0,0,0,0);
+  return adjustFoldingData(foldingModel,foldingUnaware);
+}
