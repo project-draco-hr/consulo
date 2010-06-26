@@ -8,7 +8,8 @@
   mySpacesHaveSameWidth=plainSpaceWidth == boldSpaceWidth && plainSpaceWidth == italicSpaceWidth && plainSpaceWidth == boldItalicSpaceWidth;
   int lineHeight=getLineHeight();
   int visibleLineNumber=clip.y / lineHeight;
-  int startLineNumber=xyToLogicalPosition(new Point(0,clip.y)).line;
+  LogicalPosition logicalPosition=xyToLogicalPosition(new Point(0,clip.y));
+  int startLineNumber=logicalPosition.line;
   Point position=new Point(0,visibleLineNumber * lineHeight);
   if (startLineNumber == 0 && myPrefixText != null) {
     position.x=drawString(g,myPrefixText,0,myPrefixText.length,position,clip,myPrefixAttributes.getEffectColor(),myPrefixAttributes.getEffectType(),myPrefixAttributes.getFontType(),myPrefixAttributes.getForegroundColor());
@@ -17,7 +18,12 @@
     if (position.x > 0)     flushCachedChars(g);
     return;
   }
+  boolean activeSoftWrapProcessed=true;
   int start=myDocument.getLineStartOffset(startLineNumber);
+  if (logicalPosition.isOnSoftWrappedLine()) {
+    start=logicalPositionToOffset(logicalPosition);
+    activeSoftWrapProcessed=false;
+  }
   IterationState iterationState=new IterationState(this,start,paintSelection());
   LineIterator lIterator=createLineIterator();
   lIterator.start(start);
@@ -42,7 +48,9 @@
       if (collapsedFolderAt == null) {
         drawString(g,chars,start,lEnd - lIterator.getSeparatorLength(),position,clip,effectColor,effectType,fontType,currentColor);
         position.x=0;
-        if (position.y > clip.y + clip.height)         break;
+        if (position.y > clip.y + clip.height) {
+          break;
+        }
         position.y+=lineHeight;
         start=lEnd;
       }
@@ -60,6 +68,40 @@
           position.x=drawString(g,chars,start,lEnd - lIterator.getSeparatorLength(),position,clip,effectColor,effectType,fontType,currentColor);
         }
  else {
+          boolean breakWholeIteration=false;
+          TextChange softWrap=getSoftWrapModel().getSoftWrap(start);
+          if (softWrap != null) {
+            int softWrapLinesToSkip=activeSoftWrapProcessed ? 0 : logicalPosition.linesFromActiveSoftWrap;
+            char[] softWrapChars=softWrap.getChars();
+            int softWrapSegmentStartIndex=0;
+            for (int i=0; i < softWrapChars.length; i++) {
+              if (softWrapChars[i] != '\n') {
+                continue;
+              }
+              if (softWrapLinesToSkip-- > 0) {
+                position.x=0;
+                softWrapSegmentStartIndex=i + 1;
+                continue;
+              }
+              if (i - softWrapSegmentStartIndex > 0) {
+                drawString(g,softWrapChars,softWrapSegmentStartIndex,i,position,clip,currentColor,effectType,fontType,currentColor);
+              }
+              position.x=0;
+              if (position.y > clip.y + clip.height) {
+                breakWholeIteration=true;
+                break;
+              }
+              position.y+=lineHeight;
+              softWrapSegmentStartIndex=i + 1;
+            }
+            if (softWrapSegmentStartIndex < softWrapChars.length - 1) {
+              position.x+=drawString(g,softWrapChars,softWrapSegmentStartIndex,softWrapChars.length,position,clip,effectColor,effectType,fontType,currentColor);
+            }
+            activeSoftWrapProcessed=true;
+          }
+          if (breakWholeIteration) {
+            break;
+          }
           position.x=drawString(g,chars,start,hEnd,position,clip,effectColor,effectType,fontType,currentColor);
         }
       }
