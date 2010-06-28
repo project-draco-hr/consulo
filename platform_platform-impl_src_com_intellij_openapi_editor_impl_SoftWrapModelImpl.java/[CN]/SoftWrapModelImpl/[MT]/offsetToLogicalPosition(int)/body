@@ -1,12 +1,55 @@
 {
-  if (myActive > 0 || !isSoftWrappingEnabled()) {
-    return myEditor.offsetToLogicalPosition(offset,false);
+  DocumentImpl document=(DocumentImpl)myEditor.getDocument();
+  CharSequence chars=document.getCharsNoThreadCheck();
+  int targetLine=document.getLineNumber(offset);
+  int targetLineStartOffset=document.getLineStartOffset(targetLine);
+  updateVisibleAreaIfNecessary();
+  int softWrapIntroducedLines=0;
+  int linesFromCurrentSoftWrap=0;
+  int symbolsOnCurrentLogicalLine=0;
+  int symbolsOnCurrentVisibleLine=0;
+  LogicalPosition rawLineStartLogicalPosition=myEditor.offsetToLogicalPosition(targetLineStartOffset,false);
+  int index=getSoftWrapIndex(targetLineStartOffset);
+  if (index < 0) {
+    index=-index - 1;
   }
-  myActive++;
-  try {
-    return doOffsetToLogicalPosition(offset);
+  int max=Math.min(index,myWraps.size());
+  for (int j=0; j < max; j++) {
+    softWrapIntroducedLines+=StringUtil.countNewLines(myWraps.get(j).getText());
   }
-  finally {
-    myActive--;
+  FoldingModel foldingModel=myEditor.getFoldingModel();
+  if (max >= myWraps.size() || myWraps.get(max).getStart() > offset) {
+    LogicalPosition foldingUnawarePosition=new LogicalPosition(rawLineStartLogicalPosition.line,offset - targetLineStartOffset,softWrapIntroducedLines,0,0,0,0);
+    return adjustFoldingData(foldingModel,foldingUnawarePosition);
   }
+  max=Math.min(chars.length(),offset + 1);
+  for (int i=targetLineStartOffset; i < max; i++) {
+    FoldRegion region=foldingModel.getCollapsedRegionAtOffset(i);
+    if (region != null) {
+      i=region.getEndOffset();
+      symbolsOnCurrentVisibleLine+=region.getPlaceholderText().length();
+      continue;
+    }
+    TextChange softWrap=getSoftWrap(i);
+    if (softWrap != null) {
+      CharSequence softWrapText=softWrap.getText();
+      for (int j=0; j < softWrapText.length(); j++) {
+        if (softWrapText.charAt(j) == '\n') {
+          softWrapIntroducedLines++;
+          linesFromCurrentSoftWrap++;
+          symbolsOnCurrentVisibleLine=0;
+        }
+ else {
+          symbolsOnCurrentVisibleLine++;
+        }
+      }
+    }
+    if (i == offset) {
+      break;
+    }
+    symbolsOnCurrentLogicalLine++;
+    symbolsOnCurrentVisibleLine++;
+  }
+  LogicalPosition foldingUnawarePosition=new LogicalPosition(rawLineStartLogicalPosition.line,symbolsOnCurrentLogicalLine,softWrapIntroducedLines,linesFromCurrentSoftWrap,symbolsOnCurrentVisibleLine - symbolsOnCurrentLogicalLine,0,0);
+  return adjustFoldingData(foldingModel,foldingUnawarePosition);
 }
