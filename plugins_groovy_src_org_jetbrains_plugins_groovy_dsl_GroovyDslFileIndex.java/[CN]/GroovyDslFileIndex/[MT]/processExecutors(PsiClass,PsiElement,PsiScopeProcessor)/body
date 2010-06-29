@@ -2,9 +2,17 @@
   if (!(place instanceof GrReferenceExpression) || PsiTreeUtil.getParentOfType(place,PsiAnnotation.class) != null) {
     return true;
   }
+  final PsiFile placeFile=place.getContainingFile().getOriginalFile();
+  final CachedValuesManager cacheManager=CachedValuesManager.getManager(place.getProject());
   final LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>> queue=new LinkedBlockingQueue<Pair<GroovyFile,GroovyDslExecutor>>();
-  int count=queueExecutors(psiClass.getProject(),queue);
-  final GroovyClassDescriptor descriptor=new GroovyClassDescriptor(psiClass,place);
+  final ArrayList<Pair<GroovyFile,GroovyDslExecutor>> ready=new ArrayList<Pair<GroovyFile,GroovyDslExecutor>>();
+  int count=queueExecutors(psiClass.getProject(),queue,ready);
+  for (  Pair<GroovyFile,GroovyDslExecutor> pair : ready) {
+    if (!processExecutor(pair.second,processor,pair.first,psiClass,place,placeFile,cacheManager)) {
+      return false;
+    }
+    count--;
+  }
   try {
     while (count > 0) {
       ProgressManager.checkCanceled();
@@ -12,7 +20,7 @@
       if (pair != null) {
         final GroovyDslExecutor executor=pair.second;
         final GroovyFile dslFile=pair.first;
-        if (executor != null && !processExecutor(executor,descriptor,processor,dslFile)) {
+        if (executor != null && !processExecutor(executor,processor,dslFile,psiClass,place,placeFile,cacheManager)) {
           return false;
         }
         count--;
