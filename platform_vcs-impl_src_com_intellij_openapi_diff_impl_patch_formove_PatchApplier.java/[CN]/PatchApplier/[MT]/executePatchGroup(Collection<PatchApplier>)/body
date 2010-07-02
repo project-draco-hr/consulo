@@ -1,7 +1,12 @@
 {
   if (group.isEmpty())   return ApplyPatchStatus.SUCCESS;
   final Project project=group.iterator().next().myProject;
-  ApplyPatchStatus result=ApplicationManager.getApplication().runWriteAction(new Computable<ApplyPatchStatus>(){
+  ApplyPatchStatus result=ApplyPatchStatus.SUCCESS;
+  for (  PatchApplier patchApplier : group) {
+    result=ApplyPatchStatus.and(result,patchApplier.nonWriteActionPreCheck());
+    if (ApplyPatchStatus.FAILURE.equals(result))     return result;
+  }
+  result=ApplyPatchStatus.and(result,ApplicationManager.getApplication().runWriteAction(new Computable<ApplyPatchStatus>(){
     public ApplyPatchStatus compute(){
       final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(null);
       CommandProcessor.getInstance().executeCommand(project,new Runnable(){
@@ -15,10 +20,15 @@
       return refStatus.get();
     }
   }
-);
+));
   result=result == null ? ApplyPatchStatus.FAILURE : result;
+  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(project);
   for (  PatchApplier applier : group) {
-    applier.refreshFiles();
+    applier.addSkippedItems(trigger);
+  }
+  trigger.process();
+  for (  PatchApplier applier : group) {
+    applier.refreshFiles(trigger.getAffected());
   }
   showApplyStatus(project,result);
   return result;
