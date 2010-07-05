@@ -18,75 +18,67 @@
           }
           final Ref<Boolean> cancelled=new Ref<Boolean>(false);
           final Ref<Throwable> ex=new Ref<Throwable>();
+          saveRootChangesBeforeUpdate(root);
           try {
-            saveRootChangesBeforeUpdate(root);
+            markStart(root);
             try {
-              markStart(root);
+              GitLineHandler h=makeStartHandler(root);
+              RebaseConflictDetector rebaseConflictDetector=new RebaseConflictDetector();
+              h.addLineListener(rebaseConflictDetector);
               try {
-                GitLineHandler h=makeStartHandler(root);
-                RebaseConflictDetector rebaseConflictDetector=new RebaseConflictDetector();
-                h.addLineListener(rebaseConflictDetector);
-                try {
-                  GitHandlerUtil.doSynchronouslyWithExceptions(h,progressIndicator,GitHandlerUtil.formatOperationName("Updating",root));
-                }
+                GitHandlerUtil.doSynchronouslyWithExceptions(h,progressIndicator,GitHandlerUtil.formatOperationName("Updating",root));
+              }
   finally {
-                  if (!rebaseConflictDetector.isRebaseConflict()) {
-                    myExceptions.addAll(h.errors());
-                  }
-                  cleanupHandler(root,h);
+                if (!rebaseConflictDetector.isRebaseConflict()) {
+                  myExceptions.addAll(h.errors());
                 }
-                while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get()) {
-                  mergeFiles(root,cancelled,ex);
-                  if (ex.get() != null) {
-                    throw GitUtil.rethrowVcsException(ex.get());
-                  }
-                  checkLocallyModified(root,cancelled,ex);
-                  if (ex.get() != null) {
-                    throw GitUtil.rethrowVcsException(ex.get());
-                  }
-                  if (cancelled.get()) {
-                    break;
-                  }
-                  doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
-                  final Ref<Integer> result=new Ref<Integer>();
-                  noChangeLoop:                   while (rebaseConflictDetector.isNoChange()) {
-                    UIUtil.invokeAndWaitIfNeeded(new Runnable(){
-                      public void run(){
-                        int rc=Messages.showDialog(myProject,GitBundle.message("update.rebase.no.change",root.getPresentableUrl()),GitBundle.getString("update.rebase.no.change.title"),new String[]{GitBundle.getString("update.rebase.no.change.skip"),GitBundle.getString("update.rebase.no.change.retry"),GitBundle.getString("update.rebase.no.change.cancel")},0,Messages.getErrorIcon());
-                        result.set(rc);
-                      }
+                cleanupHandler(root,h);
+              }
+              while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get()) {
+                mergeFiles(root,cancelled,ex,true);
+                if (ex.get() != null) {
+                  throw GitUtil.rethrowVcsException(ex.get());
+                }
+                checkLocallyModified(root,cancelled,ex);
+                if (ex.get() != null) {
+                  throw GitUtil.rethrowVcsException(ex.get());
+                }
+                if (cancelled.get()) {
+                  break;
+                }
+                doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
+                final Ref<Integer> result=new Ref<Integer>();
+                noChangeLoop:                 while (rebaseConflictDetector.isNoChange()) {
+                  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+                    public void run(){
+                      int rc=Messages.showDialog(myProject,GitBundle.message("update.rebase.no.change",root.getPresentableUrl()),GitBundle.getString("update.rebase.no.change.title"),new String[]{GitBundle.getString("update.rebase.no.change.skip"),GitBundle.getString("update.rebase.no.change.retry"),GitBundle.getString("update.rebase.no.change.cancel")},0,Messages.getErrorIcon());
+                      result.set(rc);
                     }
+                  }
 );
 switch (result.get()) {
 case 0:
-                      doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
-                    continue noChangeLoop;
-case 1:
+                    doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
                   continue noChangeLoop;
+case 1:
+                continue noChangeLoop;
 case 2:
-                cancelled.set(true);
-              break noChangeLoop;
-          }
+              cancelled.set(true);
+            break noChangeLoop;
         }
       }
-      if (cancelled.get()) {
-        myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
-        doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
-      }
     }
-  finally {
-      markEnd(root,cancelled.get());
+    if (cancelled.get()) {
+      myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
+      doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
     }
   }
   finally {
-    restoreRootChangesAfterUpdate(root);
+    markEnd(root,cancelled.get());
   }
 }
   finally {
-  mergeFiles(root,cancelled,ex);
-  if (ex.get() != null) {
-    myExceptions.add(GitUtil.rethrowVcsException(ex.get()));
-  }
+  restoreRootChangesAfterUpdate(root,cancelled);
 }
 }
  catch (VcsException ex) {
