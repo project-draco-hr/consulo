@@ -1,0 +1,53 @@
+{
+  final XmlAttribute xmlns=(XmlAttribute)element.getParent();
+  final String namespace=xmlns.getValue();
+  final XmlTag tag=xmlns.getParent();
+  if (tag != null) {
+    final Set<String> ns=tag.getLocalNamespaceDeclarations().keySet();
+    final String nsPrefix=Messages.showInputDialog(project,"Write new namespace prefix:","Insert Namespace Prefix",Messages.getInformationIcon(),"",new InputValidator(){
+      @Override public boolean checkInput(      String inputString){
+        return !ns.contains(inputString);
+      }
+      @Override public boolean canClose(      String inputString){
+        return checkInput(inputString);
+      }
+    }
+);
+    if (nsPrefix == null)     return;
+    final List<XmlTag> tags=new ArrayList<XmlTag>();
+    final List<XmlAttributeValue> values=new ArrayList<XmlAttributeValue>();
+    new WriteCommandAction(project,"Introduce Namespace Prefix",tag.getContainingFile()){
+      @Override protected void run(      Result result) throws Throwable {
+        tag.accept(new XmlRecursiveElementVisitor(){
+          @Override public void visitXmlTag(          XmlTag tag){
+            if (namespace.equals(tag.getNamespace()) && tag.getNamespacePrefix().length() == 0) {
+              tags.add(tag);
+            }
+            super.visitXmlTag(tag);
+          }
+          @Override public void visitXmlAttributeValue(          XmlAttributeValue value){
+            for (            PsiReference reference : value.getReferences()) {
+              if (reference instanceof SchemaReferencesProvider.TypeOrElementOrAttributeReference) {
+                final PsiElement tag=reference.resolve();
+                if (tag instanceof XmlTag && namespace.equals(((XmlTag)tag).getNamespace())) {
+                  if (reference.getRangeInElement().getLength() == value.getValue().length()) {
+                    values.add(value);
+                  }
+                }
+              }
+            }
+          }
+        }
+);
+        xmlns.setName("xmlns:" + nsPrefix);
+        for (        XmlTag xmlTag : tags) {
+          xmlTag.setName(nsPrefix + ":" + xmlTag.getLocalName());
+        }
+        for (        XmlAttributeValue value : values) {
+          ((XmlAttribute)value.getParent()).setValue(nsPrefix + ":" + value.getValue());
+        }
+      }
+    }
+.execute();
+  }
+}
