@@ -1,0 +1,53 @@
+{
+  return CachedValuesManager.getManager(project).getCachedValue(project,SCRIPTS_CACHE,new CachedValueProvider<List<GroovyDslScript>>(){
+    @Override public Result<List<GroovyDslScript>> compute(){
+      int count=0;
+      List<GroovyDslScript> result=new ArrayList<GroovyDslScript>();
+      final LinkedBlockingQueue<Pair<VirtualFile,GroovyDslExecutor>> queue=new LinkedBlockingQueue<Pair<VirtualFile,GroovyDslExecutor>>();
+      final GroovyDslIndexedRootProvider[] indexedRootProviders=ContainerUtil.findAllAsArray(IndexableSetContributor.EP_NAME.getExtensions(),GroovyDslIndexedRootProvider.class);
+      final AdditionalIndexableFileSet standardSet=new AdditionalIndexableFileSet(indexedRootProviders);
+      final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+      final AdditionalIndexedRootsScope scope=new AdditionalIndexedRootsScope(GlobalSearchScope.allScope(project),standardSet);
+      for (      VirtualFile vfile : FileBasedIndex.getInstance().getContainingFiles(NAME,OUR_KEY,scope)) {
+        if (!vfile.isValid()) {
+          continue;
+        }
+        if (!standardSet.isInSet(vfile) && !fileIndex.isInLibraryClasses(vfile) && !fileIndex.isInLibrarySource(vfile)) {
+          if (!fileIndex.isInSourceContent(vfile) || !isActivated(vfile)) {
+            continue;
+          }
+        }
+        final PsiFile psiFile=PsiManager.getInstance(project).findFile(vfile);
+        if (psiFile == null) {
+          continue;
+        }
+        final long stamp=vfile.getModificationStamp();
+        final GroovyDslExecutor cached=getCachedExecutor(vfile,stamp);
+        if (cached == null) {
+          count++;
+          scheduleParsing(queue,project,vfile,stamp,psiFile.getText());
+        }
+ else {
+          result.add(new GroovyDslScript(project,vfile,cached));
+        }
+      }
+      try {
+        while (count > 0) {
+          ProgressManager.checkCanceled();
+          final Pair<VirtualFile,GroovyDslExecutor> pair=queue.poll(20,TimeUnit.MILLISECONDS);
+          if (pair != null) {
+            count--;
+            if (pair.second != null) {
+              result.add(new GroovyDslScript(project,pair.first,pair.second));
+            }
+          }
+        }
+      }
+ catch (      InterruptedException e) {
+        LOG.error(e);
+      }
+      return Result.create(result,PsiModificationTracker.MODIFICATION_COUNT,ProjectRootManager.getInstance(project));
+    }
+  }
+,false);
+}
