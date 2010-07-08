@@ -7,6 +7,7 @@
     if (!saveProjectChangesBeforeUpdate())     return;
     try {
       for (      final VirtualFile root : roots) {
+        List<GitRebaseUtils.CommitInfo> skippedCommits=null;
         try {
           final GitBranch branch=GitBranch.current(myProject,root);
           if (branch == null) {
@@ -47,50 +48,38 @@
                   break;
                 }
                 doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
-                final Ref<Integer> result=new Ref<Integer>();
-                noChangeLoop:                 while (rebaseConflictDetector.isNoChange()) {
-                  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
-                    public void run(){
-                      int rc=Messages.showDialog(myProject,GitBundle.message("update.rebase.no.change",root.getPresentableUrl()),GitBundle.getString("update.rebase.no.change.title"),new String[]{GitBundle.getString("update.rebase.no.change.skip"),GitBundle.getString("update.rebase.no.change.retry"),GitBundle.getString("update.rebase.no.change.cancel")},0,Messages.getErrorIcon());
-                      result.set(rc);
-                    }
+                while (rebaseConflictDetector.isNoChange()) {
+                  if (skippedCommits == null) {
+                    skippedCommits=new ArrayList<GitRebaseUtils.CommitInfo>();
+                    mySkippedCommits.put(root,skippedCommits);
                   }
-);
-switch (result.get()) {
-case 0:
-                    doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
-                  continue noChangeLoop;
-case 1:
-                continue noChangeLoop;
-case 2:
-              cancelled.set(true);
-            break noChangeLoop;
+                  skippedCommits.add(GitRebaseUtils.getCurrentRebaseCommit(root));
+                  doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
+                }
+              }
+              if (cancelled.get()) {
+                myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
+                doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
+              }
+            }
+  finally {
+              markEnd(root,cancelled.get());
+            }
+          }
+  finally {
+            restoreRootChangesAfterUpdate(root,cancelled);
+          }
+        }
+ catch (        VcsException ex) {
+          myExceptions.add(ex);
         }
       }
     }
-    if (cancelled.get()) {
-      myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
-      doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
+  finally {
+      restoreProjectChangesAfterUpdate();
     }
   }
   finally {
-    markEnd(root,cancelled.get());
+    projectManager.unblockReloadingProjectOnExternalChanges();
   }
-}
-  finally {
-  restoreRootChangesAfterUpdate(root,cancelled);
-}
-}
- catch (VcsException ex) {
-myExceptions.add(ex);
-}
-}
-}
-  finally {
-restoreProjectChangesAfterUpdate();
-}
-}
-  finally {
-projectManager.unblockReloadingProjectOnExternalChanges();
-}
 }
