@@ -1,6 +1,6 @@
 {
   if (!myIsDirty)   return;
-synchronized (this) {
+synchronized (lock) {
     if (!myIsDirty)     return;
     int lineCount=myLineWidths.size();
     if (myMaxWidth != -1 && myDocument.isInBulkUpdate()) {
@@ -13,21 +13,45 @@ synchronized (this) {
     int x=0;
     final int fontSize=myScheme.getEditorFontSize();
     final String fontName=myScheme.getEditorFontName();
+    List<? extends TextChange> softWraps=getSoftWrapModel().getRegisteredSoftWraps();
+    int softWrapsIndex=-1;
     for (int line=0; line < lineCount; line++) {
       if (myLineWidths.getQuick(line) != -1)       continue;
       x=0;
-      int offset=logicalPositionToOffset(visualToLogicalPosition(new VisualPosition(line,0)));
+      int offset=myDocument.getLineStartOffset(line);
       if (offset >= myDocument.getTextLength()) {
         myLineWidths.set(line,0);
         break;
       }
+      if (softWrapsIndex < 0) {
+        softWrapsIndex=getSoftWrapModel().getSoftWrapIndex(offset);
+        if (softWrapsIndex < 0) {
+          softWrapsIndex=-softWrapsIndex - 1;
+        }
+      }
       IterationState state=new IterationState(EditorImpl.this,offset,false);
       int fontType=state.getMergedAttributes().getFontType();
+      int maxPreviousSoftWrappedWidth=-1;
       while (offset < end && line < lineCount) {
         char c=text.charAt(offset);
         if (offset >= state.getEndOffset()) {
           state.advance();
           fontType=state.getMergedAttributes().getFontType();
+        }
+        while (softWrapsIndex < softWraps.size()) {
+          TextChange softWrap=softWraps.get(softWrapsIndex);
+          if (softWrap.getStart() > offset) {
+            break;
+          }
+          softWrapsIndex++;
+          if (softWrap.getStart() == offset) {
+            maxPreviousSoftWrappedWidth=Math.max(maxPreviousSoftWrappedWidth,x);
+            x=getSoftWrapModel().getSoftWrapIndentWidthInPixels(softWrap);
+          }
+        }
+        if (line + 1 >= lineCount) {
+          myLineWidths.set(line,Math.max(x,maxPreviousSoftWrappedWidth));
+          break;
         }
         FoldRegion collapsed=state.getCurrentFold();
         if (collapsed != null) {
@@ -36,6 +60,7 @@ synchronized (this) {
             x+=EditorUtil.charWidth(placeholder.charAt(i),fontType,EditorImpl.this);
           }
           offset=collapsed.getEndOffset();
+          line=myDocument.getLineNumber(offset);
         }
  else {
           if (c == '\t') {
@@ -44,7 +69,7 @@ synchronized (this) {
           }
  else {
             if (c == '\n') {
-              myLineWidths.set(line,x);
+              myLineWidths.set(line,Math.max(x,maxPreviousSoftWrappedWidth));
               if (line + 1 >= lineCount || myLineWidths.getQuick(line + 1) != -1)               break;
               offset++;
               x=0;
@@ -61,11 +86,18 @@ synchronized (this) {
     if (lineCount > 0) {
       myLineWidths.set(lineCount - 1,x);
     }
+    int startToUse=0;
+    int endToUse=lineCount;
+    if (getSoftWrapModel().isSoftWrappingEnabled()) {
+      Rectangle visibleArea=getScrollingModel().getVisibleArea();
+      startToUse=xyToLogicalPosition(visibleArea.getLocation()).line + 1;
+      endToUse=xyToLogicalPosition(new Point(0,visibleArea.y + visibleArea.height)).line;
+    }
     int maxWidth=0;
-    for (int i=0; i < lineCount; i++) {
+    for (int i=startToUse; i < endToUse; i++) {
       maxWidth=Math.max(maxWidth,myLineWidths.getQuick(i));
     }
-    mySize=new Dimension(maxWidth,getLineHeight() * lineCount);
+    mySize=new Dimension(maxWidth,getLineHeight() * getVisibleLineCount());
     myIsDirty=false;
   }
 }
