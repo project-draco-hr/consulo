@@ -12,7 +12,10 @@
   mySemaphore.down();
   final List<Future<?>> futures=new LinkedList<Future<?>>();
   for (  final Consumer<Consumer<T>> task : myTasks) {
-    if (myResultKnown)     break;
+    if (myResultKnown) {
+      --myCntAlive;
+      continue;
+    }
     final Runnable computableProxy=new Runnable(){
       public void run(){
         try {
@@ -21,18 +24,15 @@
               if (myResultKnown)               return;
               myResult=t;
               myResultKnown=true;
-              --myCntAlive;
-              mySemaphore.up();
             }
           }
 );
         }
- catch (        ProcessCanceledException e) {
+  finally {
           --myCntAlive;
-          if (myCntAlive == 0) {
+          if (myCntAlive == 0 || myResultKnown) {
             mySemaphore.up();
           }
-          throw e;
         }
       }
     }
@@ -46,9 +46,10 @@
     futures.add(future);
   }
   while (true) {
-    mySemaphore.waitFor(1000);
     if (myResultKnown)     break;
+    if (myCntAlive <= 0)     break;
     pi.checkCanceled();
+    mySemaphore.waitFor(1000);
   }
   for (  Future<?> future : futures) {
     if ((!future.isCancelled() && (!future.isDone()))) {
