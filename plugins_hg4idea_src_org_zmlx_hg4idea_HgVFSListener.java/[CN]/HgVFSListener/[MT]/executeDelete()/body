@@ -7,14 +7,23 @@
   for (  VirtualFile vf : ChangeListManagerImpl.getInstanceImpl(myProject).getUnversionedFiles()) {
     unversionedFilePaths.add(VcsUtil.getFilePath(vf.getPath()));
   }
-  for (Iterator<FilePath> iter=filesToDelete.iterator(); iter.hasNext(); ) {
-    if (unversionedFilePaths.contains(iter.next())) {
-      iter.remove();
+  skipUnversionedAndNotUnderHg(unversionedFilePaths,filesToDelete);
+  skipUnversionedAndNotUnderHg(unversionedFilePaths,deletedFiles);
+  for (Iterator<FilePath> it=deletedFiles.iterator(); it.hasNext(); ) {
+    final FilePath filePath=it.next();
+    final HgLogCommand logCommand=new HgLogCommand(myProject);
+    logCommand.setLogFile(true);
+    logCommand.setFollowCopies(false);
+    logCommand.setIncludeRemoved(true);
+    final VirtualFile repo=HgUtil.getHgRootOrNull(myProject,filePath);
+    if (repo == null) {
+      continue;
     }
-  }
-  for (Iterator<FilePath> iter=deletedFiles.iterator(); iter.hasNext(); ) {
-    if (unversionedFilePaths.contains(iter.next())) {
-      iter.remove();
+    final HgFile hgFile=new HgFile(repo,filePath);
+    final List<HgFileRevision> localRevisions=logCommand.execute(hgFile,-1,true);
+    if (localRevisions == null || localRevisions.isEmpty() || localRevisions.get(0).getDeletedFiles().contains(hgFile.getRelativePath())) {
+      it.remove();
+      filesToDelete.add(filePath);
     }
   }
   if (myRemoveOption.getValue() != VcsShowConfirmationOption.Value.DO_NOTHING_SILENTLY) {
@@ -28,5 +37,7 @@
       }
     }
   }
-  performDeletion(filesToDelete);
+  if (!filesToDelete.isEmpty()) {
+    performDeletion(filesToDelete);
+  }
 }
