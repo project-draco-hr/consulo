@@ -1,11 +1,11 @@
 {
-  final ReadProcessRequest stdoutThread=new ReadProcessRequest(createProcessOutReader()){
+  final ReadProcessThread stdoutThread=new ReadProcessThread(createProcessOutReader()){
     protected void textAvailable(    String s){
       notifyTextAvailable(s,ProcessOutputTypes.STDOUT);
     }
   }
 ;
-  final ReadProcessRequest stderrThread=new ReadProcessRequest(createProcessErrReader()){
+  final ReadProcessThread stderrThread=new ReadProcessThread(createProcessErrReader()){
     protected void textAvailable(    String s){
       notifyTextAvailable(s,ProcessOutputTypes.STDERR);
     }
@@ -15,17 +15,22 @@
   addProcessListener(new ProcessAdapter(){
     public void startNotified(    final ProcessEvent event){
       try {
-        final Semaphore outSemaphore=stdoutThread.schedule();
-        final Semaphore errSemaphore=stderrThread.schedule();
+        final Future<?> stdOutReadingFuture=executeOnPooledThread(stdoutThread);
+        final Future<?> stdErrReadingFuture=executeOnPooledThread(stderrThread);
         myWaitFor.setTerminationCallback(new Consumer<Integer>(){
           @Override public void consume(          Integer exitCode){
             try {
               stderrThread.setProcessTerminated(true);
               stdoutThread.setProcessTerminated(true);
-              outSemaphore.waitFor();
-              errSemaphore.waitFor();
+              stdErrReadingFuture.get();
+              stdOutReadingFuture.get();
             }
-  finally {
+ catch (            InterruptedException e) {
+            }
+catch (            ExecutionException e) {
+              LOG.error(e);
+            }
+ finally {
               onOSProcessTerminated(exitCode);
             }
           }
