@@ -3,9 +3,15 @@
   if (xmlElement instanceof XmlTag) {
     final XmlTag xmlTag=(XmlTag)xmlElement;
     final String tagName=xmlTag.getName();
-    final ReflectedProject reflected=ReflectedProject.getProject(antDomElement.getAntProject().getClassLoader());
+    final AntDomProject antProject=antDomElement.getAntProject();
+    if (antProject == null) {
+      return;
+    }
+    final ReflectedProject reflected=ReflectedProject.getProject(antProject.getClassLoader());
     final DomGenericInfo genericInfo=antDomElement.getGenericInfo();
     AntIntrospector parentElementIntrospector=null;
+    final Hashtable<String,Class> coreTaskDefs=reflected.getTaskDefinitions();
+    final Hashtable<String,Class> coreTypeDefs=reflected.getDataTypeDefinitions();
     if ("project".equals(tagName)) {
       parentElementIntrospector=getIntrospector(reflected.getProject().getClass());
     }
@@ -13,16 +19,27 @@
       parentElementIntrospector=getIntrospector(reflected.getTargetClass());
     }
  else {
-      final Map<String,Class> tasks=reflected.getTaskDefinitions();
-      final Class taskClass=tasks.get(tagName);
-      if (taskClass != null) {
-        parentElementIntrospector=getIntrospector(taskClass);
+      if (antDomElement instanceof AntDomCustomElement) {
+        final AntDomCustomElement custom=(AntDomCustomElement)antDomElement;
+        final Class definitionClass=custom.getDefinitionClass();
+        if (definitionClass != null) {
+          parentElementIntrospector=getIntrospector(definitionClass);
+        }
       }
  else {
-        final Map<String,Class> dataTypes=reflected.getDataTypeDefinitions();
-        final Class dataClass=dataTypes.get(tagName);
-        if (dataClass != null) {
-          parentElementIntrospector=getIntrospector(dataClass);
+        Class elemType=antDomElement.getChildDescription().getUserData(ELEMENT_IMPL_CLASS_KEY);
+        if (elemType == null) {
+          if (coreTaskDefs != null) {
+            elemType=coreTaskDefs.get(tagName);
+          }
+        }
+        if (elemType == null) {
+          if (coreTypeDefs != null) {
+            elemType=coreTypeDefs.get(tagName);
+          }
+        }
+        if (elemType != null) {
+          parentElementIntrospector=getIntrospector(elemType);
         }
       }
     }
@@ -32,17 +49,56 @@
         registerAttribute(registrar,genericInfo,(String)attributes.nextElement());
       }
       if ("project".equals(tagName) || parentElementIntrospector.isContainer()) {
-        for (        Object nestedName : reflected.getTaskDefinitions().keySet()) {
-          registerChild(registrar,genericInfo,(String)nestedName);
+        if (coreTaskDefs != null) {
+          for (          Map.Entry<String,Class> entry : coreTaskDefs.entrySet()) {
+            final DomExtension extension=registerChild(registrar,genericInfo,entry.getKey());
+            if (extension != null) {
+              final Class type=entry.getValue();
+              if (type != null) {
+                extension.putUserData(ELEMENT_IMPL_CLASS_KEY,type);
+              }
+              extension.putUserData(AntDomElement.ROLE,AntDomElement.Role.TASK);
+            }
+          }
         }
-        for (        Object nestedTypeDef : reflected.getDataTypeDefinitions().keySet()) {
-          registerChild(registrar,genericInfo,(String)nestedTypeDef);
+        if (coreTypeDefs != null) {
+          for (          Map.Entry<String,Class> entry : coreTypeDefs.entrySet()) {
+            final DomExtension extension=registerChild(registrar,genericInfo,entry.getKey());
+            if (extension != null) {
+              final Class type=entry.getValue();
+              if (type != null) {
+                extension.putUserData(ELEMENT_IMPL_CLASS_KEY,type);
+              }
+              extension.putUserData(AntDomElement.ROLE,AntDomElement.Role.DATA_TYPE);
+            }
+          }
         }
+        registrar.registerCustomChildrenExtension(AntDomCustomElement.class,new AntCustomTagNameDescriptor());
       }
  else {
         final Enumeration<String> nested=parentElementIntrospector.getNestedElements();
         while (nested.hasMoreElements()) {
-          registerChild(registrar,genericInfo,nested.nextElement());
+          final String nestedElementName=nested.nextElement();
+          final DomExtension extension=registerChild(registrar,genericInfo,nestedElementName);
+          if (extension != null) {
+            final Class type=parentElementIntrospector.getElementType(nestedElementName);
+            if (type != null) {
+              extension.putUserData(ELEMENT_IMPL_CLASS_KEY,type);
+            }
+            AntDomElement.Role role=null;
+            if (coreTaskDefs != null && coreTaskDefs.containsKey(nestedElementName)) {
+              role=AntDomElement.Role.TASK;
+            }
+ else             if (coreTypeDefs != null && coreTypeDefs.containsKey(nestedElementName)) {
+              role=AntDomElement.Role.DATA_TYPE;
+            }
+ else             if (type != null && isAssignableFrom(Task.class.getName(),type)) {
+              role=AntDomElement.Role.TASK;
+            }
+            if (role != null) {
+              extension.putUserData(AntDomElement.ROLE,role);
+            }
+          }
         }
       }
     }

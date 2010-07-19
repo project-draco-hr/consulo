@@ -1,0 +1,64 @@
+{
+  Document document=editor.getDocument();
+  VisualPosition visLine=new VisualPosition(visualLineNumber,0);
+  int logLine=editor.visualToLogicalPosition(visLine).line;
+  int logLineStartOffset=document.getLineStartOffset(logLine);
+  int logLineEndOffset=document.getLineEndOffset(logLine);
+  LogicalPosition logLineStart=editor.offsetToLogicalPosition(logLineStartOffset);
+  VisualPosition visLineStart=editor.logicalToVisualPosition(logLineStart);
+  boolean softWrapIntroducedLine=visLineStart.line != visualLineNumber;
+  if (!softWrapIntroducedLine) {
+    int offset=findFirstNonSpaceOffsetInRange(document.getCharsSequence(),logLineStartOffset,logLineEndOffset);
+    if (offset >= 0) {
+      return EditorUtil.calcColumnNumber(editor,document.getCharsSequence(),logLineStartOffset,offset);
+    }
+ else {
+      return -1;
+    }
+  }
+  int lineFeedsToSkip=visualLineNumber - visLineStart.line;
+  List<? extends TextChange> softWraps=editor.getSoftWrapModel().getSoftWrapsForLine(logLine);
+  for (  TextChange softWrap : softWraps) {
+    int softWrapLineFeedsNumber=StringUtil.countNewLines(softWrap.getText());
+    if (softWrapLineFeedsNumber < lineFeedsToSkip) {
+      lineFeedsToSkip-=softWrapLineFeedsNumber;
+      continue;
+    }
+    CharSequence softWrapText=softWrap.getText();
+    int softWrapTextLength=softWrapText.length();
+    boolean skip=true;
+    for (int j=0; j < softWrapTextLength; j++) {
+      if (softWrapText.charAt(j) == '\n') {
+        skip=--lineFeedsToSkip > 0;
+        continue;
+      }
+      if (skip) {
+        continue;
+      }
+      int nextSoftWrapLineFeedOffset=StringUtil.indexOf(softWrapText,'\n',j,softWrapTextLength);
+      int end=findFirstNonSpaceOffsetInRange(softWrapText,j,softWrapTextLength);
+      if (end >= 0) {
+        if (nextSoftWrapLineFeedOffset < 0 || end < nextSoftWrapLineFeedOffset) {
+          return EditorUtil.calcColumnNumber(editor,softWrapText,j,end);
+        }
+ else {
+          return -1;
+        }
+      }
+      if (nextSoftWrapLineFeedOffset >= 0) {
+        return -1;
+      }
+      end=findFirstNonSpaceOffsetInRange(document.getCharsSequence(),softWrap.getStart(),logLineEndOffset);
+      if (end >= 0) {
+        int result=EditorUtil.calcColumnNumber(editor,softWrapText,j,softWrapTextLength);
+        result++;
+        result+=EditorUtil.calcColumnNumber(editor,document.getCharsSequence(),softWrap.getStart(),end);
+        return result;
+      }
+ else {
+        return -1;
+      }
+    }
+  }
+  return -1;
+}

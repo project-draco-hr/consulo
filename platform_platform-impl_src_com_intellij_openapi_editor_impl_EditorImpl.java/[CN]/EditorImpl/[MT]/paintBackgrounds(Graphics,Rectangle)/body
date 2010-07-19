@@ -1,5 +1,5 @@
 {
-  Color defaultBackground=getBackroundColor();
+  Color defaultBackground=getBackgroundColor();
   g.setColor(defaultBackground);
   g.fillRect(clip.x,clip.y,clip.width,clip.height);
   int lineHeight=getLineHeight();
@@ -30,6 +30,7 @@
   outer:   while (!iterationState.atEnd() && !lIterator.atEnd()) {
     int hEnd=iterationState.getEndOffset();
     int lEnd=lIterator.getEnd();
+    getSoftWrapModel().registerSoftWrapIfNecessary(myDocument.getRawChars(),start,hEnd,position.x,fontType);
     if (hEnd >= lEnd) {
       FoldRegion collapsedFolderAt=myFoldingModel.getCollapsedRegionAtOffset(start);
       if (collapsedFolderAt == null) {
@@ -57,22 +58,28 @@
         position.x=drawBackground(g,backColor,collapsedFolderAt.getPlaceholderText(),position,fontType,defaultBackground,clip);
       }
  else {
-        TextChange softWrap=getSoftWrapModel().getSoftWrap(start);
-        if (softWrap == null && getSoftWrapModel().shouldWrap(myDocument.getRawChars(),start,hEnd,position)) {
-          softWrap=getSoftWrapModel().wrap(myDocument.getRawChars(),start,hEnd);
-        }
-        if (softWrap != null) {
+        List<? extends TextChange> softWraps=getSoftWrapModel().getSoftWrapsForRange(start,hEnd);
+        int startToUse=start;
+        for (        TextChange softWrap : softWraps) {
+          if (softWrap.getStart() > startToUse) {
+            position.x=drawBackground(g,backColor,text.subSequence(startToUse,softWrap.getStart()),position,fontType,defaultBackground,clip);
+          }
+          startToUse=softWrap.getStart();
           CharSequence softWrapText=softWrap.getText();
           int softWrapStart=0;
           int softWrapEnd=0;
           while (softWrapEnd < softWrapText.length()) {
             for (; softWrapEnd < softWrapText.length() && softWrapText.charAt(softWrapEnd) != '\n'; softWrapEnd++)             ;
-            if (softWrapStart >= softWrapText.length() || softWrapEnd >= softWrapText.length()) {
+            if (softWrapEnd >= softWrapText.length()) {
               position.x=drawBackground(g,backColor,softWrapText.subSequence(softWrapStart,softWrapText.length()),position,fontType,defaultBackground,clip);
             }
  else {
-              if (softWrapEnd > softWrapStart + 1) {
+              if (softWrapEnd > softWrapStart) {
                 drawBackground(g,backColor,softWrapText.subSequence(softWrapStart,softWrapEnd - 1),position,fontType,defaultBackground,clip);
+                if (backColor != null && !backColor.equals(defaultBackground)) {
+                  g.setColor(backColor);
+                  g.fillRect(position.x,position.y,clip.x + clip.width - position.x,lineHeight);
+                }
               }
               if (position.y > clip.y + clip.height)               break outer;
               position.x=0;
@@ -82,11 +89,13 @@
             }
           }
         }
-        if (hEnd > lEnd - lIterator.getSeparatorLength()) {
-          position.x=drawBackground(g,backColor,text.subSequence(start,lEnd - lIterator.getSeparatorLength()),position,fontType,defaultBackground,clip);
-        }
+        if (startToUse < hEnd) {
+          if (hEnd > lEnd - lIterator.getSeparatorLength()) {
+            position.x=drawBackground(g,backColor,text.subSequence(startToUse,lEnd - lIterator.getSeparatorLength()),position,fontType,defaultBackground,clip);
+          }
  else {
-          position.x=drawBackground(g,backColor,text.subSequence(start,hEnd),position,fontType,defaultBackground,clip);
+            position.x=drawBackground(g,backColor,text.subSequence(startToUse,hEnd),position,fontType,defaultBackground,clip);
+          }
         }
       }
       iterationState.advance();
@@ -100,12 +109,10 @@
   if (lIterator.getLineNumber() >= lastLineIndex && position.y <= clip.y + clip.height) {
     paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground);
   }
-  List<TextChange> softWrapsAfterRepaint=mySoftWrapModel.getRegisteredSoftWraps();
-  if (!mySoftWrapsOnLastRepaint.equals(softWrapsAfterRepaint)) {
+  if (mySoftWrapsChanged) {
+    mySoftWrapsChanged=false;
+    validateSize();
     repaintToScreenBottom(xyToLogicalPosition(position).line);
     myGutterComponent.repaint(0,clip.y,myGutterComponent.getWidth(),myGutterComponent.getHeight() - clip.y);
-    getCaretModel().moveToOffset(getCaretModel().getOffset());
   }
-  mySoftWrapsOnLastRepaint.clear();
-  mySoftWrapsOnLastRepaint.addAll(softWrapsAfterRepaint);
 }
