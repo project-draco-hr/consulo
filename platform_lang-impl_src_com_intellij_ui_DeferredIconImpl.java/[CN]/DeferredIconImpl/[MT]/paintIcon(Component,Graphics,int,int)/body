@@ -2,27 +2,34 @@
   myDelegateIcon.paintIcon(c,g,x,y);
   if (!myIsScheduled) {
     myIsScheduled=true;
-    final Component target;
+    final Ref<Component> target=new Ref<Component>(null);
+    final Ref<Component> paintingParent=new Ref<Component>(null);
+    final Ref<Rectangle> paintingParentRec=new Ref<Rectangle>(null);
     final Container list=SwingUtilities.getAncestorOfClass(JList.class,c);
     if (list != null) {
-      target=list;
+      target.set(list);
     }
  else {
       final Container tree=SwingUtilities.getAncestorOfClass(JTree.class,c);
       if (tree != null) {
-        target=tree;
+        target.set(tree);
       }
  else {
         final Container table=SwingUtilities.getAncestorOfClass(JTable.class,c);
         if (table != null) {
-          target=table;
+          target.set(table);
         }
  else {
-          target=c;
+          target.set(c);
         }
       }
     }
-    myLastTarget=new WeakReference<Component>(target);
+    Container pp=SwingUtilities.getAncestorOfClass(PaintingParent.class,c);
+    paintingParent.set(pp);
+    if (paintingParent.get() != null) {
+      paintingParentRec.set(((PaintingParent)pp).getChildRec(c));
+    }
+    myLastTarget=new WeakReference<Component>(target.get());
     JobUtil.submitToJobThread(new Runnable(){
       public void run(){
         int oldWidth=myDelegateIcon.getIconWidth();
@@ -30,19 +37,33 @@
         final boolean shouldRevalidate=myDelegateIcon.getIconWidth() != oldWidth;
         SwingUtilities.invokeLater(new Runnable(){
           public void run(){
+            Component actualTarget=target.get();
+            if (SwingUtilities.getWindowAncestor(actualTarget) == null) {
+              actualTarget=paintingParent.get();
+              if (actualTarget == null || SwingUtilities.getWindowAncestor(actualTarget) == null) {
+                actualTarget=null;
+                myLastTarget=null;
+              }
+            }
+            if (actualTarget == null)             return;
+            myLastTarget=new WeakReference<Component>(actualTarget);
             if (shouldRevalidate) {
-              if (target instanceof JTree) {
-                final TreeUI ui=((JTree)target).getUI();
+              if (actualTarget instanceof JTree) {
+                final TreeUI ui=((JTree)actualTarget).getUI();
                 if (ui instanceof BasicTreeUI) {
                   ((BasicTreeUI)ui).setLeftChildIndent(((Integer)UIManager.get("Tree.leftChildIndent")).intValue());
                 }
               }
             }
-            if (c == target) {
+            if (c == actualTarget) {
               c.repaint(x,y,getIconWidth(),getIconHeight());
             }
  else {
-              ourRepaintScheduler.pushDirtyComponent(target);
+              Rectangle rec=null;
+              if (paintingParentRec.get() != null) {
+                rec=paintingParentRec.get();
+              }
+              ourRepaintScheduler.pushDirtyComponent(actualTarget,rec);
             }
           }
         }
