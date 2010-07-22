@@ -1,0 +1,78 @@
+{
+  IElementType tokenType=builder.getTokenType();
+  if (LITERALS.contains(tokenType)) {
+    final PsiBuilder.Marker literal=builder.mark();
+    builder.advanceLexer();
+    literal.done(JavaElementType.LITERAL_EXPRESSION);
+    return Pair.create(literal,JavaElementType.LITERAL_EXPRESSION);
+  }
+  if (tokenType == JavaTokenType.LPARENTH) {
+    final PsiBuilder.Marker parenth=builder.mark();
+    builder.advanceLexer();
+    final PsiBuilder.Marker inner=parse(builder);
+    if (inner == null) {
+      error(builder,JavaErrorMessages.message("expected.expression"));
+    }
+    JavaParserUtil.expectOrError(builder,JavaTokenType.RPARENTH,JavaErrorMessages.message("expected.rparen"));
+    parenth.done(JavaElementType.PARENTH_EXPRESSION);
+    return Pair.create(parenth,JavaElementType.PARENTH_EXPRESSION);
+  }
+  if (tokenType == JavaTokenType.LBRACE) {
+    final PsiBuilder.Marker arrayInit=parseArrayInitializer(builder);
+    return arrayInit != null ? Pair.create(arrayInit,JavaElementType.ARRAY_INITIALIZER_EXPRESSION) : null;
+  }
+  PsiBuilder.Marker annotation=null;
+  final PsiBuilder.Marker beforeAnnotation=builder.mark();
+  if (tokenType == JavaTokenType.AT) {
+    annotation=DeclarationParser.parseAnnotations(builder);
+    tokenType=builder.getTokenType();
+  }
+  if (tokenType == JavaTokenType.IDENTIFIER) {
+    final PsiBuilder.Marker refExpr;
+    if (annotation != null) {
+      final PsiBuilder.Marker refParam=annotation.precede();
+      refParam.doneBefore(JavaElementType.REFERENCE_PARAMETER_LIST,annotation);
+      refExpr=refParam.precede();
+    }
+ else {
+      refExpr=builder.mark();
+      builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
+    }
+    builder.advanceLexer();
+    refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+    beforeAnnotation.drop();
+    return Pair.create(refExpr,JavaElementType.REFERENCE_EXPRESSION);
+  }
+  if (annotation != null) {
+    beforeAnnotation.rollbackTo();
+    tokenType=builder.getTokenType();
+  }
+ else {
+    beforeAnnotation.drop();
+  }
+  if (tokenType == JavaTokenType.THIS_KEYWORD) {
+    final PsiBuilder.Marker expr=builder.mark();
+    builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
+    builder.advanceLexer();
+    final IElementType type=builder.getTokenType() != JavaTokenType.LPARENTH ? JavaElementType.THIS_EXPRESSION : JavaElementType.REFERENCE_EXPRESSION;
+    expr.done(type);
+    return Pair.create(expr,type);
+  }
+  if (tokenType == JavaTokenType.SUPER_KEYWORD) {
+    final PsiBuilder.Marker expr=builder.mark();
+    builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
+    builder.advanceLexer();
+    final IElementType type=builder.getTokenType() != JavaTokenType.LPARENTH ? JavaElementType.SUPER_EXPRESSION : JavaElementType.REFERENCE_EXPRESSION;
+    expr.done(type);
+    return Pair.create(expr,type);
+  }
+  if (tokenType == JavaTokenType.NEW_KEYWORD) {
+    final PsiBuilder.Marker newExpr=parseNew(builder,null);
+    return Pair.create(newExpr,JavaElementType.NEW_EXPRESSION);
+  }
+  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
+    final PsiBuilder.Marker classObjAccess=parseClassObjectAccess(builder);
+    return classObjAccess != null ? Pair.create(classObjAccess,JavaElementType.CLASS_OBJECT_ACCESS_EXPRESSION) : null;
+  }
+  return null;
+}

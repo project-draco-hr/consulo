@@ -1,0 +1,70 @@
+{
+  final IElementType tokenType=builder.getTokenType();
+  if (tokenType == null)   return null;
+  if (tokenType == JavaTokenType.LBRACE) {
+    if (context == Context.FILE || context == Context.CODE_BLOCK)     return null;
+  }
+ else   if (tokenType == JavaTokenType.IDENTIFIER || ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
+    if (context == Context.FILE)     return null;
+  }
+ else   if (tokenType instanceof ILazyParseableElementType) {
+    final PsiBuilder.Marker declaration=builder.mark();
+    declaration.drop();
+    builder.advanceLexer();
+    return declaration;
+  }
+ else   if (!ElementType.MODIFIER_BIT_SET.contains(tokenType) && !ElementType.CLASS_KEYWORD_BIT_SET.contains(tokenType) && tokenType != JavaTokenType.AT && (context == Context.CODE_BLOCK || tokenType != JavaTokenType.LT)) {
+    return null;
+  }
+  final PsiBuilder.Marker declaration=builder.mark();
+  final PsiBuilder.Marker modList=parseModifierList(builder);
+  if (expect(builder,JavaTokenType.AT)) {
+    if (tokenType == JavaTokenType.INTERFACE_KEYWORD) {
+      return parseClassFromKeyword(builder,declaration,true);
+    }
+ else {
+      declaration.rollbackTo();
+      return null;
+    }
+  }
+ else   if (ElementType.CLASS_KEYWORD_BIT_SET.contains(tokenType)) {
+    final PsiBuilder.Marker root=parseClassFromKeyword(builder,declaration,false);
+    if (context == Context.FILE) {
+      boolean declarationsAfterEnd=false;
+      while (builder.getTokenType() != null && builder.getTokenType() != JavaTokenType.RBRACE) {
+        final PsiBuilder.Marker position=builder.mark();
+        final PsiBuilder.Marker element=parseDeclaration(builder,Context.CLASS);
+        if (element != null && AFTER_END_DECLARATION_SET.contains(((LighterASTNode)element).getTokenType())) {
+          if (!declarationsAfterEnd) {
+            element.precede().error(JavaErrorMessages.message("expected.class.or.interface"));
+          }
+          declarationsAfterEnd=true;
+          position.drop();
+        }
+ else {
+          position.rollbackTo();
+          break;
+        }
+      }
+      if (declarationsAfterEnd) {
+        expectOrError(builder,JavaTokenType.RBRACE,JavaErrorMessages.message("expected.rbrace"));
+      }
+    }
+    return root;
+  }
+  PsiBuilder.Marker typeParams=null;
+  if (builder.getTokenType() == JavaTokenType.LT) {
+    typeParams=ReferenceParser.parseTypeParameters(builder);
+  }
+  if (context == Context.FILE) {
+    if (typeParams == null) {
+      error(builder,JavaErrorMessages.message("expected.class.or.interface"));
+    }
+ else {
+      typeParams.precede().errorBefore(JavaErrorMessages.message("expected.class.or.interface"),typeParams);
+    }
+    declaration.drop();
+    return modList;
+  }
+  throw new UnsupportedOperationException(builder.toString() + context);
+}
