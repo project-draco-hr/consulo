@@ -1,0 +1,67 @@
+{
+  final PsiBuilder.Marker newExpr=(start != null ? start.precede() : builder.mark());
+  builder.advanceLexer();
+  ReferenceParser.parseReferenceParameterList(builder,false);
+  final PsiBuilder.Marker refOrType;
+  final boolean parseAnnotations=areTypeAnnotationsSupported(builder) && builder.getTokenType() == JavaTokenType.AT;
+  final IElementType tokenType=builder.getTokenType();
+  if (tokenType == JavaTokenType.IDENTIFIER || parseAnnotations) {
+    refOrType=ReferenceParser.parseJavaCodeReference(builder,true,true,parseAnnotations);
+    if (refOrType == null) {
+      error(builder,JavaErrorMessages.message("expected.identifier"));
+      newExpr.done(JavaElementType.NEW_EXPRESSION);
+      return newExpr;
+    }
+  }
+ else   if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
+    refOrType=null;
+    builder.advanceLexer();
+  }
+ else {
+    error(builder,JavaErrorMessages.message("expected.identifier"));
+    newExpr.done(JavaElementType.NEW_EXPRESSION);
+    return newExpr;
+  }
+  if (refOrType != null && builder.getTokenType() == JavaTokenType.LPARENTH) {
+    parseArgumentList(builder);
+    if (builder.getTokenType() == JavaTokenType.LBRACE) {
+      final PsiBuilder.Marker classElement=refOrType.precede();
+      DeclarationParser.parseClassBodyWithBraces(builder,false,false);
+      classElement.done(JavaElementType.ANONYMOUS_CLASS);
+    }
+  }
+ else {
+    if (builder.getTokenType() != JavaTokenType.LBRACKET) {
+      error(builder,refOrType == null ? JavaErrorMessages.message("expected.lbracket") : JavaErrorMessages.message("expected.lparen.or.lbracket"));
+      newExpr.done(JavaElementType.NEW_EXPRESSION);
+      return newExpr;
+    }
+    int bracketCount=0;
+    int dimCount=0;
+    while (true) {
+      if (builder.getTokenType() != JavaTokenType.LBRACKET)       break;
+      builder.advanceLexer();
+      if (bracketCount == dimCount) {
+        final PsiBuilder.Marker dimExpr=parse(builder);
+        if (dimExpr != null) {
+          dimCount++;
+        }
+      }
+      bracketCount++;
+      if (!JavaParserUtil.expectOrError(builder,JavaTokenType.RBRACKET,JavaErrorMessages.message("expected.rbracket"))) {
+        newExpr.done(JavaElementType.NEW_EXPRESSION);
+        return newExpr;
+      }
+    }
+    if (dimCount == 0) {
+      if (builder.getTokenType() == JavaTokenType.LBRACE) {
+        parseArrayInitializer(builder);
+      }
+ else {
+        error(builder,JavaErrorMessages.message("expected.array.initializer"));
+      }
+    }
+  }
+  newExpr.done(JavaElementType.NEW_EXPRESSION);
+  return newExpr;
+}
