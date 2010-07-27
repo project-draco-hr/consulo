@@ -1,0 +1,57 @@
+{
+  if (!constructor.isConstructor())   return true;
+  SearchScope onlyGroovy=searchScope;
+  if (onlyGroovy instanceof GlobalSearchScope) {
+    onlyGroovy=GlobalSearchScope.getScopeRestrictedByFileTypes((GlobalSearchScope)onlyGroovy,GroovyFileType.GROOVY_FILE_TYPE);
+  }
+  final PsiClass clazz=ApplicationManager.getApplication().runReadAction(new NullableComputable<PsiClass>(){
+    public PsiClass compute(){
+      return constructor.getContainingClass();
+    }
+  }
+);
+  if (clazz == null)   return true;
+  if (!ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+    public Boolean compute(){
+      if (!clazz.isEnum())       return true;
+      if (!(clazz instanceof GroovyPsiElement))       return true;
+      final PsiField[] fields=clazz.getFields();
+      for (      PsiField field : fields) {
+        if (field instanceof GrEnumConstant) {
+          final PsiReference ref=field.getReference();
+          if (ref.isReferenceTo(constructor)) {
+            if (!consumer.process(ref))             return false;
+          }
+        }
+      }
+      return true;
+    }
+  }
+)) {
+    return false;
+  }
+  final Set<PsiMethod> processedMethods=new ConcurrentHashSet<PsiMethod>();
+  ReferencesSearch.searchOptimized(clazz,searchScope,true,collector,true,new PairProcessor<PsiReference,SearchRequestCollector>(){
+    @Override public boolean process(    PsiReference ref,    SearchRequestCollector collector){
+      return processClassReference(ref,clazz,constructor,consumer,processedMethods,searchScope,collector);
+    }
+  }
+);
+  if (clazz instanceof GrTypeDefinition) {
+    if (!processConstructors(constructor,consumer,clazz,true)) {
+      return false;
+    }
+  }
+  if (!DirectClassInheritorsSearch.search(clazz,onlyGroovy).forEach(new Processor<PsiClass>(){
+    public boolean process(    PsiClass inheritor){
+      if (inheritor instanceof GrTypeDefinition) {
+        if (!processConstructors(constructor,consumer,inheritor,false))         return false;
+      }
+      return true;
+    }
+  }
+)) {
+    return false;
+  }
+  return true;
+}
