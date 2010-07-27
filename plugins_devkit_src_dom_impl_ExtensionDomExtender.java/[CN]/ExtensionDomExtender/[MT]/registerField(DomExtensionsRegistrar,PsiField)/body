@@ -1,30 +1,40 @@
 {
-  final PsiAnnotation[] annotations=field.getModifierList().getAnnotations();
+  final PsiModifierList modifierList=field.getModifierList();
+  if (modifierList == null)   return;
+  final String fieldName=field.getName();
   final PsiConstantEvaluationHelper evalHelper=JavaPsiFacade.getInstance(field.getProject()).getConstantEvaluationHelper();
-  for (  PsiAnnotation annotation : annotations) {
-    final String qName=annotation.getQualifiedName();
-    if (qName != null) {
-      if (qName.equals(Attribute.class.getName())) {
-        final PsiAnnotationMemberValue attributeName=annotation.findAttributeValue("value");
-        if (attributeName != null && attributeName instanceof PsiExpression) {
-          final Class<String> type=String.class;
-          PsiExpression expression=(PsiExpression)attributeName;
-          final Object evaluatedExpression=evalHelper.computeConstantExpression(expression,false);
-          if (evaluatedExpression != null) {
-            registrar.registerGenericAttributeValueChildExtension(new XmlName(evaluatedExpression.toString()),type);
-          }
-        }
-      }
- else       if (qName.equals(Tag.class.getName())) {
-        final PsiAnnotationMemberValue attributeName=annotation.findAttributeValue("value");
-        if (attributeName != null && attributeName instanceof PsiExpression) {
-          PsiExpression expression=(PsiExpression)attributeName;
-          final Object evaluatedExpression=evalHelper.computeConstantExpression(expression,false);
-          if (evaluatedExpression != null) {
-            registrar.registerFixedNumberChildExtension(new XmlName(evaluatedExpression.toString()),SimpleTagValue.class);
-          }
-        }
+  final PsiAnnotation attrAnno=modifierList.findAnnotation(Attribute.class.getName());
+  if (attrAnno != null) {
+    final String attrName=getStringAttribute(attrAnno,"value",evalHelper);
+    if (attrName != null) {
+      final DomExtension extension=registrar.registerGenericAttributeValueChildExtension(new XmlName(attrName),String.class);
+      if (fieldName.endsWith("Class")) {
+        extension.setConverter(CLASS_CONVERTER);
       }
     }
+    return;
+  }
+  final PsiAnnotation tagAnno=modifierList.findAnnotation(Tag.class.getName());
+  final PsiAnnotation propAnno=modifierList.findAnnotation(Property.class.getName());
+  final PsiAnnotation absColAnno=modifierList.findAnnotation(AbstractCollection.class.getName());
+  final String tagName=tagAnno != null ? getStringAttribute(tagAnno,"value",evalHelper) : propAnno != null && getBooleanAttribute(propAnno,"surroundWithTag",evalHelper) ? Constants.OPTION : null;
+  if (tagName != null) {
+    if (absColAnno == null) {
+      final DomExtension extension=registrar.registerFixedNumberChildExtension(new XmlName(tagName),SimpleTagValue.class);
+      if (fieldName.endsWith("Class")) {
+        extension.setConverter(CLASS_CONVERTER);
+      }
+    }
+ else {
+      registrar.registerFixedNumberChildExtension(new XmlName(tagName),DomElement.class).addExtender(new DomExtender(){
+        @Override public void registerExtensions(        @NotNull DomElement domElement,        @NotNull DomExtensionsRegistrar registrar){
+          registerCollectionBinding(field.getType(),registrar,absColAnno,evalHelper);
+        }
+      }
+);
+    }
+  }
+ else   if (absColAnno != null) {
+    registerCollectionBinding(field.getType(),registrar,absColAnno,evalHelper);
   }
 }
