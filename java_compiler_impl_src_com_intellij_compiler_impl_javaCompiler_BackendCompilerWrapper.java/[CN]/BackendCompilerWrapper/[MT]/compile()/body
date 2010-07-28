@@ -1,31 +1,12 @@
 {
   Application application=ApplicationManager.getApplication();
-  final Set<VirtualFile> allDependent=new HashSet<VirtualFile>();
-  COMPILE:   try {
+  try {
     if (!myFilesToCompile.isEmpty()) {
       if (application.isUnitTestMode()) {
         saveTestData();
       }
       compileModules(buildModuleToFilesMap(myFilesToCompile));
     }
-    Collection<VirtualFile> dependentFiles;
-    do {
-      dependentFiles=CacheUtils.findDependentFiles(myCompileContext,mySuccesfullyCompiledJavaFiles,myCompiler.getDependencyProcessor(),DEPENDENCY_FILTER);
-      if (!dependentFiles.isEmpty()) {
-        myFilesToRecompile.addAll(dependentFiles);
-        allDependent.addAll(dependentFiles);
-        if (myCompileContext.getProgressIndicator().isCanceled() || myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-          break COMPILE;
-        }
-        final List<VirtualFile> filesInScope=getFilesInScope(dependentFiles);
-        if (filesInScope.isEmpty()) {
-          break;
-        }
-        myCompileContext.getDependencyCache().clearTraverseRoots();
-        compileModules(buildModuleToFilesMap(filesInScope));
-      }
-    }
- while (!dependentFiles.isEmpty() && myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) == 0);
   }
  catch (  SecurityException e) {
     throw new CompilerException(CompilerBundle.message("error.compiler.process.not.started",e.getMessage()),e);
@@ -42,25 +23,20 @@ catch (  IllegalArgumentException e) {
     }
     myModuleToTempDirMap.clear();
   }
-  if (CompilerConfiguration.MAKE_ENABLED) {
-    if (!myCompileContext.getProgressIndicator().isCanceled()) {
-      final ProgressIndicator indicator=myCompileContext.getProgressIndicator();
-      final DependencyCache cache=myCompileContext.getDependencyCache();
-      indicator.pushState();
-      indicator.setText(CompilerBundle.message("progress.updating.caches"));
-      indicator.setText2("");
-      cache.update();
-      indicator.setText(CompilerBundle.message("progress.saving.caches"));
-      cache.resetState();
-      indicator.popState();
+  if (!myFilesToCompile.isEmpty() && myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+    final List<TranslatingCompiler.OutputItem> outputs=new ArrayList<TranslatingCompiler.OutputItem>();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        for (        final VirtualFile file : myFilesToCompile) {
+          if (PACKAGE_ANNOTATION_FILE_NAME.equals(file.getName()) && !myProcessedPackageInfos.contains(file)) {
+            outputs.add(new OutputItemImpl(file));
+          }
+        }
+      }
     }
-  }
-  myFilesToRecompile.removeAll(mySuccesfullyCompiledJavaFiles);
-  if (myCompileContext.getMessageCount(CompilerMessageCategory.ERROR) != 0) {
-    myFilesToRecompile.addAll(allDependent);
-  }
-  final List<TranslatingCompiler.OutputItem> outputs=processPackageInfoFiles();
-  if (myFilesToRecompile.size() > 0 || outputs.size() > 0) {
-    mySink.add(null,outputs,VfsUtil.toVirtualFileArray(myFilesToRecompile));
+);
+    if (!outputs.isEmpty()) {
+      mySink.add(null,outputs,VirtualFile.EMPTY_ARRAY);
+    }
   }
 }
