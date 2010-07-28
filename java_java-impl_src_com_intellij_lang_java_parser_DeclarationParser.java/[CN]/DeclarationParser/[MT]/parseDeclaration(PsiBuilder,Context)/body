@@ -17,9 +17,10 @@
     return null;
   }
   final PsiBuilder.Marker declaration=builder.mark();
-  final PsiBuilder.Marker modList=parseModifierList(builder);
+  final Pair<PsiBuilder.Marker,Boolean> modListInfo=parseModifierList(builder);
+  final PsiBuilder.Marker modList=modListInfo.first;
   if (expect(builder,JavaTokenType.AT)) {
-    if (tokenType == JavaTokenType.INTERFACE_KEYWORD) {
+    if (builder.getTokenType() == JavaTokenType.INTERFACE_KEYWORD) {
       return parseClassFromKeyword(builder,declaration,true);
     }
  else {
@@ -27,7 +28,7 @@
       return null;
     }
   }
- else   if (ElementType.CLASS_KEYWORD_BIT_SET.contains(tokenType)) {
+ else   if (ElementType.CLASS_KEYWORD_BIT_SET.contains(builder.getTokenType())) {
     final PsiBuilder.Marker root=parseClassFromKeyword(builder,declaration,false);
     if (context == Context.FILE) {
       boolean declarationsAfterEnd=false;
@@ -57,14 +58,85 @@
     typeParams=ReferenceParser.parseTypeParameters(builder);
   }
   if (context == Context.FILE) {
-    if (typeParams == null) {
-      error(builder,JavaErrorMessages.message("expected.class.or.interface"));
-    }
- else {
-      typeParams.precede().errorBefore(JavaErrorMessages.message("expected.class.or.interface"),typeParams);
-    }
+    error(builder,JavaErrorMessages.message("expected.class.or.interface"),typeParams);
     declaration.drop();
     return modList;
   }
-  throw new UnsupportedOperationException(builder.toString() + context);
+  PsiBuilder.Marker type;
+  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(builder.getTokenType())) {
+    type=parseTypeNotNull(builder);
+  }
+ else   if (builder.getTokenType() == JavaTokenType.IDENTIFIER) {
+    final PsiBuilder.Marker idPos=builder.mark();
+    type=parseTypeNotNull(builder);
+    if (builder.getTokenType() == JavaTokenType.LPARENTH) {
+      if (context == Context.CODE_BLOCK) {
+        declaration.rollbackTo();
+        return null;
+      }
+      idPos.rollbackTo();
+      if (typeParams == null) {
+        emptyElement(builder,JavaElementType.TYPE_PARAMETER_LIST);
+      }
+      builder.advanceLexer();
+      if (builder.getTokenType() != JavaTokenType.LPARENTH) {
+        declaration.rollbackTo();
+        return null;
+      }
+      return parseMethodFromLeftParenth(builder,declaration,false);
+    }
+    idPos.drop();
+  }
+ else   if (builder.getTokenType() == JavaTokenType.LBRACE) {
+    if (context == Context.CODE_BLOCK) {
+      error(builder,JavaErrorMessages.message("expected.identifier.or.type"),typeParams);
+      declaration.drop();
+      return modList;
+    }
+    final PsiBuilder.Marker codeBlock=StatementParser.parseCodeBlock(builder);
+    LOG.assertTrue(codeBlock != null);
+    if (typeParams != null) {
+      final PsiBuilder.Marker error=typeParams.precede();
+      error.errorBefore(JavaErrorMessages.message("unexpected.token"),codeBlock);
+    }
+    declaration.done(JavaElementType.CLASS_INITIALIZER);
+    return declaration;
+  }
+ else {
+    final PsiBuilder.Marker error;
+    if (typeParams != null) {
+      error=typeParams.precede();
+    }
+ else {
+      error=builder.mark();
+    }
+    error.error(JavaErrorMessages.message("expected.identifier.or.type"));
+    return modList;
+  }
+  if (!expect(builder,JavaTokenType.IDENTIFIER)) {
+    if (context == Context.CODE_BLOCK && modListInfo.second) {
+      declaration.rollbackTo();
+      return null;
+    }
+ else {
+      if (typeParams != null) {
+        typeParams.precede().errorBefore(JavaErrorMessages.message("unexpected.token"),type);
+      }
+      builder.error(JavaErrorMessages.message("expected.identifier"));
+      declaration.drop();
+      return modList;
+    }
+  }
+  if (builder.getTokenType() == JavaTokenType.LPARENTH) {
+    if (context == Context.CLASS || context == Context.ANNOTATION_INTERFACE) {
+      if (typeParams == null) {
+        emptyElement(type,JavaElementType.TYPE_PARAMETER_LIST);
+      }
+      return parseMethodFromLeftParenth(builder,declaration,(context == Context.ANNOTATION_INTERFACE));
+    }
+  }
+  if (typeParams != null) {
+    typeParams.precede().errorBefore(JavaErrorMessages.message("unexpected.token"),type);
+  }
+  return parseFieldOrLocalVariable(builder,declaration,context);
 }
