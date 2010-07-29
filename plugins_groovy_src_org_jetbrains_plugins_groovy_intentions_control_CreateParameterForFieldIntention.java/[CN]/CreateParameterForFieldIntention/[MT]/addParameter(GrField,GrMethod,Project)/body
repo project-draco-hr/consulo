@@ -1,0 +1,43 @@
+{
+  List<GrParameterInfo> parameters=new ArrayList<GrParameterInfo>();
+  GrParameter[] constructorParameters=constructor.getParameters();
+  for (int i=0; i < constructorParameters.length; i++) {
+    parameters.add(new GrParameterInfo(constructorParameters[i],i));
+  }
+  final String[] suggestedNames=JavaCodeStyleManager.getInstance(project).suggestVariableName(VariableKind.PARAMETER,selectedValue.getName(),null,null).names;
+  final DefaultGroovyVariableNameValidator nameValidator=new DefaultGroovyVariableNameValidator(constructor,Collections.<String>emptyList(),false);
+  String parameterName=ContainerUtil.find(suggestedNames,new Condition<String>(){
+    @Override public boolean value(    String name){
+      return nameValidator.validateName(name,false).length() > 0;
+    }
+  }
+);
+  if (parameterName == null) {
+    parameterName=nameValidator.validateName(suggestedNames[0],true);
+  }
+  parameters.add(new GrParameterInfo(parameterName,"null","",selectedValue.getTypeGroovy(),-1));
+  PsiClassType[] exceptionTypes=constructor.getThrowsList().getReferencedTypes();
+  ThrownExceptionInfo[] thrownExceptionInfos=new ThrownExceptionInfo[exceptionTypes.length];
+  for (int i=0; i < exceptionTypes.length; i++) {
+    new JavaThrownExceptionInfo(i,exceptionTypes[i]);
+  }
+  final GrChangeInfoImpl grChangeInfo=new GrChangeInfoImpl(constructor,null,null,constructor.getName(),parameters,thrownExceptionInfos,false);
+  final GrChangeSignatureProcessor processor=new GrChangeSignatureProcessor(project,grChangeInfo);
+  final Ref<Boolean> success=Ref.create(Boolean.FALSE);
+  processor.setPrepareSuccessfulSwingThreadCallback(new Runnable(){
+    @Override public void run(){
+      success.set(Boolean.TRUE);
+    }
+  }
+);
+  processor.run();
+  if (success.get()) {
+    final GrOpenBlock block=constructor.getBlock();
+    LOG.assertTrue(block != null);
+    final GrStatement statement=block.addStatementBefore(GroovyPsiElementFactory.getInstance(project).createStatementFromText(selectedValue.getName() + " = " + parameterName),null);
+    final GrReferenceExpression ref=(GrReferenceExpression)((GrAssignmentExpression)statement).getLValue();
+    if (!PsiManager.getInstance(project).areElementsEquivalent(ref.resolve(),selectedValue)) {
+      PsiUtil.qualifyMemberReference(ref,selectedValue,selectedValue.getName());
+    }
+  }
+}
