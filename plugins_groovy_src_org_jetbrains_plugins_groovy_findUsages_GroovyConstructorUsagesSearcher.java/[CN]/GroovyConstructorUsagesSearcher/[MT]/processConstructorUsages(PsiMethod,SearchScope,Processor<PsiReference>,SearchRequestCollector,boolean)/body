@@ -16,32 +16,31 @@
       }
     }
   }
-  final Set<PsiMethod> processedMethods=new ConcurrentHashSet<PsiMethod>();
-  ReferencesSearch.searchOptimized(clazz,searchScope,true,collector,true,new PairProcessor<PsiReference,SearchRequestCollector>(){
-    @Override public boolean process(    PsiReference ref,    SearchRequestCollector collector){
-      final PsiElement element=ref.getElement();
-      if (element instanceof GrCodeReferenceElement) {
-        if (!processGroovyConstructorUsages((GrCodeReferenceElement)element,constructor,consumer,ref,!searchGppCalls)) {
-          return false;
-        }
-      }
-      if (searchGppCalls) {
-        final PsiMethod method=getMethodToSearchForCallsWithLiteralArguments(element,clazz);
-        if (method != null && processedMethods.add(method)) {
-          processGppMethodCalls(clazz,constructor,consumer,searchScope,collector,method);
-        }
+  final PairProcessor<GrListOrMap,PsiClassType> literalProcessor=new PairProcessor<GrListOrMap,PsiClassType>(){
+    @Override public boolean process(    GrListOrMap list,    PsiClassType expectedType){
+      return checkListInstantiation(constructor,consumer,list,expectedType);
+    }
+  }
+;
+  final boolean mapsNeeded=false;
+  final Processor<GrNewExpression> newExpressionProcessor=new Processor<GrNewExpression>(){
+    @Override public boolean process(    GrNewExpression grNewExpression){
+      final PsiMethod resolvedConstructor=grNewExpression.resolveConstructor();
+      if (constructor.getManager().areElementsEquivalent(resolvedConstructor,constructor)) {
+        return consumer.process(grNewExpression.getReferenceElement());
       }
       return true;
     }
   }
-);
+;
+  processGroovyClassUsages(clazz,searchScope,collector,searchGppCalls,mapsNeeded,newExpressionProcessor,literalProcessor);
   if (clazz instanceof GrTypeDefinition) {
     if (!processConstructors(constructor,consumer,clazz,true)) {
       return;
     }
   }
-  DirectClassInheritorsSearch.search(clazz,onlyGroovy).forEach(new Processor<PsiClass>(){
-    public boolean process(    PsiClass inheritor){
+  DirectClassInheritorsSearch.search(clazz,onlyGroovy).forEach(new ReadActionProcessor<PsiClass>(){
+    @Override public boolean processInReadAction(    PsiClass inheritor){
       if (inheritor instanceof GrTypeDefinition) {
         if (!processConstructors(constructor,consumer,inheritor,false))         return false;
       }
