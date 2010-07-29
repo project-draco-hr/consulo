@@ -1,0 +1,86 @@
+{
+  Document document=myEditor.getDocument();
+  int maxOffset=document.getLineEndOffset(Math.min(defaultLogical.line,document.getLineCount() - 1));
+  int endIndex=myStorage.getSoftWrapIndex(maxOffset + 1);
+  if (endIndex < 0) {
+    endIndex=-endIndex - 1;
+  }
+  int softWrapLinesBeforeCurrentLogicalLine=0;
+  int softWrapLinesOnCurrentLogicalLine=0;
+  int lastSoftWrapLogicalLine=-1;
+  FoldingModel foldingModel=myEditor.getFoldingModel();
+  int i=0;
+  List<TextChangeImpl> softWraps=myStorage.getSoftWraps();
+  int max=Math.min(softWraps.size(),endIndex);
+  for (; i < max; i++) {
+    TextChange softWrap=softWraps.get(i);
+    if (!isVisible(softWrap)) {
+      continue;
+    }
+    int currentSoftWrapLineFeeds=StringUtil.countNewLines(softWrap.getText());
+    int softWrapLine=document.getLineNumber(softWrap.getStart());
+    int visualLineBeforeSoftWrapAppliance=myEditor.logicalToVisualPosition(new LogicalPosition(softWrapLine,0)).line + softWrapLinesBeforeCurrentLogicalLine + softWrapLinesOnCurrentLogicalLine;
+    if (visualLineBeforeSoftWrapAppliance > visual.line) {
+      softWrapLinesBeforeCurrentLogicalLine+=softWrapLinesOnCurrentLogicalLine;
+      int logicalLine=defaultLogical.line - softWrapLinesBeforeCurrentLogicalLine;
+      return new LogicalPosition(logicalLine,defaultLogical.column,softWrapLinesBeforeCurrentLogicalLine,0,0,getFoldedLinesBefore(document.getLineStartOffset(logicalLine)),visual.column - defaultLogical.column);
+    }
+    if (lastSoftWrapLogicalLine >= 0 && lastSoftWrapLogicalLine != softWrapLine) {
+      softWrapLinesBeforeCurrentLogicalLine+=softWrapLinesOnCurrentLogicalLine;
+      softWrapLinesOnCurrentLogicalLine=0;
+    }
+    lastSoftWrapLogicalLine=softWrapLine;
+    int visualLineAfterSoftWrapAppliance=visualLineBeforeSoftWrapAppliance + currentSoftWrapLineFeeds;
+    if (visualLineAfterSoftWrapAppliance < visual.line) {
+      softWrapLinesOnCurrentLogicalLine+=currentSoftWrapLineFeeds;
+      continue;
+    }
+    int startLineOffset=document.getLineStartOffset(softWrapLine);
+    int endLineOffset=document.getLineEndOffset(softWrapLine);
+    FoldRegion region=foldingModel.getCollapsedRegionAtOffset(endLineOffset);
+    while (region != null) {
+      int line=document.getLineNumber(region.getEndOffset());
+      endLineOffset=document.getLineEndOffset(line);
+      region=foldingModel.getCollapsedRegionAtOffset(endLineOffset);
+    }
+    CharSequence documentText=document.getCharsSequence();
+    Context context=new Context(visual,softWrapLine,softWrapLinesBeforeCurrentLogicalLine,softWrapLinesOnCurrentLogicalLine,visualLineBeforeSoftWrapAppliance,getFoldedLinesBefore(startLineOffset));
+    myFontTypeProvider.init(startLineOffset);
+    for (int j=startLineOffset; j < endLineOffset; j++) {
+      TextChange softWrapToProcess=myStorage.getSoftWrap(j);
+      if (softWrapToProcess != null && isVisible(softWrapToProcess)) {
+        context.beforeSoftWrap();
+        if (j >= softWrap.getStart()) {
+          CharSequence softWrapText=softWrapToProcess.getText();
+          for (int k=0; k < softWrapText.length(); k++) {
+            LogicalPosition result=context.onSoftWrapSymbol(softWrapText.charAt(k));
+            if (result != null) {
+              return result;
+            }
+          }
+        }
+        context.afterSoftWrap();
+      }
+      context.fontType=myFontTypeProvider.getFontType(j);
+      FoldRegion foldRegion=foldingModel.getCollapsedRegionAtOffset(j);
+      if (foldRegion != null) {
+        LogicalPosition result=context.onCollapsedFolding(foldRegion);
+        if (result != null) {
+          return result;
+        }
+        j=foldRegion.getEndOffset();
+      }
+      LogicalPosition result=context.onNonSoftWrapSymbol(documentText.charAt(j));
+      if (result != null) {
+        return result;
+      }
+    }
+    context.logicalColumn+=visual.column - context.visualColumn;
+    return context.build();
+  }
+  softWrapLinesBeforeCurrentLogicalLine+=softWrapLinesOnCurrentLogicalLine;
+  int logicalLine=defaultLogical.line - softWrapLinesBeforeCurrentLogicalLine;
+  int foldedLines=getFoldedLinesBefore(document.getLineStartOffset(logicalLine));
+  int foldingColumnDiff=visual.column - defaultLogical.column;
+  return new LogicalPosition(logicalLine,defaultLogical.column,softWrapLinesBeforeCurrentLogicalLine,0,0,foldedLines,foldingColumnDiff);
+}
