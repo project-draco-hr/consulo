@@ -11,33 +11,32 @@
         if (argType == null)         argType=TypesUtil.getJavaLangObject(argList);
         argTypes[i]=argType;
       }
-      if (thisType instanceof GrTupleType) {
+      if (thisType instanceof GrTupleType && argTypes.length == 1 && TypesUtil.isAssignable(PsiType.INT,argTypes[0],getManager(),getResolveScope())) {
         PsiType[] types=((GrTupleType)thisType).getParameters();
         return types.length == 1 ? types[0] : null;
       }
       PsiType overloadedOperatorType=null;
-      final GroovyResolveResult[] candidates=TypesUtil.getOverloadedOperatorCandidates(thisType,"getAt",this,argTypes);
+      GroovyResolveResult[] candidates=TypesUtil.getOverloadedOperatorCandidates(thisType,"getAt",this,argTypes);
+      if (candidates.length != 1) {
+        candidates=TypesUtil.getOverloadedOperatorCandidates(thisType,"getAt",this,new PsiType[]{new GrTupleType(argTypes,JavaPsiFacade.getInstance(getProject()),getResolveScope())});
+      }
       if (candidates.length == 1) {
         final PsiElement element=candidates[0].getElement();
         if (element instanceof PsiMethod) {
-          overloadedOperatorType=candidates[0].getSubstitutor().substitute(org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil.getSmartReturnType((PsiMethod)element));
-          if (overloadedOperatorType != null && !(element instanceof GrGdkMethod)) {
-            return overloadedOperatorType;
-          }
+          overloadedOperatorType=candidates[0].getSubstitutor().substitute(getSmartReturnType((PsiMethod)element));
         }
       }
-      if (thisType instanceof PsiArrayType) {
-        PsiType componentType=((PsiArrayType)thisType).getComponentType();
-        return TypesUtil.boxPrimitiveType(componentType,getManager(),getResolveScope());
+      PsiType componentType=null;
+      if (thisType instanceof PsiArrayType && argTypes.length == 1 && TypesUtil.isAssignable(PsiType.INT,argTypes[0],getManager(),getResolveScope())) {
+        componentType=TypesUtil.boxPrimitiveType(((PsiArrayType)thisType).getComponentType(),getManager(),getResolveScope());
       }
-      if (InheritanceUtil.isInheritor(thisType,CommonClassNames.JAVA_UTIL_LIST)) {
-        PsiType iterType=PsiUtil.extractIterableTypeParameter(thisType,true);
-        if (iterType != null)         return iterType;
+ else       if (InheritanceUtil.isInheritor(thisType,CommonClassNames.JAVA_UTIL_MAP) && argTypes.length == 1) {
+        componentType=substituteTypeParameter(thisType,CommonClassNames.JAVA_UTIL_MAP,1,true);
       }
-      if (InheritanceUtil.isInheritor(thisType,CommonClassNames.JAVA_UTIL_MAP)) {
-        return PsiUtil.substituteTypeParameter(thisType,CommonClassNames.JAVA_UTIL_MAP,1,true);
+      if (overloadedOperatorType != null && (componentType == null || !TypesUtil.isAssignable(overloadedOperatorType,componentType,getManager(),getResolveScope()))) {
+        return overloadedOperatorType;
       }
-      return overloadedOperatorType;
+      return componentType;
     }
   }
   return null;
