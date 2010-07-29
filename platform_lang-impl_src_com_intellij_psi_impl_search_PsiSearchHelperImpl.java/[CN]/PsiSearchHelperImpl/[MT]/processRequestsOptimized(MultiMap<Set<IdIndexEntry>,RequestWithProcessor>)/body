@@ -1,0 +1,43 @@
+{
+  if (singles.isEmpty()) {
+    return true;
+  }
+  if (singles.size() == 1) {
+    final Collection<RequestWithProcessor> requests=singles.get(singles.keySet().iterator().next());
+    if (requests.size() == 1) {
+      final RequestWithProcessor theOnly=requests.iterator().next();
+      return processSingleRequest(theOnly.first,theOnly.second);
+    }
+  }
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  if (progress != null) {
+    progress.pushState();
+    progress.setText(PsiBundle.message("psi.scanning.files.progress"));
+  }
+  final MultiMap<VirtualFile,RequestWithProcessor> candidateFiles=collectFiles(singles);
+  if (candidateFiles.isEmpty()) {
+    return true;
+  }
+  final Map<RequestWithProcessor,StringSearcher> searchers=new HashMap<RequestWithProcessor,StringSearcher>();
+  final Set<String> allWords=new TreeSet<String>();
+  for (  RequestWithProcessor singleRequest : candidateFiles.values()) {
+    searchers.put(singleRequest,new StringSearcher(singleRequest.first.word,singleRequest.first.caseSensitive,true));
+    allWords.add(singleRequest.first.word);
+  }
+  if (progress != null) {
+    progress.setText(PsiBundle.message("psi.search.for.word.progress",StringUtil.join(allWords,", ")));
+  }
+  return processPsiFileRoots(progress,new ArrayList<VirtualFile>(candidateFiles.keySet()),new Processor<PsiElement>(){
+    public boolean process(    PsiElement psiRoot){
+      final VirtualFile vfile=psiRoot.getContainingFile().getVirtualFile();
+      for (      final RequestWithProcessor singleRequest : candidateFiles.get(vfile)) {
+        StringSearcher searcher=searchers.get(singleRequest);
+        if (!LowLevelSearchUtil.processElementsContainingWordInElement(adaptProcessor(singleRequest.first,singleRequest.second),psiRoot,searcher,false,progress)) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+);
+}
