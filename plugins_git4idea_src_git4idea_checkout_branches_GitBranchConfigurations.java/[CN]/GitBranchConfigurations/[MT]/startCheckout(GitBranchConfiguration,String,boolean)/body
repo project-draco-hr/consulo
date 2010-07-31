@@ -1,0 +1,50 @@
+{
+  if (remote != null && configuration != null) {
+    throw new IllegalArgumentException("Either remote or configuration to checkout must be null");
+  }
+synchronized (myStateLock) {
+    final SpecialStatus status=calculateSpecialStatus();
+    if (status != SpecialStatus.NORMAL) {
+      throw new IllegalStateException("Checkout cannot be started due to special status (it must have been checked in UI): " + status);
+    }
+    myCheckoutIsInProgress=true;
+    updateSpecialStatus();
+  }
+  final String name=configuration != null ? configuration.getName() : remote == null ? "new configuration" : remote;
+  final String title="Checking out " + name;
+  ProgressManager.getInstance().run(new Task.Backgroundable(myProject,title,false){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      try {
+        final GitCheckoutProcess process=new GitCheckoutProcess(GitBranchConfigurations.this,myProject,myShelveManager,myDirtyScopeManager,myChangeManager,myProjectManager,indicator,configuration,remote,quick);
+        process.run();
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            final List<VcsException> exceptions=process.getExceptions();
+            String op=(process.isModify() ? "Modification" : "Checkout") + " of " + name;
+            if (!exceptions.isEmpty()) {
+              GitUIUtil.showTabErrors(myProject,title,exceptions);
+              ToolWindowManager.getInstance(myProject).notifyByBalloon(ChangesViewContentManager.TOOLWINDOW_ID,MessageType.ERROR,op + " failed.");
+            }
+ else             if (process.isCancelled()) {
+              ToolWindowManager.getInstance(myProject).notifyByBalloon(ChangesViewContentManager.TOOLWINDOW_ID,MessageType.WARNING,op + " was cancelled by user.");
+            }
+ else {
+              ToolWindowManager.getInstance(myProject).notifyByBalloon(ChangesViewContentManager.TOOLWINDOW_ID,MessageType.INFO,op + " complete.");
+            }
+          }
+        }
+);
+      }
+ catch (      Throwable t) {
+        LOG.error("Unexpected exception from checkout: ",t);
+      }
+ finally {
+synchronized (myStateLock) {
+          myCheckoutIsInProgress=false;
+          updateSpecialStatus();
+        }
+      }
+    }
+  }
+);
+}
