@@ -1,0 +1,109 @@
+{
+  final Project project=PlatformDataKeys.PROJECT.getData(e.getDataContext());
+  final ExportTestResultsConfiguration config=ExportTestResultsConfiguration.getInstance(project);
+  LOG.assertTrue(project != null);
+  String name=ExecutionBundle.message("export.test.results.filename",myRunConfiguration.getName());
+  String filename=name + "." + config.getExportFormat().getDefaultExtension();
+  ExportTestResultsDialog d=new ExportTestResultsDialog(project,config,filename);
+  d.show();
+  if (!d.isOK()) {
+    return;
+  }
+  filename=d.getFileName();
+  final String filename_=filename;
+  ProgressManager.getInstance().run(new Task.Backgroundable(project,ExecutionBundle.message("export.test.results.task.name"),false,new PerformInBackgroundOption(){
+    @Override public boolean shouldStartInBackground(){
+      return true;
+    }
+    @Override public void processSentToBackground(){
+    }
+  }
+){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      indicator.setIndeterminate(true);
+      File outputFolder;
+      if (StringUtil.isNotEmpty(config.getOutputFolder())) {
+        if (FileUtil.isAbsolute(config.getOutputFolder())) {
+          outputFolder=new File(config.getOutputFolder());
+        }
+ else {
+          outputFolder=new File(new File(project.getLocation()),config.getOutputFolder());
+        }
+      }
+ else {
+        outputFolder=new File(project.getLocation());
+      }
+      final File outputFile=new File(outputFolder,filename_);
+      final String outputText;
+      try {
+        outputText=getOutputText(project);
+        if (outputText == null) {
+          return;
+        }
+      }
+ catch (      IOException ex) {
+        LOG.warn(ex);
+        showBalloon(project,MessageType.ERROR,ExecutionBundle.message("export.test.results.failed",ex.getMessage()),null);
+        return;
+      }
+catch (      TransformerException ex) {
+        LOG.warn(ex);
+        showBalloon(project,MessageType.ERROR,ExecutionBundle.message("export.test.results.failed",ex.getMessage()),null);
+        return;
+      }
+catch (      SAXException ex) {
+        LOG.warn(ex);
+        showBalloon(project,MessageType.ERROR,ExecutionBundle.message("export.test.results.failed",ex.getMessage()),null);
+        return;
+      }
+      final Ref<VirtualFile> result=new Ref<VirtualFile>();
+      final Ref<String> error=new Ref<String>();
+      ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+        @Override public void run(){
+          result.set(ApplicationManager.getApplication().runWriteAction(new Computable<VirtualFile>(){
+            @Override public VirtualFile compute(){
+              outputFile.getParentFile().mkdirs();
+              final VirtualFile parent=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(outputFile.getParentFile());
+              if (parent == null || !parent.isValid()) {
+                error.set(ExecutionBundle.message("failed.to.create.output.file: ''" + outputFile.getPath() + "''"));
+                return null;
+              }
+              try {
+                VirtualFile result=parent.createChildData(this,outputFile.getName());
+                VfsUtil.saveText(result,outputText);
+                return result;
+              }
+ catch (              IOException e) {
+                LOG.warn(e);
+                error.set(e.getMessage());
+                return null;
+              }
+            }
+          }
+));
+        }
+      }
+,ModalityState.defaultModalityState());
+      if (!result.isNull()) {
+        if (config.isOpenResults()) {
+          openEditorOrBrowser(result.get(),project,config.getExportFormat() == ExportTestResultsConfiguration.ExportFormat.Xml);
+        }
+ else {
+          HyperlinkListener listener=new HyperlinkListener(){
+            @Override public void hyperlinkUpdate(            HyperlinkEvent e){
+              if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                openEditorOrBrowser(result.get(),project,config.getExportFormat() == ExportTestResultsConfiguration.ExportFormat.Xml);
+              }
+            }
+          }
+;
+          showBalloon(project,MessageType.INFO,ExecutionBundle.message("export.test.results.succeeded",outputFile.getName()),listener);
+        }
+      }
+ else {
+        showBalloon(project,MessageType.ERROR,ExecutionBundle.message("export.test.results.failed",error.get()),null);
+      }
+    }
+  }
+);
+}
