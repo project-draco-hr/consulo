@@ -1,35 +1,27 @@
 {
   final int maxScanIndex=Math.min(start + columnNumber + 1,end);
-  if (editor == null) {
-    return calcSoftWrapUnawareOffset(text,start,maxScanIndex,columnNumber,tabSize);
-  }
-  EditorEx editorImpl=(EditorEx)editor;
-  int offset=start;
-  IterationState state=new IterationState(editorImpl,offset,false);
-  int fontType=state.getMergedAttributes().getFontType();
-  int column=0;
-  int x=0;
-  int spaceSize=getSpaceWidth(fontType,editorImpl);
   SoftWrapModel softWrapModel=editor.getSoftWrapModel();
-  while (column < columnNumber) {
-    TextChange softWrap=softWrapModel.getSoftWrap(offset);
-    if (softWrap != null) {
-      x=softWrapModel.getSoftWrapIndentWidthInPixels(softWrap);
+  List<? extends TextChange> softWraps=softWrapModel.getSoftWrapsForRange(start,maxScanIndex);
+  int startToUse=start;
+  int x=0;
+  AtomicInteger currentColumn=new AtomicInteger();
+  for (  TextChange softWrap : softWraps) {
+    if (currentColumn.get() >= columnNumber) {
+      return startToUse;
     }
-    if (offset >= state.getEndOffset()) {
-      state.advance();
-      fontType=state.getMergedAttributes().getFontType();
+    int result=calcSoftWrapUnawareOffset(editor,text,startToUse,softWrap.getEnd(),columnNumber,tabSize,x,currentColumn);
+    if (result >= 0) {
+      return result;
     }
-    char c=offset < end ? text.charAt(offset++) : ' ';
-    int prevX=x;
-    if (c == '\t') {
-      x=nextTabStop(x,editorImpl);
-    }
- else {
-      x+=charWidth(c,fontType,editorImpl);
-    }
-    column+=columnsNumber(c,x,prevX,spaceSize);
+    startToUse=softWrap.getStart();
+    x=softWrapModel.getSoftWrapIndentWidthInPixels(softWrap);
   }
-  if (column > columnNumber)   offset--;
-  return offset;
+  if (currentColumn.get() >= columnNumber) {
+    return startToUse;
+  }
+  int result=calcSoftWrapUnawareOffset(editor,text,startToUse,end,columnNumber,tabSize,x,currentColumn);
+  if (result >= 0) {
+    return result;
+  }
+  return end;
 }
