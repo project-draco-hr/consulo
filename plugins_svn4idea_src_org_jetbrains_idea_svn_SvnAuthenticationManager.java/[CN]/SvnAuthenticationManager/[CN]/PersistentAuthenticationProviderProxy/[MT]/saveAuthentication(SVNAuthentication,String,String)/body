@@ -1,35 +1,28 @@
 {
-  try {
-    final SvnAuthWrapperEqualable newKey=new SvnAuthWrapperEqualable(auth);
-    final Long recent=myRewritePreventer.get(newKey);
-    final long currTime=System.currentTimeMillis();
-    File dir=new File(myAuthDir,kind);
-    String fileName=SVNFileUtil.computeChecksum(realm);
-    File authFile=new File(dir,fileName);
-    if ((!authFile.exists()) || recent == null || ((recent != null) && ((currTime - recent.longValue()) > ourRefreshInterval))) {
-      if (auth.isStorageAllowed() && ISVNAuthenticationManager.USERNAME != kind) {
-        try {
-          GuiUtils.runOrInvokeAndWait(new Runnable(){
-            public void run(){
-              checkContinueSaveCredentials(auth,kind,realm);
-            }
-          }
-);
-        }
- catch (        InvocationTargetException e) {
-          LOG.error(e);
-        }
-catch (        InterruptedException e) {
-          LOG.error(e);
+  final Boolean fromInteractive=ourJustEntered.get();
+  ourJustEntered.set(null);
+  if (!Boolean.TRUE.equals(fromInteractive)) {
+    return;
+  }
+  if ((!auth.isStorageAllowed()) || (USERNAME.equals(kind)))   return;
+  saveCredentialsIfAllowed(auth,kind,realm,new Runnable(){
+    @Override public void run(){
+      File dir=new File(myAuthDir,kind);
+      String fileName=SVNFileUtil.computeChecksum(realm);
+      File authFile=new File(dir,fileName);
+      myListener.getMulticaster().actualSaveWillBeTried(ProviderType.persistent,auth.getURL(),realm,kind);
+      try {
+        ((IPersistentAuthenticationProvider)myDelegate).saveAuthentication(auth,kind,realm);
+      }
+ catch (      SVNException e) {
+        if (myProject != null) {
+          ApplicationManager.getApplication().invokeLater(new ChangesViewBalloonProblemNotifier(myProject,"<b>Problem when storing Subversion credentials:</b>&nbsp;" + e.getMessage(),MessageType.ERROR));
         }
       }
-      ((DefaultSVNAuthenticationManager.IPersistentAuthenticationProvider)myDelegate).saveAuthentication(auth,kind,realm);
-      setWriteable(authFile);
-      myRewritePreventer.put(newKey,currTime);
+ finally {
+        setWriteable(authFile);
+      }
     }
   }
- catch (  final SVNException e) {
-    if (myProject == null)     return;
-    ApplicationManager.getApplication().invokeLater(new ChangesViewBalloonProblemNotifier(myProject,"<b>Problem when storing Subversion credentials:</b>&nbsp;" + e.getMessage(),MessageType.ERROR));
-  }
+);
 }
