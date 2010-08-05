@@ -1,23 +1,42 @@
 {
   String base=JavaTestUtil.getJavaTestDataPath() + "/compiler/notNullVerification/";
-  String path=base + getTestName(false);
+  final String baseClassName=getTestName(false);
+  String path=base + baseClassName;
   String javaPath=path + ".java";
-  String classPath=path + ".class";
+  File classesDir=FileUtil.createTempDirectory(baseClassName,"output");
   try {
-    com.sun.tools.javac.Main.compile(new String[]{"-classpath",base + "annotations.jar",javaPath});
-    FileInputStream stream=new FileInputStream(classPath);
-    byte[] content=FileUtil.adaptiveLoadBytes(stream);
-    stream.close();
-    ClassReader reader=new ClassReader(content,0,content.length);
-    ClassWriter writer=new PsiClassWriter(myFixture.getProject(),false);
-    final NotNullVerifyingInstrumenter instrumenter=new NotNullVerifyingInstrumenter(writer);
-    reader.accept(instrumenter,0);
-    assertTrue(instrumenter.isModification());
+    com.sun.tools.javac.Main.compile(new String[]{"-classpath",base + "annotations.jar","-d",classesDir.getAbsolutePath(),javaPath});
+    Class mainClass=null;
+    final File[] files=classesDir.listFiles();
+    boolean modified=false;
     MyClassLoader classLoader=new MyClassLoader(getClass().getClassLoader());
-    byte[] instrumented=writer.toByteArray();
-    return classLoader.doDefineClass(getTestName(false),instrumented);
+    for (    File file : files) {
+      final String fileName=file.getName();
+      FileInputStream stream=new FileInputStream(file);
+      byte[] content;
+      try {
+        content=FileUtil.adaptiveLoadBytes(stream);
+      }
+  finally {
+        stream.close();
+      }
+      ClassReader reader=new ClassReader(content,0,content.length);
+      ClassWriter writer=new PsiClassWriter(myFixture.getProject(),false);
+      final NotNullVerifyingInstrumenter instrumenter=new NotNullVerifyingInstrumenter(writer);
+      reader.accept(instrumenter,0);
+      modified|=instrumenter.isModification();
+      byte[] instrumented=writer.toByteArray();
+      final String className=FileUtil.getNameWithoutExtension(fileName);
+      final Class aClass=classLoader.doDefineClass(className,instrumented);
+      if (className.equals(baseClassName)) {
+        mainClass=aClass;
+      }
+    }
+    assertTrue(modified);
+    assertNotNull("Class " + baseClassName + " not found!",mainClass);
+    return mainClass;
   }
   finally {
-    FileUtil.delete(new File(classPath));
+    FileUtil.delete(classesDir);
   }
 }
