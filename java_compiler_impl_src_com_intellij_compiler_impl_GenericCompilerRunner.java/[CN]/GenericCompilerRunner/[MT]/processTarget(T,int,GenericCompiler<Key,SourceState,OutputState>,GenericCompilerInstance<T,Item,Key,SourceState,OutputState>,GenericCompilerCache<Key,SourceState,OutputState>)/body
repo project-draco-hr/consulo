@@ -3,8 +3,8 @@
     LOG.debug("Processing target '" + target + "' (id="+ targetId+ ")");
   }
   final List<Item> items=instance.getItems(target);
-  if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0)   return true;
-  final List<GenericCompilerItemState<Item,SourceState,OutputState>> toProcess=new ArrayList<GenericCompilerItemState<Item,SourceState,OutputState>>();
+  checkForErrorsOrCanceled();
+  final List<GenericCompilerProcessingItem<Item,SourceState,OutputState>> toProcess=new ArrayList<GenericCompilerProcessingItem<Item,SourceState,OutputState>>();
   final THashSet<Key> keySet=new THashSet<Key>(new SourceItemHashingStrategy<Key>(compiler));
   final Ref<IOException> exception=Ref.create(null);
   DumbService.getInstance(myProject).waitForSmartMode();
@@ -20,7 +20,7 @@
           final OutputState outputState=data != null ? data.myOutputState : null;
           if (myForceCompile || sourceState == null || !item.isSourceUpToDate(sourceState) || outputState == null || !item.isOutputUpToDate(outputState)) {
             sourceStates.put(item,item.computeSourceState());
-            toProcess.add(new GenericCompilerItemState<Item,SourceState,OutputState>(item,sourceState,outputState));
+            toProcess.add(new GenericCompilerProcessingItem<Item,SourceState,OutputState>(item,sourceState,outputState));
           }
         }
       }
@@ -52,10 +52,10 @@
   if (myOnlyCheckStatus) {
     throw new CompileDriver.ExitException(CompileDriver.ExitStatus.CANCELLED);
   }
-  List<GenericCompilerItemState<Key,SourceState,OutputState>> obsoleteItems=new ArrayList<GenericCompilerItemState<Key,SourceState,OutputState>>();
+  List<GenericCompilerCacheState<Key,SourceState,OutputState>> obsoleteItems=new ArrayList<GenericCompilerCacheState<Key,SourceState,OutputState>>();
   for (  Key key : toRemove) {
     final GenericCompilerCache.PersistentStateData<SourceState,OutputState> data=cache.getState(targetId,key);
-    obsoleteItems.add(new GenericCompilerItemState<Key,SourceState,OutputState>(key,data.mySourceState,data.myOutputState));
+    obsoleteItems.add(new GenericCompilerCacheState<Key,SourceState,OutputState>(key,data.mySourceState,data.myOutputState));
   }
   final List<Item> processedItems=new ArrayList<Item>();
   final List<File> toRefresh=new ArrayList<File>();
@@ -68,25 +68,28 @@
     }
   }
 );
-  if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-    return true;
-  }
-  for (  Key key : toRemove) {
-    cache.remove(targetId,key);
-  }
-  CompilerUtil.refreshIOFiles(toRefresh);
-  final RunResult runResult=new ReadAction(){
-    protected void run(    final Result result) throws Throwable {
-      for (      Item item : processedItems) {
-        SourceState sourceState=sourceStates.get(item);
-        if (sourceState == null) {
-          sourceState=item.computeSourceState();
-        }
-        cache.putState(targetId,item.getKey(),sourceState,item.computeOutputState());
+  checkForErrorsOrCanceled();
+  CompilerUtil.runInContext(myContext,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<IOException>(){
+    @Override public void run() throws IOException {
+      for (      Key key : toRemove) {
+        cache.remove(targetId,key);
       }
+      CompilerUtil.refreshIOFiles(toRefresh);
+      final RunResult runResult=new ReadAction(){
+        protected void run(        final Result result) throws Throwable {
+          for (          Item item : processedItems) {
+            SourceState sourceState=sourceStates.get(item);
+            if (sourceState == null) {
+              sourceState=item.computeSourceState();
+            }
+            cache.putState(targetId,item.getKey(),sourceState,item.computeOutputState());
+          }
+        }
+      }
+.executeSilently();
+      Throwables.propagateIfPossible(runResult.getThrowable(),IOException.class);
     }
   }
-.executeSilently();
-  Throwables.propagateIfPossible(runResult.getThrowable(),IOException.class);
+);
   return true;
 }
