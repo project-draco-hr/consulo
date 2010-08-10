@@ -1,5 +1,5 @@
 {
-  GenericCompilerCache<Key,SourceState,OutputState> cache=CompilerCacheManager.getInstance(myProject).getGenericCompilerCache(compiler);
+  final GenericCompilerCache<Key,SourceState,OutputState> cache=CompilerCacheManager.getInstance(myProject).getGenericCompilerCache(compiler);
   GenericCompilerPersistentData data=new GenericCompilerPersistentData(getGenericCompilerCacheDir(myProject,compiler),compiler.getVersion());
   if (data.isVersionChanged()) {
     LOG.info("Clearing cache for " + compiler.getDescription());
@@ -10,22 +10,25 @@
     targetsToRemove.remove(target.getId());
   }
   if (!myOnlyCheckStatus) {
-    for (    String target : targetsToRemove) {
-      int id=data.removeId(target);
+    for (    final String target : targetsToRemove) {
+      final int id=data.removeId(target);
       if (LOG.isDebugEnabled()) {
         LOG.debug("Removing obsolete target '" + target + "' (id="+ id+ ")");
       }
-      List<Key> keys=new ArrayList<Key>();
-      cache.processSources(id,new CommonProcessors.CollectProcessor<Key>(keys));
-      List<GenericCompilerItemState<Key,SourceState,OutputState>> obsoleteSources=new ArrayList<GenericCompilerItemState<Key,SourceState,OutputState>>();
-      for (      Key key : keys) {
-        final GenericCompilerCache.PersistentStateData<SourceState,OutputState> state=cache.getState(id,key);
-        obsoleteSources.add(new GenericCompilerItemState<Key,SourceState,OutputState>(key,state.mySourceState,state.myOutputState));
+      final List<Key> keys=new ArrayList<Key>();
+      CompilerUtil.runInContext(myContext,"Processing obsolete targets...",new ThrowableRunnable<IOException>(){
+        @Override public void run() throws IOException {
+          cache.processSources(id,new CommonProcessors.CollectProcessor<Key>(keys));
+          List<GenericCompilerItemState<Key,SourceState,OutputState>> obsoleteSources=new ArrayList<GenericCompilerItemState<Key,SourceState,OutputState>>();
+          for (          Key key : keys) {
+            final GenericCompilerCache.PersistentStateData<SourceState,OutputState> state=cache.getState(id,key);
+            obsoleteSources.add(new GenericCompilerItemState<Key,SourceState,OutputState>(key,state.mySourceState,state.myOutputState));
+          }
+          instance.processObsoleteTarget(target,obsoleteSources);
+        }
       }
-      instance.processObsoleteTarget(target,obsoleteSources);
-      if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-        return true;
-      }
+);
+      checkForErrorsOrCanceled();
       for (      Key key : keys) {
         cache.remove(id,key);
       }

@@ -3,7 +3,7 @@
     LOG.debug("Processing target '" + target + "' (id="+ targetId+ ")");
   }
   final List<Item> items=instance.getItems(target);
-  if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0)   return true;
+  checkForErrorsOrCanceled();
   final List<GenericCompilerItemState<Item,SourceState,OutputState>> toProcess=new ArrayList<GenericCompilerItemState<Item,SourceState,OutputState>>();
   final THashSet<Key> keySet=new THashSet<Key>(new SourceItemHashingStrategy<Key>(compiler));
   final Ref<IOException> exception=Ref.create(null);
@@ -68,25 +68,28 @@
     }
   }
 );
-  if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-    return true;
-  }
-  for (  Key key : toRemove) {
-    cache.remove(targetId,key);
-  }
-  CompilerUtil.refreshIOFiles(toRefresh);
-  final RunResult runResult=new ReadAction(){
-    protected void run(    final Result result) throws Throwable {
-      for (      Item item : processedItems) {
-        SourceState sourceState=sourceStates.get(item);
-        if (sourceState == null) {
-          sourceState=item.computeSourceState();
-        }
-        cache.putState(targetId,item.getKey(),sourceState,item.computeOutputState());
+  checkForErrorsOrCanceled();
+  CompilerUtil.runInContext(myContext,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<IOException>(){
+    @Override public void run() throws IOException {
+      for (      Key key : toRemove) {
+        cache.remove(targetId,key);
       }
+      CompilerUtil.refreshIOFiles(toRefresh);
+      final RunResult runResult=new ReadAction(){
+        protected void run(        final Result result) throws Throwable {
+          for (          Item item : processedItems) {
+            SourceState sourceState=sourceStates.get(item);
+            if (sourceState == null) {
+              sourceState=item.computeSourceState();
+            }
+            cache.putState(targetId,item.getKey(),sourceState,item.computeOutputState());
+          }
+        }
+      }
+.executeSilently();
+      Throwables.propagateIfPossible(runResult.getThrowable(),IOException.class);
     }
   }
-.executeSilently();
-  Throwables.propagateIfPossible(runResult.getThrowable(),IOException.class);
+);
   return true;
 }
