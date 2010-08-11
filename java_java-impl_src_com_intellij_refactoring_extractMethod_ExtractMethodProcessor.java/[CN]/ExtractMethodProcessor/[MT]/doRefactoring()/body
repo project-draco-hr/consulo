@@ -21,10 +21,29 @@
   int line=myEditor.getCaretModel().getLogicalPosition().line;
   LogicalPosition pos=new LogicalPosition(0,0);
   myEditor.getCaretModel().moveToLogicalPosition(pos);
-  SearchScope processConflictsScope=myMethodVisibility.equals(PsiModifier.PRIVATE) ? new LocalSearchScope(myTargetClass) : GlobalSearchScope.projectScope(myProject);
-  final Map<PsiMethodCallExpression,PsiMethod> overloadsResolveMap=ExtractMethodUtil.encodeOverloadTargets(myTargetClass,processConflictsScope,myMethodName,myCodeFragmentMember);
-  doExtract();
-  ExtractMethodUtil.decodeOverloadTargets(overloadsResolveMap,myExtractedMethod,myCodeFragmentMember);
+  final SearchScope processConflictsScope=myMethodVisibility.equals(PsiModifier.PRIVATE) ? new LocalSearchScope(myTargetClass) : GlobalSearchScope.projectScope(myProject);
+  final Map<PsiMethodCallExpression,PsiMethod> overloadsResolveMap=new HashMap<PsiMethodCallExpression,PsiMethod>();
+  final Runnable collectOverloads=new Runnable(){
+    public void run(){
+      overloadsResolveMap.putAll(ExtractMethodUtil.encodeOverloadTargets(myTargetClass,processConflictsScope,myMethodName,myCodeFragmentMember));
+    }
+  }
+;
+  final Runnable extract=new Runnable(){
+    public void run(){
+      doExtract();
+      ExtractMethodUtil.decodeOverloadTargets(overloadsResolveMap,myExtractedMethod,myCodeFragmentMember);
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isWriteAccessAllowed()) {
+    collectOverloads.run();
+    extract.run();
+  }
+ else {
+    if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(collectOverloads,"Collect overloads...",true,myProject))     return;
+    ApplicationManager.getApplication().runWriteAction(extract);
+  }
   LogicalPosition pos1=new LogicalPosition(line,col);
   myEditor.getCaretModel().moveToLogicalPosition(pos1);
   int offset=myMethodCall.getMethodExpression().getTextRange().getStartOffset();
