@@ -1,0 +1,48 @@
+{
+  if (file instanceof PsiCompiledElement) {
+    file=(PsiFile)((PsiCompiledElement)file).getMirror();
+  }
+  PsiDocumentManager documentManager=PsiDocumentManager.getInstance(myCodeStyleManager.getProject());
+  Document document=documentManager.getDocument(file);
+  if (document instanceof DocumentWindow) {
+    final DocumentWindow documentWindow=(DocumentWindow)document;
+    if (range != null) {
+      range=new TextRange(documentWindow.injectedToHost(range.getStartOffset()),documentWindow.injectedToHost(range.getEndOffset()));
+    }
+    if (offset != -1) {
+      offset=documentWindow.injectedToHost(offset);
+    }
+    return adjustResultForInjected(perform(InjectedLanguageUtil.getTopLevelFile(file),offset,range,defaultValue),documentWindow);
+  }
+  final PsiFile templateFile=PsiUtilBase.getTemplateLanguageFile(file);
+  if (templateFile != null) {
+    file=templateFile;
+    document=documentManager.getDocument(templateFile);
+  }
+  PsiElement element=null;
+  if (offset != -1) {
+    element=CodeStyleManagerImpl.findElementInTreeWithFormatterEnabled(file,offset);
+    if (element == null && offset != file.getTextLength()) {
+      return defaultValue;
+    }
+    if (isInsidePlainComment(offset,element)) {
+      return computeValueInsidePlainComment(file,offset,defaultValue);
+    }
+  }
+  final FormattingModelBuilder builder=LanguageFormatting.INSTANCE.forContext(file);
+  FormattingModelBuilder elementBuilder=element != null ? LanguageFormatting.INSTANCE.forContext(element) : builder;
+  if (builder != null && elementBuilder != null) {
+    mySettings=CodeStyleSettingsManager.getSettings(myCodeStyleManager.getProject());
+    myIndentOptions=mySettings.getIndentOptions(file.getFileType());
+    mySignificantRange=offset != -1 ? getSignificantRange(file,offset) : null;
+    myModel=builder.createModel(file,mySettings);
+    if (document != null && useDocumentBaseFormattingModel()) {
+      myModel=new DocumentBasedFormattingModel(myModel.getRootBlock(),document,myCodeStyleManager.getProject(),mySettings,file.getFileType(),file);
+    }
+    final T result=doPerform(offset,range);
+    if (result != null) {
+      return result;
+    }
+  }
+  return defaultValue;
+}
