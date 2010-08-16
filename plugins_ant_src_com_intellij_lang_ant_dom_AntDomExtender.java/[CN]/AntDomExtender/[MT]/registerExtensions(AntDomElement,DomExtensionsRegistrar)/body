@@ -8,22 +8,25 @@
       return;
     }
     final ReflectedProject reflected=ReflectedProject.getProject(antProject.getClassLoader());
+    if (reflected.getProject() == null) {
+      return;
+    }
     final DomGenericInfo genericInfo=antDomElement.getGenericInfo();
-    AntIntrospector parentElementIntrospector=null;
+    AntIntrospector classBasedIntrospector=null;
     final Hashtable<String,Class> coreTaskDefs=reflected.getTaskDefinitions();
     final Hashtable<String,Class> coreTypeDefs=reflected.getDataTypeDefinitions();
     if ("project".equals(tagName)) {
-      parentElementIntrospector=getIntrospector(reflected.getProject().getClass());
+      classBasedIntrospector=getIntrospector(reflected.getProject().getClass());
     }
  else     if ("target".equals(tagName)) {
-      parentElementIntrospector=getIntrospector(reflected.getTargetClass());
+      classBasedIntrospector=getIntrospector(reflected.getTargetClass());
     }
  else {
       if (antDomElement instanceof AntDomCustomElement) {
         final AntDomCustomElement custom=(AntDomCustomElement)antDomElement;
         final Class definitionClass=custom.getDefinitionClass();
         if (definitionClass != null) {
-          parentElementIntrospector=getIntrospector(definitionClass);
+          classBasedIntrospector=getIntrospector(definitionClass);
         }
       }
  else {
@@ -39,16 +42,31 @@
           }
         }
         if (elemType != null) {
-          parentElementIntrospector=getIntrospector(elemType);
+          classBasedIntrospector=getIntrospector(elemType);
         }
       }
     }
-    if (parentElementIntrospector != null) {
-      final Enumeration attributes=parentElementIntrospector.getAttributes();
-      while (attributes.hasMoreElements()) {
-        registerAttribute(registrar,genericInfo,(String)attributes.nextElement());
+    AbstractIntrospector parentIntrospector=null;
+    if (classBasedIntrospector != null) {
+      parentIntrospector=new ClassIntrospectorAdapter(classBasedIntrospector);
+    }
+ else {
+      if (antDomElement instanceof AntDomCustomElement) {
+        final AntDomNamedElement declaringElement=((AntDomCustomElement)antDomElement).getDeclaringElement();
+        if (declaringElement instanceof AntDomMacroDef) {
+          parentIntrospector=new MacrodefIntrospectorAdapter((AntDomMacroDef)declaringElement);
+        }
+ else         if (declaringElement instanceof AntDomMacrodefElement) {
+          parentIntrospector=ContainerElementIntrospector.INSTANCE;
+        }
+ else         if (declaringElement instanceof AntDomScriptDef) {
+          parentIntrospector=new ScriptdefIntrospectorAdapter((AntDomScriptDef)declaringElement);
+        }
       }
-      if ("project".equals(tagName) || parentElementIntrospector.isContainer()) {
+    }
+    if (parentIntrospector != null) {
+      defineAttributes(xmlTag,registrar,genericInfo,parentIntrospector);
+      if ("project".equals(tagName) || parentIntrospector.isContainer()) {
         if (coreTaskDefs != null) {
           for (          Map.Entry<String,Class> entry : coreTaskDefs.entrySet()) {
             final DomExtension extension=registerChild(registrar,genericInfo,entry.getKey());
@@ -76,12 +94,12 @@
         registrar.registerCustomChildrenExtension(AntDomCustomElement.class,new AntCustomTagNameDescriptor());
       }
  else {
-        final Enumeration<String> nested=parentElementIntrospector.getNestedElements();
-        while (nested.hasMoreElements()) {
-          final String nestedElementName=nested.nextElement();
+        final Iterator<String> nested=parentIntrospector.getNestedElementsIterator();
+        while (nested.hasNext()) {
+          final String nestedElementName=nested.next();
           final DomExtension extension=registerChild(registrar,genericInfo,nestedElementName);
           if (extension != null) {
-            final Class type=parentElementIntrospector.getElementType(nestedElementName);
+            final Class type=parentIntrospector.getNestedElementType(nestedElementName);
             if (type != null) {
               extension.putUserData(ELEMENT_IMPL_CLASS_KEY,type);
             }
@@ -100,6 +118,7 @@
             }
           }
         }
+        registrar.registerCustomChildrenExtension(AntDomCustomElement.class,new AntCustomTagNameDescriptor());
       }
     }
   }
