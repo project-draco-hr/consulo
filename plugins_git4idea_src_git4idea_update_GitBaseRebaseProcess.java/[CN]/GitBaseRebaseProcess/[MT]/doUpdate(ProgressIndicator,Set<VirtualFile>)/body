@@ -20,6 +20,7 @@
           final Ref<Boolean> cancelled=new Ref<Boolean>(false);
           final Ref<Throwable> ex=new Ref<Throwable>();
           saveRootChangesBeforeUpdate(root);
+          boolean hadAbortErrors=false;
           try {
             markStart(root);
             try {
@@ -35,7 +36,7 @@
                 }
                 cleanupHandler(root,h);
               }
-              while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get()) {
+              while (rebaseConflictDetector.isRebaseConflict() && !cancelled.get() && !hadAbortErrors) {
                 mergeFiles(root,cancelled,ex,true);
                 if (ex.get() != null) {
                   throw GitUtil.rethrowVcsException(ex.get());
@@ -47,18 +48,19 @@
                 if (cancelled.get()) {
                   break;
                 }
-                doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
-                while (rebaseConflictDetector.isNoChange()) {
+                Collection<VcsException> exceptions=doRebase(progressIndicator,root,rebaseConflictDetector,"--continue");
+                while (rebaseConflictDetector.isNoChange() && !hasAbortExceptions(exceptions)) {
                   if (skippedCommits == null) {
                     skippedCommits=new ArrayList<GitRebaseUtils.CommitInfo>();
                     mySkippedCommits.put(root,skippedCommits);
                   }
                   skippedCommits.add(GitRebaseUtils.getCurrentRebaseCommit(root));
-                  doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
+                  exceptions=doRebase(progressIndicator,root,rebaseConflictDetector,"--skip");
                 }
+                hadAbortErrors=hasAbortExceptions(exceptions);
               }
-              if (cancelled.get()) {
-                myExceptions.add(new VcsException("The update process was cancelled for " + root.getPresentableUrl()));
+              if (cancelled.get() || hadAbortErrors) {
+                myExceptions.add(new VcsException("The update process was " + (hadAbortErrors ? "aborted" : "cancelled") + " for "+ root.getPresentableUrl()));
                 doRebase(progressIndicator,root,rebaseConflictDetector,"--abort");
                 progressIndicator.setText2("Refreshing files for the root " + root.getPath());
                 root.refresh(false,true);
