@@ -1,0 +1,48 @@
+{
+  Project project=editor.getProject();
+  Document document=editor.getDocument();
+  AutoWrapChange change=myAutoWrapChanges.get(document);
+  if (change != null) {
+    change.charTyped(editor,modificationStampBeforeTyping);
+  }
+  if (project == null || !editor.getSettings().isWrapWhenTypingReachesRightMargin(project)) {
+    return;
+  }
+  CaretModel caretModel=editor.getCaretModel();
+  int caretOffset=caretModel.getOffset();
+  int line=document.getLineNumber(caretOffset);
+  int startOffset=document.getLineStartOffset(line);
+  int endOffset=document.getLineEndOffset(line);
+  int margin=editor.getSettings().getRightMargin(project);
+  VisualPosition visEndLinePosition=editor.offsetToVisualPosition(endOffset);
+  if (margin > visEndLinePosition.column) {
+    return;
+  }
+  LineWrapPositionStrategy strategy=LanguageLineWrapPositionStrategy.INSTANCE.forEditor(editor);
+  if (change == null) {
+    change=new AutoWrapChange();
+    myAutoWrapChanges.put(document,change);
+  }
+ else {
+    if (!change.isEmpty()) {
+      document.replaceString(change.change.getStart(),change.change.getEnd(),change.change.getText());
+    }
+    change.reset();
+  }
+  change.update(editor);
+  int reservedColumns=3;
+  int maxPreferredOffset=editor.logicalPositionToOffset(editor.visualToLogicalPosition(new VisualPosition(caretModel.getVisualPosition().line,margin - reservedColumns)));
+  int documentLengthBeforeWrapping=document.getTextLength();
+  int wrapOffset=strategy.calculateWrapPosition(document.getCharsSequence(),startOffset,endOffset,maxPreferredOffset,false);
+  caretModel.moveToOffset(wrapOffset);
+  EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor,dataContext);
+  int wrapIntroducedSymbolsNumber=document.getTextLength() - documentLengthBeforeWrapping;
+  change.modificationStamp=document.getModificationStamp();
+  change.change.setStart(wrapOffset);
+  change.change.setEnd(wrapOffset + wrapIntroducedSymbolsNumber);
+  int newCaretOffset=caretOffset;
+  if (wrapOffset <= caretOffset) {
+    newCaretOffset+=wrapIntroducedSymbolsNumber;
+  }
+  caretModel.moveToOffset(newCaretOffset);
+}
