@@ -1,6 +1,7 @@
 {
   final Ref<PsiExpression> selectedExpression=Ref.create(null);
   final Ref<TextRange> currentRange=Ref.create(null);
+  final Ref<Value> preCalculatedValue=Ref.create(null);
   PsiDocumentManager.getInstance(project).commitAndRunReadAction(new Runnable(){
     public void run(){
       final int offset=calculateOffset(editor,point);
@@ -22,14 +23,47 @@
       }
       if (currentRange.get() == null) {
         PsiElement elementAtCursor=psiFile.findElementAt(offset);
-        if (elementAtCursor == null)         return;
+        if (elementAtCursor == null) {
+          return;
+        }
         Pair<PsiExpression,TextRange> pair=findExpression(elementAtCursor,type == ValueHintType.MOUSE_CLICK_HINT || type == ValueHintType.MOUSE_ALT_OVER_HINT);
-        if (pair == null)         return;
+        if (pair == null) {
+          if (type == ValueHintType.MOUSE_OVER_HINT) {
+            final DebuggerSession debuggerSession=DebuggerManagerEx.getInstanceEx(project).getContext().getDebuggerSession();
+            if (debuggerSession != null && debuggerSession.isPaused()) {
+              final Pair<Method,Value> lastExecuted=debuggerSession.getProcess().getLastExecutedMethod();
+              if (lastExecuted != null) {
+                final Method method=lastExecuted.getFirst();
+                if (method != null) {
+                  final Pair<PsiExpression,TextRange> expressionPair=findExpression(elementAtCursor,true);
+                  if (expressionPair != null && expressionPair.getFirst() instanceof PsiMethodCallExpression) {
+                    final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)expressionPair.getFirst();
+                    final PsiMethod psiMethod=methodCallExpression.resolveMethod();
+                    if (psiMethod != null) {
+                      final JVMName jvmSignature=JVMNameUtil.getJVMSignature(psiMethod);
+                      try {
+                        if (method.name().equals(psiMethod.getName()) && method.signature().equals(jvmSignature.getName(debuggerSession.getProcess()))) {
+                          pair=expressionPair;
+                          preCalculatedValue.set(lastExecuted.getSecond());
+                        }
+                      }
+ catch (                      EvaluateException ignored) {
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (pair == null) {
+          return;
+        }
         selectedExpression.set(pair.getFirst());
         currentRange.set(pair.getSecond());
       }
     }
   }
 );
-  return Pair.create(selectedExpression.get(),currentRange.get());
+  return Trinity.create(selectedExpression.get(),currentRange.get(),preCalculatedValue.get());
 }
