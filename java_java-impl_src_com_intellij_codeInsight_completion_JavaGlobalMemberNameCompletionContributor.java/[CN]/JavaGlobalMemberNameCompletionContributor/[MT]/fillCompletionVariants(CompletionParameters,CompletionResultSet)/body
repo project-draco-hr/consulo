@@ -1,0 +1,52 @@
+{
+  if (parameters.getCompletionType() != CompletionType.CLASS_NAME) {
+    return;
+  }
+  final PrefixMatcher matcher=result.getPrefixMatcher();
+  final String prefix=matcher.getPrefix();
+  if (prefix.length() == 0 || !Character.isLowerCase(prefix.charAt(0))) {
+    return;
+  }
+  final PsiElement position=parameters.getPosition();
+  final PsiElement parent=position.getParent();
+  if (!(parent instanceof PsiReferenceExpression)) {
+    return;
+  }
+  final PsiReferenceExpression referenceExpression=(PsiReferenceExpression)parent;
+  if (referenceExpression.isQualified()) {
+    return;
+  }
+  final Project project=position.getProject();
+  final GlobalSearchScope scope=GlobalSearchScope.allScope(project);
+  final PsiShortNamesCache namesCache=JavaPsiFacade.getInstance(project).getShortNamesCache();
+  final PsiResolveHelper resolveHelper=JavaPsiFacade.getInstance(project).getResolveHelper();
+  final String[] methodNames=ApplicationManager.getApplication().runReadAction(new Computable<String[]>(){
+    public String[] compute(){
+      return namesCache.getAllMethodNames();
+    }
+  }
+);
+  for (  final String methodName : methodNames) {
+    if (matcher.prefixMatches(methodName)) {
+      final PsiMethod[] methods=ApplicationManager.getApplication().runReadAction(new Computable<PsiMethod[]>(){
+        public PsiMethod[] compute(){
+          return namesCache.getMethodsByName(methodName,scope);
+        }
+      }
+);
+      for (      final PsiMethod method : methods) {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          public void run(){
+            if (method.hasModifierProperty(PsiModifier.STATIC) && resolveHelper.isAccessible(method,position,null)) {
+              final PsiClass containingClass=method.getContainingClass();
+              if (containingClass != null) {
+                result.addElement(LookupElementDecorator.withInsertHandler(LookupElementDecorator.withRenderer(LookupElementBuilder.create(method),STATIC_METHOD_RENDERER),STATIC_METHOD_INSERT_HANDLER));
+              }
+            }
+          }
+        }
+);
+      }
+    }
+  }
+}
