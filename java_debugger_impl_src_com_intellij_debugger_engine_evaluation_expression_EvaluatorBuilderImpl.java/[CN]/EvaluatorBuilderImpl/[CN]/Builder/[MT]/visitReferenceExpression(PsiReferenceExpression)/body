@@ -3,7 +3,8 @@
     LOG.debug("visitReferenceExpression " + expression);
   }
   PsiExpression qualifier=expression.getQualifierExpression();
-  PsiElement element=expression.resolve();
+  JavaResolveResult resolveResult=expression.advancedResolve(true);
+  PsiElement element=resolveResult.getElement();
   if (element instanceof PsiLocalVariable || element instanceof PsiParameter) {
     final Value labeledValue=element.getUserData(CodeFragmentFactoryContextWrapper.LABEL_VARIABLE_VALUE_KEY);
     if (labeledValue != null) {
@@ -11,7 +12,7 @@
       return;
     }
     final PsiFile containingFile=element.getContainingFile();
-    if (containingFile instanceof PsiCodeFragment && myCurrentFragmentEvaluator != null && myVisitedFragments.contains(((PsiCodeFragment)containingFile))) {
+    if (containingFile instanceof PsiCodeFragment && myCurrentFragmentEvaluator != null && myVisitedFragments.contains(containingFile)) {
       myResult=new SyntheticVariableEvaluator(myCurrentFragmentEvaluator,((PsiVariable)element).getName());
       return;
     }
@@ -37,10 +38,12 @@
       aClass=getOuterClass(aClass);
     }
     if (aClass != null) {
-      if (psiVar.getInitializer() != null) {
-        Object value=JavaPsiFacade.getInstance(psiVar.getProject()).getConstantEvaluationHelper().computeConstantExpression(psiVar.getInitializer());
+      PsiExpression initializer=psiVar.getInitializer();
+      if (initializer != null) {
+        Object value=JavaPsiFacade.getInstance(psiVar.getProject()).getConstantEvaluationHelper().computeConstantExpression(initializer);
         if (value != null) {
-          myResult=new LiteralEvaluator(value,psiVar.getType().getCanonicalText());
+          PsiType type=resolveResult.getSubstitutor().substitute(psiVar.getType());
+          myResult=new LiteralEvaluator(value,type.getCanonicalText());
           return;
         }
       }
@@ -50,13 +53,14 @@
       myResult=new FieldEvaluator(objectEvaluator,filter,"val$" + localName);
       return;
     }
-    throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.local.variable.missing.from.class.closure",localName)));
+    throwEvaluateException(DebuggerBundle.message("evaluation.error.local.variable.missing.from.class.closure",localName));
   }
  else   if (element instanceof PsiField) {
     final PsiField psiField=(PsiField)element;
     final PsiClass fieldClass=psiField.getContainingClass();
     if (fieldClass == null) {
-      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.cannot.resolve.field.class",psiField.getName())));
+      throwEvaluateException(DebuggerBundle.message("evaluation.error.cannot.resolve.field.class",psiField.getName()));
+      return;
     }
     Evaluator objectEvaluator;
     if (psiField.hasModifierProperty(PsiModifier.STATIC)) {
@@ -77,7 +81,7 @@
         aClass=getOuterClass(aClass);
       }
       if (aClass == null) {
-        throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.cannot.sources.for.field.class",psiField.getName())));
+        throwEvaluateException(DebuggerBundle.message("evaluation.error.cannot.sources.for.field.class",psiField.getName()));
       }
       objectEvaluator=new ThisEvaluator(iterationCount);
     }
@@ -90,11 +94,12 @@
       name=nameElement.getText();
     }
  else {
-      final String elementDisplayString=(nameElement != null ? nameElement.getText() : "(null)");
-      throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.identifier.expected",elementDisplayString)));
+      final String elementDisplayString=nameElement != null ? nameElement.getText() : "(null)";
+      throwEvaluateException(DebuggerBundle.message("evaluation.error.identifier.expected",elementDisplayString));
+      return;
     }
     if (qualifier != null) {
-      final PsiElement qualifierTarget=(qualifier instanceof PsiReferenceExpression) ? ((PsiReferenceExpression)qualifier).resolve() : null;
+      final PsiElement qualifierTarget=qualifier instanceof PsiReferenceExpression ? ((PsiReferenceExpression)qualifier).resolve() : null;
       if (qualifierTarget instanceof PsiClass) {
         PsiClass psiClass=(PsiClass)qualifierTarget;
         final JVMName typeName=JVMNameUtil.getJVMQualifiedName(psiClass);
@@ -103,11 +108,11 @@
  else {
         PsiType type=qualifier.getType();
         if (type == null) {
-          throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.qualifier.type.unknown",qualifier.getText())));
+          throwEvaluateException(DebuggerBundle.message("evaluation.error.qualifier.type.unknown",qualifier.getText()));
         }
         qualifier.accept(this);
         if (myResult == null) {
-          throw new EvaluateRuntimeException(EvaluateExceptionUtil.createEvaluateException(DebuggerBundle.message("evaluation.error.cannot.evaluate.qualifier",qualifier.getText())));
+          throwEvaluateException(DebuggerBundle.message("evaluation.error.cannot.evaluate.qualifier",qualifier.getText()));
         }
         myResult=new FieldEvaluator(myResult,FieldEvaluator.createClassFilter(type),name);
       }
