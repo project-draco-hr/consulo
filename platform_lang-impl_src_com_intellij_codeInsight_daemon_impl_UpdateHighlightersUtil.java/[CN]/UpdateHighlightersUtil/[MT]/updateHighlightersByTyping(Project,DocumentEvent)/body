@@ -1,66 +1,62 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
-  Document document=e.getDocument();
+  final Document document=e.getDocument();
   if (document instanceof DocumentEx && ((DocumentEx)document).isInBulkUpdate())   return;
-  MarkupModel markup=document.getMarkupModel(project);
-  List<HighlightInfo> oldHighlights=DaemonCodeAnalyzerImpl.getHighlights(markup);
-  if (oldHighlights == null || oldHighlights.isEmpty())   return;
+  final MarkupModel markup=document.getMarkupModel(project);
+  assertMarkupConsistent(markup,project);
   int offset=e.getOffset();
   Editor[] editors=EditorFactory.getInstance().getEditors(document,project);
   if (editors.length == 0)   return;
   Editor editor=editors[0];
   HighlighterIterator iterator=((EditorEx)editor).getHighlighter().createIterator(Math.max(0,offset - 1));
   if (iterator.atEnd())   return;
-  int start=iterator.getStart();
-  while (iterator.getEnd() < e.getOffset() + e.getNewLength()) {
+  final int start=iterator.getStart();
+  while (iterator.getEnd() < e.getOffset() + Math.max(e.getOldLength(),e.getNewLength())) {
     iterator.advance();
     if (iterator.atEnd())     return;
   }
-  int end=iterator.getEnd();
-  List<HighlightInfo> infosToRemove=new ArrayList<HighlightInfo>(DaemonCodeAnalyzerImpl.getHighlightsToRemove(markup));
-  boolean highlightersChanged=false;
-  List<HighlightInfo> result=new ArrayList<HighlightInfo>(oldHighlights.size());
-  boolean documentChangedInsideHighlighter=false;
-  for (  HighlightInfo info : oldHighlights) {
-    RangeHighlighter highlighter=info.highlighter;
-    boolean toRemove=false;
-    if (info.needUpdateOnTyping()) {
-      int highlighterStart=highlighter.getStartOffset();
-      int highlighterEnd=highlighter.getEndOffset();
-      if (info.isAfterEndOfLine) {
-        if (highlighterStart < document.getTextLength()) {
-          highlighterStart+=1;
+  final int end=iterator.getEnd();
+  final boolean[] highlightersChanged={false};
+  final List<HighlightInfo> removed=new ArrayList<HighlightInfo>();
+  final boolean[] documentChangedInsideHighlighter={false};
+  DaemonCodeAnalyzerImpl.processHighlights(document,project,null,start,end,new Processor<HighlightInfo>(){
+    public boolean process(    HighlightInfo info){
+      RangeHighlighter highlighter=info.highlighter;
+      boolean toRemove=false;
+      if (info.needUpdateOnTyping()) {
+        int highlighterStart=highlighter.getStartOffset();
+        int highlighterEnd=highlighter.getEndOffset();
+        if (info.isAfterEndOfLine) {
+          if (highlighterStart < document.getTextLength()) {
+            highlighterStart+=1;
+          }
+          if (highlighterEnd < document.getTextLength()) {
+            highlighterEnd+=1;
+          }
         }
-        if (highlighterEnd < document.getTextLength()) {
-          highlighterEnd+=1;
+        if (!highlighter.isValid()) {
+          toRemove=true;
+        }
+ else         if (start < highlighterEnd && highlighterStart <= end) {
+          documentChangedInsideHighlighter[0]=true;
+          toRemove=true;
         }
       }
-      if (!highlighter.isValid()) {
-        toRemove=true;
+      if (toRemove) {
+        highlightersChanged[0]=true;
+        removed.add(info);
       }
- else       if (start < highlighterEnd && highlighterStart <= end) {
-        documentChangedInsideHighlighter=true;
-        toRemove=true;
-      }
-    }
-    if (toRemove) {
-      if (info.type.equals(HighlightInfoType.WRONG_REF)) {
-        markup.removeHighlighter(highlighter);
-      }
- else {
-        infosToRemove.add(info);
-      }
-      highlightersChanged=true;
-    }
- else {
-      result.add(info);
+      return true;
     }
   }
-  if (highlightersChanged) {
-    DaemonCodeAnalyzerImpl.setHighlights(markup,project,result,infosToRemove);
+);
+  for (  HighlightInfo info : removed) {
+    if (!info.highlighter.isValid() || info.type.equals(HighlightInfoType.WRONG_REF)) {
+      markup.removeHighlighter(info.highlighter);
+    }
   }
-  assertMarkupConsistent(markup,result,infosToRemove);
-  if (highlightersChanged || documentChangedInsideHighlighter) {
+  assertMarkupConsistent(markup,project);
+  if (highlightersChanged[0] || documentChangedInsideHighlighter[0]) {
     disableWhiteSpaceOptimization(document);
   }
 }
