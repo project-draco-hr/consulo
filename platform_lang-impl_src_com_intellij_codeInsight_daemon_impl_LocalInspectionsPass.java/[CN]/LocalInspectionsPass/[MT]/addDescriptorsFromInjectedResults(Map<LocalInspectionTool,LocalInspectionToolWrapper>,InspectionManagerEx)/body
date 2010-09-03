@@ -3,35 +3,36 @@
   InspectionProfile inspectionProfile=InspectionProjectProfileManager.getInstance(myProject).getInspectionProfile();
   InjectedLanguageManager ilManager=InjectedLanguageManager.getInstance(myProject);
   PsiDocumentManager documentManager=PsiDocumentManager.getInstance(myProject);
-  for (int i=0; i < myInjectedPsiInspectionResults.size(); i++) {
-    InjectedPsiInspectionResult result=myInjectedPsiInspectionResults.get(i);
-    LocalInspectionTool tool=result.tool;
-    HighlightSeverity severity=inspectionProfile.getErrorLevel(HighlightDisplayKey.find(tool.getShortName()),myFile).getSeverity();
-    PsiElement injectedPsi=result.injectedPsi;
-    DocumentWindow documentRange=(DocumentWindow)documentManager.getDocument((PsiFile)injectedPsi);
-    if (documentRange == null)     continue;
-    for (int j=0; j < result.foundProblems.size(); j++) {
-      ProblemDescriptor descriptor=result.foundProblems.get(j);
-      PsiElement psiElement=descriptor.getPsiElement();
-      if (InspectionManagerEx.inspectionResultSuppressed(psiElement,tool))       continue;
-      HighlightInfoType level=highlightTypeFromDescriptor(descriptor,severity);
-      HighlightInfo info=createHighlightInfo(descriptor,tool,level,emptyActionRegistered);
-      if (info == null)       continue;
-      List<TextRange> editables=ilManager.intersectWithAllEditableFragments((PsiFile)injectedPsi,new TextRange(info.startOffset,info.endOffset));
-      for (      TextRange editable : editables) {
-        TextRange hostRange=documentRange.injectedToHost(editable);
-        QuickFix[] fixes=descriptor.getFixes();
-        LocalQuickFix[] localFixes=null;
-        if (fixes != null) {
-          localFixes=new LocalQuickFix[fixes.length];
-          for (int k=0; k < fixes.length; k++) {
-            QuickFix fix=fixes[k];
-            localFixes[k]=(LocalQuickFix)fix;
+  for (  Map.Entry<PsiFile,List<InspectionResult>> entry : result.entrySet()) {
+    PsiFile file=entry.getKey();
+    if (file == myFile)     continue;
+    DocumentWindow documentRange=(DocumentWindow)documentManager.getDocument(file);
+    List<InspectionResult> resultList=entry.getValue();
+    for (    InspectionResult inspectionResult : resultList) {
+      LocalInspectionTool tool=inspectionResult.tool;
+      HighlightSeverity severity=inspectionProfile.getErrorLevel(HighlightDisplayKey.find(tool.getShortName()),myFile).getSeverity();
+      for (      ProblemDescriptor descriptor : inspectionResult.foundProblems) {
+        PsiElement psiElement=descriptor.getPsiElement();
+        if (InspectionManagerEx.inspectionResultSuppressed(psiElement,tool))         continue;
+        HighlightInfoType level=highlightTypeFromDescriptor(descriptor,severity);
+        HighlightInfo info=createHighlightInfo(descriptor,tool,level,emptyActionRegistered);
+        if (info == null)         continue;
+        List<TextRange> editables=ilManager.intersectWithAllEditableFragments(file,new TextRange(info.startOffset,info.endOffset));
+        for (        TextRange editable : editables) {
+          TextRange hostRange=documentRange.injectedToHost(editable);
+          QuickFix[] fixes=descriptor.getFixes();
+          LocalQuickFix[] localFixes=null;
+          if (fixes != null) {
+            localFixes=new LocalQuickFix[fixes.length];
+            for (int k=0; k < fixes.length; k++) {
+              QuickFix fix=fixes[k];
+              localFixes[k]=(LocalQuickFix)fix;
+            }
           }
+          ProblemDescriptor patchedDescriptor=iManager.createProblemDescriptor(myFile,hostRange,descriptor.getDescriptionTemplate(),descriptor.getHighlightType(),true,localFixes);
+          LocalInspectionToolWrapper toolWrapper=tool2Wrapper.get(tool);
+          toolWrapper.addProblemDescriptors(Collections.singletonList(patchedDescriptor),true);
         }
-        ProblemDescriptor patchedDescriptor=iManager.createProblemDescriptor(myFile,hostRange,descriptor.getDescriptionTemplate(),descriptor.getHighlightType(),true,localFixes);
-        LocalInspectionToolWrapper toolWrapper=tool2Wrapper.get(tool);
-        toolWrapper.addProblemDescriptors(Collections.singletonList(patchedDescriptor),true);
       }
     }
   }
