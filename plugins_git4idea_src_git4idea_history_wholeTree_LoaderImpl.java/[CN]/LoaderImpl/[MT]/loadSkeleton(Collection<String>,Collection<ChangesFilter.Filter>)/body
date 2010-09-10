@@ -1,0 +1,50 @@
+{
+  final Application application=ApplicationManager.getApplication();
+  application.assertIsDispatchThread();
+  final int current;
+synchronized (myLock) {
+    current=++myLoadId;
+    mySomeDataShown=false;
+  }
+  final boolean drawHierarchy=filters.isEmpty();
+  application.executeOnPooledThread(new Runnable(){
+    @Override public void run(){
+      try {
+        final Join join=new Join(myAccesses.size(),new MyJoin(current));
+        final Runnable joinCaller=new Runnable(){
+          @Override public void run(){
+            join.complete();
+          }
+        }
+;
+        myTreeComposite.clearMembers();
+        final List<VirtualFile> list=new ArrayList<VirtualFile>(myAccesses.keySet());
+        Collections.sort(list,FilePathComparator.getInstance());
+        for (        VirtualFile vf : list) {
+          final LowLevelAccess access=myAccesses.get(vf);
+          final Consumer<CommitHashPlusParents> consumer=createCommitsHolderConsumer(drawHierarchy);
+          final Consumer<List<CommitHashPlusParents>> listConsumer=new RefreshingCommitsPackConsumer(current,consumer);
+          final BufferedListConsumer<CommitHashPlusParents> bufferedListConsumer=new BufferedListConsumer<CommitHashPlusParents>(15,listConsumer,1000);
+          bufferedListConsumer.setFlushListener(joinCaller);
+          final long start=System.currentTimeMillis();
+          final boolean allDataAlreadyLoaded=FullDataLoader.load(myLinesCache,access,startingPoints,filters,bufferedListConsumer.asConsumer(),ourTestCount);
+          final long end=System.currentTimeMillis();
+          if (allDataAlreadyLoaded) {
+            bufferedListConsumer.flush();
+          }
+ else {
+            final boolean loadFull=(end - start) > ourTestTimeThreshold;
+            final LoaderBase loaderBase=new LoaderBase(access,bufferedListConsumer,filters,ourTestCount,loadFull,startingPoints,myLinesCache);
+            loaderBase.execute();
+          }
+        }
+      }
+ catch (      VcsException e) {
+        myUIRefresh.acceptException(e);
+      }
+ finally {
+      }
+    }
+  }
+);
+}
