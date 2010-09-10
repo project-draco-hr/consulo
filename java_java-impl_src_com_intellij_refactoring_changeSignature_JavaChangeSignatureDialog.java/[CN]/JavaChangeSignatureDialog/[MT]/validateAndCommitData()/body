@@ -1,0 +1,83 @@
+{
+  PsiManager manager=PsiManager.getInstance(myProject);
+  PsiElementFactory factory=JavaPsiFacade.getInstance(manager.getProject()).getElementFactory();
+  String name=getMethodName();
+  if (!JavaPsiFacade.getInstance(manager.getProject()).getNameHelper().isIdentifier(name)) {
+    return RefactoringMessageUtil.getIncorrectIdentifierMessage(name);
+  }
+  if (!myMethod.isConstructor()) {
+    try {
+      ((PsiTypeCodeFragment)myReturnTypeCodeFragment).getType();
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      myReturnTypeField.requestFocus();
+      return RefactoringBundle.message("changeSignature.wrong.return.type",myReturnTypeCodeFragment.getText());
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      myReturnTypeField.requestFocus();
+      return RefactoringBundle.message("changeSignature.no.return.type");
+    }
+  }
+  List<ParameterTableModelItemBase<ParameterInfoImpl>> parameterInfos=myParametersTableModel.getItems();
+  final int newParametersNumber=parameterInfos.size();
+  for (int i=0; i < newParametersNumber; i++) {
+    ParameterTableModelItemBase<ParameterInfoImpl> item=parameterInfos.get(i);
+    if (!JavaPsiFacade.getInstance(manager.getProject()).getNameHelper().isIdentifier(item.parameter.getName())) {
+      return RefactoringMessageUtil.getIncorrectIdentifierMessage(item.parameter.getName());
+    }
+    final PsiType type;
+    try {
+      type=((PsiTypeCodeFragment)parameterInfos.get(i).typeCodeFragment).getType();
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      return RefactoringBundle.message("changeSignature.wrong.type.for.parameter",item.typeCodeFragment.getText(),item.parameter.getName());
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      return RefactoringBundle.message("changeSignature.no.type.for.parameter",item.parameter.getName());
+    }
+    item.parameter.setType(type);
+    if (type instanceof PsiEllipsisType && i != newParametersNumber - 1) {
+      return RefactoringBundle.message("changeSignature.vararg.not.last");
+    }
+    if (item.parameter.oldParameterIndex < 0) {
+      item.parameter.defaultValue=item.defaultValueCodeFragment.getText();
+      String def=item.parameter.defaultValue;
+      def=def.trim();
+      if (!(type instanceof PsiEllipsisType)) {
+        if (def.length() == 0) {
+          return RefactoringBundle.message("changeSignature.no.default.value",item.parameter.getName());
+        }
+        try {
+          factory.createExpressionFromText(def,null);
+        }
+ catch (        IncorrectOperationException e) {
+          return e.getMessage();
+        }
+      }
+    }
+  }
+  ThrownExceptionInfo[] exceptionInfos=myExceptionsTableModel.getThrownExceptions();
+  PsiTypeCodeFragment[] typeCodeFragments=myExceptionsTableModel.getTypeCodeFragments();
+  for (int i=0; i < exceptionInfos.length; i++) {
+    ThrownExceptionInfo exceptionInfo=exceptionInfos[i];
+    PsiTypeCodeFragment typeCodeFragment=typeCodeFragments[i];
+    try {
+      PsiType type=typeCodeFragment.getType();
+      if (!(type instanceof PsiClassType)) {
+        return RefactoringBundle.message("changeSignature.wrong.type.for.exception",typeCodeFragment.getText());
+      }
+      PsiClassType throwable=JavaPsiFacade.getInstance(myProject).getElementFactory().createTypeByFQClassName("java.lang.Throwable",type.getResolveScope());
+      if (!throwable.isAssignableFrom(type)) {
+        return RefactoringBundle.message("changeSignature.not.throwable.type",typeCodeFragment.getText());
+      }
+      exceptionInfo.setType((PsiClassType)type);
+    }
+ catch (    PsiTypeCodeFragment.TypeSyntaxException e) {
+      return RefactoringBundle.message("changeSignature.wrong.type.for.exception",typeCodeFragment.getText());
+    }
+catch (    PsiTypeCodeFragment.NoTypeException e) {
+      return RefactoringBundle.message("changeSignature.no.type.for.exception");
+    }
+  }
+  return null;
+}

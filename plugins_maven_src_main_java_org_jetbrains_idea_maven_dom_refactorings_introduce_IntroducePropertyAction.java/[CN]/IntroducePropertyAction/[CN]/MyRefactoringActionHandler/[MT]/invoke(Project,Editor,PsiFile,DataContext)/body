@@ -1,39 +1,36 @@
 {
-  if (!editor.getSelectionModel().hasSelection())   return;
   PsiDocumentManager.getInstance(project).commitAllDocuments();
-  final int startOffset=editor.getSelectionModel().getSelectionStart();
-  final int endOffset=editor.getSelectionModel().getSelectionEnd();
-  XmlElement selectedElement=getSelectedElement(file,startOffset,endOffset);
-  if (selectedElement != null) {
-    String stringValue=selectedElement.getText();
-    if (stringValue != null) {
-      final MavenDomProjectModel model=MavenDomUtil.getMavenDomModel(file,MavenDomProjectModel.class);
-      final String selectedString=editor.getSelectionModel().getSelectedText();
-      Set<TextRange> ranges=getPropertiesTextRanges(stringValue);
-      int offsetInElement=startOffset - selectedElement.getTextOffset();
-      if (model == null || StringUtil.isEmptyOrSpaces(selectedString) || isInsideTextRanges(ranges,offsetInElement,offsetInElement + selectedString.length())) {
-        return;
-      }
-      IntroducePropertyDialog dialog=new IntroducePropertyDialog(project,selectedElement,model,null,selectedString);
-      dialog.show();
-      if (dialog.getExitCode() == DialogWrapper.OK_EXIT_CODE) {
-        final String propertyName=dialog.getEnteredName();
-        final String replaceWith=PREFIX + propertyName + SUFFIX;
-        final MavenDomProjectModel selectedProject=dialog.getSelectedProject();
-        if (ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(getFiles(file,selectedProject)).hasReadonlyFiles()) {
-          return;
-        }
-        new WriteCommandAction(project){
-          @Override protected void run(          Result result) throws Throwable {
-            editor.getDocument().replaceString(startOffset,endOffset,replaceWith);
-            PsiDocumentManager.getInstance(project).commitAllDocuments();
-            createMavenProperty(selectedProject,propertyName,selectedString);
-            PsiDocumentManager.getInstance(project).commitAllDocuments();
-          }
-        }
-.execute();
-        showFindUsages(project,propertyName,selectedString,replaceWith,selectedProject);
-      }
+  Pair<XmlElement,TextRange> elementAndRange=getSelectedElementAndTextRange(editor,file);
+  if (elementAndRange == null)   return;
+  XmlElement selectedElement=elementAndRange.first;
+  final TextRange range=elementAndRange.second;
+  String stringValue=selectedElement.getText();
+  if (stringValue == null)   return;
+  final MavenDomProjectModel model=MavenDomUtil.getMavenDomModel(file,MavenDomProjectModel.class);
+  final String selectedString=editor.getDocument().getText(range);
+  Set<TextRange> ranges=getPropertiesTextRanges(stringValue);
+  int offsetInElement=range.getStartOffset() - selectedElement.getTextOffset();
+  if (model == null || StringUtil.isEmptyOrSpaces(selectedString) || isInsideTextRanges(ranges,offsetInElement,offsetInElement + selectedString.length())) {
+    return;
+  }
+  editor.getSelectionModel().setSelection(range.getStartOffset(),range.getEndOffset());
+  IntroducePropertyDialog dialog=new IntroducePropertyDialog(project,selectedElement,model,null,selectedString);
+  dialog.show();
+  if (dialog.getExitCode() != DialogWrapper.OK_EXIT_CODE)   return;
+  final String propertyName=dialog.getEnteredName();
+  final String replaceWith=PREFIX + propertyName + SUFFIX;
+  final MavenDomProjectModel selectedProject=dialog.getSelectedProject();
+  if (ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(getFiles(file,selectedProject)).hasReadonlyFiles()) {
+    return;
+  }
+  new WriteCommandAction(project){
+    @Override protected void run(    Result result) throws Throwable {
+      editor.getDocument().replaceString(range.getStartOffset(),range.getEndOffset(),replaceWith);
+      PsiDocumentManager.getInstance(project).commitAllDocuments();
+      createMavenProperty(selectedProject,propertyName,selectedString);
+      PsiDocumentManager.getInstance(project).commitAllDocuments();
     }
   }
+.execute();
+  showFindUsages(project,propertyName,selectedString,replaceWith,selectedProject);
 }

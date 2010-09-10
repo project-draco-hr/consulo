@@ -1,25 +1,35 @@
 {
   myInsideSave=true;
   try {
-    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    ApplicationManager.getApplication().runWriteAction(new DocumentRunnable.IgnoreDocumentRunnable(){
       public void run(){
         ((NewVirtualFile)myVFSBaseDir).markDirtyRecursively();
         myVFSBaseDir.refresh(false,true);
       }
     }
 );
-    Collection<T> schemes=getAllSchemes();
+    final Collection<T> schemes=getAllSchemes();
     myBaseDir.mkdirs();
-    UniqueFileNamesProvider fileNameProvider=new UniqueFileNamesProvider();
+    final UniqueFileNamesProvider fileNameProvider=new UniqueFileNamesProvider();
     reserveUsingFileNames(schemes,fileNameProvider);
-    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    final WriteExternalException[] ex=new WriteExternalException[1];
+    ApplicationManager.getApplication().runWriteAction(new DocumentRunnable.IgnoreDocumentRunnable(){
       public void run(){
         deleteFilesFromDeletedSchemes();
+        try {
+          saveSchemes(schemes,fileNameProvider);
+        }
+ catch (        WriteExternalException e) {
+          ex[0]=e;
+        }
       }
     }
 );
-    saveSchemes(schemes,fileNameProvider);
-    if (myDeletedNames.size() > 0) {
+    if (ex[0] != null)     throw ex[0];
+    if (myDeletedNames.isEmpty()) {
+      deleteServerFiles(DELETED_XML);
+    }
+ else {
       for (      StreamProvider provider : getEnabledProviders()) {
         try {
           StorageUtil.sendContent(provider,getFileFullPath(DELETED_XML),createDeletedDocument(),myRoamingType,true);
@@ -28,9 +38,6 @@
           LOG.debug(e);
         }
       }
-    }
- else {
-      deleteServerFiles(DELETED_XML);
     }
   }
   finally {

@@ -1,0 +1,101 @@
+{
+  final ProgressManager progressManager=ProgressManager.getInstance();
+  final int totalFiles=scope.getFileCount();
+  final Set<Module> modulesWithoutAnnotations=new HashSet<Module>();
+  final Set<Module> modulesWithLL=new HashSet<Module>();
+  if (!progressManager.runProcessWithProgressSynchronously(new Runnable(){
+    @Override public void run(){
+      scope.accept(new PsiElementVisitor(){
+        private int myFileCount=0;
+        final private Set<Module> processed=new HashSet<Module>();
+        @Override public void visitFile(        PsiFile file){
+          myFileCount++;
+          final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+          if (progressIndicator != null) {
+            final VirtualFile virtualFile=file.getVirtualFile();
+            if (virtualFile != null) {
+              progressIndicator.setText2(ProjectUtil.calcRelativeToProjectPath(virtualFile,project));
+            }
+            progressIndicator.setFraction(((double)myFileCount) / totalFiles);
+          }
+          final Module module=ModuleUtil.findModuleForPsiElement(file);
+          if (module != null && !processed.contains(module)) {
+            processed.add(module);
+            if (JavaPsiFacade.getInstance(project).findClass(AnnotationUtil.NULLABLE,GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module)) == null) {
+              modulesWithoutAnnotations.add(module);
+            }
+            if (PsiUtil.getLanguageLevel(file).compareTo(LanguageLevel.JDK_1_5) < 0) {
+              modulesWithLL.add(module);
+            }
+          }
+        }
+      }
+);
+    }
+  }
+,"Check applicability...",true,project))   return;
+  if (!modulesWithLL.isEmpty()) {
+    Messages.showErrorDialog(project,"Infer Nullity Annotations requires the project language level be set to 1.5 or greater.",INFER_NULLITY_ANNOTATIONS);
+    return;
+  }
+  if (!modulesWithoutAnnotations.isEmpty()) {
+    if (Messages.showOkCancelDialog(project,"Infer Nullity Annotations requires that the JetBrains nullity annotations" + " be available to your project.\n\nYou will need to add annotations.jar (available in your IDEA distribution) as a library. " + " The IDEA nullity annotations are freely usable and redistributable under the Apache 2.0 license. Would you like to do it now?",INFER_NULLITY_ANNOTATIONS,Messages.getErrorIcon()) == DialogWrapper.OK_EXIT_CODE) {
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          final LocateLibraryDialog dialog=new LocateLibraryDialog(modulesWithoutAnnotations.iterator().next(),PathManager.getLibPath(),"annotations.jar",QuickFixBundle.message("add.library.annotations.description"));
+          dialog.show();
+          if (dialog.isOK()) {
+            final String path=dialog.getResultingLibraryPath();
+            new WriteCommandAction(project){
+              protected void run(              final Result result) throws Throwable {
+                for (                Module module : modulesWithoutAnnotations) {
+                  OrderEntryFix.addBundledJarToRoots(project,null,module,null,AnnotationUtil.NOT_NULL,path);
+                }
+              }
+            }
+.execute();
+          }
+        }
+      }
+);
+    }
+    return;
+  }
+  if (scope.checkScopeWritable(project))   return;
+  final NullityInferrer inferrer=new NullityInferrer(myAnnotateLocalVariablesCb.isSelected(),project);
+  if (!progressManager.runProcessWithProgressSynchronously(new Runnable(){
+    @Override public void run(){
+      scope.accept(new PsiElementVisitor(){
+        int myFileCount=0;
+        @Override public void visitFile(        final PsiFile file){
+          myFileCount++;
+          final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+          if (progressIndicator != null) {
+            final VirtualFile virtualFile=file.getVirtualFile();
+            if (virtualFile != null) {
+              progressIndicator.setText2(ProjectUtil.calcRelativeToProjectPath(virtualFile,project));
+            }
+            progressIndicator.setFraction(((double)myFileCount) / totalFiles);
+          }
+          if (file instanceof PsiJavaFile) {
+            inferrer.collect(file);
+          }
+        }
+      }
+);
+    }
+  }
+,INFER_NULLITY_ANNOTATIONS,true,project))   return;
+  final Runnable applyRunnable=new Runnable(){
+    @Override public void run(){
+      new WriteCommandAction(project,INFER_NULLITY_ANNOTATIONS){
+        @Override protected void run(        Result result) throws Throwable {
+          inferrer.apply(project);
+        }
+      }
+.execute();
+    }
+  }
+;
+  SwingUtilities.invokeLater(applyRunnable);
+}
