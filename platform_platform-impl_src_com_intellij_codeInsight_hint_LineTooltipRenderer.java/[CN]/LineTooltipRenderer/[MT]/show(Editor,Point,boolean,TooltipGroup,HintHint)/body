@@ -1,0 +1,97 @@
+{
+  if (myText == null)   return null;
+  myText=myText.replaceAll(String.valueOf(UIUtil.MNEMONIC),"");
+  final boolean expanded=myCurrentWidth > 0 && dressDescription(editor);
+  final HintManagerImpl hintManager=HintManagerImpl.getInstanceImpl();
+  final JComponent contentComponent=editor.getContentComponent();
+  final JComponent editorComponent=editor.getComponent();
+  final JLayeredPane layeredPane=editorComponent.getRootPane().getLayeredPane();
+  final JEditorPane pane=initPane(myText,hintHint,layeredPane);
+  if (!hintHint.isAwtTooltip()) {
+    correctLocation(editor,pane,p,alignToRight,expanded,myCurrentWidth);
+  }
+  final JScrollPane scrollPane=ScrollPaneFactory.createScrollPane(pane);
+  scrollPane.setBorder(null);
+  scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+  scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+  scrollPane.setOpaque(hintHint.isOpaqueAllowed());
+  scrollPane.getViewport().setOpaque(hintHint.isOpaqueAllowed());
+  scrollPane.setBackground(hintHint.getTextBackground());
+  scrollPane.getViewport().setBackground(hintHint.getTextBackground());
+  scrollPane.setViewportBorder(null);
+  final Ref<AnAction> anAction=new Ref<AnAction>();
+  final LightweightHint hint=new LightweightHint(scrollPane){
+    public void hide(){
+      onHide(pane);
+      super.hide();
+      final AnAction action=anAction.get();
+      if (action != null) {
+        action.unregisterCustomShortcutSet(contentComponent);
+      }
+    }
+  }
+;
+  anAction.set(new AnAction(){
+{
+      registerCustomShortcutSet(new CustomShortcutSet(KeymapManager.getInstance().getActiveKeymap().getShortcuts(IdeActions.ACTION_SHOW_ERROR_DESCRIPTION)),contentComponent);
+    }
+    public void actionPerformed(    final AnActionEvent e){
+      hint.hide();
+      if (myCurrentWidth > 0) {
+        stripDescription();
+      }
+      createRenderer(myText,myCurrentWidth > 0 ? 0 : pane.getWidth()).show(editor,new Point(p.x - 3,p.y - 3),false,group,hintHint);
+    }
+  }
+);
+  pane.addHyperlinkListener(new HyperlinkListener(){
+    public void hyperlinkUpdate(    final HyperlinkEvent e){
+      myActiveLink=true;
+      if (e.getEventType() == HyperlinkEvent.EventType.EXITED) {
+        myActiveLink=false;
+        return;
+      }
+      if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+        if (!expanded) {
+          for (          final TooltipLinkHandlerEP handlerEP : Extensions.getExtensions(TooltipLinkHandlerEP.EP_NAME)) {
+            if (handlerEP.handleLink(e.getDescription(),editor,pane)) {
+              myText=convertTextOnLinkHandled(myText);
+              pane.setText(myText);
+              return;
+            }
+          }
+          if (e.getURL() != null) {
+            BrowserUtil.launchBrowser(e.getURL().toString());
+          }
+        }
+ else {
+          if (e.getURL() != null) {
+            BrowserUtil.launchBrowser(e.getURL().toString());
+            return;
+          }
+          stripDescription();
+          hint.hide();
+          createRenderer(myText,0).show(editor,new Point(p.x - 3,p.y - 3),false,group,hintHint);
+        }
+      }
+    }
+  }
+);
+  pane.addMouseListener(new MouseAdapter(){
+    public void mouseReleased(    final MouseEvent e){
+      if (!myActiveLink) {
+        MouseEvent newMouseEvent=SwingUtilities.convertMouseEvent(e.getComponent(),e,contentComponent);
+        hint.hide();
+        contentComponent.dispatchEvent(newMouseEvent);
+      }
+    }
+    public void mouseExited(    final MouseEvent e){
+      if (!expanded) {
+        hint.hide();
+      }
+    }
+  }
+);
+  hintManager.showEditorHint(hint,editor,p,HintManager.HIDE_BY_ANY_KEY | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_OTHER_HINT| HintManager.HIDE_BY_SCROLLING,0,false,hintHint);
+  return hint;
+}
