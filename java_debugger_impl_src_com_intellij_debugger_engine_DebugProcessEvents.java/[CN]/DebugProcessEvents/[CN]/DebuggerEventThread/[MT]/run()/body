@@ -4,20 +4,42 @@
     while (!isStopped()) {
       try {
         final EventSet eventSet=eventQueue.remove();
-        if (myReturnValueWatcher != null && myReturnValueWatcher.isEnabled()) {
-          int processed=0;
-          for (EventIterator eventIterator=eventSet.eventIterator(); eventIterator.hasNext(); ) {
-            final Event event=eventIterator.nextEvent();
+        final boolean methodWatcherActive=myReturnValueWatcher != null && myReturnValueWatcher.isEnabled();
+        int processed=0;
+        for (EventIterator eventIterator=eventSet.eventIterator(); eventIterator.hasNext(); ) {
+          final Event event=eventIterator.nextEvent();
+          if (methodWatcherActive) {
             if (event instanceof MethodExitEvent) {
               if (myReturnValueWatcher.processMethodExitEvent((MethodExitEvent)event)) {
                 processed++;
               }
+              continue;
             }
           }
-          if (processed == eventSet.size()) {
-            eventSet.resume();
-            continue;
+          if (event instanceof ThreadStartEvent) {
+            processed++;
+            final ThreadReference thread=((ThreadStartEvent)event).thread();
+            getManagerThread().schedule(new DebuggerCommandImpl(){
+              protected void action() throws Exception {
+                myDebugProcessDispatcher.getMulticaster().threadStarted(DebugProcessEvents.this,thread);
+              }
+            }
+);
           }
+ else           if (event instanceof ThreadDeathEvent) {
+            processed++;
+            final ThreadReference thread=((ThreadDeathEvent)event).thread();
+            getManagerThread().schedule(new DebuggerCommandImpl(){
+              protected void action() throws Exception {
+                myDebugProcessDispatcher.getMulticaster().threadStopped(DebugProcessEvents.this,thread);
+              }
+            }
+);
+          }
+        }
+        if (processed == eventSet.size()) {
+          eventSet.resume();
+          continue;
         }
         getManagerThread().invokeAndWait(new DebuggerCommandImpl(){
           protected void action() throws Exception {
