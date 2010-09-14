@@ -1,0 +1,70 @@
+{
+  if (!XmlCompletionContributor.isXmlNameCompletion(parameters)) {
+    return;
+  }
+  result.stopHere();
+  if (!(element.getParent() instanceof XmlTag)) {
+    return;
+  }
+  final XmlTag tag=(XmlTag)element.getParent();
+  final XmlTag parentTag=tag.getParentTag();
+  Application application=ApplicationManager.getApplication();
+  final XmlElementDescriptor parentDescriptor=application.runReadAction(new NullableComputable<XmlElementDescriptor>(){
+    public XmlElementDescriptor compute(){
+      return parentTag.getDescriptor();
+    }
+  }
+);
+  if (parentDescriptor == null)   return;
+  final XmlElementsGroup topGroup=application.runReadAction(new NullableComputable<XmlElementsGroup>(){
+    @Override public XmlElementsGroup compute(){
+      return parentDescriptor.getTopGroup();
+    }
+  }
+);
+  if (topGroup == null)   return;
+  XmlElementsGroupModel model=new XmlElementsGroupModel(topGroup);
+  Set<XmlElementsGroup> anchor=null;
+  Set<XmlElementsGroup> existing=new HashSet<XmlElementsGroup>();
+  XmlTag[] subTags=parentTag.getSubTags();
+  for (  XmlTag subTag : subTags) {
+    if (subTag == tag) {
+      if (anchor == null)       anchor=Collections.emptySet();
+      continue;
+    }
+    XmlElementsGroup group=model.findGroup(subTag);
+    if (group != null) {
+      List<XmlElementsGroup> allAncestors=getAllAncestors(group);
+      existing.addAll(allAncestors);
+      if (anchor == null) {
+        anchor=new HashSet<XmlElementsGroup>();
+        anchor.addAll(allAncestors);
+      }
+    }
+  }
+  final List<XmlElementDescriptor> descriptors=new ArrayList<XmlElementDescriptor>();
+  processGroup(topGroup,descriptors,anchor,existing,1);
+  result.addAllElements(ContainerUtil.map(descriptors,new Function<XmlElementDescriptor,LookupElement>(){
+    @Override public LookupElement fun(    XmlElementDescriptor descriptor){
+      LookupElementBuilder builder=LookupElementBuilder.create(descriptor.getName()).setInsertHandler(new XmlTagInsertHandler(){
+        @Override protected boolean addTail(        char completionChar,        XmlElementDescriptor descriptor,        XmlTag tag,        Template template,        boolean weInsertedSomeCodeThatCouldBeInvalidated,        XmlAttributeDescriptor[] attributes,        StringBuilder indirectRequiredAttrs){
+          if (descriptor.getContentType() != XmlElementDescriptor.CONTENT_TYPE_EMPTY) {
+            template.addTextSegment(">");
+            final MacroCallNode completeAttrExpr=new MacroCallNode(MacroFactory.createMacro("complete"));
+            template.addVariable("contentComplete",completeAttrExpr,completeAttrExpr,true);
+            weInsertedSomeCodeThatCouldBeInvalidated=true;
+            template.addTextSegment("</" + tag.getName() + ">");
+            template.addEndVariable();
+          }
+          return weInsertedSomeCodeThatCouldBeInvalidated;
+        }
+      }
+);
+      if (descriptor instanceof XmlElementDescriptorImpl) {
+        builder=builder.setTailText(" (" + ((XmlElementDescriptorImpl)descriptor).getNamespace() + ")",true);
+      }
+      return builder;
+    }
+  }
+));
+}
