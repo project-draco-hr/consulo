@@ -9,14 +9,24 @@
   h.addRelativePaths(path);
   final String prefix=root.getPath() + "/";
   final MyTokenAccumulator accumulator=new MyTokenAccumulator(6);
-  final Consumer<List<String>> resultAdapter=new Consumer<List<String>>(){
-    public void consume(    List<String> result){
-      final GitRevisionNumber revision=new GitRevisionNumber(result.get(0),GitUtil.parseTimestamp(result.get(1)));
-      final String author=GitUtil.adjustAuthorName(result.get(2),result.get(3));
-      final String message=result.get(4).trim();
-      String path="";
+  final Consumer<LowLevelRevisionDetails> resultAdapter=new Consumer<LowLevelRevisionDetails>(){
+    public void consume(    LowLevelRevisionDetails revisionDetails){
+      if (revisionDetails == null) {
+        exceptionConsumer.consume(new VcsException("revision details are null."));
+        return;
+      }
+      if (revisionDetails.missesRequiredFields()) {
+        exceptionConsumer.consume(new VcsException("revision misses hash or timestamp data."));
+        return;
+      }
+      final GitRevisionNumber revision=new GitRevisionNumber(revisionDetails.hash,GitUtil.parseTimestamp(revisionDetails.timestamp));
+      final String author=GitUtil.adjustAuthorName(revisionDetails.getAuthor(),revisionDetails.getCommitter());
+      final String message=revisionDetails.getComment();
+      String path=revisionDetails.getPath();
       try {
-        path=GitUtil.unescapePath(result.get(5));
+        if (!path.isEmpty()) {
+          path=GitUtil.unescapePath(path);
+        }
       }
  catch (      VcsException e) {
         exceptionConsumer.consume(e);
@@ -29,7 +39,7 @@
   final Semaphore semaphore=new Semaphore();
   h.addLineListener(new GitLineHandlerAdapter(){
     @Override public void onLineAvailable(    String line,    Key outputType){
-      final List<String> result=accumulator.acceptLine(line);
+      final LowLevelRevisionDetails result=accumulator.acceptLine(line);
       if (result != null) {
         resultAdapter.consume(result);
       }
@@ -39,7 +49,7 @@
     }
     @Override public void processTerminated(    int exitCode){
       super.processTerminated(exitCode);
-      final List<String> result=accumulator.processLast();
+      final LowLevelRevisionDetails result=accumulator.processLast();
       if (result != null) {
         resultAdapter.consume(result);
       }
