@@ -1,124 +1,28 @@
 {
-  Editor editor=PsiUtilBase.findEditor(file);
-  if (editor == null) {
+  if (!mySettings.WRAP_LONG_LINES || file.getViewProvider().isLockedByPsiOperations()) {
     return;
   }
-  LineWrapPositionStrategy strategy=LanguageLineWrapPositionStrategy.INSTANCE.forEditor(editor);
-  CharSequence text=document.getCharsSequence();
-  int startLine=document.getLineNumber(startOffset);
-  int endLine=document.getLineNumber(Math.min(document.getTextLength(),endOffset) - 1);
-  int maxLine=Math.min(document.getLineCount(),endLine + 1);
-  int tabSize=EditorUtil.getTabSize(editor);
-  int spaceSize=EditorUtil.getSpaceWidth(Font.PLAIN,editor);
-  for (int line=startLine; line < maxLine; line++) {
-    int startLineOffset=document.getLineStartOffset(line);
-    int endLineOffset=document.getLineEndOffset(line);
-    boolean hasTabs=false;
-    boolean canOptimize=true;
-    boolean hasNonSpaceSymbols=false;
-    loop:     for (int i=startLineOffset; i < Math.min(endLineOffset,endOffset); i++) {
-      char c=text.charAt(i);
-switch (c) {
-case '\t':
-{
-          hasTabs=true;
-          if (hasNonSpaceSymbols) {
-            canOptimize=false;
-            break loop;
-          }
-        }
-case ' ':
-      break;
-default :
-    hasNonSpaceSymbols=true;
-}
-}
-int preferredWrapPosition=Integer.MAX_VALUE;
-if (!hasTabs) {
-if (Math.min(endLineOffset,endOffset) >= mySettings.RIGHT_MARGIN) {
-  preferredWrapPosition=startLineOffset + mySettings.RIGHT_MARGIN - FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS;
-}
-}
- else if (canOptimize) {
-int width=0;
-int symbolWidth;
-for (int i=startLineOffset; i < Math.min(endLineOffset,endOffset); i++) {
-  char c=text.charAt(i);
-switch (c) {
-case '\t':
-    symbolWidth=tabSize - (width % tabSize);
-  break;
-default :
-symbolWidth=1;
-}
-if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN && (Math.min(endLineOffset,endOffset) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS) {
-preferredWrapPosition=i - 1;
-break;
-}
-width+=symbolWidth;
-}
-}
- else {
-int width=0;
-int x=0;
-int newX;
-int symbolWidth;
-for (int i=startLineOffset; i < Math.min(endLineOffset,endOffset); i++) {
-char c=text.charAt(i);
-switch (c) {
-case '\t':
-newX=EditorUtil.nextTabStop(x,editor);
-int diffInPixels=newX - x;
-symbolWidth=diffInPixels / spaceSize;
-if (diffInPixels % spaceSize > 0) {
-symbolWidth++;
-}
-break;
-default :
-newX=x + EditorUtil.charWidth(c,Font.PLAIN,editor);
-symbolWidth=1;
-}
-if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN && (Math.min(endLineOffset,endOffset) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS) {
-preferredWrapPosition=i - 1;
-break;
-}
-x=newX;
-width+=symbolWidth;
-}
-}
-if (preferredWrapPosition >= endLineOffset) {
-continue;
-}
-if (preferredWrapPosition >= endOffset) {
-return;
-}
-int wrapOffset=strategy.calculateWrapPosition(text,Math.max(startLineOffset,startOffset),Math.min(endLineOffset,endOffset),preferredWrapPosition,false);
-editor.getCaretModel().moveToOffset(wrapOffset);
-DataContext dataContext=DataManager.getInstance().getDataContext(editor.getComponent());
-SelectionModel selectionModel=editor.getSelectionModel();
-boolean restoreSelection;
-int startSelectionOffset=0;
-int endSelectionOffset=0;
-if (restoreSelection=selectionModel.hasSelection()) {
-startSelectionOffset=selectionModel.getSelectionStart();
-endSelectionOffset=selectionModel.getSelectionEnd();
-selectionModel.removeSelection();
-}
-int textLengthBeforeWrap=document.getTextLength();
-EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor,dataContext);
-if (restoreSelection) {
-int symbolsDiff=document.getTextLength() - textLengthBeforeWrap;
-int newSelectionStart=startSelectionOffset;
-int newSelectionEnd=endSelectionOffset;
-if (startSelectionOffset >= wrapOffset) {
-newSelectionStart+=symbolsDiff;
-}
-if (endSelectionOffset >= wrapOffset) {
-newSelectionEnd+=symbolsDiff;
-}
-selectionModel.setSelection(newSelectionStart,newSelectionEnd);
-}
-wrapLongLinesIfNecessary(file,document,document.getLineStartOffset(line + 1),endOffset);
-return;
-}
+  Editor editor=PsiUtilBase.findEditor(file);
+  EditorFactory editorFactory=null;
+  if (editor == null) {
+    if (!ApplicationManager.getApplication().isDispatchThread()) {
+      return;
+    }
+    editorFactory=EditorFactory.getInstance();
+    editor=editorFactory.createEditor(document);
+  }
+  try {
+    final Editor editorToUse=editor;
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      @Override public void run(){
+        doWrapLongLinesIfNecessary(editorToUse,document,startOffset,endOffset);
+      }
+    }
+);
+  }
+  finally {
+    if (editorFactory != null) {
+      editorFactory.releaseEditor(editor);
+    }
+  }
 }
