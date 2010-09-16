@@ -1,6 +1,6 @@
 {
   final PsiExpression expression=forStatement.getCondition();
-  final PsiBinaryExpression condition=(PsiBinaryExpression)PsiUtil.deparenthesizeExpression(expression);
+  final PsiBinaryExpression condition=(PsiBinaryExpression)ParenthesesUtils.stripParentheses(expression);
   if (condition == null) {
     return null;
   }
@@ -21,49 +21,36 @@
     return null;
   }
   final PsiLocalVariable variable=(PsiLocalVariable)declaredElement;
-  final PsiExpressionStatement body=getBody(forStatement);
-  if (body == null) {
+  final String collectionText=buildCollectionText(forStatement);
+  final PsiArrayAccessExpression arrayAccessExpression=getArrayAccessExpression(forStatement);
+  if (arrayAccessExpression == null) {
     return null;
   }
-  final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)body.getExpression();
-  final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
-  final PsiElement collection=methodExpression.getQualifier();
-  if (collection == null) {
-    return null;
-  }
-  final String collectionText=collection.getText();
-  final PsiExpressionList argumentList=methodCallExpression.getArgumentList();
-  final PsiExpression argument=argumentList.getExpressions()[0];
-  final PsiExpression deparenthesizedArgument=PsiUtil.deparenthesizeExpression(argument);
-  if (!(deparenthesizedArgument instanceof PsiArrayAccessExpression)) {
-    return null;
-  }
-  final PsiArrayAccessExpression arrayAccessExpression=(PsiArrayAccessExpression)deparenthesizedArgument;
   final PsiExpression arrayExpression=arrayAccessExpression.getArrayExpression();
   final String arrayText=arrayExpression.getText();
   final PsiExpression indexExpression=arrayAccessExpression.getIndexExpression();
-  final String fromOffsetText=getStartOffsetText(indexExpression,variable);
+  final String fromOffsetText=buildFromOffsetText(indexExpression,variable);
   if (fromOffsetText == null) {
     return null;
   }
-  PsiExpression limit;
-  if (condition.getOperationTokenType() == JavaTokenType.LT) {
+  final PsiExpression limit;
+  final IElementType tokenType=condition.getOperationTokenType();
+  if (tokenType == JavaTokenType.LT || tokenType == JavaTokenType.LE) {
     limit=condition.getROperand();
   }
  else {
     limit=condition.getLOperand();
   }
-  limit=PsiUtil.deparenthesizeExpression(limit);
-  if (limit == null) {
-    return null;
-  }
-  @NonNls final String toOffsetText=limit.getText();
+  @NonNls final String toOffsetText=buildToOffsetText(limit,tokenType == JavaTokenType.LE || tokenType == JavaTokenType.GE);
   if (toOffsetText == null) {
     return null;
   }
-  @NonNls final StringBuilder buffer=new StringBuilder(60);
-  buffer.append(collectionText);
-  buffer.append(".addAll(java.util.Arrays.asList(");
+  @NonNls final StringBuilder buffer=new StringBuilder();
+  if (collectionText.length() > 0) {
+    buffer.append(collectionText);
+    buffer.append('.');
+  }
+  buffer.append("addAll(java.util.Arrays.asList(");
   buffer.append(arrayText);
   buffer.append(')');
   if (!fromOffsetText.equals("0") || !toOffsetText.equals(arrayText + ".length")) {
