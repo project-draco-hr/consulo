@@ -44,6 +44,9 @@
       if (vmProxy.canGetOwnedMonitorInfo() && vmProxy.canGetMonitorInfo()) {
         List<ObjectReference> list=threadReference.ownedMonitors();
         for (        ObjectReference reference : list) {
+          if (!vmProxy.canGetMonitorFrameInfo()) {
+            buffer.append("\n\t ").append(renderLockedObject(reference));
+          }
           final List<ThreadReference> waiting=reference.waitingThreads();
           for (          ThreadReference thread : waiting) {
             final String waitingThreadName=threadName(thread);
@@ -59,15 +62,33 @@
           if (waitedMonitorOwner != null) {
             final String monitorOwningThreadName=threadName(waitedMonitorOwner);
             waitingMap.put(threadName,monitorOwningThreadName);
-            buffer.append("\n\t ").append(DebuggerBundle.message("threads.export.attribute.label.waiting.for.thread",monitorOwningThreadName));
+            buffer.append("\n\t ").append(DebuggerBundle.message("threads.export.attribute.label.waiting.for.thread",monitorOwningThreadName,renderObject(waitedMonitor)));
           }
         }
       }
       final List<StackFrame> frames=threadReference.frames();
       hasEmptyStack=frames.size() == 0;
-      for (      StackFrame stackFrame : frames) {
+      final TIntObjectHashMap<List<ObjectReference>> lockedAt=new TIntObjectHashMap<List<ObjectReference>>();
+      if (vmProxy.canGetMonitorFrameInfo()) {
+        for (        MonitorInfo info : threadReference.ownedMonitorsAndFrames()) {
+          final int stackDepth=info.stackDepth();
+          List<ObjectReference> monitors;
+          if ((monitors=lockedAt.get(stackDepth)) == null) {
+            lockedAt.put(stackDepth,monitors=new SmartList<ObjectReference>());
+          }
+          monitors.add(info.monitor());
+        }
+      }
+      for (int i=0, framesSize=frames.size(); i < framesSize; i++) {
+        final StackFrame stackFrame=frames.get(i);
         final Location location=stackFrame.location();
         buffer.append("\n\t  ").append(renderLocation(location));
+        final List<ObjectReference> monitors=lockedAt.get(i);
+        if (monitors != null) {
+          for (          ObjectReference monitor : monitors) {
+            buffer.append("\n\t  - ").append(renderLockedObject(monitor));
+          }
+        }
       }
     }
  catch (    IncompatibleThreadStateException e) {

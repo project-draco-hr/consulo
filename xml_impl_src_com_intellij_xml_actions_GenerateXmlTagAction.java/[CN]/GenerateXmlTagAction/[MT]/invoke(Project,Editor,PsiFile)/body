@@ -1,0 +1,55 @@
+{
+  try {
+    final XmlTag contextTag=getContextTag(editor,file);
+    if (contextTag == null) {
+      throw new CommonRefactoringUtil.RefactoringErrorHintException("Caret should be positioned inside a tag");
+    }
+    XmlElementDescriptor currentTagDescriptor=contextTag.getDescriptor();
+    XmlElementDescriptor[] descriptors=currentTagDescriptor.getElementsDescriptors(contextTag);
+    Arrays.sort(descriptors,new Comparator<XmlElementDescriptor>(){
+      @Override public int compare(      XmlElementDescriptor o1,      XmlElementDescriptor o2){
+        return o1.getName().compareTo(o2.getName());
+      }
+    }
+);
+    final JBList list=new JBList(descriptors);
+    list.setCellRenderer(new ColoredListCellRenderer(){
+      @Override protected void customizeCellRenderer(      JList list,      Object value,      int index,      boolean selected,      boolean hasFocus){
+        XmlElementDescriptor descriptor=(XmlElementDescriptor)value;
+        append(descriptor.getName());
+        append(" " + getNamespace(descriptor),SimpleTextAttributes.GRAYED_ATTRIBUTES);
+      }
+    }
+);
+    JBPopupFactory.getInstance().createListPopupBuilder(list).setTitle("Choose Tag Name").setItemChoosenCallback(new Runnable(){
+      @Override public void run(){
+        final XmlElementDescriptor selected=(XmlElementDescriptor)list.getSelectedValue();
+        final XmlElementsGroup topGroup=selected.getTopGroup();
+        if (topGroup == null) {
+          throw new CommonRefactoringUtil.RefactoringErrorHintException("XML Schema does not provide enough information to generate tags");
+        }
+        LinkedHashMap<String,XmlElementDescriptor> requiredSubTags=new LinkedHashMap<String,XmlElementDescriptor>();
+        computeRequiredSubTags(topGroup,requiredSubTags);
+        final Collection<XmlElementDescriptor> values=requiredSubTags.values();
+        new WriteCommandAction.Simple(project,"Generate XML Tag",file){
+          @Override protected void run(){
+            XmlTag newTag=createTag(contextTag,selected);
+            newTag=contextTag.addSubTag(newTag,false);
+            final ComplexTypeDescriptor typeDescriptor=getType(selected,newTag);
+            for (            XmlElementDescriptor descriptor : values) {
+              if (true || typeDescriptor.canContainTag(descriptor.getName(),getNamespace(descriptor),newTag)) {
+                newTag.addSubTag(createTag(newTag,descriptor),false);
+              }
+            }
+            TemplateBuilder builder=TemplateBuilderFactory.getInstance().createTemplateBuilder(newTag);
+          }
+        }
+.execute();
+      }
+    }
+).createPopup().showInBestPositionFor(editor);
+  }
+ catch (  CommonRefactoringUtil.RefactoringErrorHintException e) {
+    HintManager.getInstance().showErrorHint(editor,e.getMessage());
+  }
+}
