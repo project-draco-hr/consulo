@@ -1,24 +1,31 @@
 {
   final Ref<Library.ModifiableModel> modelRef=Ref.create(null);
-  final NullableComputable<Library.ModifiableModel> computable=new NullableComputable<Library.ModifiableModel>(){
-    public Library.ModifiableModel compute(){
-      if (myTreeBuilder == null) {
-        final Library library=myLibraryEditor.getLibrary();
-        final InvocationHandler invocationHandler=Proxy.isProxyClass(library.getClass()) ? Proxy.getInvocationHandler(library) : null;
-        final Library realLibrary=invocationHandler instanceof ModuleEditor.ProxyDelegateAccessor ? (Library)((ModuleEditor.ProxyDelegateAccessor)invocationHandler).getDelegate() : library;
-        final Module module=realLibrary instanceof LibraryImpl && ((LibraryImpl)realLibrary).isDisposed() ? ((LibraryImpl)realLibrary).getModule() : null;
-        if (module != null && module.isDisposed())         return null;
-        final Library targetLibrary=module != null ? LibraryUtil.findLibrary(module,realLibrary.getName()) : realLibrary;
-        final Library.ModifiableModel model=targetLibrary.getModifiableModel();
-        modelRef.set(model);
-        return model;
-      }
+  final NullableComputable<Library.ModifiableModel> computable;
+  if (myLibraryEditor instanceof ExistingLibraryEditor) {
+    final ExistingLibraryEditor libraryEditor=(ExistingLibraryEditor)myLibraryEditor;
+    computable=new NullableComputable<Library.ModifiableModel>(){
+      public Library.ModifiableModel compute(){
+        if (myTreeBuilder == null) {
+          final Library library=libraryEditor.getLibrary();
+          final InvocationHandler invocationHandler=Proxy.isProxyClass(library.getClass()) ? Proxy.getInvocationHandler(library) : null;
+          final Library realLibrary=invocationHandler instanceof ModuleEditor.ProxyDelegateAccessor ? (Library)((ModuleEditor.ProxyDelegateAccessor)invocationHandler).getDelegate() : library;
+          final Module module=realLibrary instanceof LibraryImpl && ((LibraryImpl)realLibrary).isDisposed() ? ((LibraryImpl)realLibrary).getModule() : null;
+          if (module != null && module.isDisposed())           return null;
+          final Library targetLibrary=module != null ? LibraryUtil.findLibrary(module,realLibrary.getName()) : realLibrary;
+          final Library.ModifiableModel model=targetLibrary.getModifiableModel();
+          modelRef.set(model);
+          return model;
+        }
  else {
-        return myLibraryEditor.getModel();
+          return libraryEditor.getModel();
+        }
       }
     }
-  }
 ;
+  }
+ else {
+    computable=null;
+  }
   final Runnable successRunnable=new Runnable(){
     public void run(){
       if (modelRef.get() != null) {
@@ -27,8 +34,8 @@
       ApplicationManager.getApplication().invokeLater(new Runnable(){
         public void run(){
           if (myTreeBuilder != null)           myTreeBuilder.queueUpdate();
-          if (myProject != null) {
-            ModuleStructureConfigurable.getInstance(myProject).fireItemsChangeListener(myLibraryEditor.getLibrary());
+          if (myProject != null && myLibraryEditor instanceof ExistingLibraryEditor) {
+            ModuleStructureConfigurable.getInstance(myProject).fireItemsChangeListener(((ExistingLibraryEditor)myLibraryEditor).getLibrary());
           }
         }
       }
@@ -45,7 +52,7 @@
   }
 ;
   if (myHandlers.length == 1) {
-    myHandlers[0].performAttach(myProject,computable).doWhenDone(successRunnable).doWhenRejected(rejectRunnable);
+    myHandlers[0].performAttach(myProject,myLibraryEditor,computable).doWhenDone(successRunnable).doWhenRejected(rejectRunnable);
   }
  else {
     final ListPopup popup=JBPopupFactory.getInstance().createListPopup(new BaseListPopupStep<LibraryTableAttachHandler>(null,myHandlers){
@@ -58,7 +65,7 @@
       public PopupStep onChosen(      final LibraryTableAttachHandler handler,      final boolean finalChoice){
         ApplicationManager.getApplication().invokeLater(new Runnable(){
           public void run(){
-            handler.performAttach(myProject,computable).doWhenProcessed(successRunnable).doWhenRejected(rejectRunnable);
+            handler.performAttach(myProject,myLibraryEditor,computable).doWhenProcessed(successRunnable).doWhenRejected(rejectRunnable);
           }
         }
 );
