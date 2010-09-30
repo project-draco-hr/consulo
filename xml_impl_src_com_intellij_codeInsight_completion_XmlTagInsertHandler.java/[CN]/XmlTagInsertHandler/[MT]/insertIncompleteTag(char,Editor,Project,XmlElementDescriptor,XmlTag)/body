@@ -45,61 +45,42 @@
       }
     }
   }
-  if (completionChar == '>' || (completionChar == '/' && indirectRequiredAttrs != null)) {
-    template.addTextSegment(">");
-    boolean toInsertCDataEnd=false;
-    if (descriptor instanceof XmlElementDescriptorWithCDataContent) {
-      final XmlElementDescriptorWithCDataContent cDataContainer=(XmlElementDescriptorWithCDataContent)descriptor;
-      if (cDataContainer.requiresCdataBracesInContext(tag)) {
-        template.addTextSegment("<![CDATA[\n");
-        toInsertCDataEnd=true;
-      }
+  weInsertedSomeCodeThatCouldBeInvalidated=addTail(completionChar,descriptor,tag,template,weInsertedSomeCodeThatCouldBeInvalidated,attributes,indirectRequiredAttrs);
+  final boolean weInsertedSomeCodeThatCouldBeInvalidated1=weInsertedSomeCodeThatCouldBeInvalidated;
+  templateManager.startTemplate(editor,template,new TemplateEditingAdapter(){
+    private RangeMarker myAttrValueMarker;
+    @Override public void waitingForInput(    Template template){
+      int offset=editor.getCaretModel().getOffset();
+      myAttrValueMarker=editor.getDocument().createRangeMarker(offset + 1,offset + 4);
     }
-    if (indirectRequiredAttrs != null)     template.addTextSegment(indirectRequiredAttrs.toString());
-    template.addEndVariable();
-    if (toInsertCDataEnd)     template.addTextSegment("\n]]>");
-    if ((!(tag instanceof HtmlTag) || !HtmlUtil.isSingleHtmlTag(tag.getName())) && tag.getAttributes().length == 0) {
-      if (WebEditorOptions.getInstance().isAutomaticallyInsertClosingTag()) {
-        final String name=descriptor.getName(tag);
-        if (name != null) {
-          template.addTextSegment("</");
-          template.addTextSegment(name);
-          template.addTextSegment(">");
+    public void templateFinished(    final Template template,    boolean brokenOff){
+      final int offset=editor.getCaretModel().getOffset();
+      if (weInsertedSomeCodeThatCouldBeInvalidated1 && offset >= 3) {
+        char c=editor.getDocument().getCharsSequence().charAt(offset - 3);
+        if (c == '/' || (c == ' ' && brokenOff)) {
+          new WriteCommandAction.Simple(project){
+            protected void run() throws Throwable {
+              editor.getDocument().replaceString(offset - 2,offset + 1,">");
+            }
+          }
+.execute();
         }
       }
     }
-  }
- else   if (completionChar == '/') {
-    template.addTextSegment("/>");
-  }
- else   if (completionChar == ' ' && template.getSegmentsCount() == 0) {
-    if (WebEditorOptions.getInstance().isAutomaticallyStartAttribute() && (attributes.length > 0 || isTagFromHtml(tag) && !HtmlUtil.isTagWithoutAttributes(tag.getName()))) {
-      template.addTextSegment(" ");
-      final MacroCallNode completeAttrExpr=new MacroCallNode(MacroFactory.createMacro("complete"));
-      template.addVariable("attrComplete",completeAttrExpr,completeAttrExpr,true);
-      weInsertedSomeCodeThatCouldBeInvalidated=true;
-      template.addTextSegment("=\"");
-      template.addEndVariable();
-      template.addTextSegment("\"");
-    }
-  }
- else   if ((completionChar == Lookup.AUTO_INSERT_SELECT_CHAR || completionChar == Lookup.NORMAL_SELECT_CHAR) && WebEditorOptions.getInstance().isAutomaticallyInsertClosingTag() && HtmlUtil.isSingleHtmlTag(tag.getName())) {
-    template.addTextSegment(tag instanceof HtmlTag ? ">" : "/>");
-  }
-  final boolean weInsertedSomeCodeThatCouldBeInvalidated1=weInsertedSomeCodeThatCouldBeInvalidated;
-  templateManager.startTemplate(editor,template,new TemplateEditingAdapter(){
-    public void templateFinished(    final Template template,    boolean brokenOff){
-      final int offset=editor.getCaretModel().getOffset();
-      if (weInsertedSomeCodeThatCouldBeInvalidated1 && offset >= 3 && editor.getDocument().getCharsSequence().charAt(offset - 3) == '/') {
+    public void templateCancelled(    final Template template){
+      if (myAttrValueMarker == null) {
+        return;
+      }
+      if (weInsertedSomeCodeThatCouldBeInvalidated1) {
+        final int startOffset=myAttrValueMarker.getStartOffset();
+        final int endOffset=myAttrValueMarker.getEndOffset();
         new WriteCommandAction.Simple(project){
           protected void run() throws Throwable {
-            editor.getDocument().replaceString(offset - 2,offset + 1,">");
+            editor.getDocument().replaceString(startOffset,endOffset,">");
           }
         }
 .execute();
       }
-    }
-    public void templateCancelled(    final Template template){
     }
   }
 );

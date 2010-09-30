@@ -1,2 +1,63 @@
 {
+  final Pair<CompletionContext,PsiElement> insertedInfo=new WriteCommandAction<Pair<CompletionContext,PsiElement>>(context.project){
+    protected void run(    Result<Pair<CompletionContext,PsiElement>> result) throws Throwable {
+      result.setResult(insertDummyIdentifier(context,patcher));
+    }
+  }
+.execute().getResultObject();
+  final PsiElement insertedElement=insertedInfo.getSecond();
+  final CompletionContext newContext=insertedInfo.getFirst();
+  insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,newContext);
+  PsiFile originalFile=newContext.file;
+  final PsiFile rightLanguagedOriginal=originalFile.getViewProvider().getPsi(insertedElement.getContainingFile().getLanguage());
+  if (rightLanguagedOriginal != null) {
+    originalFile=rightLanguagedOriginal;
+  }
+  final CompletionParameters parameters=new CompletionParameters(insertedElement,originalFile,myCompletionType,newContext.getStartOffset(),invocationCount);
+  final Semaphore freezeSemaphore=new Semaphore();
+  freezeSemaphore.down();
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,this,context,freezeSemaphore);
+  final AtomicReference<LookupElement[]> data=new AtomicReference<LookupElement[]>(null);
+  final Runnable computeRunnable=new Runnable(){
+    public void run(){
+      ProgressManager.getInstance().runProcess(new Runnable(){
+        public void run(){
+          try {
+            data.set(CompletionService.getCompletionService().performCompletion(parameters,new Consumer<LookupElement>(){
+              public void consume(              final LookupElement lookupElement){
+                indicator.addItem(lookupElement);
+              }
+            }
+));
+          }
+ catch (          PsiInvalidElementAccessException e) {
+            throw new RuntimeException("PIEAE: canceled=" + indicator.isCanceled() + "; trace="+ indicator.cancelTrace,e);
+          }
+catch (          ProcessCanceledException ignored) {
+          }
+        }
+      }
+,indicator);
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    computeRunnable.run();
+  }
+ else {
+    ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
+  }
+  if (!invokedExplicitly) {
+    indicator.notifyBackgrounded();
+    return;
+  }
+  if (freezeSemaphore.waitFor(2000)) {
+    final LookupElement[] allItems=data.get();
+    if (allItems != null) {
+      completionFinished(offset1,offset2,context,indicator,allItems);
+      return;
+    }
+  }
+  indicator.notifyBackgrounded();
+  indicator.showLookup();
 }
