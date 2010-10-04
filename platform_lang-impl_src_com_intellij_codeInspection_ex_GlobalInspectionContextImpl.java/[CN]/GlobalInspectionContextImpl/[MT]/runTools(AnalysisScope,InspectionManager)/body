@@ -1,0 +1,70 @@
+{
+  final List<InspectionProfileEntry> needRepeatSearchRequest=new ArrayList<InspectionProfileEntry>();
+  final List<Tools> globalTools=new ArrayList<Tools>();
+  final List<Tools> localTools=new ArrayList<Tools>();
+  initializeTools(globalTools,localTools);
+  ((RefManagerImpl)getRefManager()).initializeAnnotators();
+  for (  Tools tools : globalTools) {
+    for (    ScopeToolState state : tools.getTools()) {
+      final InspectionTool tool=(InspectionTool)state.getTool();
+      try {
+        if (tool.isGraphNeeded()) {
+          ((RefManagerImpl)tool.getRefManager()).findAllDeclarations();
+        }
+        tool.runInspection(scope,manager);
+        if (tool.queryExternalUsagesRequests(manager)) {
+          needRepeatSearchRequest.add(tool);
+        }
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        LOG.error(e);
+      }
+    }
+  }
+  for (  GlobalInspectionContextExtension extension : myExtensions.values()) {
+    try {
+      extension.performPostRunActivities(needRepeatSearchRequest,this);
+    }
+ catch (    ProcessCanceledException e) {
+      throw e;
+    }
+catch (    Exception e) {
+      LOG.error(e);
+    }
+  }
+  if (RUN_GLOBAL_TOOLS_ONLY)   return;
+  final PsiManager psiManager=PsiManager.getInstance(myProject);
+  scope.accept(new PsiElementVisitor(){
+    @Override public void visitFile(    PsiFile file){
+      final VirtualFile virtualFile=file.getVirtualFile();
+      if (virtualFile != null) {
+        incrementJobDoneAmount(LOCAL_ANALYSIS,ProjectUtil.calcRelativeToProjectPath(virtualFile,myProject));
+        if (SingleRootFileViewProvider.isTooLarge(virtualFile))         return;
+      }
+      final FileViewProvider viewProvider=psiManager.findViewProvider(virtualFile);
+      final com.intellij.openapi.editor.Document document=viewProvider == null ? null : viewProvider.getDocument();
+      if (document == null || virtualFile.getFileType().isBinary())       return;
+      final LocalInspectionsPass pass=new LocalInspectionsPass(file,document,0,file.getTextLength());
+      try {
+        final List<InspectionProfileEntry> lTools=new ArrayList<InspectionProfileEntry>();
+        for (        Tools tool : localTools) {
+          final InspectionTool enabledTool=(InspectionTool)tool.getEnabledTool(file);
+          if (enabledTool != null) {
+            lTools.add(enabledTool);
+          }
+        }
+        pass.doInspectInBatch((InspectionManagerEx)manager,lTools,true);
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        LOG.error(e);
+      }
+    }
+  }
+);
+}
