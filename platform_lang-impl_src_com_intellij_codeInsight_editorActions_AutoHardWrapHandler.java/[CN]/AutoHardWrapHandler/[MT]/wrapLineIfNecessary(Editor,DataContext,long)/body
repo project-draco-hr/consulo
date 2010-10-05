@@ -1,0 +1,73 @@
+{
+  Project project=editor.getProject();
+  Document document=editor.getDocument();
+  AutoWrapChange change=myAutoWrapChanges.get(document);
+  if (change != null) {
+    change.charTyped(editor,modificationStampBeforeTyping);
+  }
+  if (project == null || !editor.getSettings().isWrapWhenTypingReachesRightMargin(project)) {
+    return;
+  }
+  CaretModel caretModel=editor.getCaretModel();
+  int caretOffset=caretModel.getOffset();
+  int line=document.getLineNumber(caretOffset);
+  int startOffset=document.getLineStartOffset(line);
+  int endOffset=document.getLineEndOffset(line);
+  int margin=editor.getSettings().getRightMargin(project);
+  VisualPosition visEndLinePosition=editor.offsetToVisualPosition(endOffset);
+  if (margin > visEndLinePosition.column) {
+    if (change != null) {
+      change.modificationStamp=document.getModificationStamp();
+    }
+    return;
+  }
+  LineWrapPositionStrategy strategy=LanguageLineWrapPositionStrategy.INSTANCE.forEditor(editor);
+  if (change == null) {
+    change=new AutoWrapChange();
+    myAutoWrapChanges.put(document,change);
+  }
+ else {
+    if (!change.isEmpty()) {
+      document.replaceString(change.change.getStart(),change.change.getEnd(),change.change.getText());
+    }
+    change.reset();
+  }
+  change.update(editor);
+  int maxPreferredOffset=editor.logicalPositionToOffset(editor.visualToLogicalPosition(new VisualPosition(caretModel.getVisualPosition().line,margin - FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS)));
+  int wrapOffset=strategy.calculateWrapPosition(document.getCharsSequence(),startOffset,endOffset,maxPreferredOffset,true);
+  WhiteSpaceFormattingStrategy formattingStrategy=WhiteSpaceFormattingStrategyFactory.getStrategy(editor);
+  if (wrapOffset <= startOffset || wrapOffset > maxPreferredOffset || formattingStrategy.check(document.getCharsSequence(),startOffset,wrapOffset) >= wrapOffset) {
+    return;
+  }
+  final int[] wrapIntroducedSymbolsNumber=new int[1];
+  DocumentListener listener=new DocumentListener(){
+    @Override public void beforeDocumentChange(    DocumentEvent event){
+      if (event.getNewLength() <= 0) {
+        return;
+      }
+      wrapIntroducedSymbolsNumber[0]+=event.getNewLength() - event.getOldLength();
+    }
+    @Override public void documentChanged(    DocumentEvent event){
+    }
+  }
+;
+  caretModel.moveToOffset(wrapOffset);
+  DataManager.getInstance().saveInDataContext(dataContext,AUTO_WRAP_LINE_IN_PROGRESS_KEY,true);
+  document.addDocumentListener(listener);
+  try {
+    EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor,dataContext);
+  }
+  finally {
+    DataManager.getInstance().saveInDataContext(dataContext,AUTO_WRAP_LINE_IN_PROGRESS_KEY,null);
+    document.removeDocumentListener(listener);
+  }
+  change.modificationStamp=document.getModificationStamp();
+  change.change.setStart(wrapOffset);
+  change.change.setEnd(wrapOffset + wrapIntroducedSymbolsNumber[0]);
+  int newCaretOffset=caretOffset;
+  if (wrapOffset <= caretOffset && newCaretOffset + wrapIntroducedSymbolsNumber[0] < document.getTextLength()) {
+    newCaretOffset+=wrapIntroducedSymbolsNumber[0];
+  }
+  newCaretOffset=Math.min(document.getLineEndOffset(line + 1),newCaretOffset);
+  caretModel.moveToOffset(newCaretOffset);
+}
