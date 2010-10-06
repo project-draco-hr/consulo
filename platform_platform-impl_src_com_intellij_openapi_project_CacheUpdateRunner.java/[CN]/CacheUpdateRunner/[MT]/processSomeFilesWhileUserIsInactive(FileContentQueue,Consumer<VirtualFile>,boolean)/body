@@ -1,0 +1,36 @@
+{
+  final ProgressIndicatorBase innerIndicator=new ProgressIndicatorBase();
+  final ApplicationAdapter canceller=new ApplicationAdapter(){
+    @Override public void beforeWriteActionStart(    Object action){
+      innerIndicator.cancel();
+    }
+  }
+;
+  final Application application=ApplicationManager.getApplication();
+  application.addApplicationListener(canceller);
+  final boolean[] isFinished=new boolean[1];
+  try {
+    int threadsCount=Registry.intValue("caches.indexerThreadsCount");
+    if (threadsCount == 1) {
+      Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
+      ProgressManager.getInstance().runProcess(process,innerIndicator);
+    }
+ else {
+      Job<Object> job=JobScheduler.getInstance().createJob("Indexing",Thread.NORM_PRIORITY);
+      for (int i=0; i < threadsCount; i++) {
+        Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
+        job.addTask(process);
+      }
+      try {
+        job.scheduleAndWaitForResults();
+      }
+ catch (      Throwable throwable) {
+        LOG.error(throwable);
+      }
+    }
+  }
+  finally {
+    application.removeApplicationListener(canceller);
+  }
+  return isFinished[0];
+}
