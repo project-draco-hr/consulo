@@ -10,42 +10,24 @@
   application.addApplicationListener(canceller);
   final boolean[] isFinished=new boolean[1];
   try {
-    ProgressManager.getInstance().runProcess(new Runnable(){
-      public void run(){
-        while (true) {
-          if (myProject.isDisposed())           return;
-          if (innerIndicator.isCanceled())           return;
-          final FileContent fileContent=queue.take();
-          if (fileContent == null) {
-            isFinished[0]=true;
-            return;
-          }
-          try {
-            final Runnable action=new Runnable(){
-              public void run(){
-                innerIndicator.checkCanceled();
-                if (myProject.isDisposed())                 return;
-                final VirtualFile file=fileContent.getVirtualFile();
-                progressUpdater.consume(file);
-                mySession.processFile(fileContent);
-              }
-            }
-;
-            if (processInReadAction) {
-              application.runReadAction(action);
-            }
+    int threadsCount=Registry.intValue("caches.indexerThreadsCount");
+    if (threadsCount == 1) {
+      Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
+      ProgressManager.getInstance().runProcess(process,innerIndicator);
+    }
  else {
-              action.run();
-            }
-          }
- catch (          ProcessCanceledException e) {
-            queue.pushback(fileContent);
-            return;
-          }
-        }
+      Job<Object> job=JobScheduler.getInstance().createJob("Indexing",Thread.NORM_PRIORITY);
+      for (int i=0; i < threadsCount; i++) {
+        Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
+        job.addTask(process);
+      }
+      try {
+        job.scheduleAndWaitForResults();
+      }
+ catch (      Throwable throwable) {
+        LOG.error(throwable);
       }
     }
-,innerIndicator);
   }
   finally {
     application.removeApplicationListener(canceller);
