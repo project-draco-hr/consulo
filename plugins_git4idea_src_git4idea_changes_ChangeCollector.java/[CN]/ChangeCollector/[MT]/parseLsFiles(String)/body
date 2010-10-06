@@ -1,0 +1,50 @@
+{
+  final Set<String> removed=new HashSet<String>();
+  final Set<String> changed=new HashSet<String>();
+  final Set<String> unmerged=new HashSet<String>();
+  for (StringScanner sc=new StringScanner(list); sc.hasMoreData(); ) {
+    if (sc.isEol()) {
+      sc.nextLine();
+      continue;
+    }
+    final char status=sc.peek();
+    sc.skipChars(2);
+    if ('?' == status) {
+      VirtualFile file=myVcsRoot.findFileByRelativePath(GitUtil.unescapePath(sc.line()));
+      myUnversioned.add(file);
+    }
+ else {
+      sc.boundedToken('\t');
+      final String filePath=GitUtil.unescapePath(sc.line());
+      if ('R' == status) {
+        removed.add(filePath);
+      }
+ else       if ('C' == status) {
+        changed.add(filePath);
+      }
+ else       if ('M' == status) {
+        unmerged.add(filePath);
+      }
+ else {
+        LOG.info("Unsupported type of the file status returned by git ls-file: [" + status + "]. Line: "+ sc.line());
+      }
+    }
+  }
+  for (  String removedPath : removed) {
+    changed.remove(removedPath);
+    ContentRevision before=GitContentRevision.createRevision(myVcsRoot,removedPath,myHeadRevision,myProject,true,true);
+    myChanges.add(new Change(before,null,FileStatus.DELETED));
+  }
+  for (  String unmergedPath : unmerged) {
+    changed.remove(unmergedPath);
+    myUnmergedNames.add(unmergedPath);
+    ContentRevision before=GitContentRevision.createRevision(myVcsRoot,unmergedPath,new GitRevisionNumber("orig_head"),myProject,false,true);
+    ContentRevision after=GitContentRevision.createRevision(myVcsRoot,unmergedPath,null,myProject,false,false);
+    myChanges.add(new Change(before,after,FileStatus.MERGED_WITH_CONFLICTS));
+  }
+  for (  String changedPath : changed) {
+    ContentRevision before=GitContentRevision.createRevision(myVcsRoot,changedPath,null,myProject,false,true);
+    ContentRevision after=GitContentRevision.createRevision(myVcsRoot,changedPath,myHeadRevision,myProject,false,false);
+    myChanges.add(new Change(before,after,FileStatus.MODIFIED));
+  }
+}
