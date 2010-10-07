@@ -1,22 +1,24 @@
 {
-  final Pair<CompletionContext,PsiElement> insertedInfo=new WriteCommandAction<Pair<CompletionContext,PsiElement>>(context.project){
-    protected void run(    Result<Pair<CompletionContext,PsiElement>> result) throws Throwable {
-      result.setResult(insertDummyIdentifier(context,patcher));
+  final Ref<Pair<CompletionContext,PsiElement>> ref=Ref.create(null);
+  CommandProcessor.getInstance().runUndoTransparentAction(new Runnable(){
+    @Override public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        @Override public void run(){
+          ref.set(insertDummyIdentifier(context,patcher,context.file,context.editor));
+        }
+      }
+);
     }
   }
-.execute().getResultObject();
-  final PsiElement insertedElement=insertedInfo.getSecond();
-  final CompletionContext newContext=insertedInfo.getFirst();
+);
+  final PsiElement insertedElement=ref.get().getSecond();
+  final CompletionContext newContext=ref.get().getFirst();
   insertedElement.putUserData(CompletionContext.COMPLETION_CONTEXT_KEY,newContext);
-  PsiFile originalFile=newContext.file;
-  final PsiFile rightLanguagedOriginal=originalFile.getViewProvider().getPsi(insertedElement.getContainingFile().getLanguage());
-  if (rightLanguagedOriginal != null) {
-    originalFile=rightLanguagedOriginal;
-  }
+  PsiFile originalFile=context.file;
   final CompletionParameters parameters=new CompletionParameters(insertedElement,originalFile,myCompletionType,newContext.getStartOffset(),invocationCount);
   final Semaphore freezeSemaphore=new Semaphore();
   freezeSemaphore.down();
-  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,this,context,freezeSemaphore);
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,this,freezeSemaphore,context.getOffsetMap());
   final AtomicReference<LookupElement[]> data=new AtomicReference<LookupElement[]>(null);
   final Semaphore startSemaphore=new Semaphore();
   startSemaphore.down();
@@ -58,7 +60,7 @@ catch (          ProcessCanceledException ignored) {
   if (freezeSemaphore.waitFor(2000)) {
     final LookupElement[] allItems=data.get();
     if (allItems != null) {
-      completionFinished(offset1,offset2,context,indicator,allItems);
+      completionFinished(offset1,offset2,indicator,allItems);
       return;
     }
   }
