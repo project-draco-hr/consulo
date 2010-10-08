@@ -26,23 +26,57 @@
         unmerged.add(filePath);
       }
  else {
-        LOG.info("Unsupported type of the file status returned by git ls-file: [" + status + "]. Line: "+ sc.line());
+        LOG.info("Unexpected type of the file status returned by git ls-file: [" + status + "]. Line: "+ sc.line());
+      }
+    }
+  }
+  changed.removeAll(removed);
+  changed.removeAll(unmerged);
+  final Set<String> changedPaths=new HashSet<String>(myChanges.size());
+  for (Iterator<Change> it=myChanges.iterator(); it.hasNext(); ) {
+    boolean alreadyRemoved=false;
+    final Change c=it.next();
+    final ContentRevision before=c.getBeforeRevision();
+    final ContentRevision after=c.getAfterRevision();
+    if (after != null) {
+      String path=after.getFile().getPath();
+      if (path != null) {
+        path=GitUtil.relativePath(VfsUtil.virtualToIoFile(myVcsRoot),new File(path));
+        if (removed.contains(path)) {
+          it.remove();
+          alreadyRemoved=true;
+          if (before == null) {
+            removed.remove(path);
+          }
+        }
+ else {
+          changedPaths.add(path);
+        }
+      }
+    }
+    if (before != null) {
+      String path=before.getFile().getPath();
+      if (path != null) {
+        path=GitUtil.relativePath(VfsUtil.virtualToIoFile(myVcsRoot),new File(path));
+        if (removed.contains(path)) {
+          if (!alreadyRemoved) {
+            it.remove();
+          }
+        }
+ else {
+          changedPaths.add(path);
+        }
       }
     }
   }
   for (  String removedPath : removed) {
-    changed.remove(removedPath);
     ContentRevision before=GitContentRevision.createRevision(myVcsRoot,removedPath,myHeadRevision,myProject,true,true);
     myChanges.add(new Change(before,null,FileStatus.DELETED));
   }
-  for (  String unmergedPath : unmerged) {
-    changed.remove(unmergedPath);
-    myUnmergedNames.add(unmergedPath);
-    ContentRevision before=GitContentRevision.createRevision(myVcsRoot,unmergedPath,new GitRevisionNumber("orig_head"),myProject,false,true);
-    ContentRevision after=GitContentRevision.createRevision(myVcsRoot,unmergedPath,null,myProject,false,false);
-    myChanges.add(new Change(before,after,FileStatus.MERGED_WITH_CONFLICTS));
-  }
   for (  String changedPath : changed) {
+    if (changedPaths.contains(changedPath)) {
+      continue;
+    }
     ContentRevision before=GitContentRevision.createRevision(myVcsRoot,changedPath,myHeadRevision,myProject,false,true);
     ContentRevision after=GitContentRevision.createRevision(myVcsRoot,changedPath,null,myProject,false,false);
     myChanges.add(new Change(before,after,FileStatus.MODIFIED));
