@@ -56,7 +56,7 @@
 ;
   EditorFactory.getInstance().addEditorFactoryListener(myEditorFactoryListener);
   PsiDocumentManagerImpl documentManager=(PsiDocumentManagerImpl)PsiDocumentManager.getInstance(myProject);
-  PsiChangeHandler changeHandler=new PsiChangeHandler(myProject,daemonCodeAnalyzer,documentManager,EditorFactory.getInstance(),connection);
+  PsiChangeHandler changeHandler=new PsiChangeHandler(myProject,documentManager,EditorFactory.getInstance(),connection,daemonCodeAnalyzer.getFileStatusMap());
   Disposer.register(this,changeHandler);
   PsiManager.getInstance(myProject).addPsiTreeChangeListener(changeHandler,changeHandler);
   connection.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootListener(){
@@ -102,7 +102,8 @@
   ActionManagerEx.getInstanceEx().addAnActionListener(new MyAnActionListener(),this);
   VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileAdapter(){
     public void propertyChanged(    VirtualFilePropertyEvent event){
-      if (VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
+      String propertyName=event.getPropertyName();
+      if (VirtualFile.PROP_NAME.equals(propertyName)) {
         myDaemonCodeAnalyzer.restart();
         PsiFile psiFile=PsiManager.getInstance(myProject).findFile(event.getFile());
         if (psiFile != null && !myDaemonCodeAnalyzer.isHighlightingAvailable(psiFile)) {
@@ -111,6 +112,9 @@
             UpdateHighlightersUtil.setHighlightersToEditor(myProject,document,0,document.getTextLength(),Collections.<HighlightInfo>emptyList(),Pass.UPDATE_ALL);
           }
         }
+      }
+      if (!propertyName.equals(PsiTreeChangeEvent.PROP_WRITABLE)) {
+        stopDaemon(true);
       }
     }
   }
@@ -129,7 +133,9 @@
   }
   myModalityStateListener=new ModalityStateListener(){
     public void beforeModalityStateChanged(    boolean entering){
-      stopDaemon(LaterInvocator.isInModalContext());
+      boolean inModalContext=LaterInvocator.isInModalContext();
+      stopDaemon(inModalContext);
+      myDaemonCodeAnalyzer.setUpdateByTimerEnabled(inModalContext);
     }
   }
 ;
