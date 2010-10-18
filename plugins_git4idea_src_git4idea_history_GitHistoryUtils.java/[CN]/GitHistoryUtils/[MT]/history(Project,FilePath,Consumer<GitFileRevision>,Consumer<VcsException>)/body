@@ -2,46 +2,43 @@
   path=getLastCommitName(project,path);
   final VirtualFile root=GitUtil.getGitRoot(path);
   GitLineHandler h=new GitLineHandler(project,root,GitCommand.LOG);
+  final GitLogParser parser=new GitLogParser(HASH,COMMIT_TIME,AUTHOR_NAME,AUTHOR_EMAIL,COMMITTER_NAME,COMMITTER_EMAIL,SUBJECT,BODY);
   h.setNoSSH(true);
   h.setStdoutSuppressed(true);
-  h.addParameters("-M","--follow","--name-only","--pretty=tformat:%x00%x01%x00%H%x00%ct%x00%an%x20%x3C%ae%x3E%x00%cn%x20%x3C%ce%x3E%x00%x02%x00%s%x00%b%x00%x02%x01","--encoding=UTF-8");
+  h.addParameters("-M","--follow","--name-only",parser.getPretty(),"--encoding=UTF-8");
+  parser.setNameInOutput(false);
   h.endOptions();
   h.addRelativePaths(path);
-  final String prefix=root.getPath() + "/";
-  final MyTokenAccumulator accumulator=new MyTokenAccumulator(6);
-  final Consumer<LowLevelRevisionDetails> resultAdapter=new Consumer<LowLevelRevisionDetails>(){
-    public void consume(    LowLevelRevisionDetails revisionDetails){
-      if (revisionDetails == null) {
+  final MyTokenAccumulator accumulator=new MyTokenAccumulator(parser);
+  final Consumer<GitLogRecord> resultAdapter=new Consumer<GitLogRecord>(){
+    public void consume(    GitLogRecord record){
+      if (record == null) {
         exceptionConsumer.consume(new VcsException("revision details are null."));
         return;
       }
-      if (revisionDetails.missesRequiredFields()) {
-        exceptionConsumer.consume(new VcsException("revision misses hash or timestamp data."));
-        return;
-      }
-      final GitRevisionNumber revision=new GitRevisionNumber(revisionDetails.hash,GitUtil.parseTimestamp(revisionDetails.timestamp));
-      final String author=GitUtil.adjustAuthorName(revisionDetails.getAuthor(),revisionDetails.getCommitter());
-      final String message=revisionDetails.getComment();
-      String path=revisionDetails.getPath();
+      final GitRevisionNumber revision=new GitRevisionNumber(record.getHash(),record.getDate());
+      final String author=record.getAuthorAndCommitter();
+      final String message=record.getFullMessage();
+      FilePath revisionPath=new FilePathImpl(root);
       try {
-        if (!path.isEmpty()) {
-          path=GitUtil.unescapePath(path);
+        final List<FilePath> paths=record.getFilePaths(root);
+        if (paths.size() > 0) {
+          revisionPath=paths.get(0);
         }
+        consumer.consume(new GitFileRevision(project,revisionPath,revision,author,message,null));
       }
  catch (      VcsException e) {
         exceptionConsumer.consume(e);
       }
-      final FilePath revisionPath=VcsUtil.getFilePathForDeletedFile(prefix + path,false);
-      consumer.consume(new GitFileRevision(project,revisionPath,revision,author,message,null));
     }
   }
 ;
   final Semaphore semaphore=new Semaphore();
   h.addLineListener(new GitLineHandlerAdapter(){
     @Override public void onLineAvailable(    String line,    Key outputType){
-      final LowLevelRevisionDetails result=accumulator.acceptLine(line);
-      if (result != null && !result.missesRequiredFields()) {
-        resultAdapter.consume(result);
+      final GitLogRecord record=accumulator.acceptLine(line);
+      if (record != null) {
+        resultAdapter.consume(record);
       }
     }
     @Override public void startFailed(    Throwable exception){
@@ -49,12 +46,9 @@
     }
     @Override public void processTerminated(    int exitCode){
       super.processTerminated(exitCode);
-      final LowLevelRevisionDetails result=accumulator.processLast();
-      if (result != null && !result.missesRequiredFields()) {
-        resultAdapter.consume(result);
-      }
-      for (      VcsException e : accumulator.exceptions) {
-        exceptionConsumer.consume(e);
+      final GitLogRecord record=accumulator.processLast();
+      if (record != null) {
+        resultAdapter.consume(record);
       }
       semaphore.up();
     }
