@@ -1,0 +1,56 @@
+{
+  if (myTargetDeviceSerialNumbers.length > 0) {
+    for (    String serialNumber : myTargetDeviceSerialNumbers) {
+      IDevice targetDevice=getDeviceBySerialNumber(serialNumber);
+      if (targetDevice != null && targetDevice.isOnline()) {
+        if (!prepareAndStartApp(targetDevice) && !myStopped) {
+          myStopped=true;
+          getProcessHandler().destroyProcess();
+          break;
+        }
+      }
+    }
+    if (!myDebugMode && !myStopped) {
+      getProcessHandler().destroyProcess();
+    }
+    return null;
+  }
+  final AndroidDebugBridge.IDeviceChangeListener deviceListener=new AndroidDebugBridge.IDeviceChangeListener(){
+    boolean installed=false;
+    public void deviceConnected(    IDevice device){
+      if (isMyDevice(device)) {
+        getProcessHandler().notifyTextAvailable("Device connected: " + device.getSerialNumber() + '\n',STDOUT);
+      }
+    }
+    public void deviceDisconnected(    IDevice device){
+      if (isMyDevice(device)) {
+        getProcessHandler().notifyTextAvailable("Device disconnected: " + device.getSerialNumber() + "\n",STDOUT);
+      }
+    }
+    public void deviceChanged(    final IDevice device,    int changeMask){
+      ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+        public void run(){
+          if (!installed && isMyDevice(device) && device.isOnline()) {
+            if (myTargetDeviceSerialNumbers.length == 0) {
+              myTargetDeviceSerialNumbers=new String[]{device.getSerialNumber()};
+            }
+            getProcessHandler().notifyTextAvailable("Device is online.\n",STDOUT);
+            installed=true;
+            if ((!prepareAndStartApp(device) || !myDebugMode) && !myStopped) {
+              getProcessHandler().destroyProcess();
+            }
+          }
+        }
+      }
+);
+    }
+  }
+;
+  AdbManager.run(new Runnable(){
+    public void run(){
+      AndroidDebugBridge.addDeviceChangeListener(deviceListener);
+    }
+  }
+,false);
+  return deviceListener;
+}
