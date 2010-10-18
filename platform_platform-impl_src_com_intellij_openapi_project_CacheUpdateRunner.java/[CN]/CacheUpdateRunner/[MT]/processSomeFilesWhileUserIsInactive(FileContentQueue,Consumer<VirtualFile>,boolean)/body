@@ -8,7 +8,7 @@
 ;
   final Application application=ApplicationManager.getApplication();
   application.addApplicationListener(canceller);
-  final boolean[] isFinished=new boolean[1];
+  final Ref<Boolean> isFinished=new Ref<Boolean>(Boolean.FALSE);
   try {
     int threadsCount=Registry.intValue("caches.indexerThreadsCount");
     if (threadsCount == -1) {
@@ -19,13 +19,24 @@
       ProgressManager.getInstance().runProcess(process,innerIndicator);
     }
  else {
-      Job<Object> job=JobScheduler.getInstance().createJob("Indexing",Thread.NORM_PRIORITY);
+      final Job<Object> job=JobScheduler.getInstance().createJob("Indexing",Thread.NORM_PRIORITY);
+      final Ref[] finishedRefs=new Ref[threadsCount];
       for (int i=0; i < threadsCount; i++) {
-        Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
+        final Ref<Boolean> ref=new Ref<Boolean>(Boolean.FALSE);
+        finishedRefs[i]=ref;
+        Runnable process=new MyRunnable(innerIndicator,queue,ref,progressUpdater,processInReadAction,application);
         job.addTask(process);
       }
       try {
         job.scheduleAndWaitForResults();
+        boolean allFinished=true;
+        for (        Ref ref : finishedRefs) {
+          if (!(Boolean)ref.get()) {
+            allFinished=false;
+            break;
+          }
+        }
+        isFinished.set(allFinished);
       }
  catch (      Throwable throwable) {
         LOG.error(throwable);
@@ -35,5 +46,5 @@
   finally {
     application.removeApplicationListener(canceller);
   }
-  return isFinished[0];
+  return isFinished.get();
 }
