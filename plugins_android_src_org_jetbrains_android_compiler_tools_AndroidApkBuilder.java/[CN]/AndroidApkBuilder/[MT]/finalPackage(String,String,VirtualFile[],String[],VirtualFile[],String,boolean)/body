@@ -1,0 +1,92 @@
+{
+  final Map<CompilerMessageCategory,List<String>> result=new HashMap<CompilerMessageCategory,List<String>>();
+  result.put(ERROR,new ArrayList<String>());
+  result.put(INFORMATION,new ArrayList<String>());
+  FileOutputStream fos=null;
+  try {
+    String osKeyPath=DebugKeyProvider.getDefaultKeyStoreOsPath();
+    DebugKeyProvider provider=new DebugKeyProvider(osKeyPath,null,new DebugKeyProvider.IKeyGenOutput(){
+      public void err(      String message){
+        result.get(ERROR).add("Error during key creation: " + message);
+      }
+      public void out(      String message){
+        result.get(INFORMATION).add("Info message during key creation: " + message);
+      }
+    }
+);
+    PrivateKey key=provider.getDebugKey();
+    X509Certificate certificate=signed ? (X509Certificate)provider.getCertificate() : null;
+    if (key == null) {
+      result.get(ERROR).add(AndroidBundle.message("android.cannot.create.new.key.error"));
+      return result;
+    }
+    if (certificate != null && certificate.getNotAfter().compareTo(new Date()) < 0) {
+      String date=DateFormatUtil.formatPrettyDateTime(certificate.getNotAfter());
+      result.get(ERROR).add(AndroidBundle.message("android.debug.certificate.expired.error",date));
+      return result;
+    }
+    fos=new FileOutputStream(outputApk);
+    SignedJarBuilder builder=new SignedJarBuilder(fos,key,certificate);
+    FileInputStream fis=new FileInputStream(apkPath);
+    try {
+      builder.writeZip(fis,null);
+    }
+  finally {
+      fis.close();
+    }
+    File entryFile=new File(dexPath);
+    builder.writeFile(entryFile,AndroidUtils.CLASSES_FILE_NAME);
+    for (    VirtualFile sourceRoot : sourceRoots) {
+      writeStandardSourceFolderResources(builder,sourceRoot,sourceRoot,new HashSet<VirtualFile>(),new HashSet<String>());
+    }
+    for (    String externalJar : externalJars) {
+      try {
+        fis=new FileInputStream(externalJar);
+        builder.writeZip(fis,myJavaResourcesFilter);
+      }
+  finally {
+        fis.close();
+      }
+    }
+    for (    VirtualFile nativeLibsFolder : nativeLibsFolders) {
+      for (      VirtualFile child : nativeLibsFolder.getChildren()) {
+        writeNativeLibraries(builder,nativeLibsFolder,child);
+      }
+    }
+    builder.close();
+  }
+ catch (  IOException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  CertificateException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  DebugKeyProvider.KeytoolException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  AndroidLocation.AndroidLocationException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  NoSuchAlgorithmException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  UnrecoverableEntryException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  KeyStoreException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  GeneralSecurityException e) {
+    return addExceptionMessage(e,result);
+  }
+ finally {
+    if (fos != null) {
+      try {
+        fos.close();
+      }
+ catch (      IOException ignored) {
+      }
+    }
+  }
+  return result;
+}
