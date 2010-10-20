@@ -1,0 +1,88 @@
+{
+  final boolean testMode=ApplicationManager.getApplication().isUnitTestMode();
+  final DeploymentUtil deploymentUtil=DeploymentUtil.getInstance();
+  final FileFilter fileFilter=new IgnoredFileFilter();
+  final Set<JarInfo> changedJars=new THashSet<JarInfo>();
+  for (  String deletedJar : deletedJars) {
+    ContainerUtil.addIfNotNull(myBuilderContext.getJarInfo(deletedJar),changedJars);
+  }
+  try {
+    onBuildStartedOrFinished(artifact,false);
+    if (myContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
+      return false;
+    }
+    int i=0;
+    for (    final GenericCompilerProcessingItem<ArtifactCompilerCompileItem,VirtualFilePersistentState,ArtifactPackagingItemOutputState> item : changedItems) {
+      final ArtifactCompilerCompileItem sourceItem=item.getItem();
+      myContext.getProgressIndicator().checkCanceled();
+      final Ref<IOException> exception=Ref.create(null);
+      new ReadAction(){
+        protected void run(        final Result result){
+          final VirtualFile sourceFile=sourceItem.getFile();
+          for (          DestinationInfo destination : sourceItem.getDestinations()) {
+            if (destination instanceof ExplodedDestinationInfo) {
+              final ExplodedDestinationInfo explodedDestination=(ExplodedDestinationInfo)destination;
+              File toFile=new File(FileUtil.toSystemDependentName(explodedDestination.getOutputPath()));
+              try {
+                if (sourceFile.isInLocalFileSystem()) {
+                  final File ioFromFile=VfsUtil.virtualToIoFile(sourceFile);
+                  if (ioFromFile.exists()) {
+                    deploymentUtil.copyFile(ioFromFile,toFile,myContext,writtenPaths,fileFilter);
+                  }
+                }
+ else {
+                  extractFile(sourceFile,toFile,writtenPaths,fileFilter);
+                }
+              }
+ catch (              IOException e) {
+                exception.set(e);
+                return;
+              }
+            }
+ else {
+              changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+            }
+          }
+        }
+      }
+.execute();
+      if (exception.get() != null) {
+        throw exception.get();
+      }
+      myContext.getProgressIndicator().setFraction(++i * 1.0 / changedItems.size());
+      processedItems.add(sourceItem);
+      if (testMode) {
+        CompilerManagerImpl.addRecompiledPath(FileUtil.toSystemDependentName(sourceItem.getFile().getPath()));
+      }
+    }
+    JarsBuilder builder=new JarsBuilder(changedJars,fileFilter,myContext);
+    final boolean processed=builder.buildJars(writtenPaths);
+    if (!processed) {
+      return false;
+    }
+    Set<VirtualFile> recompiledSources=new HashSet<VirtualFile>();
+    for (    JarInfo info : builder.getJarsToBuild()) {
+      for (      Pair<String,VirtualFile> pair : info.getPackedFiles()) {
+        recompiledSources.add(pair.getSecond());
+      }
+    }
+    for (    VirtualFile source : recompiledSources) {
+      ArtifactCompilerCompileItem item=myBuilderContext.getItemBySource(source);
+      LOG.assertTrue(item != null,source);
+      processedItems.add(item);
+      if (testMode) {
+        CompilerManagerImpl.addRecompiledPath(FileUtil.toSystemDependentName(item.getFile().getPath()));
+      }
+    }
+    onBuildStartedOrFinished(artifact,true);
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Exception e) {
+    LOG.info(e);
+    myContext.addMessage(CompilerMessageCategory.ERROR,e.getLocalizedMessage(),null,-1,-1);
+    return false;
+  }
+  return true;
+}

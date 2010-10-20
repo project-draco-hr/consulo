@@ -1,0 +1,62 @@
+{
+  final DataContext dataContext=DataManager.getInstance().getDataContext(parentComponent);
+  Project project=PlatformDataKeys.PROJECT.getData(dataContext);
+  final EAPSendErrorDialog dlg=new EAPSendErrorDialog();
+  dlg.setErrorDescription(description);
+  dlg.show();
+  if (!dlg.isShouldSend()) {
+    return;
+  }
+  @NonNls String login=ErrorReportConfigurable.getInstance().ITN_LOGIN;
+  @NonNls String password=ErrorReportConfigurable.getInstance().getPlainItnPassword();
+  if (login.trim().length() == 0 && password.trim().length() == 0) {
+    login="idea_anonymous";
+    password="guest";
+  }
+  errorBean.setDescription(buildDescription(event,dlg.getErrorDescription()));
+  ErrorReportSender.sendError(project,login,password,errorBean,new Consumer<Integer>(){
+    @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod"}) @Override public void consume(    Integer threadId){
+      previousExceptionThreadId=threadId;
+      wasException=true;
+      callback.consume(new SubmittedReportInfo(URL_HEADER + threadId,String.valueOf(threadId),SubmittedReportInfo.SubmissionStatus.NEW_ISSUE));
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        @Override public void run(){
+          Notification notification=new Notification(ReportMessages.ERROR_REPORT,ReportMessages.ERROR_REPORT,DiagnosticBundle.message("error.report.confirmation"),NotificationType.INFORMATION);
+          Notifications.Bus.notify(notification);
+        }
+      }
+);
+    }
+  }
+,new Consumer<Exception>(){
+    @Override public void consume(    final Exception e){
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        @Override public void run(){
+          String msg;
+          if (e instanceof NoSuchEAPUserException) {
+            msg=DiagnosticBundle.message("error.report.authentication.failed");
+          }
+ else           if (e instanceof InternalEAPException) {
+            msg=DiagnosticBundle.message("error.report.posting.failed",e.getMessage());
+          }
+ else {
+            msg=DiagnosticBundle.message("error.report.sending.failure");
+          }
+          if (Messages.showYesNoDialog(parentComponent,msg,ReportMessages.ERROR_REPORT,Messages.getErrorIcon()) != 0) {
+            callback.consume(new SubmittedReportInfo(null,"0",SubmittedReportInfo.SubmissionStatus.FAILED));
+          }
+ else {
+            ApplicationManager.getApplication().invokeLater(new Runnable(){
+              @Override public void run(){
+                doSubmit(event,parentComponent,callback,errorBean,dlg.getErrorDescription());
+              }
+            }
+);
+          }
+        }
+      }
+);
+    }
+  }
+);
+}
