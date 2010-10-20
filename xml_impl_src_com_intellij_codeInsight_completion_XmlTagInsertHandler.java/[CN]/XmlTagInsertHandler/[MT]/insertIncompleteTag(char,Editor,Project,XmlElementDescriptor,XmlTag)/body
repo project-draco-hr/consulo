@@ -2,51 +2,11 @@
   TemplateManager templateManager=TemplateManager.getInstance(project);
   Template template=templateManager.createTemplate("","");
   template.setToIndent(true);
-  boolean htmlCode=HtmlUtil.hasHtml(tag.getContainingFile());
-  Set<String> notRequiredAttributes=Collections.emptySet();
-  if (tag instanceof HtmlTag) {
-    final InspectionProfile profile=InspectionProjectProfileManager.getInstance(tag.getProject()).getInspectionProfile();
-    LocalInspectionToolWrapper localInspectionToolWrapper=(LocalInspectionToolWrapper)profile.getInspectionTool(RequiredAttributesInspection.SHORT_NAME,tag);
-    RequiredAttributesInspection inspection=localInspectionToolWrapper != null ? (RequiredAttributesInspection)localInspectionToolWrapper.getTool() : null;
-    if (inspection != null) {
-      StringTokenizer tokenizer=new StringTokenizer(inspection.getAdditionalEntries(0));
-      notRequiredAttributes=new HashSet<String>(1);
-      while (tokenizer.hasMoreElements())       notRequiredAttributes.add(tokenizer.nextToken());
-    }
-  }
-  boolean toReformat=true;
-  boolean weInsertedSomeCodeThatCouldBeInvalidated=false;
-  if (htmlCode) {
-    toReformat=false;
-  }
-  template.setToReformat(toReformat);
-  XmlAttributeDescriptor[] attributes=descriptor.getAttributesDescriptors(tag);
-  StringBuilder indirectRequiredAttrs=null;
-  if (WebEditorOptions.getInstance().isAutomaticallyInsertRequiredAttributes()) {
-    final XmlExtension extension=XmlExtension.getExtension(tag.getContainingFile());
-    for (    XmlAttributeDescriptor attributeDecl : attributes) {
-      String attributeName=attributeDecl.getName(tag);
-      if (attributeDecl.isRequired() && tag.getAttributeValue(attributeName) == null) {
-        if (!notRequiredAttributes.contains(attributeName)) {
-          if (!extension.isIndirectSyntax(attributeDecl)) {
-            template.addTextSegment(" " + attributeName + "=\"");
-            Expression expression=new MacroCallNode(MacroFactory.createMacro("complete"));
-            template.addVariable(attributeName,expression,expression,true);
-            template.addTextSegment("\"");
-          }
- else {
-            if (indirectRequiredAttrs == null)             indirectRequiredAttrs=new StringBuilder();
-            indirectRequiredAttrs.append("\n<jsp:attribute name=\"").append(attributeName).append("\"></jsp:attribute>\n");
-          }
-        }
-      }
- else       if (attributeDecl.isRequired() && attributeDecl.isFixed() && attributeDecl.getDefaultValue() != null && !htmlCode) {
-        template.addTextSegment(" " + attributeName + "=\""+ attributeDecl.getDefaultValue()+ "\"");
-      }
-    }
-  }
-  weInsertedSomeCodeThatCouldBeInvalidated=addTail(completionChar,descriptor,tag,template,weInsertedSomeCodeThatCouldBeInvalidated,attributes,indirectRequiredAttrs);
-  final boolean weInsertedSomeCodeThatCouldBeInvalidated1=weInsertedSomeCodeThatCouldBeInvalidated;
+  PsiFile containingFile=tag.getContainingFile();
+  boolean htmlCode=HtmlUtil.hasHtml(containingFile);
+  template.setToReformat(!htmlCode);
+  StringBuilder indirectRequiredAttrs=addRequiredAttributes(descriptor,tag,template,containingFile);
+  final boolean chooseAttributeName=addTail(completionChar,descriptor,tag,template,indirectRequiredAttrs);
   templateManager.startTemplate(editor,template,new TemplateEditingAdapter(){
     private RangeMarker myAttrValueMarker;
     @Override public void waitingForInput(    Template template){
@@ -55,7 +15,7 @@
     }
     public void templateFinished(    final Template template,    boolean brokenOff){
       final int offset=editor.getCaretModel().getOffset();
-      if (weInsertedSomeCodeThatCouldBeInvalidated1 && offset >= 3) {
+      if (chooseAttributeName && offset >= 3) {
         char c=editor.getDocument().getCharsSequence().charAt(offset - 3);
         if (c == '/' || (c == ' ' && brokenOff)) {
           new WriteCommandAction.Simple(project){
@@ -71,7 +31,7 @@
       if (myAttrValueMarker == null) {
         return;
       }
-      if (weInsertedSomeCodeThatCouldBeInvalidated1) {
+      if (chooseAttributeName) {
         final int startOffset=myAttrValueMarker.getStartOffset();
         final int endOffset=myAttrValueMarker.getEndOffset();
         new WriteCommandAction.Simple(project){
