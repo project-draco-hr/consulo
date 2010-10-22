@@ -1,0 +1,71 @@
+{
+  TextChange currentChange=context.currentChange;
+  TextChange beforeChange=context.beforeChange;
+  CharSequence beforeTail=context.beforeText.subSequence(beforeChange.getStart(),context.beforeText.length());
+  CharSequence currentTail=context.currentText.subSequence(currentChange.getStart(),context.currentText.length());
+  int matchedSymbolsNumber=StringUtil.commonPrefixLength(beforeTail,currentTail);
+  if (matchedSymbolsNumber <= 0) {
+    return false;
+  }
+  int beforeEnd=beforeChange.getStart() + matchedSymbolsNumber;
+  int currentEnd=currentChange.getStart() + matchedSymbolsNumber;
+  Context contextCopy=new Context();
+  context.copyTo(contextCopy);
+  int offset=-1;
+  StringBuilder beforeOriginalText=new StringBuilder(beforeChange.getText());
+  int matchedChangesNumber=0;
+  int beforeUnchangedTailSymbolsNumber=0;
+  while (context.beforeChange != null && context.beforeChange.getStart() < beforeEnd) {
+    if (offset >= 0) {
+      CharSequence text=context.beforeText.subSequence(offset,context.beforeChange.getStart());
+      beforeOriginalText.append(text);
+      beforeOriginalText.append(context.beforeChange.getText());
+    }
+    offset=context.beforeChange.getEnd();
+    if (context.beforeChange.getEnd() <= beforeEnd) {
+      beforeUnchangedTailSymbolsNumber=beforeEnd - context.beforeChange.getEnd();
+      context.proceedToNextChange(Context.ChangeType.BEFORE);
+      matchedChangesNumber++;
+    }
+ else {
+      context.beforeChange=new TextChangeImpl(context.beforeChange.getText(),beforeEnd,context.beforeChange.getEnd());
+      beforeUnchangedTailSymbolsNumber=0;
+      break;
+    }
+  }
+  if (offset >= 0 && offset < beforeEnd) {
+    beforeOriginalText.append(context.beforeText.subSequence(offset,beforeEnd));
+  }
+  matchedChangesNumber=matchedChangesNumber < 2 ? 0 : matchedChangesNumber;
+  offset=-1;
+  StringBuilder currentOriginalText=new StringBuilder(currentChange.getText());
+  while (context.currentChange != null && context.currentChange.getStart() < currentEnd) {
+    if (offset >= 0) {
+      CharSequence text=context.currentText.subSequence(offset,context.currentChange.getStart());
+      currentOriginalText.append(text);
+      if (context.currentChange.getEnd() < currentEnd) {
+        currentOriginalText.append(context.currentChange.getText());
+      }
+    }
+    offset=context.currentChange.getEnd();
+    if (context.currentChange.getEnd() <= currentEnd) {
+      context.proceedToNextChange(Context.ChangeType.CURRENT);
+      matchedChangesNumber++;
+    }
+ else {
+      context.currentShiftToOriginal+=context.currentChange.getStart() - currentEnd + beforeUnchangedTailSymbolsNumber;
+      context.currentChange=new TextChangeImpl(context.currentChange.getText(),currentEnd - beforeUnchangedTailSymbolsNumber,context.currentChange.getEnd());
+      break;
+    }
+  }
+  if (offset >= 0 && offset < currentEnd) {
+    currentOriginalText.append(context.currentText.subSequence(offset,currentEnd));
+  }
+  context.beforeShiftToCurrent+=contextCopy.currentShiftToOriginal - context.currentShiftToOriginal - (contextCopy.beforeShiftToOriginal - context.beforeShiftToOriginal);
+  if (matchedChangesNumber < 2 || !StringUtil.equals(beforeOriginalText,currentOriginalText)) {
+    contextCopy.copyTo(context);
+    return false;
+  }
+  context.update();
+  return true;
+}
