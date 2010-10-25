@@ -1,11 +1,31 @@
 {
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-  final PsiClass[][] result=new PsiClass[1][];
+  final PsiElement[][] result=new PsiElement[1][];
   ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
     public void run(){
       final PsiClass psiClass=myMethod.getContainingClass();
       if (!psiClass.isValid())       return;
-      result[0]=getClassImplementations(psiClass);
+      if (!psiClass.isEnum()) {
+        result[0]=getClassImplementations(psiClass);
+      }
+ else {
+        final List<PsiElement> enumConstants=new ArrayList<PsiElement>();
+        for (        PsiField field : psiClass.getFields()) {
+          if (field instanceof PsiEnumConstant) {
+            final PsiEnumConstantInitializer initializingClass=((PsiEnumConstant)field).getInitializingClass();
+            if (initializingClass != null) {
+              PsiMethod method=initializingClass.findMethodBySignature(myMethod,true);
+              if (method == null || !method.getContainingClass().equals(initializingClass)) {
+                enumConstants.add(initializingClass);
+              }
+            }
+ else {
+              enumConstants.add(field);
+            }
+          }
+        }
+        result[0]=enumConstants.toArray(new PsiElement[enumConstants.size()]);
+      }
     }
   }
 ,CodeInsightBundle.message("intention.implement.abstract.method.searching.for.descendants.progress"),true,myProject);
@@ -18,21 +38,20 @@
     implementInClass(result[0][0]);
     return;
   }
-  PsiClassListCellRenderer renderer=new PsiClassListCellRenderer();
-  Arrays.sort(result[0],renderer.getComparator());
   myList=new JBList(result[0]);
   myList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-  myList.setCellRenderer(renderer);
   final Runnable runnable=new Runnable(){
     public void run(){
       int index=myList.getSelectedIndex();
       if (index < 0)       return;
       PsiElement element=(PsiElement)myList.getSelectedValue();
-      implementInClass((PsiClass)element);
+      implementInClass(element);
     }
   }
 ;
+  final PsiElementListCellRenderer<PsiElement> elementListCellRenderer=new MyPsiElementListCellRenderer(result[0]);
+  myList.setCellRenderer(elementListCellRenderer);
   final PopupChooserBuilder builder=new PopupChooserBuilder(myList);
-  renderer.installSpeedSearch(builder);
+  elementListCellRenderer.installSpeedSearch(builder);
   builder.setTitle(CodeInsightBundle.message("intention.implement.abstract.method.class.chooser.title")).setItemChoosenCallback(runnable).createPopup().showInBestPositionFor(myEditor);
 }
