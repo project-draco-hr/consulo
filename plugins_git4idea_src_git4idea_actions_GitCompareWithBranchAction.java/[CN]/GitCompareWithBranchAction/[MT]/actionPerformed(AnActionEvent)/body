@@ -1,0 +1,55 @@
+{
+  final Project project=event.getData(PlatformDataKeys.PROJECT);
+  if (project == null || project.isDisposed()) {
+    LOG.info("Project is null. " + event.getPlace() + ", "+ event.getDataContext());
+    return;
+  }
+  final VirtualFile[] vFiles=event.getData(PlatformDataKeys.VIRTUAL_FILE_ARRAY);
+  if (vFiles == null || vFiles.length != 1 || vFiles[0] == null) {
+    LOG.info("Selected incorrect virtual files array: " + Arrays.toString(vFiles));
+    return;
+  }
+  final VirtualFile file=vFiles[0];
+  final VirtualFile vcsRoot=VcsUtil.getVcsRootFor(project,file);
+  if (vcsRoot == null) {
+    LOG.info("The file " + file + " is not under Git version control.");
+    return;
+  }
+  final List<String> branches=new ArrayList<String>();
+  GitBranch curBranch=null;
+  try {
+    GitBranch.listAsStrings(project,vcsRoot,true,true,branches,null);
+    curBranch=GitBranch.current(project,vcsRoot);
+  }
+ catch (  VcsException e) {
+    LOG.info("Couldn't get information about current branch",e);
+  }
+  if (curBranch == null) {
+    LOG.info("Current branch is null.");
+    return;
+  }
+  final AtomicReference<ListPopup> popup=new AtomicReference<ListPopup>();
+  final String currentBranch=curBranch.getName();
+  final ListPopupStep<String> branchesStep=new BaseListPopupStep<String>("Select branch to compare",branches){
+    @Override public PopupStep onChosen(    final String selectedValue,    boolean finalChoice){
+      return doFinalStep(new Runnable(){
+        public void run(){
+          if (project.isDisposed()) {
+            return;
+          }
+          try {
+            showDiffWithBranch(project,file,currentBranch,selectedValue);
+            popup.get().cancel();
+          }
+ catch (          Exception e) {
+            LOG.info("Couldn't compare file [" + file + "] with selected branch ["+ selectedValue+ "]",e);
+          }
+        }
+      }
+);
+    }
+  }
+;
+  popup.set(new ListPopupImpl(branchesStep));
+  popup.get().showInBestPositionFor(event.getDataContext());
+}
