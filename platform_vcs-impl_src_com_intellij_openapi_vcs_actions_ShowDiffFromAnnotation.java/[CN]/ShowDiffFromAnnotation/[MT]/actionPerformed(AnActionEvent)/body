@@ -1,0 +1,41 @@
+{
+  final int actualNumber=getActualLineNumber();
+  if (actualNumber < 0)   return;
+  final VcsRevisionNumber revisionNumber=myFileAnnotation.getLineRevisionNumber(actualNumber);
+  if (revisionNumber != null) {
+    final VcsException[] exc=new VcsException[1];
+    final List<Change> changes=new LinkedList<Change>();
+    final FilePath[] targetPath=new FilePath[1];
+    ProgressManager.getInstance().run(new Task.Backgroundable(myVcs.getProject(),"Loading revision " + revisionNumber.asString() + " contents",true,BackgroundFromStartOption.getInstance()){
+      @Override public void run(      @NotNull ProgressIndicator indicator){
+        final CommittedChangesProvider provider=myVcs.getCommittedChangesProvider();
+        try {
+          final Pair<CommittedChangeList,FilePath> pair=provider.getOneList(myFile,revisionNumber);
+          targetPath[0]=pair.getSecond() == null ? new FilePathImpl(myFile) : pair.getSecond();
+          final CommittedChangeList cl=pair.getFirst();
+          if (cl == null) {
+            VcsBalloonProblemNotifier.showOverChangesView(myVcs.getProject(),"Can not load data for show diff",MessageType.ERROR);
+            return;
+          }
+          changes.addAll(cl.getChanges());
+          Collections.sort(changes,ChangesComparator.getInstance());
+        }
+ catch (        VcsException e1) {
+          exc[0]=e1;
+        }
+      }
+      @Override public void onSuccess(){
+        if (exc[0] != null) {
+          VcsBalloonProblemNotifier.showOverChangesView(myVcs.getProject(),"Can not show diff: " + exc[0].getMessage(),MessageType.ERROR);
+        }
+ else         if (!changes.isEmpty()) {
+          int idx=findSelfInList(changes,targetPath[0]);
+          final ShowDiffUIContext context=new ShowDiffUIContext(true);
+          context.setDiffNavigationContext(createDiffNavigationContext(actualNumber));
+          ShowDiffAction.showDiffForChange(changes.toArray(new Change[changes.size()]),idx,myVcs.getProject(),context);
+        }
+      }
+    }
+);
+  }
+}
