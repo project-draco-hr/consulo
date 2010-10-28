@@ -1,5 +1,5 @@
 {
-  String upToDateContent=fileAnnotation.getAnnotatedContent();
+  final String upToDateContent=fileAnnotation.getAnnotatedContent();
   final UpToDateLineNumberProvider getUpToDateLineNumber=new UpToDateLineNumberProviderImpl(editor.getDocument(),project,upToDateContent);
   editor.getGutter().closeAllAnnotations();
   Collection<ActiveAnnotationGutter> annotations=editor.getUserData(KEY_IN_EDITOR);
@@ -7,24 +7,26 @@
     annotations=new HashSet<ActiveAnnotationGutter>();
     editor.putUserData(KEY_IN_EDITOR,annotations);
   }
-  final EditorGutterComponentEx editorGutterComponentEx=(EditorGutterComponentEx)editor.getGutter();
-  final HighlightAnnotationsActions highlighting=new HighlightAnnotationsActions(project,file,fileAnnotation,editorGutterComponentEx);
+  final EditorGutterComponentEx editorGutter=(EditorGutterComponentEx)editor.getGutter();
+  final HighlightAnnotationsActions highlighting=new HighlightAnnotationsActions(project,file,fileAnnotation,editorGutter);
   final List<AnnotationFieldGutter> gutters=new ArrayList<AnnotationFieldGutter>();
   final AnnotationSourceSwitcher switcher=fileAnnotation.getAnnotationSourceSwitcher();
-  final MyAnnotationPresentation presentation;
+  final AnnotationPresentation presentation;
   if (vcs.getCommittedChangesProvider() != null) {
     final ShowDiffFromAnnotation showDiff=new ShowDiffFromAnnotation(getUpToDateLineNumber,fileAnnotation,vcs,file);
-    presentation=new MyAnnotationPresentation(highlighting,switcher,editorGutterComponentEx,gutters,showDiff);
+    presentation=new AnnotationPresentation(highlighting,switcher,editorGutter,gutters,showDiff);
     presentation.addLineNumberListener(showDiff);
   }
  else {
-    presentation=new MyAnnotationPresentation(highlighting,switcher,editorGutterComponentEx,gutters);
+    presentation=new AnnotationPresentation(highlighting,switcher,editorGutter,gutters);
   }
+  final Map<String,Color> bgColorMap=Registry.is("vcs.show.colored.annotations") ? computeBgColors(fileAnnotation) : null;
+  final Map<String,Integer> historyIds=Registry.is("vcs.show.history.numbers") ? computeLineNumbers(fileAnnotation) : null;
   if (switcher != null) {
     switcher.switchTo(switcher.getDefaultSource());
-    final LineAnnotationAspect revisonAspect=switcher.getRevisionAspect();
-    final MyCurrentRevisionAnnotationFieldGutter currentRevisionGutter=new MyCurrentRevisionAnnotationFieldGutter(fileAnnotation,editor,revisonAspect,presentation);
-    final MyMergeSourceAvailableMarkerGutter mergeSourceGutter=new MyMergeSourceAvailableMarkerGutter(fileAnnotation,editor,null,presentation);
+    final LineAnnotationAspect revisionAspect=switcher.getRevisionAspect();
+    final CurrentRevisionAnnotationFieldGutter currentRevisionGutter=new CurrentRevisionAnnotationFieldGutter(fileAnnotation,editor,revisionAspect,presentation,bgColorMap);
+    final MergeSourceAvailableMarkerGutter mergeSourceGutter=new MergeSourceAvailableMarkerGutter(fileAnnotation,editor,null,presentation,bgColorMap);
     presentation.addSourceSwitchListener(currentRevisionGutter);
     presentation.addSourceSwitchListener(mergeSourceGutter);
     currentRevisionGutter.consume(switcher.getDefaultSource());
@@ -32,14 +34,16 @@
     gutters.add(currentRevisionGutter);
     gutters.add(mergeSourceGutter);
   }
-  final Map<String,Color> revNumbers=Registry.is("vcs.show.colored.annotations") ? computeBgColors(fileAnnotation) : null;
   final LineAnnotationAspect[] aspects=fileAnnotation.getAspects();
   for (  LineAnnotationAspect aspect : aspects) {
-    final AnnotationFieldGutter gutter=new AnnotationFieldGutter(fileAnnotation,editor,aspect,presentation);
+    final AnnotationFieldGutter gutter=new AnnotationFieldGutter(fileAnnotation,editor,aspect,presentation,bgColorMap);
+    gutter.setAspectValueToBgColorMap(bgColorMap);
     gutters.add(gutter);
-    gutter.setAspectValueToBgColorMap(revNumbers);
   }
-  gutters.add(new MyHighlightedAdditionalColumn(fileAnnotation,editor,null,presentation,highlighting));
+  gutters.add(new HighlightedAdditionalColumn(fileAnnotation,editor,null,presentation,highlighting,bgColorMap));
+  if (historyIds != null) {
+    gutters.add(new HistoryIdColumn(fileAnnotation,editor,null,presentation,bgColorMap,historyIds));
+  }
   for (  AnnotationFieldGutter gutter : gutters) {
     final AnnotationGutterLineConvertorProxy proxy=new AnnotationGutterLineConvertorProxy(getUpToDateLineNumber,gutter);
     if (gutter.isGutterAction()) {

@@ -1,26 +1,30 @@
 {
-  List<Object> deps=new ArrayList<Object>();
-  deps.add(xincludeTag.getContainingFile());
-  final XmlFile xmlFile=XmlIncludeHandler.resolveXIncludeFile(xincludeTag);
-  PsiElement[] result=null;
-  if (xmlFile != null) {
-    deps.add(xmlFile);
-    final XmlDocument document=xmlFile.getDocument();
-    if (document != null) {
-      XmlTag rootTag=document.getRootTag();
-      if (rootTag != null) {
-        final XmlTag[] includeTag=extractXpointer(rootTag,xincludeTag);
-        result=ContainerUtil.map(includeTag,new Function<XmlTag,PsiElement>(){
-          public PsiElement fun(          final XmlTag xmlTag){
+  final PsiFile containingFile=xincludeTag.getContainingFile();
+  final XmlFile included=XmlIncludeHandler.resolveXIncludeFile(xincludeTag);
+  final XmlDocument document=included != null ? included.getDocument() : null;
+  final XmlTag rootTag=document != null ? document.getRootTag() : null;
+  if (rootTag != null) {
+    final String xpointer=xincludeTag.getAttributeValue("xpointer",XINCLUDE_URI);
+    Trinity<XmlFile,String,CachedValue<PsiElement[]>> cached=xincludeTag.getUserData(COPY_CACHE);
+    if (cached == null || !cached.first.equals(included) || !Comparing.equal(cached.second,xpointer)) {
+      cached=Trinity.create(included,xpointer,CachedValuesManager.getManager(xincludeTag.getProject()).createCachedValue(new CachedValueProvider<PsiElement[]>(){
+        @Override public Result<PsiElement[]> compute(){
+          final XmlTag[] includeTag=extractXpointer(rootTag,xpointer);
+          PsiElement[] result=new PsiElement[includeTag.length];
+          for (int i=0; i < includeTag.length; i++) {
+            XmlTag xmlTag=includeTag[i];
             final PsiElement psiElement=PsiUtilBase.copyElementPreservingOriginalLinks(xmlTag,XmlElement.ORIGINAL_ELEMENT);
             psiElement.putUserData(XmlElement.INCLUDING_ELEMENT,xincludeTag.getParentTag());
             psiElement.putUserData(XmlElement.ORIGINAL_ELEMENT,xmlTag);
-            return psiElement;
+            result[i]=psiElement;
           }
+          return Result.create(result,included);
         }
-,new PsiElement[includeTag.length]);
       }
+,false));
+      xincludeTag.putUserData(COPY_CACHE,cached);
     }
+    return new CachedValueProvider.Result<PsiElement[]>(cached.third.getValue(),containingFile);
   }
-  return new CachedValueProvider.Result<PsiElement[]>(result,deps.toArray());
+  return new CachedValueProvider.Result<PsiElement[]>(null,containingFile);
 }
