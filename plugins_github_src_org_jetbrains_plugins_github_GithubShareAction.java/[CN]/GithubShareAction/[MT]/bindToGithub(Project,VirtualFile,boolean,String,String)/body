@@ -1,0 +1,84 @@
+{
+  LOG.info("Binding local project with GitHub");
+  if (!gitDetected) {
+    LOG.info("No git detected, creating empty git repo");
+    final GitLineHandler h=new GitLineHandler(project,root,GitCommand.INIT);
+    h.setNoSSH(true);
+    GitHandlerUtil.doSynchronously(h,GitBundle.getString("initializing.title"),h.printableCommandLine());
+    if (!h.errors().isEmpty()) {
+      GitUIUtil.showOperationErrors(project,h.errors(),"git init");
+      LOG.info("Failed to create empty git repo: " + h.errors());
+      return;
+    }
+    final ProgressManager manager=ProgressManager.getInstance();
+    manager.runProcessWithProgressSynchronously(new Runnable(){
+      @Override public void run(){
+        GitInit.refreshAndConfigureVcsMappings(project,root,"");
+      }
+    }
+,"Committing",false,project);
+  }
+  LOG.info("Adding GitHub as a remote host");
+  final GitSimpleHandler addRemoteHandler=new GitSimpleHandler(project,root,GitCommand.REMOTE);
+  addRemoteHandler.setNoSSH(true);
+  addRemoteHandler.setSilent(true);
+  addRemoteHandler.addParameters("add","origin","git@github.com:" + login + "/"+ name+ ".git");
+  try {
+    addRemoteHandler.run();
+    if (addRemoteHandler.getExitCode() != 0) {
+      Messages.showErrorDialog("Failed to add GitHub repository as remote","Failed to add GitHub repository as remote");
+      return;
+    }
+  }
+ catch (  VcsException e) {
+    Messages.showErrorDialog(e.getMessage(),"Failed to add GitHub repository as remote");
+    LOG.info("Failed to add GitHub as remote: " + e.getMessage());
+    return;
+  }
+  LOG.info("Configuring tracked branch");
+  final GitSimpleHandler configureTrackedHandler=new GitSimpleHandler(project,root,GitCommand.CONFIG);
+  configureTrackedHandler.setNoSSH(true);
+  configureTrackedHandler.setSilent(true);
+  configureTrackedHandler.addParameters("branch.master.remote","origin");
+  final GitSimpleHandler configureTrackedHandler2=new GitSimpleHandler(project,root,GitCommand.CONFIG);
+  configureTrackedHandler2.setNoSSH(true);
+  configureTrackedHandler2.setSilent(true);
+  configureTrackedHandler2.addParameters("branch.master.merge","refs/heads/master");
+  try {
+    configureTrackedHandler.run();
+    if (configureTrackedHandler.getExitCode() != 0) {
+      Messages.showErrorDialog("Failed to configured tracked branch","Failed to configured tracked branch");
+      return;
+    }
+    configureTrackedHandler2.run();
+    if (configureTrackedHandler2.getExitCode() != 0) {
+      Messages.showErrorDialog("Failed to configured tracked branch","Failed to configured tracked branch");
+      return;
+    }
+  }
+ catch (  VcsException e) {
+    Messages.showErrorDialog(e.getMessage(),"Failed to configured tracked branch");
+    LOG.info("Failed to configured tracked branch: " + e.getMessage());
+    return;
+  }
+  performFirstCommit(project,root);
+  final ProgressManager manager=ProgressManager.getInstance();
+  final ArrayList<VcsException> errors=new ArrayList<VcsException>();
+  manager.runProcessWithProgressSynchronously(new Runnable(){
+    public void run(){
+      final ProgressIndicator progressIndicator=manager.getProgressIndicator();
+      if (progressIndicator != null) {
+        progressIndicator.setText("Pushing to GitHub");
+      }
+      final GitLineHandler gitPushHandler=new GitLineHandler(project,root,GitCommand.PUSH);
+      gitPushHandler.addParameters("origin","master");
+      GitPushUtils.trackPushRejectedAsError(gitPushHandler,"Rejected push (" + root.getPresentableUrl() + "): ");
+      errors.addAll(GitHandlerUtil.doSynchronouslyWithExceptions(gitPushHandler));
+    }
+  }
+,GitBundle.getString("push.active.pushing"),false,project);
+  if (!errors.isEmpty()) {
+    GitUIUtil.showOperationErrors(project,errors,GitBundle.getString("push.active.pushing"));
+  }
+  RefreshAction.doRefresh(project);
+}
