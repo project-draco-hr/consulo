@@ -1,2 +1,61 @@
 {
+  String name=getReferenceName();
+  if (name == null)   return GroovyResolveResult.EMPTY_ARRAY;
+  PropertyResolverProcessor propertyResolver=new PropertyResolverProcessor(name,this);
+  resolveImpl(propertyResolver);
+  final GroovyResolveResult[] propertyCandidates=propertyResolver.getCandidates();
+  if (!allVariants) {
+    for (    GroovyResolveResult candidate : propertyCandidates) {
+      if (candidate.getElement() instanceof GrVariable && !(candidate.getElement() instanceof GrField)) {
+        return propertyResolver.getCandidates();
+      }
+    }
+  }
+  final PsiType[] argTypes=PsiUtil.getArgumentTypes(this,false,upToArgument);
+  MethodResolverProcessor methodResolver=runMethodResolverProcessor(name,argTypes,allVariants);
+  if (!allVariants && methodResolver.hasApplicableCandidates()) {
+    return methodResolver.getCandidates();
+  }
+  if (!allVariants) {
+    for (    GroovyResolveResult candidate : propertyCandidates) {
+      final PsiElement element=candidate.getElement();
+      if (element instanceof GrField) {
+        final PsiClass containingClass=((PsiField)element).getContainingClass();
+        if (containingClass != null && PsiTreeUtil.isAncestor(containingClass,this,true))         return propertyCandidates;
+      }
+    }
+    if (!isQualified() && getParent() instanceof GrMethodCall) {
+      boolean resolve=false;
+      for (PsiElement e=this.getParent(); !resolve && e != null; e=e.getParent()) {
+        if (e instanceof GrClosableBlock) {
+          for (          ClosureMissingMethodContributor contributor : ClosureMissingMethodContributor.EP_NAME.getExtensions()) {
+            if (!contributor.processMembers((GrClosableBlock)e,methodResolver,this,ResolveState.initial())) {
+              resolve=true;
+              break;
+            }
+          }
+        }
+      }
+      if (methodResolver.hasApplicableCandidates()) {
+        return methodResolver.getCandidates();
+      }
+    }
+  }
+  List<GroovyResolveResult> allCandidates=new ArrayList<GroovyResolveResult>();
+  ContainerUtil.addAll(allCandidates,propertyCandidates);
+  ContainerUtil.addAll(allCandidates,methodResolver.getCandidates());
+  for (  String getterName : GroovyPropertyUtils.suggestGettersName(name)) {
+    AccessorResolverProcessor getterResolver=new AccessorResolverProcessor(getterName,this,true);
+    resolveImpl(getterResolver);
+    final GroovyResolveResult[] candidates=getterResolver.getCandidates();
+    if (!allVariants && candidates.length == 1) {
+      putUserData(IS_RESOLVED_TO_GETTER,true);
+      return candidates;
+    }
+    ContainerUtil.addAll(allCandidates,candidates);
+  }
+  if (allCandidates.size() > 0) {
+    return allCandidates.toArray(new GroovyResolveResult[allCandidates.size()]);
+  }
+  return GroovyResolveResult.EMPTY_ARRAY;
 }

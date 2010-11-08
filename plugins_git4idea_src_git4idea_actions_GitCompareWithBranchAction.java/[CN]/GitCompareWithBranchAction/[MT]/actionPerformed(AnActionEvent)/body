@@ -15,11 +15,10 @@
     notifyError(project,"The file " + file + " is not under Git version control.",null);
     return;
   }
-  final List<String> branches=new ArrayList<String>();
+  final List<GitBranch> branches=new ArrayList<GitBranch>();
   GitBranch curBranch=null;
   try {
-    GitBranch.listAsStrings(project,vcsRoot,true,true,branches,null);
-    curBranch=GitBranch.current(project,vcsRoot);
+    curBranch=GitBranch.list(project,vcsRoot,true,true,branches,null);
   }
  catch (  VcsException e) {
     notifyError(project,"Couldn't get information about current branch",e);
@@ -28,28 +27,39 @@
     notifyError(project,"Current branch is null.",null);
     return;
   }
-  final AtomicReference<ListPopup> popup=new AtomicReference<ListPopup>();
   final String currentBranch=curBranch.getName();
-  final ListPopupStep<String> branchesStep=new BaseListPopupStep<String>("Select branch to compare",branches){
-    @Override public PopupStep onChosen(    final String selectedValue,    boolean finalChoice){
-      return doFinalStep(new Runnable(){
-        public void run(){
-          if (project.isDisposed()) {
-            return;
-          }
+  final JBList list=new JBList(branches);
+  list.installCellRenderer(new NotNullFunction<GitBranch,JComponent>(){
+    @NotNull public JComponent fun(    GitBranch branch){
+      if (branch.isActive()) {
+        JLabel label=new JLabel(branch.getName() + " *");
+        final Map<TextAttribute,Float> attributes=new HashMap<TextAttribute,Float>(1);
+        attributes.put(TextAttribute.WEIGHT,TextAttribute.WEIGHT_BOLD);
+        label.setFont(label.getFont().deriveFont(attributes));
+        return label;
+      }
+      return new JLabel(branch.getName());
+    }
+  }
+);
+  JBPopupFactory.getInstance().createListPopupBuilder(list).setTitle("Select branch to compare").setItemChoosenCallback(new Runnable(){
+    public void run(){
+      Application app=ApplicationManager.getApplication();
+      if (project.isDisposed() || app == null || !app.isActive() || app.isDisposed() || app.isDisposeInProgress()) {
+        return;
+      }
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        @Override public void run(){
           try {
-            showDiffWithBranch(project,file,currentBranch,selectedValue);
-            popup.get().cancel();
+            showDiffWithBranch(project,file,currentBranch,list.getSelectedValue().toString());
           }
  catch (          Exception e) {
-            notifyError(project,"Couldn't compare file [" + file + "] with selected branch ["+ selectedValue+ "]",e);
+            notifyError(project,"Couldn't compare file [" + file + "] with selected branch ["+ list.getSelectedValue()+ "]",e);
           }
         }
       }
 );
     }
   }
-;
-  popup.set(new ListPopupImpl(branchesStep));
-  popup.get().showInBestPositionFor(event.getDataContext());
+).setAutoselectOnMouseMove(true).createPopup().showInBestPositionFor(event.getDataContext());
 }
