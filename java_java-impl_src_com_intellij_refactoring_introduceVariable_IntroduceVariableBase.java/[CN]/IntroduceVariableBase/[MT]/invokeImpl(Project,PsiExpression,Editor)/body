@@ -6,6 +6,7 @@
     LOG.debug("expression:" + expr);
   }
   if (expr == null) {
+    if (ReassignVariableUtil.reassign(editor))     return false;
     String message=RefactoringBundle.getCannotRefactorMessage(RefactoringBundle.message("selected.block.should.represent.an.expression"));
     showErrorMessage(project,editor,message);
     return false;
@@ -84,10 +85,19 @@
         public void run(){
           ApplicationManager.getApplication().runWriteAction(runnable);
           if (isInplaceAvailableOnDataContext) {
-            PsiVariable elementToRename=variable.get().getElement();
+            final PsiVariable elementToRename=variable.get().getElement();
             if (elementToRename != null) {
               editor.getCaretModel().moveToOffset(elementToRename.getTextOffset());
-              new VariableInplaceRenamer(elementToRename,editor).performInplaceRename(false,new LinkedHashSet<String>(Arrays.asList(suggestedName.names)),new Consumer<Boolean>(){
+              final PsiDeclarationStatement declarationStatement=PsiTreeUtil.getParentOfType(elementToRename,PsiDeclarationStatement.class);
+              editor.putUserData(ReassignVariableUtil.DECLARATION_KEY,declarationStatement);
+              final VariableInplaceRenamer renamer=new VariableInplaceRenamer(elementToRename,editor){
+                @Override protected void addAdditionalVariables(                TemplateBuilderImpl builder){
+                  builder.replaceElement(elementToRename.getTypeElement(),"Variable_Type",ReassignVariableUtil.createExpression(typeSelectorManager),false,true);
+                }
+              }
+;
+              renamer.setAdvertisementText(ReassignVariableUtil.getAdvertisementText(editor,declarationStatement,elementToRename.getType()));
+              renamer.performInplaceRename(false,new LinkedHashSet<String>(Arrays.asList(suggestedName.names)),new Consumer<Boolean>(){
                 @Override public void consume(                Boolean apply){
                   if (apply) {
                     int startOffset=exprMarker.getStartOffset();
@@ -100,6 +110,7 @@
                     }
                     editor.getCaretModel().moveToOffset(startOffset);
                   }
+                  editor.putUserData(ReassignVariableUtil.DECLARATION_KEY,null);
                   exprMarker.dispose();
                 }
               }
