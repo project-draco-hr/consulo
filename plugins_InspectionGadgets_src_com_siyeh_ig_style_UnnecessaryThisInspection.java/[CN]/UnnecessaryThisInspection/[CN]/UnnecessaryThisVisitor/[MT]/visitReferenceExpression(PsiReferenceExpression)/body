@@ -23,7 +23,12 @@
       registerError(qualifierExpression);
       return;
     }
-    if (VariableSearchUtils.existsLocalOrParameter(referenceName,expression)) {
+    final PsiElement target=expression.resolve();
+    if (!(target instanceof PsiVariable)) {
+      return;
+    }
+    final PsiVariable variable=(PsiVariable)target;
+    if (!VariableSearchUtils.variableNameResolvesToTarget(referenceName,variable,expression)) {
       return;
     }
     registerError(thisExpression);
@@ -41,19 +46,33 @@
       }
       final String methodName=calledMethod.getName();
       PsiClass parentClass=ClassUtils.getContainingClass(expression);
+      final Project project=expression.getProject();
+      final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(project);
+      final PsiResolveHelper resolveHelper=psiFacade.getResolveHelper();
       while (parentClass != null) {
         if (qualifierName.equals(parentClass.getName())) {
           registerError(thisExpression);
         }
         final PsiMethod[] methods=parentClass.findMethodsByName(methodName,true);
-        if (methods.length > 0) {
-          return;
+        for (        PsiMethod method : methods) {
+          final PsiClass containingClass=method.getContainingClass();
+          if (resolveHelper.isAccessible(method,expression,containingClass)) {
+            if (method.hasModifierProperty(PsiModifier.PRIVATE) && !PsiTreeUtil.isAncestor(containingClass,expression,true)) {
+              continue;
+            }
+            return;
+          }
         }
         parentClass=ClassUtils.getContainingClass(parentClass);
       }
     }
  else {
-      if (VariableSearchUtils.existsLocalOrParameter(referenceName,expression)) {
+      final PsiElement target=expression.resolve();
+      if (!(target instanceof PsiVariable)) {
+        return;
+      }
+      final PsiVariable variable=(PsiVariable)target;
+      if (!VariableSearchUtils.variableNameResolvesToTarget(referenceName,variable,expression)) {
         return;
       }
       PsiClass parentClass=ClassUtils.getContainingClass(expression);
