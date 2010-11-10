@@ -1,10 +1,9 @@
 {
   myProjectsTree.addListener(new MavenProjectsTree.ListenerAdapter(){
-    @Override public void projectsIgnoredStateChanged(    List<MavenProject> ignored,    List<MavenProject> unignored,    Object message){
-      if (message instanceof MavenProjectImporter)       return;
-      scheduleImport(false);
+    @Override public void projectsIgnoredStateChanged(    List<MavenProject> ignored,    List<MavenProject> unignored,    boolean fromImport){
+      if (!fromImport)       scheduleImport();
     }
-    @Override public void projectsUpdated(    List<Pair<MavenProject,MavenProjectChanges>> updated,    List<MavenProject> deleted,    Object message){
+    @Override public void projectsUpdated(    List<Pair<MavenProject,MavenProjectChanges>> updated,    List<MavenProject> deleted){
       myEmbeddersManager.clearCaches();
       unscheduleAllTasks(deleted);
       List<MavenProject> updatedProjects=MavenUtil.collectFirsts(updated);
@@ -24,9 +23,10 @@
         if (each.hasReadingProblems())         it.remove();
       }
       if (haveChanges(toImport) || !deleted.isEmpty()) {
-        scheduleImport(toImport,message == FORCE_IMPORT_MESSAGE);
+        scheduleForNextImport(toImport);
       }
-      scheduleResolve(toResolve,message == FORCE_IMPORT_MESSAGE);
+      scheduleForNextResolve(toResolve);
+      fireProjectScheduled();
     }
     private boolean haveChanges(    List<Pair<MavenProject,MavenProjectChanges>> projectsWithChanges){
       for (      MavenProjectChanges each : MavenUtil.collectSeconds(projectsWithChanges)) {
@@ -34,33 +34,22 @@
       }
       return false;
     }
-    @Override public void projectResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges,    @Nullable NativeMavenProjectHolder nativeMavenProject,    Object message){
+    @Override public void projectResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges,    @Nullable NativeMavenProjectHolder nativeMavenProject){
       if (nativeMavenProject != null && shouldScheduleProject(projectWithChanges)) {
+        scheduleForNextImport(projectWithChanges);
         if (projectWithChanges.first.hasUnresolvedPlugins()) {
-          schedulePluginsResolving(projectWithChanges.first,nativeMavenProject);
+          schedulePluginsResolve(projectWithChanges.first,nativeMavenProject);
         }
         scheduleArtifactsDownloading(Collections.singleton(projectWithChanges.first),null,getImportingSettings().isDownloadSourcesAutomatically(),getImportingSettings().isDownloadDocsAutomatically(),null);
-        scheduleForNextImport(projectWithChanges);
       }
-      processMessage(message);
     }
-    @Override public void foldersResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges,    Object message){
+    @Override public void foldersResolved(    Pair<MavenProject,MavenProjectChanges> projectWithChanges){
       if (shouldScheduleProject(projectWithChanges)) {
         scheduleForNextImport(projectWithChanges);
       }
-      processMessage(message);
     }
     private boolean shouldScheduleProject(    Pair<MavenProject,MavenProjectChanges> projectWithChanges){
       return !projectWithChanges.first.hasReadingProblems() && projectWithChanges.second.hasChanges();
-    }
-    private void processMessage(    Object message){
-      if (getScheduledProjectsCount() == 0)       return;
-      if (message == SCHEDULE_IMPORT_MESSAGE) {
-        scheduleImport(false);
-      }
- else       if (message == FORCE_IMPORT_MESSAGE) {
-        scheduleImport(true);
-      }
     }
   }
 );
