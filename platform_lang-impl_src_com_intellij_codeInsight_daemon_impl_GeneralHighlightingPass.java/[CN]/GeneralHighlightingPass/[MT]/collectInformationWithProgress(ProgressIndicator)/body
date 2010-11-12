@@ -1,5 +1,5 @@
 {
-  final Set<HighlightInfo> result=new THashSet<HighlightInfo>(100);
+  final Set<HighlightInfo> gotHighlights=new THashSet<HighlightInfo>(100);
   final Set<HighlightInfo> outsideResult=new THashSet<HighlightInfo>(100);
   DaemonCodeAnalyzer daemonCodeAnalyzer=DaemonCodeAnalyzer.getInstance(myProject);
   final FileStatusMap fileStatusMap=((DaemonCodeAnalyzerImpl)daemonCodeAnalyzer).getFileStatusMap();
@@ -8,75 +8,72 @@
   final List<PsiElement> inside=new ArrayList<PsiElement>();
   final List<PsiElement> outside=new ArrayList<PsiElement>();
   try {
-    Divider.getInsideAndOutside(myFile,myStartOffset,myEndOffset,myPriorityRange,inside,outside,HighlightLevelUtil.AnalysisLevel.HIGHLIGHT);
-    final List<PsiFile> injectedInside=new ArrayList<PsiFile>();
-    final List<PsiFile> injectedOutside=new ArrayList<PsiFile>();
-    divideInjectedPsiHighlights(inside,outside,progress,injectedInside,injectedOutside);
+    Divider.divideInsideAndOutside(myFile,myStartOffset,myEndOffset,myPriorityRange,inside,outside,HighlightLevelUtil.AnalysisLevel.HIGHLIGHT);
+    final Set<PsiFile> injected=new THashSet<PsiFile>();
+    getInjectedPsiFiles(inside,outside,progress,injected);
     setProgressLimit((long)(inside.size() + outside.size()));
     final boolean forceHighlightParents=forceHighlightParents();
     if (!isDumbMode()) {
-      highlightTodos(myFile,myDocument.getCharsSequence(),myStartOffset,myEndOffset,progress,myPriorityRange,result,outsideResult);
+      highlightTodos(myFile,myDocument.getCharsSequence(),myStartOffset,myEndOffset,progress,myPriorityRange,gotHighlights,outsideResult);
     }
     collectHighlights(inside,new Runnable(){
       @Override public void run(){
-        if (!addInjectedPsiHighlights(injectedInside,progress,Collections.synchronizedSet(result)))         throw new ProcessCanceledException();
-        if (!outside.isEmpty() || !injectedOutside.isEmpty()) {
-          if (!inside.isEmpty() || !injectedInside.isEmpty()) {
-            final List<HighlightInfo> toApply=new ArrayList<HighlightInfo>(result.size());
-            for (            HighlightInfo info : result) {
-              if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
-                toApply.add(info);
-              }
- else {
-                outsideResult.add(info);
-              }
-            }
-            myHighlights.addAll(toApply);
-            result.clear();
-            result.addAll(outsideResult);
-            UIUtil.invokeLaterIfNeeded(new Runnable(){
-              @Override public void run(){
-                if (myProject.isDisposed())                 return;
-                MarkupModel markupModel=myDocument.getMarkupModel(myProject);
-                ProperTextRange range=myPriorityRange.intersection(new TextRange(myStartOffset,myEndOffset));
-                final EditorColorsScheme colorsScheme=getColorsScheme();
-                UpdateHighlightersUtil.setHighlightersInRange(myProject,myDocument,range,colorsScheme,toApply,(MarkupModelEx)markupModel,Pass.UPDATE_ALL);
-              }
-            }
-);
-            UIUtil.invokeLaterIfNeeded(new Runnable(){
-              @Override public void run(){
-                if (myProject.isDisposed() || myEditor == null)                 return;
-                new ShowAutoImportPass(myProject,myFile,myEditor).applyInformationToEditor();
-              }
-            }
-);
+        THashSet<HighlightInfo> injectedResult=new THashSet<HighlightInfo>();
+        if (!addInjectedPsiHighlights(injected,progress,Collections.synchronizedSet(injectedResult)))         throw new ProcessCanceledException();
+        final List<HighlightInfo> toApplyOutside=new ArrayList<HighlightInfo>(gotHighlights.size());
+        for (        HighlightInfo info : injectedResult) {
+          if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
+            gotHighlights.add(info);
           }
-          final List<HighlightInfo> injectedOutsideInfos=Collections.synchronizedList(new ArrayList<HighlightInfo>());
-          if (!addInjectedPsiHighlights(injectedOutside,progress,injectedOutsideInfos))           throw new ProcessCanceledException();
-          myApplyCommand=new Runnable(){
-            @Override public void run(){
-              final List<HighlightInfo> insideInfos=new ArrayList<HighlightInfo>(result.size());
-              final List<HighlightInfo> toApply=new ArrayList<HighlightInfo>(result.size());
-              ProperTextRange range=new ProperTextRange(myStartOffset,myEndOffset);
-              for (              HighlightInfo info : result) {
-                if (!range.containsRange(info.getStartOffset(),info.getEndOffset()))                 continue;
-                if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
-                  insideInfos.add(info);
-                }
  else {
-                  toApply.add(info);
-                }
-              }
-              toApply.addAll(injectedOutsideInfos);
-              UpdateHighlightersUtil.setHighlightersOutsideRange(myProject,myDocument,toApply,getColorsScheme(),myStartOffset,myEndOffset,myPriorityRange,Pass.UPDATE_ALL);
-            }
+            toApplyOutside.add(info);
           }
-;
         }
+        if (outsideResult.isEmpty() && toApplyOutside.isEmpty()) {
+          return;
+        }
+        final ProperTextRange priorityIntersection=myPriorityRange.intersection(new TextRange(myStartOffset,myEndOffset));
+        if ((!inside.isEmpty() || !gotHighlights.isEmpty()) && priorityIntersection != null) {
+          final List<HighlightInfo> toApplyInside=new ArrayList<HighlightInfo>(gotHighlights);
+          myHighlights.addAll(toApplyInside);
+          gotHighlights.clear();
+          gotHighlights.addAll(outsideResult);
+          UIUtil.invokeLaterIfNeeded(new Runnable(){
+            @Override public void run(){
+              if (myProject.isDisposed())               return;
+              MarkupModel markupModel=myDocument.getMarkupModel(myProject);
+              UpdateHighlightersUtil.setHighlightersInRange(myProject,myDocument,priorityIntersection,getColorsScheme(),toApplyInside,(MarkupModelEx)markupModel,Pass.UPDATE_ALL);
+            }
+          }
+);
+          UIUtil.invokeLaterIfNeeded(new Runnable(){
+            @Override public void run(){
+              if (myProject.isDisposed() || myEditor == null)               return;
+              new ShowAutoImportPass(myProject,myFile,myEditor).applyInformationToEditor();
+            }
+          }
+);
+        }
+        myApplyCommand=new Runnable(){
+          @Override public void run(){
+            final List<HighlightInfo> insideInfos=new ArrayList<HighlightInfo>(gotHighlights.size());
+            ProperTextRange range=new ProperTextRange(myStartOffset,myEndOffset);
+            for (            HighlightInfo info : gotHighlights) {
+              if (!range.containsRange(info.getStartOffset(),info.getEndOffset()))               continue;
+              if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
+                insideInfos.add(info);
+              }
+ else {
+                toApplyOutside.add(info);
+              }
+            }
+            UpdateHighlightersUtil.setHighlightersOutsideRange(myProject,myDocument,toApplyOutside,getColorsScheme(),myStartOffset,myEndOffset,myPriorityRange,Pass.UPDATE_ALL);
+          }
+        }
+;
       }
     }
-,outside,progress,filteredVisitors,result,forceHighlightParents);
+,outside,progress,filteredVisitors,gotHighlights,forceHighlightParents);
     if (myUpdateAll) {
       fileStatusMap.setErrorFoundFlag(myDocument,myErrorFound);
     }
@@ -84,5 +81,5 @@
   finally {
     incVisitorUsageCount(-1);
   }
-  myHighlights.addAll(result);
+  myHighlights.addAll(gotHighlights);
 }
