@@ -97,24 +97,34 @@
               final PsiDeclarationStatement declarationStatement=PsiTreeUtil.getParentOfType(elementToRename,PsiDeclarationStatement.class);
               editor.putUserData(ReassignVariableUtil.DECLARATION_KEY,declarationStatement);
               editor.putUserData(ReassignVariableUtil.OCCURRENCES_KEY,occurrenceMarkers.toArray(new RangeMarker[occurrenceMarkers.size()]));
+              final boolean cantChangeFinalModifier=hasWriteAccess || (inFinalContext && choice == OccurrencesChooser.ReplaceChoice.ALL);
               final VariableInplaceRenamer renamer=new VariableInplaceRenamer(elementToRename,editor){
                 @Override protected void addAdditionalVariables(                TemplateBuilderImpl builder){
                   final PsiTypeElement typeElement=elementToRename.getTypeElement();
-                  builder.replaceElement(typeElement,"Variable_Type",ReassignVariableUtil.createExpression(expression,typeElement.getText()),false,true);
+                  builder.replaceElement(typeElement,"Variable_Type",ReassignVariableUtil.createExpression(expression,typeElement.getText(),!cantChangeFinalModifier),false,true);
+                  if (!cantChangeFinalModifier) {
+                    builder.replaceElement(elementToRename.getModifierList(),"_FINAL_",new FinalExpression(project),false,true);
+                  }
                 }
               }
 ;
-              renamer.setAdvertisementText(ReassignVariableUtil.getAdvertisementText(editor,declarationStatement,elementToRename.getType(),typeSelectorManager.getTypesForAll()));
+              renamer.setAdvertisementText(ReassignVariableUtil.getAdvertisementText(editor,declarationStatement,elementToRename.getType(),typeSelectorManager.getTypesForAll(),!cantChangeFinalModifier));
               renamer.performInplaceRename(false,new LinkedHashSet<String>(Arrays.asList(suggestedName.names)),new Consumer<Boolean>(){
                 @Override public void consume(                Boolean apply){
                   if (apply) {
+                    final Document document=editor.getDocument();
+                    final PsiVariable psiVariable=PsiTreeUtil.getParentOfType(file.findElementAt(editor.getCaretModel().getOffset()),PsiVariable.class);
+                    if (psiVariable != null) {
+                      JavaRefactoringSettings.getInstance().INTRODUCE_LOCAL_CREATE_FINALS=psiVariable.hasModifierProperty(PsiModifier.FINAL);
+                      FinalExpression.adjustLine(psiVariable,document);
+                    }
                     int startOffset=exprMarker.getStartOffset();
                     final PsiReference referenceAt=file.findReferenceAt(startOffset);
                     if (referenceAt != null && referenceAt.resolve() instanceof PsiLocalVariable) {
                       startOffset=referenceAt.getElement().getTextRange().getEndOffset();
                     }
  else {
-                      startOffset=editor.getDocument().getLineEndOffset(editor.getDocument().getLineNumber(startOffset));
+                      startOffset=document.getLineEndOffset(document.getLineNumber(startOffset));
                     }
                     editor.getCaretModel().moveToOffset(startOffset);
                     typeSelectorManager.typeSelected(ReassignVariableUtil.getVariableType(declarationStatement));
