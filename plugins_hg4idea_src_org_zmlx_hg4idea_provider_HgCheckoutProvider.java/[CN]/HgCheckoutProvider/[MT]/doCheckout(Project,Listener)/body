@@ -15,17 +15,31 @@
     return;
   }
   final String targetDir=destinationParent.getPath() + File.separator + dialog.getDirectoryName();
-  ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
-    public void run(){
+  final String sourceRepositoryURL=dialog.getSourceRepositoryURL();
+  new Task.Backgroundable(project,HgVcsMessages.message("hg4idea.clone.progress",sourceRepositoryURL),true){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
       HgCloneCommand clone=new HgCloneCommand(project);
-      clone.setRepositoryURL(dialog.getSourceRepositoryURL());
+      clone.setRepositoryURL(sourceRepositoryURL);
       clone.setDirectory(targetDir);
-      myCloneResult=clone.execute();
+      final HgCommandResult myCloneResult=clone.execute();
+      if (myCloneResult == null) {
+        notifyError("Clone failed","Clone failed due to unknown error",project);
+      }
+ else       if (myCloneResult.getExitValue() != 0) {
+        notifyError("Clone failed","Clone from " + sourceRepositoryURL + " failed.<br/><br/>"+ myCloneResult.getRawError(),project);
+      }
+ else {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            if (listener != null) {
+              listener.directoryCheckedOut(new File(dialog.getParentDirectory(),dialog.getDirectoryName()));
+              listener.checkoutCompleted();
+            }
+          }
+        }
+);
+      }
     }
   }
-,HgVcsMessages.message("hg4idea.clone.progress",dialog.getSourceRepositoryURL()),false,project);
-  if (myCloneResult != null && myCloneResult.getExitValue() == 0 && listener != null) {
-    listener.directoryCheckedOut(new File(dialog.getParentDirectory(),dialog.getDirectoryName()));
-    listener.checkoutCompleted();
-  }
+.queue();
 }
