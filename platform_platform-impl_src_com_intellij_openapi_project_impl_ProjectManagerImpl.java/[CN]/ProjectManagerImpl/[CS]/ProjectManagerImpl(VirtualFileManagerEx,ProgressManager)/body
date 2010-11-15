@@ -1,0 +1,62 @@
+{
+  myProgressManager=progressManager;
+  Application app=ApplicationManager.getApplication();
+  MessageBus messageBus=app.getMessageBus();
+  MessageBusConnection connection=messageBus.connect(app);
+  connection.subscribe(StateStorage.STORAGE_TOPIC,new StateStorage.Listener(){
+    public void storageFileChanged(    final VirtualFileEvent event,    @NotNull final StateStorage storage){
+      VirtualFile file=event.getFile();
+      LOG.debug("[RELOAD] Storage file changed: " + file.getPath());
+      if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
+        saveChangedProjectFile(file,null,storage);
+      }
+    }
+  }
+);
+  final ProjectManagerListener busPublisher=messageBus.syncPublisher(AppTopics.PROJECTS);
+  addProjectManagerListener(new ProjectManagerListener(){
+    public void projectOpened(    final Project project){
+      MessageBus messageBus=project.getMessageBus();
+      MessageBusConnection connection=messageBus.connect(project);
+      connection.subscribe(StateStorage.STORAGE_TOPIC,new StateStorage.Listener(){
+        public void storageFileChanged(        final VirtualFileEvent event,        @NotNull final StateStorage storage){
+          VirtualFile file=event.getFile();
+          if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
+            saveChangedProjectFile(file,project,storage);
+          }
+        }
+      }
+);
+      busPublisher.projectOpened(project);
+      ProjectManagerListener[] listeners=getListeners(project);
+      for (      ProjectManagerListener listener : listeners) {
+        listener.projectOpened(project);
+      }
+    }
+    public void projectClosed(    Project project){
+      busPublisher.projectClosed(project);
+      ProjectManagerListener[] listeners=getListeners(project);
+      for (      ProjectManagerListener listener : listeners) {
+        listener.projectClosed(project);
+      }
+    }
+    public boolean canCloseProject(    Project project){
+      ProjectManagerListener[] listeners=getListeners(project);
+      for (      ProjectManagerListener listener : listeners) {
+        if (!listener.canCloseProject(project)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    public void projectClosing(    Project project){
+      busPublisher.projectClosing(project);
+      ProjectManagerListener[] listeners=getListeners(project);
+      for (      ProjectManagerListener listener : listeners) {
+        listener.projectClosing(project);
+      }
+    }
+  }
+);
+  registerExternalProjectFileListener(virtualFileManagerEx);
+}
