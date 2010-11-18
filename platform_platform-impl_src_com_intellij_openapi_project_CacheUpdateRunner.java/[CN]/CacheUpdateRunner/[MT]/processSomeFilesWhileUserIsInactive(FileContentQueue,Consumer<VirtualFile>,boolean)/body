@@ -11,24 +11,26 @@
   final Ref<Boolean> isFinished=new Ref<Boolean>(Boolean.FALSE);
   try {
     int threadsCount=Registry.intValue("caches.indexerThreadsCount");
-    if (threadsCount == -1) {
-      threadsCount=Math.min(Runtime.getRuntime().availableProcessors(),2);
+    if (threadsCount <= 0) {
+      threadsCount=Math.min(PROC_COUNT,ApplicationManager.getApplication().isUnitTestMode() ? 4 : 2);
     }
     if (threadsCount == 1) {
       Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,application);
       ProgressManager.getInstance().runProcess(process,innerIndicator);
     }
  else {
-      final Job<Object> job=JobScheduler.getInstance().createJob("Indexing",Thread.NORM_PRIORITY);
       final Ref[] finishedRefs=new Ref[threadsCount];
+      Future<?>[] futures=new Future<?>[threadsCount];
       for (int i=0; i < threadsCount; i++) {
         final Ref<Boolean> ref=new Ref<Boolean>(Boolean.FALSE);
         finishedRefs[i]=ref;
         Runnable process=new MyRunnable(innerIndicator,queue,ref,progressUpdater,processInReadAction,application);
-        job.addTask(process);
+        futures[i]=ApplicationManager.getApplication().executeOnPooledThread(getProcessWrapper(process));
       }
       try {
-        job.scheduleAndWaitForResults();
+        for (        Future<?> future : futures) {
+          future.get();
+        }
         boolean allFinished=true;
         for (        Ref ref : finishedRefs) {
           if (!(Boolean)ref.get()) {
