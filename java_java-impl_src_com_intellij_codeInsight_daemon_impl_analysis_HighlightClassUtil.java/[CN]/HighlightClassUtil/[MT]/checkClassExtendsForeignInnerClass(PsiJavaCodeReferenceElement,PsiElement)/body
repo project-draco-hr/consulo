@@ -7,7 +7,7 @@
   if (!(grand instanceof PsiClass)) {
     return null;
   }
-  PsiClass aClass=(PsiClass)grand;
+  final PsiClass aClass=(PsiClass)grand;
   if (aClass instanceof PsiTypeParameter) {
     return null;
   }
@@ -17,12 +17,31 @@
   if (!(resolved instanceof PsiClass)) {
     return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,extendRef,JavaErrorMessages.message("class.name.expected"));
   }
-  PsiClass base=(PsiClass)resolved;
-  if (!PsiUtil.isInnerClass(base))   return null;
-  PsiClass baseClass=base.getContainingClass();
-  if (!hasEnclosingInstanceInScope(baseClass,extendRef,true) && !qualifiedNewCalledInConstructors(aClass,baseClass)) {
-    String description=JavaErrorMessages.message("no.enclosing.instance.in.scope",HighlightUtil.formatClass(baseClass));
-    return HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,extendRef,description);
+  final HighlightInfo[] infos=new HighlightInfo[1];
+  extendRef.accept(new JavaRecursiveElementWalkingVisitor(){
+    @Override public void visitElement(    PsiElement element){
+      if (infos[0] != null)       return;
+      super.visitElement(element);
+    }
+    @Override public void visitReferenceElement(    PsiJavaCodeReferenceElement reference){
+      super.visitReferenceElement(reference);
+      final PsiElement resolve=reference.resolve();
+      if (resolve instanceof PsiClass) {
+        final PsiClass base=(PsiClass)resolve;
+        final PsiClass baseClass=base.getContainingClass();
+        if (baseClass != null && base.hasModifierProperty(PsiModifier.PRIVATE) && !PsiTreeUtil.isAncestor(baseClass,aClass,true)) {
+          String description=JavaErrorMessages.message("private.symbol",HighlightUtil.formatClass(base),HighlightUtil.formatClass(baseClass));
+          infos[0]=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,extendRef,description);
+          return;
+        }
+        if (!PsiUtil.isInnerClass(base))         return;
+        if (!hasEnclosingInstanceInScope(baseClass,extendRef,true) && !qualifiedNewCalledInConstructors(aClass,baseClass)) {
+          String description=JavaErrorMessages.message("no.enclosing.instance.in.scope",HighlightUtil.formatClass(baseClass));
+          infos[0]=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,extendRef,description);
+        }
+      }
+    }
   }
-  return null;
+);
+  return infos[0];
 }
