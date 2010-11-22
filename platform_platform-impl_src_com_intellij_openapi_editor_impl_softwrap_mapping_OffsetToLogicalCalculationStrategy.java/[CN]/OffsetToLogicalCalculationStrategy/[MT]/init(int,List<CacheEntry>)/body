@@ -1,5 +1,5 @@
 {
-  setEagerMatch(null);
+  reset();
   myTargetOffset=targetOffset;
   Document document=myEditor.getDocument();
   if (targetOffset == 0) {
@@ -9,19 +9,57 @@
   }
  else   if (targetOffset >= document.getTextLength()) {
     if (cache.isEmpty()) {
-      setEagerMatch(new LogicalPosition(0,0,0,0,0,0,0));
+      setFirstInitialPosition();
+      return;
     }
  else {
       CacheEntry lastEntry=cache.get(cache.size() - 1);
-      int columnToUse=lastEntry.endLogicalColumn;
-      if (lastEntry.endOffset < targetOffset) {
-        columnToUse++;
+      if (lastEntry.endOffset >= targetOffset - 1) {
+        EditorPosition position=lastEntry.buildEndLinePosition();
+        if (document.getCharsSequence().charAt(document.getTextLength() - 1) == '\n') {
+          position.onNewLine();
+        }
+        setEagerMatch(position.buildLogicalPosition());
+        return;
       }
-      LogicalPosition eager=new LogicalPosition(lastEntry.endLogicalLine,columnToUse,lastEntry.endSoftWrapLinesBefore,lastEntry.endSoftWrapLinesCurrent,lastEntry.endSoftWrapColumnDiff,lastEntry.endFoldedLines,lastEntry.endFoldingColumnDiff);
-      setEagerMatch(eager);
     }
+  }
+ else   if (cache.size() > 0 && cache.get(cache.size() - 1).endOffset < targetOffset) {
+    EditorPosition position=cache.get(cache.size() - 1).buildEndLinePosition();
+    position.onNewLine();
+    setInitialPosition(position);
     return;
   }
   int i=MappingUtil.getCacheEntryIndexForOffset(targetOffset,myEditor.getDocument(),cache);
-  setCacheEntry(cache.get(i));
+  CacheEntry cacheEntry=null;
+  if (i >= 0) {
+    CacheEntry candidate=cache.get(i);
+    if (candidate.endOffset == targetOffset && i < cache.size() - 1 && cache.get(i + 1).startOffset == targetOffset) {
+      EditorPosition position=cache.get(i + 1).buildStartLinePosition();
+      SoftWrap softWrap=myStorage.getSoftWrap(targetOffset);
+      if (softWrap != null) {
+        position.visualColumn=softWrap.getIndentInColumns();
+        position.softWrapColumnDiff+=softWrap.getIndentInColumns();
+        setEagerMatch(position.buildLogicalPosition());
+      }
+    }
+ else     if (candidate.startOffset <= targetOffset) {
+      cacheEntry=candidate;
+    }
+  }
+ else   if (i < -1) {
+    i=-i - 2;
+    if (i < myCache.size()) {
+      cacheEntry=myCache.get(i);
+    }
+  }
+  if (cacheEntry == null) {
+    setFirstInitialPosition();
+  }
+ else   if (cacheEntry.startOffset <= targetOffset && cacheEntry.endOffset >= targetOffset) {
+    setTargetEntry(cacheEntry,true);
+  }
+ else {
+    setInitialPosition(cacheEntry.buildStartLinePosition());
+  }
 }
