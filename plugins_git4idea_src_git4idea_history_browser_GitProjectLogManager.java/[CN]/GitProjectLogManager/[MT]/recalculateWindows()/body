@@ -1,46 +1,20 @@
 {
   final GitVcs vcs=GitVcs.getInstance(myProject);
   final VirtualFile[] roots=myVcsManager.getRootsUnderVcs(vcs);
-  final Map<VirtualFile,Content> currentState=myComponentsMap.get();
-  final Set<VirtualFile> currentKeys=new HashSet<VirtualFile>(currentState.keySet());
-  currentKeys.removeAll(Arrays.asList(roots));
-  final Map<VirtualFile,Content> newKeys=new HashMap<VirtualFile,Content>(currentState);
+  final List<VirtualFile> fileList=Arrays.asList(roots);
   final ChangesViewContentI cvcm=ChangesViewContentManager.getInstance(myProject);
-  final VirtualFile baseDir=myProject.getBaseDir();
+  final Content currContent=myCurrentContent.get();
+  if (currContent != null) {
+    myLogRef.get().rootsChanged(fileList);
+    return;
+  }
+  final GitLog gitLog=myLogFactoryService.createComponent();
   final ContentFactory contentFactory=ContentFactory.SERVICE.getInstance();
-  for (  final VirtualFile root : roots) {
-    if (!currentState.containsKey(root)) {
-      final GitLogTree tree=new GitLogTree(myProject,root,myGitUsersComponent);
-      tree.setParentDisposable(myProject);
-      tree.initView();
-      final Content content=contentFactory.createContent(tree.getComponent(),"",false);
-      content.setCloseable(false);
-      cvcm.addContent(content);
-      newKeys.put(root,content);
-      new AbstractCalledLater(myProject,ModalityState.NON_MODAL){
-        @Override public void run(){
-          new CalculateContinuation<String>().calculateAndContinue(new ThrowableComputable<String,Exception>(){
-            public String compute() throws Exception {
-              return getCaption(baseDir,root);
-            }
-          }
-,new CatchingConsumer<String,Exception>(){
-            public void consume(            Exception e){
-              LOG.info(e);
-            }
-            public void consume(            final String caption){
-              content.setDisplayName(caption);
-            }
-          }
-);
-        }
-      }
-.callMe();
-    }
-  }
-  for (  VirtualFile currentKey : currentKeys) {
-    final Content content=newKeys.remove(currentKey);
-    cvcm.removeContent(content);
-  }
-  myComponentsMap.set(newKeys);
+  final Content content=contentFactory.createContent(gitLog.getVisualComponent(),CONTENT_KEY,false);
+  content.setCloseable(false);
+  cvcm.addContent(content);
+  Disposer.register(content,gitLog);
+  myLogRef.set(gitLog);
+  myCurrentContent.set(content);
+  gitLog.rootsChanged(fileList);
 }
