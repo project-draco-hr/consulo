@@ -1,29 +1,42 @@
 {
   final Task.Backgroundable rebaseAndPushTask=new Task.Backgroundable(myProject,GitBundle.getString("push.active.fetching")){
     public void run(    @NotNull ProgressIndicator indicator){
-      List<VcsException> exceptions=new ArrayList<VcsException>(1);
-      do {
+      List<VcsException> exceptions=new ArrayList<VcsException>();
+      for (int i=0; i < 3; i++) {
         final RebaseInfo rebaseInfo=collectRebaseInfo();
+        if (rebaseInfo.reorderedCommits.isEmpty()) {
+          final Collection<Root> rootsToPush=getRootsToPush();
+          exceptions=executePushCommand(rootsToPush);
+          if (exceptions.isEmpty() && !rootsToPush.isEmpty()) {
+            int commitsNum=0;
+            for (            Root root : rootsToPush) {
+              commitsNum+=root.commits.size();
+              Set<String> unchecked=rebaseInfo.uncheckedCommits.get(root.root);
+              if (unchecked != null) {
+                commitsNum-=unchecked.size();
+              }
+            }
+            GitUIUtil.notifySuccess(myProject,"Pushed successfully","Pushed " + commitsNum + " "+ StringUtil.pluralize("commit",commitsNum)+ ".");
+            return;
+          }
+          exceptions.clear();
+        }
         final List<Root> roots=loadRoots(myProject,myVcsRoots,exceptions,true);
         if (!exceptions.isEmpty()) {
-          notifyExceptionWhenClosed("Failed to fetch.",exceptions);
+          notifyException("Failed to fetch",exceptions);
           return;
         }
         updateTree(roots,rebaseInfo.uncheckedCommits);
-        executeRebase(exceptions,rebaseInfo);
-        if (!exceptions.isEmpty()) {
-          notifyExceptionWhenClosed("Failed to rebase.",exceptions);
-          return;
+        if (isRebaseNeeded()) {
+          executeRebase(exceptions,rebaseInfo);
+          if (!exceptions.isEmpty()) {
+            notifyException("Failed to rebase",exceptions);
+            return;
+          }
+          GitUtil.refreshFiles(myProject,rebaseInfo.roots);
         }
-        GitUtil.refreshFiles(myProject,rebaseInfo.roots);
       }
- while (isRebaseNeeded());
-      final Collection<Root> rootsToPush=getRootsToPush();
-      exceptions=executePushCommand(rootsToPush);
-      if (!exceptions.isEmpty()) {
-        notifyExceptionWhenClosed("Failed to push",exceptions);
-        return;
-      }
+      notifyException("Failed to push",exceptions);
     }
   }
 ;
