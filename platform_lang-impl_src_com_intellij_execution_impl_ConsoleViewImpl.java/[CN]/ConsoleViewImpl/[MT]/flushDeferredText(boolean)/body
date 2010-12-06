@@ -1,0 +1,86 @@
+{
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  if (myProject.isDisposed()) {
+    return;
+  }
+  if (clear) {
+    final Document document;
+synchronized (LOCK) {
+      myHyperlinks.clear();
+      myTokens.clear();
+      if (myEditor == null)       return;
+      myEditor.getMarkupModel().removeAllHighlighters();
+      document=myEditor.getDocument();
+      myFoldingAlarm.cancelAllRequests();
+    }
+    CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+      public void run(){
+        document.deleteString(0,document.getTextLength());
+      }
+    }
+,null,DocCommandGroupId.noneGroupId(document));
+  }
+  final String text;
+  final Collection<ConsoleViewContentType> contentTypes;
+  int deferredTokensSize;
+synchronized (LOCK) {
+    if (myOutputPaused)     return;
+    if (myDeferredOutput.length() == 0)     return;
+    if (myEditor == null)     return;
+    text=myDeferredOutput.substring(0,myDeferredOutput.length());
+    contentTypes=Collections.unmodifiableCollection(new HashSet<ConsoleViewContentType>(myDeferredTypes));
+    for (    TokenInfo deferredToken : myDeferredTokens) {
+      addToken(deferredToken.getLength(),deferredToken.getHyperlinkInfo(),deferredToken.contentType);
+    }
+    deferredTokensSize=myDeferredTokens.size();
+    myDeferredTokens.clear();
+    myDeferredTypes.clear();
+    if (USE_CYCLIC_BUFFER) {
+      myDeferredOutput=new StringBuffer(Math.min(myDeferredOutput.length(),CYCLIC_BUFFER_SIZE));
+    }
+ else {
+      myDeferredOutput.setLength(0);
+    }
+  }
+  final Document document=myEditor.getDocument();
+  final int oldLineCount=document.getLineCount();
+  final boolean isAtEndOfDocument=myEditor.getCaretModel().getOffset() == document.getTextLength();
+  boolean cycleUsed=USE_CYCLIC_BUFFER && document.getTextLength() + text.length() > CYCLIC_BUFFER_SIZE;
+  CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+    public void run(){
+      document.insertString(document.getTextLength(),text);
+      if (!contentTypes.isEmpty()) {
+        for (        ChangeListener each : myListeners) {
+          each.contentAdded(contentTypes);
+        }
+      }
+    }
+  }
+,null,DocCommandGroupId.noneGroupId(document));
+synchronized (LOCK) {
+    for (int i=myTokens.size() - 1; i >= 0 && deferredTokensSize > 0; i--, deferredTokensSize--) {
+      TokenInfo token=myTokens.get(i);
+      final HyperlinkInfo info=token.getHyperlinkInfo();
+      if (info != null) {
+        addHyperlink(token.startOffset,token.endOffset,null,info,getHyperlinkAttributes());
+      }
+    }
+  }
+  myPsiDisposedCheck.performCheck();
+  final int newLineCount=document.getLineCount();
+  if (cycleUsed) {
+    final int lineCount=LineTokenizer.calcLineCount(text,true);
+    for (Iterator<RangeHighlighter> it=myHyperlinks.getRanges().keySet().iterator(); it.hasNext(); ) {
+      if (!it.next().isValid()) {
+        it.remove();
+      }
+    }
+    highlightHyperlinksAndFoldings(newLineCount >= lineCount + 1 ? newLineCount - lineCount - 1 : 0,newLineCount - 1);
+  }
+ else   if (oldLineCount < newLineCount) {
+    highlightHyperlinksAndFoldings(oldLineCount - 1,newLineCount - 2);
+  }
+  if (isAtEndOfDocument) {
+    EditorUtil.scrollToTheEnd(myEditor);
+  }
+}
