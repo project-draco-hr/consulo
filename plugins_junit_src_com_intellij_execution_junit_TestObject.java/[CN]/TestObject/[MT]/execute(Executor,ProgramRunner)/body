@@ -10,7 +10,7 @@
   consoleView.attachToProcess(handler);
   unboundOutputRoot.setPrinter(consoleView.getPrinter());
   Disposer.register(consoleView,unboundOutputRoot);
-  final TestsPacketsReceiver packetsReceiver=new TestsPacketsReceiver(consoleView){
+  final TestsPacketsReceiver packetsReceiver=new TestsPacketsReceiver(consoleView,unboundOutputRoot){
     @Override public void notifyStart(    TestProxy root){
       super.notifyStart(root);
       unboundOutputRoot.addChild(root);
@@ -40,9 +40,9 @@
       if (myListenersFile != null) {
         FileUtil.delete(myListenersFile);
       }
-      unboundOutputRoot.flush();
       IJSwingUtilities.invoke(new Runnable(){
         public void run(){
+          unboundOutputRoot.flush();
           packetsReceiver.checkTerminated();
           final JUnitRunningModel model=packetsReceiver.getModel();
           TestsUIUtil.notifyByBalloon(myProject,model != null ? model.getRoot() : null,consoleProperties);
@@ -53,20 +53,24 @@
     @Override public void onTextAvailable(    final ProcessEvent event,    final Key outputType){
       final String text=event.getText();
       final ConsoleViewContentType consoleViewType=ConsoleViewContentType.getConsoleViewType(outputType);
-      final Set<TestProxy> currentTests=packetsReceiver.getCurrentTests();
       final Printable printable=new Printable(){
         public void printOn(        final Printer printer){
           printer.print(text,consoleViewType);
         }
       }
 ;
-      if (!currentTests.isEmpty()) {
-        for (        TestProxy currentTest : currentTests) {
-          currentTest.addLast(printable);
-        }
+      if (consoleViewType == ConsoleViewContentType.SYSTEM_OUTPUT) {
+        unboundOutputRoot.addLast(printable);
       }
  else {
-        unboundOutputRoot.addLast(printable);
+        final Extractor extractor;
+        if (consoleViewType == ConsoleViewContentType.ERROR_OUTPUT) {
+          extractor=handler.getErr();
+        }
+ else {
+          extractor=handler.getOut();
+        }
+        extractor.getEventsDispatcher().processOutput(printable);
       }
     }
   }
