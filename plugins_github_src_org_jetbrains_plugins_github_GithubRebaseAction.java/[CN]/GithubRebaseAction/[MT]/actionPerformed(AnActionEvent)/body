@@ -1,0 +1,76 @@
+{
+  final Project project=e.getData(PlatformDataKeys.PROJECT);
+  final VirtualFile[] roots=ProjectRootManager.getInstance(project).getContentRoots();
+  if (roots.length == 0) {
+    Messages.showErrorDialog(project,"Project doesn't have any project roots",CANNOT_PERFORM_GITHUB_REBASE);
+    return;
+  }
+  final VirtualFile root=roots[0];
+  final boolean gitDetected=GitUtil.isUnderGit(root);
+  if (!gitDetected) {
+    Messages.showErrorDialog(project,"Cannot find any git repository configured for the project",CANNOT_PERFORM_GITHUB_REBASE);
+    return;
+  }
+  try {
+    final GitRemote githubRemote=GithubUtil.getGithubBoundRepository(project);
+    final List<GitRemote> gitRemotes=GitRemote.list(project,root);
+    LOG.assertTrue(githubRemote != null);
+    final String pushUrl=githubRemote.pushUrl();
+    final String login=GithubSettings.getInstance().getLogin();
+    final int index=pushUrl.lastIndexOf(login);
+    if (index == -1) {
+      Messages.showErrorDialog(project,"Github remote repository doesn't seem to be your own repository: " + pushUrl,CANNOT_PERFORM_GITHUB_REBASE);
+      return;
+    }
+    String repoName=pushUrl.substring(index + login.length() + 1);
+    if (repoName.endsWith(".git")) {
+      repoName=repoName.substring(0,repoName.length() - 4);
+    }
+    final RepositoryInfo repositoryInfo=GithubUtil.getDetailedRepositoryInfo(project,repoName);
+    if (repositoryInfo == null) {
+      Messages.showErrorDialog(project,"Github repository doesn't seem to be your own repository: " + pushUrl,CANNOT_PERFORM_GITHUB_REBASE);
+      return;
+    }
+    if (!repositoryInfo.isFork()) {
+      Messages.showErrorDialog(project,"Github repository '" + repoName + "' is not a forked one",CANNOT_PERFORM_GITHUB_REBASE);
+      return;
+    }
+    final String parent=repositoryInfo.getParent();
+    LOG.assertTrue(parent != null,"Parent repository not found!");
+    final String parentRepoSuffix=parent + ".git";
+    final String parentRepoUrl="git://github.com/" + parentRepoSuffix;
+    boolean remoteForParentSeen=false;
+    for (    GitRemote gitRemote : gitRemotes) {
+      final String fetchUrl=gitRemote.fetchUrl();
+      if (fetchUrl.endsWith(parent + ".git")) {
+        remoteForParentSeen=true;
+        break;
+      }
+    }
+    if (!remoteForParentSeen) {
+      final int result=Messages.showYesNoDialog(project,"It is nescessary to have '" + parentRepoUrl + "' as a configured remote. Add remote?","Github Rebase",Messages.getQuestionIcon());
+      if (result != Messages.OK) {
+        return;
+      }
+      LOG.info("Adding GitHub as a remote host");
+      final GitSimpleHandler addRemoteHandler=new GitSimpleHandler(project,root,GitCommand.REMOTE);
+      addRemoteHandler.setNoSSH(true);
+      addRemoteHandler.setSilent(true);
+      addRemoteHandler.addParameters("add",repoName,parentRepoUrl);
+      addRemoteHandler.run();
+      if (addRemoteHandler.getExitCode() != 0) {
+        Messages.showErrorDialog("Failed to add GitHub remote: '" + parentRepoUrl + "'",CANNOT_PERFORM_GITHUB_REBASE);
+        return;
+      }
+    }
+    BasicAction.saveAll();
+    final GithubRebase action=(GithubRebase)ActionManager.getInstance().getAction("Github.Rebase.Internal");
+    action.setRebaseOrigin(parent);
+    final AnActionEvent actionEvent=new AnActionEvent(e.getInputEvent(),e.getDataContext(),e.getPlace(),e.getPresentation(),e.getActionManager(),e.getModifiers());
+    action.actionPerformed(actionEvent);
+  }
+ catch (  VcsException e1) {
+    Messages.showErrorDialog(project,"Error happened during git operation: " + e1.getMessage(),CANNOT_PERFORM_GITHUB_REBASE);
+    return;
+  }
+}
