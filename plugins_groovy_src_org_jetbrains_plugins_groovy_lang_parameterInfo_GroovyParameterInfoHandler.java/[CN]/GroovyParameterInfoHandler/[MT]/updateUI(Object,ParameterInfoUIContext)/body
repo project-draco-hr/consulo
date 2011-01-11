@@ -1,0 +1,91 @@
+{
+  CodeInsightSettings settings=CodeInsightSettings.getInstance();
+  if (o == null)   return;
+  Object element;
+  if (o instanceof GroovyResolveResult) {
+    element=((GroovyResolveResult)o).getElement();
+    if (element == null || !((PsiElement)element).isValid()) {
+      context.setUIComponentEnabled(false);
+      return;
+    }
+  }
+ else   if (o instanceof GrClosureType) {
+    if (!((GrClosureType)o).isValid()) {
+      context.setUIComponentEnabled(false);
+      return;
+    }
+    element=o;
+  }
+ else {
+    return;
+  }
+  int highlightStartOffset=-1;
+  int highlightEndOffset=-1;
+  StringBuffer buffer=new StringBuffer();
+  if (element instanceof PsiMethod) {
+    final PsiMethod method=(PsiMethod)element;
+    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO) {
+      if (!method.isConstructor()) {
+        PsiType returnType=PsiUtil.getSmartReturnType(method);
+        if (returnType != null) {
+          buffer.append(returnType.getPresentableText());
+          buffer.append(" ");
+        }
+      }
+      buffer.append(method.getName());
+      buffer.append("(");
+    }
+    final int currentParameter=context.getCurrentParameterIndex();
+    PsiParameter[] parms=method.getParameterList().getParameters();
+    final GroovyResolveResult resolveResult=(GroovyResolveResult)o;
+    if (ResolveUtil.isInUseScope(resolveResult)) {
+      parms=ArrayUtil.remove(parms,0);
+    }
+    int numParams=parms.length;
+    if (numParams > 0) {
+      final PsiSubstitutor substitutor=resolveResult.getSubstitutor();
+      for (int j=0; j < numParams; j++) {
+        PsiParameter parm=parms[j];
+        int startOffset=buffer.length();
+        appendParameterText(parm,substitutor,buffer);
+        int endOffset=buffer.length();
+        if (j < numParams - 1) {
+          buffer.append(", ");
+        }
+        if (context.isUIComponentEnabled() && (j == currentParameter || (j == numParams - 1 && parm.isVarArgs() && currentParameter >= numParams))) {
+          highlightStartOffset=startOffset;
+          highlightEndOffset=endOffset;
+        }
+      }
+    }
+ else {
+      buffer.append("no parameters");
+    }
+    if (settings.SHOW_FULL_SIGNATURES_IN_PARAMETER_INFO) {
+      buffer.append(")");
+    }
+  }
+ else   if (element instanceof PsiClass) {
+    buffer.append("no parameters");
+  }
+ else   if (element instanceof GrVariable) {
+    final PsiElement parent=context.getParameterOwner().getParent();
+    if (parent == null || !parent.isValid()) {
+      context.setUIComponentEnabled(false);
+      return;
+    }
+    final PsiType type;
+    if (parent instanceof GrMethodCallExpression) {
+      type=((GrMethodCallExpression)parent).getInvokedExpression().getType();
+    }
+ else {
+      type=((GrVariable)element).getTypeGroovy();
+    }
+    generateForClosureType(buffer,type);
+  }
+ else   if (element instanceof GrClosureType) {
+    generateForClosureType(buffer,(GrClosureType)element);
+  }
+  final boolean isDeprecated=o instanceof PsiDocCommentOwner && ((PsiDocCommentOwner)o).isDeprecated();
+  context.setupUIComponentPresentation(buffer.toString(),highlightStartOffset,highlightEndOffset,!context.isUIComponentEnabled(),isDeprecated,false,context.getDefaultParameterColor());
+}
