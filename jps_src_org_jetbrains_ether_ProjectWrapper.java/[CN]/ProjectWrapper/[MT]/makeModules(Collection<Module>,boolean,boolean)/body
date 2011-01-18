@@ -1,11 +1,16 @@
 {
   final Set<Module> modules=new HashSet<Module>();
-  final Set<Module> visited=new HashSet<Module>();
+  final Set<Module> marked=new HashSet<Module>();
+  final Map<Module,Boolean> visited=new HashMap<Module,Boolean>();
+  final Set<Module> frontier=new HashSet<Module>();
   final Map<Module,Set<Module>> reversedDependencies=new HashMap<Module,Set<Module>>();
+  DotPrinter.header();
   for (  Module m : myProject.getModules().values()) {
+    DotPrinter.node(m.getName());
     for (    Module.ModuleDependency mdep : m.getDependencies()) {
       final ClasspathItem cpi=mdep.getItem();
       if (cpi instanceof Module) {
+        DotPrinter.edge(((Module)cpi).getName(),m.getName());
         Set<Module> sm=reversedDependencies.get(cpi);
         if (sm == null) {
           sm=new HashSet<Module>();
@@ -15,23 +20,55 @@
       }
     }
   }
+  DotPrinter.footer();
+  DotPrinter.header();
+  new Object(){
+    public void run(    final Collection<Module> initial){
+      if (initial == null)       return;
+      for (      Module module : initial) {
+        if (marked.contains(module))         continue;
+        DotPrinter.node(module.getName());
+        final List<Module> dep=new ArrayList<Module>();
+        for (        Module.ModuleDependency d : module.getDependencies()) {
+          final ClasspathItem cpi=d.getItem();
+          if (cpi instanceof Module) {
+            DotPrinter.edge(((Module)cpi).getName(),module.getName());
+            dep.add((Module)cpi);
+          }
+        }
+        if (dep.size() == 0) {
+          frontier.add(module);
+        }
+        marked.add(module);
+        run(dep);
+      }
+    }
+  }
+.run(initial);
+  DotPrinter.footer();
   new Object(){
     public void run(    final Collection<Module> initial,    final boolean force){
       if (initial == null)       return;
       for (      Module module : initial) {
-        if (visited.contains(module))         continue;
-        visited.add(module);
-        if (force || getModule(module.getName()).isOutdated(tests,myHistory)) {
-          modules.add(module);
-          run(reversedDependencies.get(module),true);
-        }
+        if (!marked.contains(module))         continue;
+        final Boolean property=visited.get(module);
+        if (property == null || !property && force) {
+          if (force || getModule(module.getName()).isOutdated(tests,myHistory)) {
+            visited.put(module,true);
+            modules.add(module);
+            run(reversedDependencies.get(module),true);
+          }
  else {
-          run(reversedDependencies.get(module),false);
+            if (property == null) {
+              visited.put(module,false);
+            }
+            run(reversedDependencies.get(module),false);
+          }
         }
       }
     }
   }
-.run(initial,force);
+.run(frontier,force);
   if (modules.size() == 0 && !force) {
     System.out.println("All requested modules are up-to-date.");
     return;
