@@ -1,0 +1,52 @@
+{
+  final Set<VirtualFile> toCompile=new HashSet<VirtualFile>();
+  final List<Trinity<File,String,Boolean>> toDelete=new ArrayList<Trinity<File,String,Boolean>>();
+  context.getProgressIndicator().pushState();
+  final boolean[] wereFilesDeleted={false};
+  try {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        TranslatingCompilerFilesMonitor.getInstance().collectFiles(context,compiler,srcSnapshot.iterator(),forceCompile,isRebuild,toCompile,toDelete);
+      }
+    }
+);
+    if (onlyCheckStatus) {
+      if (toDelete.isEmpty() && toCompile.isEmpty()) {
+        return false;
+      }
+      if (LOG.isDebugEnabled() || ourDebugMode) {
+        if (!toDelete.isEmpty()) {
+          final String message="Found items to delete, compiler " + compiler.getDescription();
+          LOG.debug(message);
+          if (ourDebugMode) {
+            System.out.println(message);
+          }
+        }
+        if (!toCompile.isEmpty()) {
+          final String message="Found items to compile, compiler " + compiler.getDescription();
+          LOG.debug(message);
+          if (ourDebugMode) {
+            System.out.println(message);
+          }
+        }
+      }
+      throw new ExitException(ExitStatus.CANCELLED);
+    }
+    if (!toDelete.isEmpty()) {
+      try {
+        wereFilesDeleted[0]=syncOutputDir(context,toDelete);
+      }
+ catch (      CacheCorruptedException e) {
+        LOG.info(e);
+        context.requestRebuildNextTime(e.getMessage());
+      }
+    }
+    if ((wereFilesDeleted[0] || !toCompile.isEmpty()) && context.getMessageCount(CompilerMessageCategory.ERROR) == 0) {
+      compiler.compile(context,moduleChunk,VfsUtil.toVirtualFileArray(toCompile),sink);
+    }
+  }
+  finally {
+    context.getProgressIndicator().popState();
+  }
+  return !toCompile.isEmpty() || wereFilesDeleted[0];
+}

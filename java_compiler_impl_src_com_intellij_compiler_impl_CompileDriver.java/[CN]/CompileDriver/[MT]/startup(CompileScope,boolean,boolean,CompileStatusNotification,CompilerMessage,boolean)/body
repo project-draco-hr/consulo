@@ -1,0 +1,61 @@
+{
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  final CompilerTask compileTask=new CompilerTask(myProject,CompilerWorkspaceConfiguration.getInstance(myProject).COMPILE_IN_BACKGROUND,forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make"),ApplicationManager.getApplication().isUnitTestMode());
+  final WindowManager windowManager=WindowManager.getInstance();
+  if (windowManager != null) {
+    windowManager.getStatusBar(myProject).setInfo("");
+  }
+  PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+  FileDocumentManager.getInstance().saveAllDocuments();
+  final DependencyCache dependencyCache=createDependencyCache();
+  final CompileContextImpl compileContext=new CompileContextImpl(myProject,compileTask,scope,dependencyCache,!isRebuild && !forceCompile,isRebuild);
+  compileContext.putUserData(COMPILATION_START_TIMESTAMP,LocalTimeCounter.currentTime());
+  for (  Map.Entry<Pair<IntermediateOutputCompiler,Module>,Pair<VirtualFile,VirtualFile>> entry : myGenerationCompilerModuleToOutputDirMap.entrySet()) {
+    final Pair<VirtualFile,VirtualFile> outputs=entry.getValue();
+    final Module module=entry.getKey().getSecond();
+    compileContext.assignModule(outputs.getFirst(),module,false);
+    compileContext.assignModule(outputs.getSecond(),module,true);
+  }
+  attachAnnotationProcessorsOutputDirectories(compileContext);
+  compileTask.start(new Runnable(){
+    public void run(){
+      if (compileContext.getProgressIndicator().isCanceled()) {
+        if (callback != null) {
+          callback.finished(true,0,0,compileContext);
+        }
+        return;
+      }
+      long start=System.currentTimeMillis();
+      try {
+        if (myProject.isDisposed()) {
+          return;
+        }
+        LOG.info("COMPILATION STARTED");
+        if (message != null) {
+          compileContext.addMessage(message);
+        }
+        TranslatingCompilerFilesMonitor.getInstance().ensureInitializationCompleted(myProject);
+        doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
+      }
+  finally {
+        compileContext.commitZipFiles();
+        final long finish=System.currentTimeMillis();
+        CompilerUtil.logDuration("\tCOMPILATION FINISHED; Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),finish - start);
+        CompilerCacheManager.getInstance(myProject).flushCaches();
+      }
+    }
+  }
+,new Runnable(){
+    public void run(){
+      if (isRebuild) {
+        final int rv=Messages.showDialog(myProject,"You are about to rebuild the whole project.\nRun 'Make Project' instead?","Confirm Project Rebuild",new String[]{"Make","Rebuild"},0,Messages.getQuestionIcon());
+        if (rv == 0) {
+          startup(scope,false,false,callback,null,checkCachesVersion);
+          return;
+        }
+      }
+      startup(scope,isRebuild,forceCompile,callback,message,checkCachesVersion);
+    }
+  }
+);
+}
