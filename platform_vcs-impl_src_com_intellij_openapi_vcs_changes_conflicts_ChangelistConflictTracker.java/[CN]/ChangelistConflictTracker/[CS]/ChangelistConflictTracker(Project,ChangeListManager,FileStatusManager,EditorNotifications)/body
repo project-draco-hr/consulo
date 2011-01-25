@@ -4,6 +4,25 @@
   myEditorNotifications=editorNotifications;
   myDocumentManager=FileDocumentManager.getInstance();
   myFileStatusManager=fileStatusManager;
+  myCheckSetLock=new Object();
+  myCheckSet=new HashSet<VirtualFile>();
+  final Application application=ApplicationManager.getApplication();
+  final ZipperUpdater zipperUpdater=new ZipperUpdater(300,Alarm.ThreadToUse.SHARED_THREAD,myProject);
+  final Runnable runnable=new Runnable(){
+    @Override public void run(){
+      if (application.isDisposed() || myProject.isDisposed() || (!myProject.isOpen()))       return;
+      final Set<VirtualFile> localSet;
+synchronized (myCheckSetLock) {
+        localSet=new HashSet<VirtualFile>();
+        localSet.addAll(myCheckSet);
+        myCheckSet.clear();
+      }
+      for (      VirtualFile file : localSet) {
+        checkFile(file);
+      }
+    }
+  }
+;
   myDocumentListener=new DocumentAdapter(){
     @Override public void documentChanged(    DocumentEvent e){
       if (!myOptions.TRACKING_ENABLED) {
@@ -11,30 +30,10 @@
       }
       Document document=e.getDocument();
       final VirtualFile file=myDocumentManager.getFile(document);
-      if (file == null || isFromActiveChangelist(file) || ChangesUtil.isInternalOperation(file)) {
-        return;
+synchronized (myCheckSetLock) {
+        myCheckSet.add(file);
       }
-      myChangeListManager.invokeAfterUpdate(new Runnable(){
-        public void run(){
-          if (!isFromActiveChangelist(file)) {
-            String path=file.getPath();
-            Conflict conflict=myConflicts.get(path);
-            boolean newConflict=false;
-            if (conflict == null) {
-              conflict=new Conflict();
-              myConflicts.put(path,conflict);
-              newConflict=true;
-            }
-            conflict.timestamp=System.currentTimeMillis();
-            conflict.changelistId=myChangeListManager.getDefaultChangeList().getId();
-            if (newConflict && myOptions.HIGHLIGHT_CONFLICTS) {
-              myFileStatusManager.fileStatusChanged(file);
-              myEditorNotifications.updateNotifications(file);
-            }
-          }
-        }
-      }
-,InvokeAfterUpdateMode.SILENT,null,null);
+      zipperUpdater.queue(runnable);
     }
   }
 ;
