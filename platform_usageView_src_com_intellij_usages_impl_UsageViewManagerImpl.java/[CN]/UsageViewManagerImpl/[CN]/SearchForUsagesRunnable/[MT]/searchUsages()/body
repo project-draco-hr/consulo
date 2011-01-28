@@ -1,17 +1,25 @@
 {
   UsageSearcher usageSearcher=mySearcherFactory.create();
-  final AtomicBoolean warningShown=new AtomicBoolean();
+  final AtomicInteger tooManyUsages=new AtomicInteger();
+  final CountDownLatch waitWhileUserClick=new CountDownLatch(1);
   usageSearcher.generate(new Processor<Usage>(){
     public boolean process(    final Usage usage){
       final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
       if (searchHasBeenCancelled() || indicator != null && indicator.isCanceled())       return false;
+      if (tooManyUsages.get() == 1) {
+        try {
+          waitWhileUserClick.await(1,TimeUnit.SECONDS);
+        }
+ catch (        InterruptedException ignored) {
+        }
+      }
       boolean incrementCounter=!isSelfUsage(usage,mySearchFor);
       if (incrementCounter) {
         final int usageCount=myUsageCountWithoutDefinition.incrementAndGet();
         if (usageCount == 1 && !myProcessPresentation.isShowPanelIfOnlyOneUsage()) {
           myFirstUsage.compareAndSet(null,usage);
         }
-        if (usageCount > UsageLimitUtil.USAGES_LIMIT && !warningShown.get() && warningShown.compareAndSet(false,true)) {
+        if (usageCount > UsageLimitUtil.USAGES_LIMIT && tooManyUsages.get() == 0 && tooManyUsages.compareAndSet(0,1)) {
           UIUtil.invokeLaterIfNeeded(new Runnable(){
             @Override public void run(){
               if (searchHasBeenCancelled() || indicator != null && indicator.isCanceled())               return;
@@ -20,6 +28,7 @@
               if (ret != 0) {
                 setCurrentSearchCancelled(true);
               }
+              waitWhileUserClick.countDown();
             }
           }
 );
@@ -28,6 +37,7 @@
         if (usageView != null) {
           usageView.appendUsageLater(usage);
         }
+        if (usageCount % 100 == 0)         System.out.println("usageCount = " + usageCount);
       }
       return indicator == null || !indicator.isCanceled();
     }
