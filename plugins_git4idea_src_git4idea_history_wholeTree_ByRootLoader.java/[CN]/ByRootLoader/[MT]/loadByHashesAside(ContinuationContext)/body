@@ -1,0 +1,42 @@
+{
+  final List<CommitI> result=new ArrayList<CommitI>();
+  final Set<SHAHash> controlSet=new HashSet<SHAHash>();
+  final List<String> hashes=myGitLogFilters.getPossibleReferencies();
+  if (hashes == null)   return;
+  myGitLogFilters.callConsumer(new Consumer<List<ChangesFilter.Filter>>(){
+    @Override public void consume(    List<ChangesFilter.Filter> filters){
+      for (      String hash : hashes) {
+        try {
+          final SHAHash shaHash=GitChangeUtils.commitExists(myProject,myRootHolder.getRoot(),hash,ChangesFilter.filtersToParameterArray(filters));
+          if (shaHash == null)           continue;
+          if (controlSet.contains(shaHash))           continue;
+          controlSet.add(shaHash);
+          if (myStartingPoints != null && (!myStartingPoints.isEmpty())) {
+            boolean matches=false;
+            for (            String startingPoint : myStartingPoints) {
+              if (GitChangeUtils.isAnyLevelChild(myProject,myRootHolder.getRoot(),shaHash,startingPoint)) {
+                matches=true;
+                break;
+              }
+            }
+            if (!matches)             continue;
+          }
+          final List<GitCommit> commits=myLowLevelAccess.getCommitDetails(Collections.singletonList(shaHash.getValue()),mySymbolicRefs);
+          if (commits.isEmpty())           continue;
+          myDetailsCache.acceptAnswer(commits,myRootHolder.getRoot());
+          appendCommits(result,commits);
+        }
+ catch (        VcsException e1) {
+          continue;
+        }
+      }
+    }
+  }
+,false);
+  if (!result.isEmpty()) {
+    final StepType stepType=myMediator.appendResult(myTicket,result,null);
+    if (StepType.STOP.equals(stepType)) {
+      context.cancelEverything();
+    }
+  }
+}
