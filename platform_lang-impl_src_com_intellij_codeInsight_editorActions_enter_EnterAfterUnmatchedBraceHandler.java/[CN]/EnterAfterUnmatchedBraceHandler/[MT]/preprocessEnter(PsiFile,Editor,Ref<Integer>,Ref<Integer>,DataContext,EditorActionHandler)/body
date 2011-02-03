@@ -3,7 +3,8 @@
   CharSequence text=document.getCharsSequence();
   Project project=file.getProject();
   int caretOffset=caretOffsetRef.get().intValue();
-  if (!CodeInsightSettings.getInstance().INSERT_BRACE_ON_ENTER || !isAfterUnmatchedLBrace(editor,caretOffset,file.getFileType())) {
+  int unmatchedLBracesNumber=getUnmatchedLBracesNumberBefore(editor,caretOffset,file.getFileType());
+  if (!CodeInsightSettings.getInstance().INSERT_BRACE_ON_ENTER || unmatchedLBracesNumber <= 0) {
     return Result.Continue;
   }
   int offset=CharArrayUtil.shiftForward(text,caretOffset," \t");
@@ -14,38 +15,54 @@
     }
   }
   offset=Math.min(offset,document.getTextLength());
-  document.insertString(offset,"\n}");
-  document.insertString(caretOffset,"\n");
-  PsiDocumentManager.getInstance(project).commitDocument(document);
-  long stamp=document.getModificationStamp();
-  boolean closingBraceIndentAdjusted;
-  try {
-    CodeStyleManager.getInstance(project).adjustLineIndent(file,new TextRange(caretOffset,offset + 2));
-  }
- catch (  IncorrectOperationException e) {
-    LOG.error(e);
-  }
+  int bracesToInsert=0;
+  outer:   for (int i=caretOffset - 1; unmatchedLBracesNumber > 0 && i >= 0 && bracesToInsert < unmatchedLBracesNumber; i--) {
+    char c=text.charAt(i);
+switch (c) {
+case ' ':
+case '\n':
+case '\t':
+      continue;
+case '{':
+    bracesToInsert++;
+  break;
+default :
+break outer;
+}
+}
+bracesToInsert=Math.max(bracesToInsert,1);
+document.insertString(offset,"\n" + StringUtil.repeatSymbol('}',bracesToInsert));
+document.insertString(caretOffset,"\n");
+PsiDocumentManager.getInstance(project).commitDocument(document);
+long stamp=document.getModificationStamp();
+boolean closingBraceIndentAdjusted;
+try {
+CodeStyleManager.getInstance(project).adjustLineIndent(file,new TextRange(caretOffset,offset + 2));
+}
+ catch (IncorrectOperationException e) {
+LOG.error(e);
+}
  finally {
-    closingBraceIndentAdjusted=stamp != document.getModificationStamp();
-    document.deleteString(caretOffset,caretOffset + 1);
-  }
-  if (!closingBraceIndentAdjusted) {
-    int line=document.getLineNumber(offset);
-    StringBuilder buffer=new StringBuilder();
-    int start=document.getLineStartOffset(line);
-    int end=document.getLineEndOffset(line);
-    for (int i=start; i < end; i++) {
-      char c=text.charAt(i);
-      if (c != ' ' && c != '\t') {
-        break;
-      }
+closingBraceIndentAdjusted=stamp != document.getModificationStamp();
+document.deleteString(caretOffset,caretOffset + 1);
+}
+if (!closingBraceIndentAdjusted) {
+int line=document.getLineNumber(offset);
+StringBuilder buffer=new StringBuilder();
+int start=document.getLineStartOffset(line);
+int end=document.getLineEndOffset(line);
+for (int i=start; i < end; i++) {
+char c=text.charAt(i);
+if (c != ' ' && c != '\t') {
+break;
+}
  else {
-        buffer.append(c);
-      }
-    }
-    if (buffer.length() > 0) {
-      document.insertString(offset + 1,buffer);
-    }
-  }
-  return Result.DefaultForceIndent;
+buffer.append(c);
+}
+}
+if (buffer.length() > 0) {
+document.insertString(offset + 1,buffer);
+}
+}
+return Result.DefaultForceIndent;
 }
