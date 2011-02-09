@@ -1,20 +1,19 @@
 {
   removeCurrentHighlights();
   myMatchInfoLabel.setFont(myMatchInfoLabel.getFont().deriveFont(Font.PLAIN));
-  String text=mySearchField.getText();
+  final String text=mySearchField.getText();
   if (text.length() == 0) {
     setRegularBackground();
     myMatchInfoLabel.setText("");
     myClickToHighlightLabel.setVisible(false);
-    myOkToSearch=false;
+    myLivePreview.cleanUp();
   }
  else {
-    myOkToSearch=true;
-    FindManager findManager=FindManager.getInstance(myProject);
-    FindModel model=new FindModel();
+    final FindModel model=new FindModel();
     model.setCaseSensitive(isCaseSensitive());
     model.setInCommentsOnly(isInComments());
     model.setInStringLiteralsOnly(isInLiterals());
+    setRegularBackground();
     if (isRegexp()) {
       model.setWholeWordsOnly(false);
       model.setRegularExpressions(true);
@@ -22,11 +21,10 @@
         Pattern.compile(text);
       }
  catch (      Exception e) {
-        myOkToSearch=false;
         setNotFoundBackground();
-        myClickToHighlightLabel.setVisible(false);
         myMatchInfoLabel.setText("Incorrect regular expression");
         boldMatchInfo();
+        myClickToHighlightLabel.setVisible(false);
         return;
       }
     }
@@ -37,58 +35,49 @@
     model.setFromCursor(false);
     model.setStringToFind(text);
     model.setSearchHighlighters(true);
-    int offset=0;
-    VirtualFile virtualFile=FindUtil.getVirtualFile(myEditor);
-    ArrayList<FindResult> results=new ArrayList<FindResult>();
-    CharSequence charsSequence=myEditor.getDocument().getCharsSequence();
-    while (true) {
-      FindResult result=findManager.findString(charsSequence,offset,model,virtualFile);
-      if (!result.isStringFound())       break;
-      int newOffset=result.getEndOffset();
-      if (offset == newOffset) {
-        ++newOffset;
-        if (newOffset >= charsSequence.length())         break;
-      }
-      offset=newOffset;
-      results.add(result);
-      if (results.size() > myMatchesLimit)       break;
-    }
-    if (allowedToChangedEditorSelection) {
-      int currentOffset=myEditor.getCaretModel().getOffset();
-      if (myEditor.getSelectionModel().hasSelection()) {
-        currentOffset=Math.min(currentOffset,myEditor.getSelectionModel().getSelectionStart());
-      }
-      if (!findAndSelectFirstUsage(findManager,model,currentOffset,virtualFile)) {
-        findAndSelectFirstUsage(findManager,model,0,virtualFile);
-      }
-    }
-    final int count=results.size();
-    if (count <= myMatchesLimit) {
-      myClickToHighlightLabel.setVisible(false);
-      highlightResults(text,results);
-      if (count > 0) {
-        setRegularBackground();
-        if (count > 1) {
-          myMatchInfoLabel.setText(count + " matches");
-        }
- else {
-          myMatchInfoLabel.setText("1 match");
-        }
-      }
- else {
-        setNotFoundBackground();
-        myMatchInfoLabel.setText("No matches");
-      }
-    }
- else {
-      setRegularBackground();
-      myMatchInfoLabel.setText("More than 100 matches");
-      myClickToHighlightLabel.setVisible(true);
-      boldMatchInfo();
-    }
+    final FindManager findManager=FindManager.getInstance(myProject);
     if (allowedToChangedEditorSelection) {
       findManager.setFindWasPerformed();
-      findManager.setFindNextModel(model);
+      FindModel copy=new FindModel();
+      copy.copyFrom(model);
+      findManager.setFindNextModel(copy);
     }
+    if (myIsReplace) {
+      model.setReplaceState(true);
+      model.setStringToReplace(myReplaceField.getText());
+      model.setPromptOnReplace(false);
+      model.setGlobal(!mySelectionOnly.isSelected());
+      model.setPreserveCase(myPreserveCase.isEnabled() && myPreserveCase.isSelected());
+    }
+    myLivePreviewController.setFindModel(model);
+    myLivePreview.update();
+    myLivePreview.setContinuation(new Runnable(){
+      @Override public void run(){
+        final int count=myLivePreview.getSearchResults().size();
+        if (count <= myMatchesLimit) {
+          myClickToHighlightLabel.setVisible(false);
+          if (count > 0) {
+            setRegularBackground();
+            if (count > 1) {
+              myMatchInfoLabel.setText(count + " matches");
+            }
+ else {
+              myMatchInfoLabel.setText("1 match");
+            }
+          }
+ else {
+            setNotFoundBackground();
+            myMatchInfoLabel.setText("No matches");
+          }
+        }
+ else {
+          setRegularBackground();
+          myMatchInfoLabel.setText("More than 100 matches");
+          myClickToHighlightLabel.setVisible(true);
+          boldMatchInfo();
+        }
+      }
+    }
+);
   }
 }
