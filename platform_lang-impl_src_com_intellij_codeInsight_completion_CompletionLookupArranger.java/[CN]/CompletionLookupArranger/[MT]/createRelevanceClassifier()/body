@@ -1,11 +1,40 @@
 {
-  return new ComparingClassifier<LookupElement>(ClassifierFactory.<LookupElement>listClassifier()){
-    @Override public Comparable getWeight(    LookupElement item){
+  final CompletionSorterImpl defaultSorter=CompletionSorterImpl.emptySorter().weigh(new LookupElementWeigher(){
+    @Override public Comparable weigh(    @NotNull LookupElement item){
       LookupItemWeightComparable result=getCachedRelevance(item);
       if (result != null)       return result;
       final double priority=item instanceof LookupItem ? ((LookupItem)item).getPriority() : 0;
       result=new LookupItemWeightComparable(priority,WeighingService.weigh(CompletionService.RELEVANCE_KEY,item,myLocation));
       item.putUserData(RELEVANCE_KEY,result);
+      return result;
+    }
+  }
+);
+  return new Classifier<LookupElement>(){
+    private final FactoryMap<CompletionSorterImpl,Classifier<LookupElement>> myClassifiers=new FactoryMap<CompletionSorterImpl,Classifier<LookupElement>>(){
+      @Override protected Map<CompletionSorterImpl,Classifier<LookupElement>> createMap(){
+        return Maps.newLinkedHashMap();
+      }
+      @Override protected Classifier<LookupElement> create(      CompletionSorterImpl key){
+        return key.buildClassifier();
+      }
+    }
+;
+    @Override public void addElement(    LookupElement element){
+      myClassifiers.get(obtainSorter(element)).addElement(element);
+    }
+    private CompletionSorterImpl obtainSorter(    LookupElement element){
+      return defaultSorter;
+    }
+    @Override public Iterable<List<LookupElement>> classify(    List<LookupElement> source){
+      MultiMap<CompletionSorter,LookupElement> inputBySorter=new MultiMap<CompletionSorter,LookupElement>();
+      for (      LookupElement element : source) {
+        inputBySorter.put(obtainSorter(element),source);
+      }
+      final ArrayList<List<LookupElement>> result=new ArrayList<List<LookupElement>>();
+      for (      CompletionSorterImpl sorter : myClassifiers.keySet()) {
+        ContainerUtil.addAll(result,myClassifiers.get(sorter).classify((List<LookupElement>)inputBySorter.get(sorter)));
+      }
       return result;
     }
   }
