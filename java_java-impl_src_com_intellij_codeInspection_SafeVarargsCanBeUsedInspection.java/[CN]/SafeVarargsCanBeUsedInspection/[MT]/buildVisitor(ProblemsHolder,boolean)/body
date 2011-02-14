@@ -1,0 +1,45 @@
+{
+  return new JavaElementVisitor(){
+    @Override public void visitMethod(    PsiMethod method){
+      super.visitMethod(method);
+      if (!PsiUtil.getLanguageLevel(method).isAtLeast(LanguageLevel.JDK_1_7))       return;
+      if (AnnotationUtil.isAnnotated(method,"java.lang.SafeVarargs",false))       return;
+      if (!method.isVarArgs())       return;
+      if (method.hasModifierProperty(PsiModifier.STATIC) || method.hasModifierProperty(PsiModifier.FINAL)) {
+        final PsiParameter psiParameter=method.getParameterList().getParameters()[method.getParameterList().getParametersCount() - 1];
+        final PsiType componentType=((PsiEllipsisType)psiParameter.getType()).getComponentType();
+        if (GenericsHighlightUtil.isReifiableType(componentType)) {
+          return;
+        }
+        for (        PsiReference reference : ReferencesSearch.search(psiParameter)) {
+          final PsiElement element=reference.getElement();
+          if (element instanceof PsiExpression && !PsiUtil.isAccessedForReading((PsiExpression)element)) {
+            return;
+          }
+        }
+        final PsiIdentifier nameIdentifier=method.getNameIdentifier();
+        if (nameIdentifier != null) {
+          holder.registerProblem(nameIdentifier,"",new LocalQuickFix(){
+            @NotNull @Override public String getName(){
+              return "Annotate as @SafeVarargs";
+            }
+            @NotNull @Override public String getFamilyName(){
+              return getName();
+            }
+            @Override public void applyFix(            @NotNull Project project,            @NotNull ProblemDescriptor descriptor){
+              final PsiElement psiElement=descriptor.getPsiElement();
+              if (psiElement instanceof PsiIdentifier) {
+                final PsiMethod psiMethod=(PsiMethod)psiElement.getParent();
+                new AddAnnotationFix("java.lang.SafeVarargs",psiMethod).applyFix(project,descriptor);
+              }
+            }
+          }
+);
+        }
+      }
+    }
+    @Override public void visitReferenceExpression(    PsiReferenceExpression expression){
+    }
+  }
+;
+}
