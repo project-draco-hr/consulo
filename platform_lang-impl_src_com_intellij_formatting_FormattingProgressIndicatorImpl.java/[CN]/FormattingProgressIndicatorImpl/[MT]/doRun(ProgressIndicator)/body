@@ -1,0 +1,47 @@
+{
+  final SequentialTask task=myTask;
+  if (task == null) {
+    return;
+  }
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      myDocumentModificationStampBefore=myDocument.getModificationStamp();
+      task.prepare();
+    }
+  }
+);
+  final Lock lock=new ReentrantLock();
+  final Condition condition=lock.newCondition();
+  myIndicator=indicator;
+  while (myRunning && !task.isDone()) {
+    if (indicator.isCanceled()) {
+      task.stop();
+      break;
+    }
+    lock.lock();
+    try {
+      SwingUtilities.invokeLater(new Runnable(){
+        @Override public void run(){
+          lock.lock();
+          try {
+            long start=System.currentTimeMillis();
+            while (!task.isDone() && System.currentTimeMillis() - start < ITERATION_MIN_TIMES_MILLIS.get(myLastState)) {
+              task.iteration();
+            }
+          }
+  finally {
+            condition.signal();
+            lock.unlock();
+          }
+        }
+      }
+);
+      if (!task.isDone()) {
+        condition.await();
+      }
+    }
+  finally {
+      lock.unlock();
+    }
+  }
+}
