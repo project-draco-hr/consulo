@@ -1,0 +1,52 @@
+{
+  final GitLineHandler rh=new GitLineHandler(myProject,root,GitCommand.REBASE);
+  rh.addParameters(startOperation);
+  final GitRebaseProblemDetector rebaseConflictDetector=new GitRebaseProblemDetector();
+  rh.addLineListener(rebaseConflictDetector);
+  GitTask rebaseTask=new GitTask(myProject,rh,"git rebase " + startOperation);
+  rebaseTask.setProgressAnalyzer(new GitStandardProgressAnalyzer());
+  final AtomicBoolean result=new AtomicBoolean();
+  rebaseTask.executeInBackground(true,new GitTaskResultHandlerAdapter(){
+    @Override protected void onSuccess(){
+      result.set(true);
+    }
+    @Override protected void onCancel(){
+      result.set(false);
+    }
+    @Override protected void onFailure(){
+      if (rebaseConflictDetector.isMergeConflict()) {
+        try {
+          Collection<VirtualFile> unmergedFiles=GitMergeUtil.getUnmergedFiles(myProject,root);
+          if (unmergedFiles.isEmpty()) {
+            continueRebase(root,"--continue");
+          }
+ else {
+            myVcsHelper.showMergeDialog(new ArrayList<VirtualFile>(unmergedFiles),myVcs.getReverseMergeProvider());
+            unmergedFiles=GitMergeUtil.getUnmergedFiles(myProject,root);
+            if (unmergedFiles.isEmpty()) {
+              continueRebase(root,"--continue");
+            }
+ else {
+              result.set(false);
+              Notifications.Bus.notify(new Notification(GitVcs.IMPORTANT_ERROR_NOTIFICATION,"Can't continue rebase","You must resolve all conflicts first. <br/>" + "Then you may continue or abort rebase.",NotificationType.WARNING),myProject);
+            }
+          }
+        }
+ catch (        VcsException e) {
+          result.set(false);
+          Notifications.Bus.notify(new Notification(GitVcs.IMPORTANT_ERROR_NOTIFICATION,"Can't continue rebase","Be sure to resolve all conflicts first. <br/>" + "Then you may continue or abort rebase.<br/>" + e.getLocalizedMessage(),NotificationType.WARNING),myProject);
+        }
+      }
+ else       if (rebaseConflictDetector.isNoChangeError()) {
+        mySkippedCommits.add(GitRebaseUtils.getCurrentRebaseCommit(root));
+        continueRebase(root,"--skip");
+      }
+ else {
+        result.set(false);
+        GitUIUtil.notifyImportantError(myProject,"Error rebasing",GitUIUtil.stringifyErrors(rh.errors()));
+      }
+    }
+  }
+);
+  return result.get();
+}
