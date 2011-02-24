@@ -3,27 +3,39 @@
   if (commitButtonText.endsWith("...")) {
     commitButtonText=commitButtonText.substring(0,commitButtonText.length() - 3);
   }
-  final StringBuilder text=new StringBuilder();
-  if (worker.getAddedOrEditedTodos().isEmpty() && worker.getInChangedTodos().isEmpty()) {
-    text.append("No new, edited, or located in changed fragments TODO items found.\n").append(worker.getSkipped().size()).append(" file(s) were skipped.\nWould you like to review them?");
-  }
- else {
-    if (worker.getAddedOrEditedTodos().isEmpty()) {
-      text.append("There were ").append(worker.getInChangedTodos().size()).append(" located in changed fragments TODO item(s) found.\n");
-    }
- else     if (worker.getInChangedTodos().isEmpty()) {
-      text.append("There were ").append(worker.getAddedOrEditedTodos().size()).append(" added or edited TODO item(s) found.\n");
-    }
- else {
-      text.append("There were ").append(worker.getAddedOrEditedTodos().size()).append(" added or edited,\nand ").append(worker.getInChangedTodos().size()).append(" located in changed fragments TODO item(s) found.\n");
-    }
-    if (!worker.getSkipped().isEmpty()) {
-      text.append(worker.getSkipped().size()).append(" file(s) were skipped.\n");
-    }
-    text.append("Would you like to review them?");
-  }
-  final int answer=Messages.showDialog(text.toString(),"TODO",new String[]{VcsBundle.message("todo.in.new.review.button"),commitButtonText,CommonBundle.getCancelButtonText()},0,UIUtil.getWarningIcon());
+  final String text=createMessage(worker);
+  final String[] buttons=worker.getAddedOrEditedTodos().size() + worker.getInChangedTodos().size() > 0 ? new String[]{VcsBundle.message("todo.in.new.review.button"),commitButtonText,CommonBundle.getCancelButtonText()} : new String[]{commitButtonText,CommonBundle.getCancelButtonText()};
+  final int answer=Messages.showDialog(text,"TODO",buttons,0,UIUtil.getWarningIcon());
   if (answer == 0) {
+    TodoView todoView=ServiceManager.getService(myProject,TodoView.class);
+    final String title="For commit (" + DateFormatUtil.formatDateTime(System.currentTimeMillis()) + ")";
+    todoView.addCustomTodoView(new TodoTreeBuilderFactory(){
+      @Override public TodoTreeBuilder createTreeBuilder(      JTree tree,      DefaultTreeModel treeModel,      Project project){
+        return new CustomChangelistTodosTreeBuilder(tree,treeModel,myProject,title,worker.inOneList());
+      }
+    }
+,title,new TodoPanelSettings(myConfiguration.myTodoPanelSettings));
+    ApplicationManager.getApplication().invokeLater(new Runnable(){
+      @Override public void run(){
+        final ToolWindowManager manager=ToolWindowManager.getInstance(myProject);
+        if (manager != null) {
+          final ToolWindow window=manager.getToolWindow("TODO");
+          if (window != null) {
+            window.show(new Runnable(){
+              @Override public void run(){
+                final ContentManager cm=window.getContentManager();
+                final Content[] contents=cm.getContents();
+                if (contents.length > 0) {
+                  cm.setSelectedContent(contents[contents.length - 1],true);
+                }
+              }
+            }
+);
+          }
+        }
+      }
+    }
+,ModalityState.NON_MODAL,myProject.getDisposed());
     return ReturnResult.CLOSE_WINDOW;
   }
  else   if (answer == 2 || answer == -1) {
