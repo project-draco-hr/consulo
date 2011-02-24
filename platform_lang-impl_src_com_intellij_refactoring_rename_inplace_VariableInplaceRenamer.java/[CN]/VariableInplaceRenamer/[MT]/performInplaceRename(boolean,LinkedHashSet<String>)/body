@@ -1,2 +1,53 @@
 {
+  if (InjectedLanguageUtil.isInInjectedLanguagePrefixSuffix(myElementToRename)) {
+    return false;
+  }
+  final FileViewProvider fileViewProvider=myElementToRename.getContainingFile().getViewProvider();
+  VirtualFile file=getTopLevelVirtualFile(fileViewProvider);
+  SearchScope referencesSearchScope=file == null || ProjectRootManager.getInstance(myProject).getFileIndex().isInContent(file) ? ProjectScope.getProjectScope(myElementToRename.getProject()) : new LocalSearchScope(myElementToRename.getContainingFile());
+  final Collection<PsiReference> refs=ReferencesSearch.search(myElementToRename,referencesSearchScope,false).findAll();
+  addReferenceAtCaret(refs);
+  for (  PsiReference ref : refs) {
+    final FileViewProvider usageViewProvider=ref.getElement().getContainingFile().getViewProvider();
+    if (getTopLevelVirtualFile(usageViewProvider) != file) {
+      return false;
+    }
+  }
+  while (!ourRenamersStack.isEmpty()) {
+    ourRenamersStack.peek().finish();
+  }
+  ourRenamersStack.push(this);
+  PsiElement scope=null;
+  final SearchScope searchScope=myElementToRename.getManager().getSearchHelper().getUseScope(myElementToRename);
+  if (searchScope instanceof LocalSearchScope) {
+    final PsiElement[] elements=((LocalSearchScope)searchScope).getScope();
+    scope=PsiTreeUtil.findCommonParent(elements);
+  }
+  if (scope == null) {
+    return false;
+  }
+  final PsiFile containingFile=scope.getContainingFile();
+  if (containingFile == null) {
+    return false;
+  }
+  if (!CommonRefactoringUtil.checkReadOnlyStatus(myProject,myElementToRename))   return false;
+  final List<Pair<PsiElement,TextRange>> stringUsages=new ArrayList<Pair<PsiElement,TextRange>>();
+  final String stringToSearch=myElementToRename.getName();
+  if (processTextOccurrences && stringToSearch != null) {
+    TextOccurrencesUtil.processUsagesInStringsAndComments(myElementToRename,stringToSearch,true,new PairProcessor<PsiElement,TextRange>(){
+      public boolean process(      PsiElement psiElement,      TextRange textRange){
+        stringUsages.add(Pair.create(psiElement,textRange));
+        return true;
+      }
+    }
+);
+  }
+  if (stringUsages.isEmpty()) {
+    runRenameTemplate(nameSuggestions,refs,stringUsages,scope,containingFile);
+  }
+ else {
+    new RenameChooser(myEditor).showChooser(refs,stringUsages,nameSuggestions,scope,containingFile);
+  }
+  myEditor.putUserData(INPLACE_RENAMER,this);
+  return true;
 }
