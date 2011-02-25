@@ -1,6 +1,6 @@
 {
   super(new BorderLayout(0,0));
-  myIsReplace=isReplace;
+  myFindModel=findModel;
   GRADIENT_C1=getBackground();
   GRADIENT_C2=new Color(Math.max(0,GRADIENT_C1.getRed() - 0x18),Math.max(0,GRADIENT_C1.getGreen() - 0x18),Math.max(0,GRADIENT_C1.getBlue() - 0x18));
   myProject=project;
@@ -21,20 +21,22 @@
   group.add(new PrevOccurrenceAction());
   group.add(new NextOccurrenceAction());
   group.add(new FindAllAction());
+  group.add(new IncrementalFindAction());
+  group.add(new ReplaceAction());
   final ActionToolbar tb=ActionManager.getInstance().createActionToolbar("SearchBar",group,true);
   tb.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
   myToolbarComponent=tb.getComponent();
   myToolbarComponent.setBorder(null);
   myToolbarComponent.setOpaque(false);
   leadPanel.add(myToolbarComponent);
-  final JCheckBox cbMatchCase=new NonFocusableCheckBox("Case sensitive");
+  myCbMatchCase=new NonFocusableCheckBox("Case sensitive");
   myCbWholeWords=new NonFocusableCheckBox("Match whole words only");
   myCbRegexp=new NonFocusableCheckBox("Regex");
   myCbInComments=new NonFocusableCheckBox("Search in comments only");
   myCbInLiterals=new NonFocusableCheckBox("Search in literals only");
   myOptionsPane=new JPanel();
   myOptionsPane.setLayout(new BoxLayout(myOptionsPane,BoxLayout.Y_AXIS));
-  leadPanel.add(cbMatchCase);
+  leadPanel.add(myCbMatchCase);
   myOptionsPane.add(myCbWholeWords);
   leadPanel.add(myCbRegexp);
   if (FindManagerImpl.ourHasSearchInCommentsAndLiterals) {
@@ -54,31 +56,31 @@
   }
 );
   leadPanel.add(myMoreOptionsButton);
-  cbMatchCase.setSelected(isCaseSensitive());
-  myCbWholeWords.setSelected(isWholeWords());
-  myCbRegexp.setSelected(isRegexp());
-  myCbInComments.setSelected(isInComments());
-  myCbInLiterals.setSelected(isInLiterals());
-  cbMatchCase.setMnemonic('C');
+  myFindModel.addObserver(new FindModel.FindModelObserver(){
+    @Override public void findModelChanged(    FindModel findModel){
+      syncFindModels(FindManager.getInstance(myProject).getFindInFileModel(),myFindModel);
+      updateUIWithFindModel();
+      updateResults(true);
+    }
+  }
+);
+  FindManager.getInstance(myProject).getFindInFileModel().addObserver(this);
+  updateUIWithFindModel();
+  myCbMatchCase.setMnemonic('C');
   myCbWholeWords.setMnemonic('M');
   myCbRegexp.setMnemonic('x');
   myCbInComments.setMnemonic('o');
   myCbInLiterals.setMnemonic('l');
   setSmallerFontAndOpaque(myCbWholeWords);
-  setSmallerFontAndOpaque(cbMatchCase);
+  setSmallerFontAndOpaque(myCbMatchCase);
   setSmallerFontAndOpaque(myCbRegexp);
   setSmallerFontAndOpaque(myCbInComments);
   setSmallerFontAndOpaque(myCbInLiterals);
-  if (myIsReplace) {
-    configureReplacementPane();
-    myReplaceField.putClientProperty("AuxEditorComponent",Boolean.TRUE);
-  }
-  cbMatchCase.addActionListener(new ActionListener(){
+  myCbMatchCase.addActionListener(new ActionListener(){
     public void actionPerformed(    final ActionEvent e){
-      final boolean b=cbMatchCase.isSelected();
+      final boolean b=myCbMatchCase.isSelected();
       FindManager.getInstance(myProject).getFindInFileModel().setCaseSensitive(b);
       FindSettings.getInstance().setLocalCaseSensitive(b);
-      updateResults(true);
     }
   }
 );
@@ -87,7 +89,6 @@
       final boolean b=myCbWholeWords.isSelected();
       FindManager.getInstance(myProject).getFindInFileModel().setWholeWordsOnly(b);
       FindSettings.getInstance().setLocalWholeWordsOnly(b);
-      updateResults(true);
     }
   }
 );
@@ -95,11 +96,6 @@
     public void actionPerformed(    final ActionEvent e){
       final boolean b=myCbRegexp.isSelected();
       FindManager.getInstance(myProject).getFindInFileModel().setRegularExpressions(b);
-      myCbWholeWords.setEnabled(!b);
-      if (myPreserveCase != null) {
-        myPreserveCase.setEnabled(!b);
-      }
-      updateResults(true);
     }
   }
 );
@@ -107,7 +103,6 @@
     public void actionPerformed(    final ActionEvent e){
       final boolean b=myCbInComments.isSelected();
       FindManager.getInstance(myProject).getFindInFileModel().setInCommentsOnly(b);
-      updateResults(true);
     }
   }
 );
@@ -115,7 +110,6 @@
     public void actionPerformed(    final ActionEvent e){
       final boolean b=myCbInLiterals.isSelected();
       FindManager.getInstance(myProject).getFindInFileModel().setInStringLiteralsOnly(b);
-      updateResults(true);
     }
   }
 );
@@ -148,6 +142,17 @@
   tailPanel.add(labelsPanel,BorderLayout.CENTER);
   tailPanel.add(closeLabel,BorderLayout.EAST);
   configureTextField(mySearchField);
+  mySearchField.getDocument().addDocumentListener(new DocumentAdapter(){
+    protected void textChanged(    final DocumentEvent e){
+      setMatchesLimit(MATCHES_LIMIT);
+      String text=mySearchField.getText();
+      if (!StringUtil.isEmpty(text)) {
+        myFindModel.setStringToFind(text);
+        updateResults(true);
+      }
+    }
+  }
+);
   setSmallerFont(mySearchField);
   mySearchField.registerKeyboardAction(new ActionListener(){
     public void actionPerformed(    final ActionEvent e){
@@ -161,7 +166,7 @@
     }
   }
 ,KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,SystemInfo.isMac ? InputEvent.META_DOWN_MASK : InputEvent.CTRL_DOWN_MASK),JComponent.WHEN_FOCUSED);
-  final String initialText=myEditor.getSelectionModel().getSelectedText();
+  final String initialText=myFindModel.getStringToFind();
   ApplicationManager.getApplication().invokeLater(new Runnable(){
     public void run(){
       setInitialText(initialText);
