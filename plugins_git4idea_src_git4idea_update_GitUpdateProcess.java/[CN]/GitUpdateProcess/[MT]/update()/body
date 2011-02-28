@@ -1,20 +1,26 @@
 {
   LOG.info("update started");
-  final GitChangesSaver saver=GitChangesSaver.getSaver(myProject,myProgressIndicator,"Uncommitted changes before update operation at " + DateFormatUtil.formatDateTime(Clock.getTime()));
   myProjectManager.blockReloadingProjectOnExternalChanges();
   try {
     if (checkRebaseInProgress() || checkMergeInProgress() || checkUnmergedFiles()) {
       return false;
     }
-    if (!allTrackedBranchesConfigured()) {
+    if (!checkTrackedBranchesConfigured()) {
       return false;
     }
-    saver.saveLocalChanges();
+    Collection<VirtualFile> rootsToSave=new HashSet<VirtualFile>(1);
+    for (    VirtualFile root : myRoots) {
+      final GitUpdater updater=GitUpdater.getUpdater(myProject,this,root,myProgressIndicator,myUpdatedFiles);
+      if (updater.isSaveNeeded()) {
+        rootsToSave.add(root);
+      }
+    }
+    mySaver.saveLocalChanges(rootsToSave);
     boolean incomplete=false;
     boolean success=true;
     for (    final VirtualFile root : myRoots) {
       try {
-        final GitUpdater updater=GitUpdater.getUpdater(myProject,root,myProgressIndicator,myUpdatedFiles);
+        final GitUpdater updater=GitUpdater.getUpdater(myProject,this,root,myProgressIndicator,myUpdatedFiles);
         GitUpdateResult res=updater.update();
         if (res == GitUpdateResult.INCOMPLETE) {
           incomplete=true;
@@ -28,10 +34,10 @@
  finally {
         try {
           if (!incomplete) {
-            saver.restoreLocalChanges();
+            mySaver.restoreLocalChanges();
           }
  else {
-            saver.notifyLocalChangesAreNotRestored();
+            mySaver.notifyLocalChangesAreNotRestored();
           }
         }
  catch (        VcsException e) {
@@ -44,7 +50,7 @@
   }
  catch (  VcsException e) {
     LOG.info("Couldn't save local changes",e);
-    notifyError(myProject,"Couldn't save local changes","Tried to save uncommitted changes in " + saver.getSaverName() + " before update, but failed with an error.<br/>"+ "Update was cancelled.",true,e);
+    notifyError(myProject,"Couldn't save local changes","Tried to save uncommitted changes in " + mySaver.getSaverName() + " before update, but failed with an error.<br/>"+ "Update was cancelled.",true,e);
   }
  finally {
     myProjectManager.unblockReloadingProjectOnExternalChanges();
