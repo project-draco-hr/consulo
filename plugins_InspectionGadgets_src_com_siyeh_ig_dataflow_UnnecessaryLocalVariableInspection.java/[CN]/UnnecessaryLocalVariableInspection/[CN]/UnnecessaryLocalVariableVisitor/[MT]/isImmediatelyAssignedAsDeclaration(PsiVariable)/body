@@ -16,23 +16,65 @@
       followingStatementNumber=i + 2;
     }
   }
-  if (!(nextStatement instanceof PsiDeclarationStatement)) {
-    return false;
+  if (nextStatement instanceof PsiDeclarationStatement) {
+    boolean referenceFound=false;
+    for (    PsiElement declaration : ((PsiDeclarationStatement)nextStatement).getDeclaredElements()) {
+      if (!(declaration instanceof PsiVariable)) {
+        continue;
+      }
+      final PsiExpression initializer=((PsiVariable)declaration).getInitializer();
+      if (!referenceFound) {
+        if (initializer instanceof PsiReferenceExpression) {
+          final PsiElement referent=((PsiReference)initializer).resolve();
+          if (variable.equals(referent)) {
+            referenceFound=true;
+            continue;
+          }
+        }
+      }
+      if (VariableAccessUtils.variableIsUsed(variable,initializer)) {
+        return false;
+      }
+    }
+    if (!referenceFound) {
+      return false;
+    }
   }
-  final PsiDeclarationStatement declaration=(PsiDeclarationStatement)nextStatement;
-  final PsiElement[] declarations=declaration.getDeclaredElements();
-  if (declarations.length != 1) {
-    return false;
+ else   if (nextStatement instanceof PsiTryStatement) {
+    final PsiTryStatement tryStatement=(PsiTryStatement)nextStatement;
+    final PsiResourceList resourceList=tryStatement.getResourceList();
+    if (resourceList == null) {
+      return false;
+    }
+    boolean referenceFound=false;
+    for (    PsiResourceVariable resourceVariable : resourceList.getResourceVariables()) {
+      final PsiExpression initializer=resourceVariable.getInitializer();
+      if (!referenceFound) {
+        if (initializer instanceof PsiReferenceExpression) {
+          final PsiElement referent=((PsiReferenceExpression)initializer).resolve();
+          if (variable.equals(referent)) {
+            referenceFound=true;
+            continue;
+          }
+        }
+      }
+      if (VariableAccessUtils.variableIsUsed(variable,initializer)) {
+        return false;
+      }
+    }
+    if (!referenceFound) {
+      return false;
+    }
+    if (VariableAccessUtils.variableIsUsed(variable,tryStatement.getTryBlock()) || VariableAccessUtils.variableIsUsed(variable,tryStatement.getFinallyBlock())) {
+      return false;
+    }
+    for (    PsiCatchSection section : tryStatement.getCatchSections()) {
+      if (VariableAccessUtils.variableIsUsed(variable,section)) {
+        return false;
+      }
+    }
   }
-  if (!(declarations[0] instanceof PsiVariable)) {
-    return false;
-  }
-  final PsiExpression rhs=((PsiVariable)declarations[0]).getInitializer();
-  if (!(rhs instanceof PsiReferenceExpression)) {
-    return false;
-  }
-  final PsiElement referent=((PsiReference)rhs).resolve();
-  if (referent == null || !referent.equals(variable)) {
+ else {
     return false;
   }
   for (int i=followingStatementNumber; i < statements.length; i++) {

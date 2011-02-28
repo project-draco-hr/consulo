@@ -1,64 +1,42 @@
 {
-  final ApplicationAdapter listener=new ApplicationAdapter(){
-    @Override public void beforeWriteActionStart(    Object action){
-      indicator.scheduleRestart();
+  final Semaphore startSemaphore=new Semaphore();
+  startSemaphore.down();
+  final AtomicReference<LookupElement[]> data=new AtomicReference<LookupElement[]>(null);
+  final Runnable computeRunnable=new Runnable(){
+    public void run(){
+      ProgressManager.getInstance().runProcess(new Runnable(){
+        @Override public void run(){
+          try {
+            ApplicationManager.getApplication().runReadAction(new Runnable(){
+              public void run(){
+                startSemaphore.up();
+                ProgressManager.checkCanceled();
+                indicator.duringCompletion(initContext);
+                ProgressManager.checkCanceled();
+                data.set(CompletionService.getCompletionService().performCompletion(parameters,new Consumer<LookupElement>(){
+                  public void consume(                  final LookupElement lookupElement){
+                    indicator.addItem(lookupElement);
+                  }
+                }
+));
+              }
+            }
+);
+          }
+ catch (          ProcessCanceledException ignored) {
+          }
+        }
+      }
+,indicator);
     }
   }
 ;
-  ApplicationManager.getApplication().addApplicationListener(listener);
-  final Semaphore startSemaphore=new Semaphore();
-  startSemaphore.down();
-  startSemaphore.down();
-  spawnProcess(ProgressWrapper.wrap(indicator),new Runnable(){
-    public void run(){
-      try {
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          public void run(){
-            startSemaphore.up();
-            if (autopopup) {
-              indicator.setFocusLookupWhenDone(shouldFocusLookup(parameters));
-            }
-            indicator.duringCompletion(initContext);
-          }
-        }
-);
-      }
-  finally {
-        indicator.duringCompletionPassed();
-      }
-    }
+  if (ApplicationManager.getApplication().isUnitTestMode() && !CompletionAutoPopupHandler.ourTestingAutopopup) {
+    computeRunnable.run();
   }
-);
-  final AtomicReference<LookupElement[]> data=new AtomicReference<LookupElement[]>(null);
-  spawnProcess(indicator,new Runnable(){
-    public void run(){
-      try {
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          public void run(){
-            try {
-              startSemaphore.up();
-              ProgressManager.checkCanceled();
-              final LookupElement[] result=CompletionService.getCompletionService().performCompletion(parameters,new Consumer<LookupElement>(){
-                public void consume(                final LookupElement lookupElement){
-                  indicator.addItem(lookupElement);
-                }
-              }
-);
-              indicator.ensureDuringCompletionPassed();
-              data.set(result);
-            }
-  finally {
-              ApplicationManager.getApplication().removeApplicationListener(listener);
-            }
-          }
-        }
-);
-      }
- catch (      ProcessCanceledException ignored) {
-      }
-    }
+ else {
+    ApplicationManager.getApplication().executeOnPooledThread(computeRunnable);
   }
-);
   startSemaphore.waitFor();
   return data;
 }
