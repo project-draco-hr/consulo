@@ -1,6 +1,46 @@
 {
   final GrExpression expression=call.getInvokedExpression();
-  if (expression instanceof GrReferenceExpression)   return;
-  final PsiType type=expression.getType();
-  checkCallApplicability(type,expression);
+  if (!(expression instanceof GrReferenceExpression)) {
+    final PsiType type=expression.getType();
+    checkCallApplicability(type,expression);
+  }
+  GrNamedArgument[] namedArguments=PsiUtil.getFirstMapNamedArguments(call);
+  if (namedArguments.length == 0)   return;
+  MultiMap<String,String> map=new MultiMap<String,String>(){
+    @Override protected Collection<String> createCollection(){
+      return new HashSet<String>();
+    }
+  }
+;
+  GroovyResolveResult[] callVariants=call.getCallVariants(null);
+  for (  GroovyResolveResult callVariant : callVariants) {
+    PsiElement element=callVariant.getElement();
+    if (element instanceof PsiMethod) {
+      Map<String,String[]> arguments=GroovyNamedArgumentProvider.getNamedArguments(call,(PsiMethod)element);
+      for (      Map.Entry<String,String[]> entry : arguments.entrySet()) {
+        map.putValues(entry.getKey(),Arrays.asList(entry.getValue()));
+      }
+    }
+  }
+  for (  GrNamedArgument namedArgument : namedArguments) {
+    String labelName=namedArgument.getLabelName();
+    Collection<String> allowTypes=map.get(labelName);
+    if (allowTypes.isEmpty())     continue;
+    GrExpression namedArgumentExpression=namedArgument.getExpression();
+    if (namedArgumentExpression == null)     continue;
+    if (PsiUtil.isRawClassMemberAccess(namedArgumentExpression))     continue;
+    PsiType expressionType=namedArgumentExpression.getType();
+    if (expressionType == null)     continue;
+    expressionType=TypesUtil.boxPrimitiveType(expressionType,namedArgument.getManager(),namedArgument.getResolveScope());
+    boolean correct=false;
+    for (    String typeName : allowTypes) {
+      if (InheritanceUtil.isInheritor(expressionType,typeName)) {
+        correct=true;
+        break;
+      }
+    }
+    if (!correct) {
+      registerError(namedArgumentExpression,"Type of argument '" + labelName + "' can not be '"+ expressionType.getPresentableText()+ "'");
+    }
+  }
 }
