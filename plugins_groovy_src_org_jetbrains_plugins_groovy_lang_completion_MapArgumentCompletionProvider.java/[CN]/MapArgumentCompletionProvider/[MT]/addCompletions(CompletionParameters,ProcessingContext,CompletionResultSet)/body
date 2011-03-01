@@ -1,13 +1,14 @@
 {
-  final GrArgumentList argumentList;
+  PsiElement mapOrArgumentList;
   PsiElement parent=parameters.getPosition().getParent();
   if (parent instanceof GrReferenceExpression) {
     if (((GrReferenceExpression)parent).getQualifier() != null)     return;
-    argumentList=(GrArgumentList)parent.getParent();
+    mapOrArgumentList=parent.getParent();
   }
  else {
-    argumentList=(GrArgumentList)parent.getParent().getParent();
+    mapOrArgumentList=parent.getParent().getParent();
   }
+  PsiElement argumentList=mapOrArgumentList instanceof GrArgumentList ? mapOrArgumentList : mapOrArgumentList.getParent();
   final GrCall call=(GrCall)argumentList.getParent();
   List<GroovyResolveResult> results=new ArrayList<GroovyResolveResult>();
   if (call instanceof GrConstructorCall) {
@@ -16,8 +17,8 @@
     ContainerUtil.addAll(results,constructorCall.multiResolveClass());
   }
  else   if (call instanceof GrCallExpression) {
-    GrCallExpression constructorCall=(GrCallExpression)call;
-    ContainerUtil.addAll(results,constructorCall.getCallVariants(null));
+    GrCallExpression callExpression=(GrCallExpression)call;
+    ContainerUtil.addAll(results,callExpression.getCallVariants(null));
     final PsiType type=((GrCallExpression)call).getType();
     if (type instanceof PsiClassType) {
       final PsiClass psiClass=((PsiClassType)type).resolve();
@@ -26,13 +27,10 @@
   }
   Set<PsiClass> usedClasses=new HashSet<PsiClass>();
   Set<String> usedNames=new HashSet<String>();
-  for (  GrNamedArgument argument : argumentList.getNamedArguments()) {
+  for (  GrNamedArgument argument : PsiUtil.getFirstMapNamedArguments(call)) {
     final GrArgumentLabel label=argument.getLabel();
     if (label != null) {
-      final String name=label.getName();
-      if (name != null) {
-        usedNames.add(name);
-      }
+      ContainerUtil.addIfNotNull(label.getName(),usedNames);
     }
   }
   for (  GroovyResolveResult resolveResult : results) {
@@ -43,12 +41,11 @@
       if (containingClass != null) {
         addPropertiesForClass(result,usedClasses,usedNames,containingClass,call);
       }
-      if (method instanceof GrMethod) {
-        for (        String parameter : ((GrMethod)method).getNamedParametersArray()) {
-          if (!usedNames.contains(parameter)) {
-            final LookupElementBuilder lookup=LookupElementBuilder.create(parameter).setIcon(GroovyIcons.DYNAMIC).setInsertHandler(NamedArgumentInsertHandler.INSTANCE);
-            result.addElement(lookup);
-          }
+      Map<String,String[]> namedArguments=GroovyNamedArgumentProvider.getNamedArguments(call,method);
+      for (      String namedArgumentName : namedArguments.keySet()) {
+        if (!usedNames.contains(namedArgumentName)) {
+          final LookupElementBuilder lookup=LookupElementBuilder.create(namedArgumentName).setIcon(GroovyIcons.DYNAMIC).setInsertHandler(NamedArgumentInsertHandler.INSTANCE);
+          result.addElement(lookup);
         }
       }
     }
