@@ -34,69 +34,18 @@
     showErrorMessage(project,message,editor);
     return false;
   }
-  method=chooseEnclosingMethod(method);
-  if (method == null)   return false;
-  final PsiMethod methodToSearchFor=SuperMethodWarningUtil.checkSuperMethod(method,RefactoringBundle.message("to.refactor"));
-  if (methodToSearchFor == null)   return false;
-  if (!CommonRefactoringUtil.checkReadOnlyStatus(project,methodToSearchFor))   return false;
-  PsiExpression[] occurences;
-  if (expr != null) {
-    occurences=new ExpressionOccurenceManager(expr,method,null).findExpressionOccurrences();
+  final List<PsiMethod> validEnclosingMethods=getEnclosingMethods(method);
+  if (validEnclosingMethods.isEmpty()) {
+    return false;
   }
- else {
-    occurences=CodeInsightUtil.findReferenceExpressions(method,localVar);
-  }
-  PsiExpression expressionToRemoveParamFrom=expr;
-  if (expr == null) {
-    expressionToRemoveParamFrom=localVar.getInitializer();
-  }
-  TIntArrayList parametersToRemove=expressionToRemoveParamFrom == null ? new TIntArrayList() : Util.findParametersToRemove(method,expressionToRemoveParamFrom,occurences);
-  boolean mustBeFinal=false;
-  if (localVar != null) {
-    for (    PsiExpression occurrence : occurences) {
-      if (PsiTreeUtil.getParentOfType(occurrence,PsiClass.class,PsiMethod.class) != method) {
-        mustBeFinal=true;
-        break;
-      }
+  final Introducer introducer=new Introducer(project,expr,localVar,editor);
+  final boolean unitTestMode=ApplicationManager.getApplication().isUnitTestMode();
+  if (validEnclosingMethods.size() == 1 || unitTestMode) {
+    if (validEnclosingMethods.get(0).findDeepestSuperMethod() == null || unitTestMode) {
+      introducer.introduceParameter(method,method);
+      return true;
     }
   }
-  List<UsageInfo> localVars=new ArrayList<UsageInfo>();
-  List<UsageInfo> classMemberRefs=new ArrayList<UsageInfo>();
-  List<UsageInfo> params=new ArrayList<UsageInfo>();
-  if (expr != null) {
-    Util.analyzeExpression(expr,localVars,classMemberRefs,params);
-  }
-  if (expr instanceof PsiReferenceExpression) {
-    PsiElement resolved=((PsiReferenceExpression)expr).resolve();
-    if (resolved instanceof PsiLocalVariable) {
-      localVar=(PsiLocalVariable)resolved;
-    }
-  }
-  if (ApplicationManager.getApplication().isUnitTestMode()) {
-    @NonNls String parameterName="anObject";
-    boolean replaceAllOccurences=true;
-    boolean isDeleteLocalVariable=true;
-    PsiExpression initializer=localVar != null && expr == null ? localVar.getInitializer() : expr;
-    new IntroduceParameterProcessor(myProject,method,methodToSearchFor,initializer,expr,localVar,isDeleteLocalVariable,parameterName,replaceAllOccurences,IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE,mustBeFinal,false,null,parametersToRemove).run();
-  }
- else {
-    final String propName=localVar != null ? JavaCodeStyleManager.getInstance(myProject).variableNameToPropertyName(localVar.getName(),VariableKind.LOCAL_VARIABLE) : null;
-    final PsiType initializerType=IntroduceParameterProcessor.getInitializerType(null,expr,localVar);
-    TypeSelectorManagerImpl typeSelectorManager=expr != null ? new TypeSelectorManagerImpl(project,initializerType,expr,occurences) : new TypeSelectorManagerImpl(project,initializerType,occurences);
-    NameSuggestionsGenerator nameSuggestionsGenerator=createNameSuggestionGenerator(expr,propName);
-    boolean isInplaceAvailableOnDataContext=editor != null && editor.getSettings().isVariableInplaceRenameEnabled() && method == methodToSearchFor && method.hasModifierProperty(PsiModifier.PRIVATE);
-    if (!isInplaceAvailableOnDataContext) {
-      if (editor != null) {
-        RefactoringUtil.highlightAllOccurences(myProject,occurences,editor);
-      }
-      new IntroduceParameterDialog(myProject,classMemberRefs,occurences.length,localVar,expr,nameSuggestionsGenerator,typeSelectorManager,methodToSearchFor,method,parametersToRemove,mustBeFinal).show();
-      if (editor != null) {
-        editor.getSelectionModel().removeSelection();
-      }
-    }
- else {
-      new InplaceIntroduceParameterPopup(project,editor,classMemberRefs,typeSelectorManager,expr,localVar,method,methodToSearchFor,occurences,parametersToRemove,mustBeFinal).inplaceIntroduceParameter();
-    }
-  }
+  chooseMethodToIntroduceParameter(editor,validEnclosingMethods,introducer);
   return true;
 }
