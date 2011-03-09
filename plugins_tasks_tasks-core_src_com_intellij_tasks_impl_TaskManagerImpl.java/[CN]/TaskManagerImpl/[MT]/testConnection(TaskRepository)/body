@@ -1,16 +1,41 @@
 {
-  MyProgressTask task=new MyProgressTask("Test connection"){
+  TestConnectionTask task=new TestConnectionTask("Test connection"){
     public void run(    @NotNull ProgressIndicator indicator){
-      indicator.setText("Connecting...");
+      indicator.setText("Connecting to " + repository.getUrl() + "...");
       indicator.setFraction(0);
       indicator.setIndeterminate(true);
-      try {
-        myThread=Thread.currentThread();
-        repository.testConnection();
+      myConnection=repository.createCancellableConnection();
+      if (myConnection != null) {
+        Future<Exception> future=ApplicationManager.getApplication().executeOnPooledThread(myConnection);
+        while (true) {
+          try {
+            myException=future.get(100,TimeUnit.MILLISECONDS);
+            return;
+          }
+ catch (          TimeoutException ignore) {
+            try {
+              indicator.checkCanceled();
+            }
+ catch (            ProcessCanceledException e) {
+              myException=e;
+              myConnection.cancel();
+              return;
+            }
+          }
+catch (          Exception e) {
+            myException=e;
+            return;
+          }
+        }
       }
- catch (      Exception e) {
-        LOG.info(e);
-        myException=e;
+ else {
+        try {
+          repository.testConnection();
+        }
+ catch (        Exception e) {
+          LOG.info(e);
+          myException=e;
+        }
       }
     }
   }
@@ -20,7 +45,7 @@
   if (e == null) {
     Messages.showMessageDialog(myProject,"Connection is successful","Connection",Messages.getInformationIcon());
   }
- else {
+ else   if (!(e instanceof ProcessCanceledException)) {
     Messages.showErrorDialog(myProject,e.getMessage(),"Error");
   }
   return e == null;
