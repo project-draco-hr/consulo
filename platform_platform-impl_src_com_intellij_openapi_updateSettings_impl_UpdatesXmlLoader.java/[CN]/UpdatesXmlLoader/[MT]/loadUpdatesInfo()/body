@@ -1,0 +1,52 @@
+{
+  LOG.debug("load update xml (UPDATE_URL='" + updateUrl + "' )");
+  if (StringUtil.isEmpty(updateUrl)) {
+    LOG.debug("update url is empty: updates will not be checked");
+    return null;
+  }
+  final Ref<Exception> error=new Ref<Exception>();
+  FutureTask<UpdatesInfo> ft=new FutureTask<UpdatesInfo>(new Callable<UpdatesInfo>(){
+    @Nullable @Override public UpdatesInfo call() throws Exception {
+      try {
+        prepareUrl(updateUrl);
+        URL requestUrl=prepareRequestUrl(updateUrl);
+        final InputStream inputStream=requestUrl.openStream();
+        Reader reader=new InputStreamReader(inputStream);
+        try {
+          return new UpdatesInfo(JDOMUtil.loadDocument(inputStream).getRootElement());
+        }
+ catch (        JDOMException e) {
+          LOG.info(e);
+        }
+ finally {
+          reader.close();
+          inputStream.close();
+        }
+      }
+ catch (      Exception e) {
+        error.set(e);
+      }
+      return null;
+    }
+  }
+);
+  ApplicationManager.getApplication().executeOnPooledThread(ft);
+  try {
+    UpdatesInfo result=ft.get(5,TimeUnit.SECONDS);
+    if (!error.isNull()) {
+      throw new ConnectionException(error.get());
+    }
+    return result;
+  }
+ catch (  TimeoutException e) {
+  }
+catch (  Exception e) {
+    LOG.debug(e);
+    throw new ConnectionException(e.getMessage(),e);
+  }
+  if (!ft.isDone()) {
+    ft.cancel(true);
+    throw new ConnectionException(IdeBundle.message("updates.timeout.error"));
+  }
+  return null;
+}

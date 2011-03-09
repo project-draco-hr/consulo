@@ -2,7 +2,7 @@
   if (isBlockStatementNeeded && GroovyTokenTypes.mLCURLY.equals(builder.getTokenType())) {
     final PsiBuilder.Marker marker=builder.mark();
     OpenOrClosableBlock.parseOpenBlockDeep(builder,this);
-    marker.done(GroovyElementTypes.BLOCK_STATEMENT);
+    marker.done(BLOCK_STATEMENT);
     return true;
   }
   if (GroovyTokenTypes.kIMPORT.equals(builder.getTokenType())) {
@@ -72,20 +72,35 @@
     return parseLabeledStatement(builder);
   }
   PsiBuilder.Marker declMarker=builder.mark();
-  if (!Declaration.parse(builder,false,this)) {
-    declMarker.rollbackTo();
-  }
- else {
-    declMarker.drop();
+  boolean modifiersParsed=Modifiers.parse(builder,this);
+  if (kIMPORT == builder.getTokenType()) {
+    final PsiBuilder.Marker impMarker=declMarker.precede();
+    ImportStatement.parseAfterModifiers(builder);
+    declMarker.done(IMPORT_STATEMENT);
+    impMarker.error(GroovyBundle.message("import.not.allowed"));
     return true;
   }
-  PsiBuilder.Marker marker=builder.mark();
-  if (ImportStatement.parse(builder,this)) {
-    marker.error(GroovyBundle.message("import.not.allowed"));
+  if (kCLASS == builder.getTokenType() || kINTERFACE == builder.getTokenType() || kENUM == builder.getTokenType() || mAT == builder.getTokenType()) {
+    final IElementType tdType=TypeDefinition.parseAfterModifiers(builder,this);
+    if (tdType != WRONGWAY) {
+      declMarker.done(tdType);
+      return true;
+    }
   }
+  final IElementType declType=Declaration.parseAfterModifiers(builder,false,false,this,declMarker,modifiersParsed);
+  if (declType != WRONGWAY) {
+    if (declType != null) {
+      declMarker.done(declType);
+    }
  else {
-    marker.drop();
+      declMarker.drop();
+    }
+    return true;
   }
-  if (TypeDefinition.parse(builder,this))   return true;
+  if (modifiersParsed) {
+    declMarker.done(VARIABLE_DEFINITION_ERROR);
+    return true;
+  }
+  declMarker.rollbackTo();
   return AssignmentExpression.parse(builder,this,true);
 }
