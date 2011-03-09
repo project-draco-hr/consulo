@@ -2,14 +2,28 @@
   if (rebaseInfo.reorderedCommits.isEmpty()) {
     return true;
   }
-  ProjectManagerEx projectManager=ProjectManagerEx.getInstanceEx();
   ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
   if (progressIndicator == null) {
     progressIndicator=new EmptyProgressIndicator();
   }
   String stashMessage="Uncommitted changes before rebase operation at " + DateFormatUtil.formatDateTime(Clock.getTime());
   GitChangesSaver saver=rebaseInfo.policy == GitVcsSettings.UpdateChangesPolicy.SHELVE ? new GitShelveChangesSaver(myProject,progressIndicator,stashMessage) : new GitStashChangesSaver(myProject,progressIndicator,stashMessage);
-  projectManager.blockReloadingProjectOnExternalChanges();
+  final boolean saveOnFrameDeactivation=myGeneralSettings.isSaveOnFrameDeactivation();
+  final boolean syncOnFrameDeactivation=myGeneralSettings.isSyncOnFrameActivation();
+  myProjectManager.blockReloadingProjectOnExternalChanges();
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        @Override public void run(){
+          FileDocumentManager.getInstance().saveAllDocuments();
+          myGeneralSettings.setSaveOnFrameDeactivation(false);
+          myGeneralSettings.setSyncOnFrameActivation(false);
+        }
+      }
+);
+    }
+  }
+);
   try {
     final Set<VirtualFile> rootsToReorder=rebaseInfo.reorderedCommits.keySet();
     saver.saveLocalChanges(rootsToReorder);
@@ -37,7 +51,7 @@
       }
     }
  catch (    VcsException e) {
-      GitUIUtil.notifyMessage(myProject,"Commits weren't pushed","Failed to reorder commits",NotificationType.WARNING,true,Collections.singleton(e));
+      notifyMessage(myProject,"Commits weren't pushed","Failed to reorder commits",NotificationType.WARNING,true,Collections.singleton(e));
     }
  finally {
       try {
@@ -54,7 +68,9 @@
     notifyError(myProject,"Couldn't save local changes","Tried to save uncommitted changes in " + saver.getSaverName() + " before update, but failed with an error.<br/>"+ "Update was cancelled.",true,e);
   }
  finally {
-    projectManager.unblockReloadingProjectOnExternalChanges();
+    myProjectManager.unblockReloadingProjectOnExternalChanges();
+    myGeneralSettings.setSaveOnFrameDeactivation(saveOnFrameDeactivation);
+    myGeneralSettings.setSyncOnFrameActivation(syncOnFrameDeactivation);
   }
   return false;
 }

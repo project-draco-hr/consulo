@@ -1,6 +1,21 @@
 {
-  LOG.info("update started");
+  LOG.info("update started|" + (forceRebase ? " force rebase" : ""));
+  final boolean saveOnFrameDeactivation=myGeneralSettings.isSaveOnFrameDeactivation();
+  final boolean syncOnFrameDeactivation=myGeneralSettings.isSyncOnFrameActivation();
   myProjectManager.blockReloadingProjectOnExternalChanges();
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        @Override public void run(){
+          FileDocumentManager.getInstance().saveAllDocuments();
+          myGeneralSettings.setSaveOnFrameDeactivation(false);
+          myGeneralSettings.setSyncOnFrameActivation(false);
+        }
+      }
+);
+    }
+  }
+);
   try {
     if (checkRebaseInProgress() || checkMergeInProgress() || checkUnmergedFiles()) {
       return false;
@@ -8,20 +23,30 @@
     if (!checkTrackedBranchesConfigured()) {
       return false;
     }
-    Collection<VirtualFile> rootsToSave=new HashSet<VirtualFile>(1);
+    final Map<VirtualFile,GitUpdater> updaters=new HashMap<VirtualFile,GitUpdater>();
     for (    VirtualFile root : myRoots) {
-      final GitUpdater updater=forceRebase ? GitUpdater.getUpdater(myProject,this,root,myProgressIndicator,myUpdatedFiles) : new GitRebaseUpdater(myProject,root,this,myProgressIndicator,myUpdatedFiles);
+      final GitUpdater updater=forceRebase ? new GitRebaseUpdater(myProject,root,this,myProgressIndicator,myUpdatedFiles) : GitUpdater.getUpdater(myProject,this,root,myProgressIndicator,myUpdatedFiles);
+      updaters.put(root,updater);
+      LOG.info("update| root=" + root + " ,updater="+ updater);
+    }
+    final Collection<VirtualFile> rootsToSave=new HashSet<VirtualFile>(1);
+    for (    Map.Entry<VirtualFile,GitUpdater> entry : updaters.entrySet()) {
+      VirtualFile root=entry.getKey();
+      GitUpdater updater=entry.getValue();
       if (updater.isSaveNeeded()) {
         rootsToSave.add(root);
+        LOG.info("update| root " + root + " needs save");
       }
     }
     mySaver.saveLocalChanges(rootsToSave);
     boolean incomplete=false;
     boolean success=true;
-    for (    final VirtualFile root : myRoots) {
+    for (    Map.Entry<VirtualFile,GitUpdater> entry : updaters.entrySet()) {
+      VirtualFile root=entry.getKey();
+      GitUpdater updater=entry.getValue();
       try {
-        final GitUpdater updater=forceRebase ? GitUpdater.getUpdater(myProject,this,root,myProgressIndicator,myUpdatedFiles) : new GitRebaseUpdater(myProject,root,this,myProgressIndicator,myUpdatedFiles);
         GitUpdateResult res=updater.update();
+        LOG.info("updating root " + root + " finished: "+ res);
         if (res == GitUpdateResult.INCOMPLETE) {
           incomplete=true;
         }
@@ -54,6 +79,8 @@
   }
  finally {
     myProjectManager.unblockReloadingProjectOnExternalChanges();
+    myGeneralSettings.setSaveOnFrameDeactivation(saveOnFrameDeactivation);
+    myGeneralSettings.setSyncOnFrameActivation(syncOnFrameDeactivation);
   }
   return false;
 }
