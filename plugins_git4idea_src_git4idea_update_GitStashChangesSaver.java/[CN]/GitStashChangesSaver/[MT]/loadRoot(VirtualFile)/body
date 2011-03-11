@@ -15,21 +15,29 @@
 );
   final GitTask task=new GitTask(myProject,handler,"git stash pop");
   task.setExecuteResultInAwt(false);
+  final AtomicBoolean failure=new AtomicBoolean();
   task.executeInBackground(true,new GitTaskResultHandlerAdapter(){
     @Override protected void onSuccess(){
     }
     @Override protected void onCancel(){
-      Notifications.Bus.notify(new Notification(GitVcs.NOTIFICATION_GROUP_ID,"Unstash cancelled","You may view the stashed changes <a href='saver'>here</a>",NotificationType.WARNING,new ShowSavedChangesNotificationListener()),myProject);
+      Notifications.Bus.notify(new Notification(GitVcs.NOTIFICATION_GROUP_ID,"Unstash cancelled","You may view the stashed changes <a href='saver'>here</a>",WARNING,new ShowSavedChangesNotificationListener()),myProject);
     }
     @Override protected void onFailure(){
-      if (conflict.get()) {
-        new GitMergeConflictResolver(myProject,true,"Uncommitted changes that were stashed before update have conflicts with updated files.","Can't update","").merge(Collections.singleton(root));
-      }
- else {
-        LOG.info("unstash failed " + handler.errors());
-        GitUIUtil.notifyImportantError(myProject,"Couldn't unstash","<br/>" + GitUIUtil.stringifyErrors(handler.errors()));
-      }
+      failure.set(true);
     }
   }
 );
+  if (failure.get()) {
+    if (conflict.get()) {
+      boolean conflictsResolved=new UnstashConflictResolver().merge(Collections.singleton(root));
+      if (conflictsResolved) {
+        LOG.info("loadRoot " + root + " conflicts resolved, dropping stash");
+        dropStash(root);
+      }
+    }
+ else {
+      LOG.info("unstash failed " + handler.errors());
+      GitUIUtil.notifyImportantError(myProject,"Couldn't unstash","<br/>" + GitUIUtil.stringifyErrors(handler.errors()));
+    }
+  }
 }
