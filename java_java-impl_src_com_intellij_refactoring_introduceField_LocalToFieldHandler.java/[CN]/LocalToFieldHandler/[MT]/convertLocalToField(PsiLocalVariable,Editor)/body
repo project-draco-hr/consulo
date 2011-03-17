@@ -1,11 +1,10 @@
 {
-  PsiClass aClass;
   boolean tempIsStatic=myIsConstant;
   PsiElement parent=local.getParent();
-  while (true) {
-    if (parent instanceof PsiClass && !(parent instanceof PsiAnonymousClass)) {
-      aClass=(PsiClass)parent;
-      break;
+  List<PsiClass> classes=new ArrayList<PsiClass>();
+  while (parent != null && parent.getContainingFile() != null) {
+    if (parent instanceof PsiClass && !(myIsConstant && parent instanceof PsiAnonymousClass)) {
+      classes.add((PsiClass)parent);
     }
     if (parent instanceof PsiFile && JspPsiUtil.isInJspFile(parent)) {
       String message=RefactoringBundle.message("error.not.supported.for.jsp",REFACTORING_NAME);
@@ -17,89 +16,19 @@
     }
     parent=parent.getParent();
   }
-  final boolean isStatic=tempIsStatic;
-  final PsiExpression[] occurences=CodeInsightUtil.findReferenceExpressions(RefactoringUtil.getVariableScope(local),local);
-  if (editor != null) {
-    RefactoringUtil.highlightAllOccurences(myProject,occurences,editor);
+  if (classes.isEmpty())   return false;
+  if (classes.size() == 1 || ApplicationManager.getApplication().isUnitTestMode()) {
+    if (convertLocalToField(local,classes.get(0),editor,tempIsStatic))     return false;
   }
-  final BaseExpressionToFieldHandler.Settings settings=showRefactoringDialog(aClass,local,occurences,isStatic);
-  if (settings == null)   return false;
-  final String variableName=local.getName();
-  final String fieldName=settings.getFieldName();
-  final BaseExpressionToFieldHandler.InitializationPlace initializerPlace=settings.getInitializerPlace();
-  final PsiClass destinationClass=settings.getDestinationClass();
-  boolean rebindNeeded=false;
-  if (destinationClass != null) {
-    aClass=destinationClass;
-    rebindNeeded=true;
+ else {
+    final boolean isStatic=tempIsStatic;
+    NavigationUtil.getPsiElementPopup(classes.toArray(new PsiClass[classes.size()]),new PsiClassListCellRenderer(),"Choose class to introduce " + (myIsConstant ? "constant" : "field"),new PsiElementProcessor<PsiClass>(){
+      @Override public boolean execute(      PsiClass aClass){
+        convertLocalToField(local,aClass,editor,isStatic);
+        return false;
+      }
+    }
+).showInBestPositionFor(editor);
   }
-  final PsiClass aaClass=aClass;
-  final boolean rebindNeeded1=rebindNeeded;
-  final Runnable runnable=new Runnable(){
-    public void run(){
-      try {
-        final boolean rebindNeeded2=!variableName.equals(fieldName) || rebindNeeded1;
-        final PsiReference[] refs;
-        if (rebindNeeded2) {
-          refs=ReferencesSearch.search(local,GlobalSearchScope.projectScope(myProject),false).toArray(new PsiReference[0]);
-        }
- else {
-          refs=null;
-        }
-        final PsiMethod enclosingConstructor=BaseExpressionToFieldHandler.getEnclosingConstructor(aaClass,local);
-        PsiField field=settings.isIntroduceEnumConstant() ? EnumConstantsUtil.createEnumConstant(aaClass,local,fieldName) : createField(local,settings.getForcedType(),fieldName,initializerPlace == IN_FIELD_DECLARATION);
-        field=(PsiField)aaClass.add(field);
-        BaseExpressionToFieldHandler.setModifiers(field,settings,isStatic);
-        if (!settings.isIntroduceEnumConstant()) {
-          VisibilityUtil.fixVisibility(occurences,field,settings.getFieldVisibility());
-        }
-        local.normalizeDeclaration();
-        PsiDeclarationStatement declarationStatement=(PsiDeclarationStatement)local.getParent();
-        final BaseExpressionToFieldHandler.InitializationPlace finalInitializerPlace;
-        if (local.getInitializer() == null) {
-          finalInitializerPlace=IN_FIELD_DECLARATION;
-        }
- else {
-          finalInitializerPlace=initializerPlace;
-        }
-        final PsiElementFactory factory=JavaPsiFacade.getInstance(myManager.getProject()).getElementFactory();
-switch (finalInitializerPlace) {
-case IN_FIELD_DECLARATION:
-          declarationStatement.delete();
-        break;
-case IN_CURRENT_METHOD:
-      PsiStatement statement=createAssignment(local,fieldName,factory);
-    declarationStatement.replace(statement);
-  break;
-case IN_CONSTRUCTOR:
-addInitializationToConstructors(local,field,enclosingConstructor,factory);
-break;
-case IN_SETUP_METHOD:
-addInitializationToSetUp(local,field,factory);
-}
-if (enclosingConstructor != null && initializerPlace == IN_CONSTRUCTOR) {
-PsiStatement statement=createAssignment(local,fieldName,factory);
-declarationStatement.replace(statement);
-}
-if (rebindNeeded2) {
-for (final PsiReference reference : refs) {
-if (reference != null) {
-RefactoringUtil.replaceOccurenceWithFieldRef((PsiExpression)reference,field,aaClass);
-}
-}
-}
-}
- catch (IncorrectOperationException e) {
-LOG.error(e);
-}
-}
-}
-;
-CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
-public void run(){
-ApplicationManager.getApplication().runWriteAction(runnable);
-}
-}
-,REFACTORING_NAME,null);
-return true;
+  return true;
 }
