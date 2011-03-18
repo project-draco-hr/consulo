@@ -1,43 +1,24 @@
 {
   GrExpression selected=getSelectedExpression();
   PsiType thisType=selected.getType();
-  if (thisType != null) {
-    GrArgumentList argList=getArgumentList();
-    if (argList != null) {
-      GrExpression[] arguments=argList.getExpressionArguments();
-      PsiType[] argTypes=new PsiType[arguments.length];
-      for (int i=0; i < arguments.length; i++) {
-        PsiType argType=arguments[i].getType();
-        if (argType == null)         argType=TypesUtil.getJavaLangObject(argList);
-        argTypes[i]=argType;
-      }
-      if (thisType instanceof PsiArrayType && argTypes.length == 1 && TypesUtil.isAssignable(PsiType.INT,argTypes[0],getManager(),getResolveScope())) {
-        return TypesUtil.boxPrimitiveType(((PsiArrayType)thisType).getComponentType(),getManager(),getResolveScope());
-      }
- else       if (thisType instanceof GrTupleType && argTypes.length == 1 && TypesUtil.isAssignable(PsiType.INT,argTypes[0],getManager(),getResolveScope())) {
-        PsiType[] types=((GrTupleType)thisType).getParameters();
-        return types.length == 1 ? types[0] : null;
-      }
-      PsiType overloadedOperatorType=null;
-      GroovyResolveResult[] candidates=ResolveUtil.getMethodCandidates(thisType,"getAt",this,argTypes);
-      if (candidates.length != 1) {
-        candidates=ResolveUtil.getMethodCandidates(thisType,"getAt",this,new PsiType[]{new GrTupleType(argTypes,JavaPsiFacade.getInstance(getProject()),getResolveScope())});
-      }
-      if (candidates.length == 1) {
-        final PsiElement element=candidates[0].getElement();
-        if (element instanceof PsiMethod) {
-          overloadedOperatorType=candidates[0].getSubstitutor().substitute(getSmartReturnType((PsiMethod)element));
-        }
-      }
-      PsiType componentType=null;
-      if (InheritanceUtil.isInheritor(thisType,CommonClassNames.JAVA_UTIL_MAP) && argTypes.length == 1) {
-        componentType=TypesUtil.boxPrimitiveType(substituteTypeParameter(thisType,CommonClassNames.JAVA_UTIL_MAP,1,true),getManager(),getResolveScope());
-      }
-      if (overloadedOperatorType != null && (componentType == null || !TypesUtil.isAssignable(overloadedOperatorType,componentType,getManager(),getResolveScope()))) {
-        return TypesUtil.boxPrimitiveType(overloadedOperatorType,getManager(),getResolveScope());
-      }
-      return componentType;
-    }
+  if (thisType == null)   return null;
+  GrArgumentList argList=getArgumentList();
+  if (argList == null)   return null;
+  PsiType[] argTypes=PsiUtil.getArgumentTypes(argList,false,null);
+  final PsiManager manager=getManager();
+  final GlobalSearchScope resolveScope=getResolveScope();
+  if (PsiImplUtil.isSimpleArrayAccess(thisType,argTypes,manager,resolveScope)) {
+    return TypesUtil.boxPrimitiveType(((PsiArrayType)thisType).getComponentType(),manager,resolveScope);
   }
-  return null;
+  PsiType overloadedOperatorType=null;
+  GroovyResolveResult candidate=PsiImplUtil.getIndexPropertyMethodCandidate(thisType,argTypes,this);
+  final PsiElement element=candidate.getElement();
+  if (element instanceof PsiMethod) {
+    overloadedOperatorType=candidate.getSubstitutor().substitute(getSmartReturnType((PsiMethod)element));
+  }
+  PsiType componentType=extractMapValueType(thisType,argTypes);
+  if (overloadedOperatorType != null && (componentType == null || !TypesUtil.isAssignable(overloadedOperatorType,componentType,manager,resolveScope))) {
+    return TypesUtil.boxPrimitiveType(overloadedOperatorType,manager,resolveScope);
+  }
+  return componentType;
 }
