@@ -1,0 +1,66 @@
+{
+  if (modifierList == null)   return true;
+  final PsiManager manager=member.getManager();
+  if (placeFile instanceof JavaCodeFragment) {
+    JavaCodeFragment fragment=(JavaCodeFragment)placeFile;
+    JavaCodeFragment.VisibilityChecker visibilityChecker=fragment.getVisibilityChecker();
+    if (visibilityChecker != null) {
+      JavaCodeFragment.VisibilityChecker.Visibility visibility=visibilityChecker.isDeclarationVisible(member,place);
+      if (visibility == JavaCodeFragment.VisibilityChecker.Visibility.VISIBLE)       return true;
+      if (visibility == JavaCodeFragment.VisibilityChecker.Visibility.NOT_VISIBLE)       return false;
+    }
+  }
+ else   if (placeFile instanceof XmlFile && !JspPsiUtil.isInJspFile(placeFile))   return true;
+  if (isInJavaDoc(place))   return true;
+  if (accessObjectClass != null) {
+    if (!isAccessible(accessObjectClass,accessObjectClass.getContainingClass(),accessObjectClass.getModifierList(),place,null,null,placeFile))     return false;
+  }
+  int effectiveAccessLevel=PsiUtil.getAccessLevel(modifierList);
+  PsiFile file=FileContextUtil.getContextFile(placeFile);
+  if (JspPsiUtil.isInJspFile(file) && JspPsiUtil.isInJspFile(member.getContainingFile()))   return true;
+  if (file instanceof XmlFile && !JspPsiUtil.isInJspFile(file))   return true;
+  if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PUBLIC) {
+    return true;
+  }
+  if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PROTECTED) {
+    if (JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(member,place))     return true;
+    if (memberClass == null)     return false;
+    for (PsiElement placeParent=place; placeParent != null; placeParent=placeParent.getContext()) {
+      if (placeParent instanceof PsiClass && InheritanceUtil.isInheritorOrSelf((PsiClass)placeParent,memberClass,true)) {
+        if (member instanceof PsiClass || modifierList.hasModifierProperty(PsiModifier.STATIC))         return true;
+        if (accessObjectClass == null || InheritanceUtil.isInheritorOrSelf(accessObjectClass,(PsiClass)placeParent,true))         return true;
+      }
+    }
+    return false;
+  }
+  if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PRIVATE) {
+    if (memberClass == null)     return true;
+    if (accessObjectClass != null) {
+      PsiClass topMemberClass=getTopLevelClass(memberClass,accessObjectClass);
+      PsiClass topAccessClass=getTopLevelClass(accessObjectClass,memberClass);
+      if (!manager.areElementsEquivalent(topMemberClass,topAccessClass))       return false;
+    }
+    if (fileResolveScope == null) {
+      PsiClass placeTopLevelClass=getTopLevelClass(place,null);
+      PsiClass memberTopLevelClass=getTopLevelClass(memberClass,null);
+      return manager.areElementsEquivalent(placeTopLevelClass,memberTopLevelClass);
+    }
+ else {
+      return fileResolveScope instanceof PsiClass && !((PsiClass)fileResolveScope).isInheritor(memberClass,true);
+    }
+  }
+  if (!JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(member,place))   return false;
+  if (modifierList.hasModifierProperty(PsiModifier.STATIC))   return true;
+  final PsiClass placeClass=getContextClass(place);
+  if (memberClass == null || placeClass == null)   return true;
+  if (memberClass.isInterface() || placeClass.isInterface())   return true;
+  PsiClass clazz=accessObjectClass != null ? accessObjectClass : placeClass.getSuperClass();
+  if (clazz != null && clazz.isInheritor(memberClass,true)) {
+    PsiClass superClass=clazz;
+    while (!manager.areElementsEquivalent(superClass,memberClass)) {
+      if (superClass == null || !JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(superClass,memberClass))       return false;
+      superClass=superClass.getSuperClass();
+    }
+  }
+  return true;
+}
