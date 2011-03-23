@@ -2,32 +2,34 @@
   return new RecursionGuard(){
     @Override public <T>T doPreventingRecursion(    Object key,    Computable<T> computation){
       Object realKey=Pair.create(id,key);
-      LinkedHashMap<Object,Set<Object>> progressMap=ourProgress.get();
-      if (progressMap == null) {
-        ourProgress.set(progressMap=new LinkedHashMap<Object,Set<Object>>());
-      }
- else       if (progressMap.containsKey(realKey)) {
-        disableCachingForStackLoop(realKey,progressMap);
-        ourRecursionsMet.set((ourRecursionsMet.get() != null ? ourRecursionsMet.get() : 0) + 1);
+      LinkedHashMap<Object,Integer> progressMap=ourProgress.get();
+      if (progressMap.containsKey(realKey)) {
+        int stamp=ourStamp.get() + 1;
+        ourStamp.set(stamp);
+        boolean inLoop=false;
+        for (        Map.Entry<Object,Integer> entry : progressMap.entrySet()) {
+          if (inLoop) {
+            entry.setValue(stamp);
+          }
+ else           if (entry.getKey().equals(realKey)) {
+            inLoop=true;
+          }
+        }
         return null;
       }
-      progressMap.put(realKey,null);
+      progressMap.put(realKey,ourStamp.get());
       try {
         return computation.compute();
       }
   finally {
-        Set<Object> deps=progressMap.remove(realKey);
-        Set<Object> noCache=ourNoCache.get();
-        if (noCache != null && deps != null) {
-          noCache.removeAll(deps);
-        }
+        ourStamp.set(progressMap.remove(realKey));
       }
     }
     @Override public StackStamp markStack(){
-      final Integer stamp=ourRecursionsMet.get();
+      final Integer stamp=ourStamp.get();
       return new StackStamp(){
         @Override public boolean mayCacheNow(){
-          return Comparing.equal(stamp,ourRecursionsMet.get());
+          return Comparing.equal(stamp,ourStamp.get());
         }
       }
 ;
