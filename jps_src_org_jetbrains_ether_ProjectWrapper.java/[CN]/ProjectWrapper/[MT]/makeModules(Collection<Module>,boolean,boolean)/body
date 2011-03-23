@@ -1,0 +1,94 @@
+{
+  final ClasspathKind kind=myProject.getCompileClasspathKind(tests);
+  final Set<Module> modules=new HashSet<Module>();
+  final Set<String> marked=new HashSet<String>();
+  final Map<String,Boolean> visited=new HashMap<String,Boolean>();
+  final Set<String> frontier=new HashSet<String>();
+  final Map<String,Set<String>> reversedDependencies=new HashMap<String,Set<String>>();
+  DotPrinter.header();
+  for (  Module m : myProject.getModules().values()) {
+    final String mName=m.getName();
+    DotPrinter.node(mName);
+    for (    ClasspathItem cpi : m.getClasspath(kind)) {
+      if (cpi instanceof Module) {
+        final String name=((Module)cpi).getName();
+        DotPrinter.edge(name,mName);
+        Set<String> sm=reversedDependencies.get(name);
+        if (sm == null) {
+          sm=new HashSet<String>();
+          reversedDependencies.put(name,sm);
+        }
+        sm.add(mName);
+      }
+    }
+  }
+  DotPrinter.footer();
+  DotPrinter.header();
+  new Object(){
+    public void run(    final Collection<Module> initial){
+      if (initial == null)       return;
+      for (      Module module : initial) {
+        final String mName=module.getName();
+        if (marked.contains(mName))         continue;
+        DotPrinter.node(mName);
+        final List<Module> dep=new ArrayList<Module>();
+        for (        ClasspathItem cpi : module.getClasspath(kind)) {
+          if (cpi instanceof Module) {
+            DotPrinter.edge(((Module)cpi).getName(),mName);
+            dep.add((Module)cpi);
+          }
+        }
+        if (dep.size() == 0) {
+          frontier.add(mName);
+        }
+        marked.add(mName);
+        run(dep);
+      }
+    }
+  }
+.run(initial);
+  DotPrinter.footer();
+  new Object(){
+    public void run(    final Collection<String> initial,    final boolean force){
+      if (initial == null)       return;
+      for (      String moduleName : initial) {
+        if (!marked.contains(moduleName))         continue;
+        final Boolean property=visited.get(moduleName);
+        if (property == null || !property && force) {
+          if (force || getModule(moduleName).isOutdated(tests,myHistory)) {
+            visited.put(moduleName,true);
+            modules.add(myProject.getModules().get(moduleName));
+            run(reversedDependencies.get(moduleName),true);
+          }
+ else {
+            if (property == null) {
+              visited.put(moduleName,false);
+            }
+            run(reversedDependencies.get(moduleName),false);
+          }
+        }
+      }
+    }
+  }
+.run(frontier,force);
+  if (modules.size() == 0 && !force) {
+    System.out.println("All requested modules are up-to-date.");
+    return;
+  }
+  final ProjectBuilder builder=myProject.getBuilder();
+  final BusyBeaver dwarf=new BusyBeaver(builder);
+  builder.buildStart();
+  try {
+    dwarf.build(modules,false,force);
+    if (tests) {
+      dwarf.build(modules,true,force);
+    }
+  }
+ catch (  Exception e) {
+    e.printStackTrace();
+  }
+  builder.buildStop();
+  for (  Module mod : modules) {
+    getModule(mod.getName()).updateOutputStatus();
+  }
+}

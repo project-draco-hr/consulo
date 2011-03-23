@@ -1,0 +1,55 @@
+{
+  if (removed != null) {
+    for (    StringCache.S file : removed) {
+      affectAll(file,affectedFiles);
+    }
+  }
+  for (  StringCache.S fileName : delta.sourceFileToClasses.keySet()) {
+    final Set<ClassRepr> classes=(Set<ClassRepr>)delta.sourceFileToClasses.foxyGet(fileName);
+    final Set<ClassRepr> pastClasses=(Set<ClassRepr>)sourceFileToClasses.foxyGet(fileName);
+    final Set<StringCache.S> dependants=(Set<StringCache.S>)fileToFileDependency.foxyGet(fileName);
+    final Set<UsageRepr.Usage> affectedUsages=new HashSet<UsageRepr.Usage>();
+    final Difference.Specifier<ClassRepr> classDiff=Difference.make(pastClasses,classes);
+    for (    Pair<ClassRepr,Difference> changed : classDiff.changed()) {
+      final ClassRepr it=changed.fst;
+      final ClassRepr.Diff diff=(ClassRepr.Diff)changed.snd;
+      if (diff.base() != Difference.NONE || !diff.interfaces().unchanged() || !diff.nestedClasses().unchanged()) {
+        affectedUsages.add(it.createUsage());
+      }
+      for (      MethodRepr m : diff.methods().removed()) {
+        affectedUsages.add(m.createUsage(it.name));
+      }
+      for (      Pair<MethodRepr,Difference> m : diff.methods().changed()) {
+        affectedUsages.add(m.fst.createUsage(it.name));
+      }
+      for (      FieldRepr f : diff.fields().removed()) {
+        affectedUsages.add(f.createUsage(it.name));
+      }
+      for (      Pair<FieldRepr,Difference> f : diff.fields().changed()) {
+        final Difference d=f.snd;
+        final FieldRepr field=f.fst;
+        final int mask=Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
+        if (((field.access & Opcodes.ACC_PUBLIC) > 0 || (field.access & Opcodes.ACC_PROTECTED) > 0) && ((field.access & mask) == mask)) {
+          if ((d.base() & Difference.ACCESS) > 0 || (d.base() & Difference.VALUE) > 0) {
+            return false;
+          }
+        }
+        affectedUsages.add(field.createUsage(it.name));
+      }
+    }
+    for (    ClassRepr c : classDiff.removed()) {
+      affectedUsages.add(c.createUsage());
+    }
+    if (dependants != null) {
+      dependants.removeAll(compiledFiles);
+      for (      StringCache.S depFile : dependants) {
+        final Set<UsageRepr.Usage> usages=new HashSet<UsageRepr.Usage>(sourceFileToUsages.foxyGet(depFile));
+        usages.retainAll(affectedUsages);
+        if (!usages.isEmpty()) {
+          affectedFiles.add(depFile);
+        }
+      }
+    }
+  }
+  return true;
+}
