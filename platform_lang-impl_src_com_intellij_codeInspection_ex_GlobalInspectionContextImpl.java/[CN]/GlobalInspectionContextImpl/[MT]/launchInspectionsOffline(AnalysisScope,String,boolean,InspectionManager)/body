@@ -1,0 +1,61 @@
+{
+  cleanup();
+  myCurrentScope=scope;
+  InspectionTool.setOutputPath(outputPath);
+  final boolean oldToolsSettings=RUN_GLOBAL_TOOLS_ONLY;
+  RUN_GLOBAL_TOOLS_ONLY=runGlobalToolsOnly;
+  try {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        performInspectionsWithProgress(scope,manager);
+        @NonNls final String ext=".xml";
+        for (        Map.Entry<String,Tools> stringSetEntry : myTools.entrySet()) {
+          final Element root=new Element(InspectionsBundle.message("inspection.problems"));
+          final Document doc=new Document(root);
+          final Tools sameTools=stringSetEntry.getValue();
+          boolean hasProblems=false;
+          boolean isLocalTool=false;
+          String toolName=stringSetEntry.getKey();
+          if (sameTools != null) {
+            for (            ScopeToolState toolDescr : sameTools.getTools()) {
+              final InspectionTool tool=(InspectionTool)toolDescr.getTool();
+              if (tool instanceof LocalInspectionToolWrapper) {
+                hasProblems=new File(outputPath,toolName + ext).exists();
+                isLocalTool=true;
+              }
+ else {
+                tool.updateContent();
+                if (tool.hasReportedProblems()) {
+                  hasProblems=true;
+                  tool.exportResults(root);
+                }
+              }
+            }
+          }
+          if (!hasProblems)           continue;
+          @NonNls final String isLocalToolAttribute="is_local_tool";
+          root.setAttribute(isLocalToolAttribute,String.valueOf(isLocalTool));
+          try {
+            new File(outputPath).mkdirs();
+            final File file=new File(outputPath,toolName + ext);
+            if (isLocalTool) {
+              FileUtil.writeToFile(file,"</" + InspectionsBundle.message("inspection.problems") + ">");
+            }
+ else {
+              PathMacroManager.getInstance(getProject()).collapsePaths(doc.getRootElement());
+              JDOMUtil.writeDocument(doc,file,"\n");
+            }
+          }
+ catch (          IOException e) {
+            LOG.error(e);
+          }
+        }
+      }
+    }
+);
+  }
+  finally {
+    InspectionTool.setOutputPath(null);
+    RUN_GLOBAL_TOOLS_ONLY=oldToolsSettings;
+  }
+}

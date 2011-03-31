@@ -2,7 +2,8 @@
   final List<InspectionProfileEntry> needRepeatSearchRequest=new ArrayList<InspectionProfileEntry>();
   final List<Tools> globalTools=new ArrayList<Tools>();
   final List<Tools> localTools=new ArrayList<Tools>();
-  initializeTools(globalTools,localTools);
+  final List<Tools> globalSimpleTools=new ArrayList<Tools>();
+  initializeTools(globalTools,localTools,globalSimpleTools);
   ((RefManagerImpl)getRefManager()).initializeAnnotators();
   for (  Tools tools : globalTools) {
     for (    ScopeToolState state : tools.getTools()) {
@@ -43,9 +44,9 @@ catch (    Exception e) {
   }
   if (RUN_GLOBAL_TOOLS_ONLY)   return;
   final PsiManager psiManager=PsiManager.getInstance(myProject);
-  final Set<VirtualFile> localScopeFiles=scope.toSearchScope() instanceof LocalSearchScope ? new HashSet<VirtualFile>() : null;
+  final Set<VirtualFile> localScopeFiles=scope.toSearchScope() instanceof LocalSearchScope ? new THashSet<VirtualFile>() : null;
   scope.accept(new PsiElementVisitor(){
-    @Override public void visitFile(    PsiFile file){
+    @Override public void visitFile(    final PsiFile file){
       final VirtualFile virtualFile=file.getVirtualFile();
       if (virtualFile != null) {
         incrementJobDoneAmount(LOCAL_ANALYSIS,ProjectUtil.calcRelativeToProjectPath(virtualFile,myProject));
@@ -65,6 +66,17 @@ catch (    Exception e) {
           }
         }
         pass.doInspectInBatch((InspectionManagerEx)manager,lTools);
+        JobUtil.invokeConcurrentlyUnderProgress(globalSimpleTools,new Processor<Tools>(){
+          @Override public boolean process(          Tools tools){
+            GlobalInspectionToolWrapper toolWrapper=(GlobalInspectionToolWrapper)tools.getTool();
+            GlobalSimpleInspectionTool tool=(GlobalSimpleInspectionTool)toolWrapper.getTool();
+            ProblemsHolder problemsHolder=new ProblemsHolder(manager,file,false);
+            tool.checkFile(file,manager,problemsHolder,GlobalInspectionContextImpl.this,toolWrapper);
+            LocalInspectionToolWrapper.addProblemDescriptors(problemsHolder.getResults(),false,GlobalInspectionContextImpl.this,null,CONVERT,toolWrapper);
+            return true;
+          }
+        }
+,false,myProgressIndicator);
       }
  catch (      ProcessCanceledException e) {
         throw e;
