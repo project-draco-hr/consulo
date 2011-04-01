@@ -1,0 +1,84 @@
+{
+  boolean hasFieldInitialization=hasFieldInitialization(newExpression);
+  StringBuilder builder;
+  final PsiType type=newExpression.getType();
+  final String varName;
+  if (hasFieldInitialization) {
+    builder=new StringBuilder();
+    varName=GenerationUtil.suggestVarName(type,newExpression,this.context);
+    GenerationUtil.writeType(builder,type);
+    builder.append(" ").append(varName).append(" = ");
+  }
+ else {
+    varName=null;
+    builder=this.builder;
+  }
+  final GrExpression qualifier=newExpression.getQualifier();
+  if (qualifier != null) {
+    qualifier.accept(this);
+    builder.append(".");
+  }
+  final GrTypeElement typeElement=newExpression.getTypeElement();
+  final GrArrayDeclaration arrayDeclaration=newExpression.getArrayDeclaration();
+  final GrCodeReferenceElement referenceElement=newExpression.getReferenceElement();
+  builder.append("new ");
+  if (typeElement != null) {
+    final PsiType builtIn=typeElement.getType();
+    LOG.assertTrue(builtIn instanceof PsiPrimitiveType);
+    final PsiType boxed=TypesUtil.boxPrimitiveType(builtIn,newExpression.getManager(),newExpression.getResolveScope());
+    GenerationUtil.writeType(builder,boxed);
+  }
+ else   if (referenceElement != null) {
+    GenerationUtil.writeCodeReferenceElement(builder,referenceElement);
+  }
+  final GrArgumentList argList=newExpression.getArgumentList();
+  if (argList != null) {
+    GrClosureSignature signature=null;
+    final GroovyResolveResult resolveResult=newExpression.resolveConstructorGenerics();
+    final PsiElement constructor=resolveResult.getElement();
+    if (constructor instanceof PsiMethod) {
+      signature=GrClosureSignatureUtil.createSignature((PsiMethod)constructor,resolveResult.getSubstitutor());
+    }
+ else     if (referenceElement != null) {
+      final GroovyResolveResult clazzResult=referenceElement.advancedResolve();
+      final PsiElement clazz=clazzResult.getElement();
+      if (clazz instanceof PsiClass && ((PsiClass)clazz).getConstructors().length == 0) {
+        signature=GrClosureSignatureUtil.createSignature(PsiParameter.EMPTY_ARRAY,null);
+      }
+    }
+    final GrNamedArgument[] namedArgs=hasFieldInitialization ? GrNamedArgument.EMPTY_ARRAY : argList.getNamedArguments();
+    new ArgumentListGenerator(builder,context).generate(signature,argList.getExpressionArguments(),namedArgs,GrClosableBlock.EMPTY_ARRAY,newExpression);
+  }
+  final GrAnonymousClassDefinition anonymous=newExpression.getAnonymousClassDefinition();
+  if (anonymous != null) {
+    writeTypeBody(builder,anonymous);
+  }
+  if (arrayDeclaration != null) {
+    final GrExpression[] boundExpressions=arrayDeclaration.getBoundExpressions();
+    for (    GrExpression boundExpression : boundExpressions) {
+      builder.append("[");
+      boundExpression.accept(this);
+      builder.append("]");
+    }
+    if (boundExpressions.length == 0) {
+      builder.append("[]");
+    }
+  }
+  if (hasFieldInitialization) {
+    context.myStatements.add(builder.toString());
+    final GrNamedArgument[] namedArguments=argList.getNamedArguments();
+    for (    GrNamedArgument namedArgument : namedArguments) {
+      final String fieldName=namedArgument.getLabelName();
+      if (fieldName == null) {
+        final GrArgumentLabel label=namedArgument.getLabel();
+        LOG.info("cannot initialize field " + (label == null ? "<null>" : label.getText()));
+      }
+ else {
+        final GroovyResolveResult resolveResult=referenceElement.advancedResolve();
+        final PsiElement resolved=resolveResult.getElement();
+        LOG.assertTrue(resolved instanceof PsiClass);
+        initializeField(varName,type,((PsiClass)resolved),resolveResult.getSubstitutor(),fieldName,namedArgument.getExpression());
+      }
+    }
+  }
+}

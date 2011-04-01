@@ -1,0 +1,43 @@
+{
+  final GrModifierList modifierList=variableDeclaration.getModifierList();
+  final GrVariable[] variables=variableDeclaration.getVariables();
+  StringBuilder builder=new StringBuilder();
+  ExpressionContext expressionContext=new ExpressionContext(project);
+  final ExpressionGenerator expressionGenerator=new ExpressionGenerator(builder,expressionContext);
+  if (variableDeclaration.isTuple()) {
+    final GrTupleDeclaration tuple=variableDeclaration.getTupleDeclaration();
+    final GrExpression tupleInitializer=tuple.getInitializerGroovy();
+    if (tupleInitializer instanceof GrListOrMap) {
+      final GrExpression[] initializers=((GrListOrMap)tupleInitializer).getInitializers();
+      for (int i=0; i < variables.length; i++) {
+        final GrVariable v=variables[i];
+        final PsiType type=v.getDeclaredType();
+        GenerationUtil.writeType(builder,type);
+        builder.append(" ").append(v.getName());
+        if (i < initializers.length) {
+          builder.append(" = ");
+          initializers[i].accept(expressionGenerator);
+        }
+        builder.append(";\n");
+      }
+    }
+ else {
+      final PsiType iteratorType=JavaPsiFacade.getElementFactory(project).createTypeFromText(CommonClassNames.JAVA_UTIL_ITERATOR,variableDeclaration);
+      final String iteratorName=GenerationUtil.suggestVarName(iteratorType,variableDeclaration,expressionContext);
+      builder.append("final ").append(CommonClassNames.JAVA_UTIL_ITERATOR).append(" ").append(iteratorName).append(" = ");
+      GenerationUtil.invokeMethodByName(tupleInitializer,"iterator",GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,expressionGenerator,variableDeclaration);
+      for (      final GrVariable v : variables) {
+        final PsiType type=v.getDeclaredType();
+        GenerationUtil.writeType(builder,type);
+        builder.append(" ").append(v.getName());
+        builder.append(" = ").append(iteratorName).append(".hasNext() ? ").append(iteratorName).append(".next() : null;");
+      }
+    }
+  }
+ else {
+    final GrTypeElement typeElement=variableDeclaration.getTypeElementGroovy();
+    PsiType type=typeElement == null ? PsiType.getJavaLangObject(variableDeclaration.getManager(),variableDeclaration.getResolveScope()) : typeElement.getType();
+    GenerationUtil.writeType(builder,type);
+  }
+  writeStatement(builder,variableDeclaration,expressionContext);
+}
