@@ -1,0 +1,77 @@
+{
+  if ((!myProject.isOpen()) || myProject.isDisposed()) {
+    ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+    return;
+  }
+  boolean continueChain=false;
+  for (  SequentialUpdatesContext context : myContextInfo.values()) {
+    continueChain|=(context != null) && (context.shouldFail());
+  }
+  final boolean continueChainFinal=continueChain;
+  final boolean someSessionWasCancelled=wasCanceled || someSessionWasCanceled(myUpdateSessions);
+  for (  final UpdateSession updateSession : myUpdateSessions) {
+    updateSession.onRefreshFilesCompleted();
+  }
+  if (myActionInfo.canChangeFileStatus()) {
+    final List<VirtualFile> files=new ArrayList<VirtualFile>();
+    final RemoteRevisionsCache revisionsCache=RemoteRevisionsCache.getInstance(myProject);
+    revisionsCache.invalidate(myUpdatedFiles);
+    UpdateFilesHelper.iterateFileGroupFiles(myUpdatedFiles,new UpdateFilesHelper.Callback(){
+      public void onFile(      final String filePath,      final String groupId){
+        @NonNls final String path=VfsUtil.pathToUrl(filePath.replace(File.separatorChar,'/'));
+        final VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(path);
+        if (file != null) {
+          files.add(file);
+        }
+      }
+    }
+);
+    myDirtyScopeManager.filesDirty(files,null);
+  }
+  final boolean updateSuccess=(!someSessionWasCancelled) && (myGroupedExceptions.isEmpty());
+  WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable(){
+    public void run(){
+      if (myProject.isDisposed()) {
+        ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+        return;
+      }
+      if (!myGroupedExceptions.isEmpty()) {
+        if (continueChainFinal) {
+          gatherContextInterruptedMessages();
+        }
+        AbstractVcsHelper.getInstance(myProject).showErrors(myGroupedExceptions,VcsBundle.message("message.title.vcs.update.errors",getTemplatePresentation().getText()));
+      }
+ else       if (someSessionWasCancelled) {
+        ProgressManager.progress(VcsBundle.message("progress.text.updating.canceled"));
+      }
+ else {
+        ProgressManager.progress(VcsBundle.message("progress.text.updating.done"));
+      }
+      final boolean noMerged=myUpdatedFiles.getGroupById(FileGroup.MERGED_WITH_CONFLICT_ID).isEmpty();
+      if (myUpdatedFiles.isEmpty() && myGroupedExceptions.isEmpty()) {
+        if (someSessionWasCancelled) {
+          VcsBalloonProblemNotifier.showOverChangesView(myProject,VcsBundle.message("progress.text.updating.canceled"),MessageType.WARNING);
+        }
+ else {
+          VcsBalloonProblemNotifier.showOverChangesView(myProject,getAllFilesAreUpToDateMessage(myRoots),MessageType.INFO);
+        }
+      }
+ else       if (!myUpdatedFiles.isEmpty()) {
+        showUpdateTree(continueChainFinal && updateSuccess && noMerged,someSessionWasCancelled);
+        final CommittedChangesCache cache=CommittedChangesCache.getInstance(myProject);
+        cache.processUpdatedFiles(myUpdatedFiles);
+      }
+      ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+      if (continueChainFinal && updateSuccess) {
+        if (!noMerged) {
+          showContextInterruptedError();
+        }
+ else {
+          reset();
+          ProgressManager.getInstance().run(Updater.this);
+        }
+      }
+    }
+  }
+,null,myProject);
+}
