@@ -1,0 +1,62 @@
+{
+  VirtualFile manifestFile=null;
+  final Project project=myContext.getProject();
+  if (mainClassName != null && !mainClassName.isEmpty() || !extractLibrariesToJar) {
+    final VirtualFile directory;
+    try {
+      directory=VfsUtil.createDirectoryIfMissing(directoryForManifest);
+    }
+ catch (    IOException e) {
+      LOG.info(e);
+      Messages.showErrorDialog(project,"Cannot create directory '" + directoryForManifest + "': "+ e.getMessage(),CommonBundle.getErrorTitle());
+      return null;
+    }
+    if (directory == null)     return null;
+    manifestFile=ManifestFileUtil.createManifestFile(directory,project);
+    if (manifestFile == null) {
+      return null;
+    }
+    ManifestFileUtil.updateManifest(manifestFile,mainClassName,null,true);
+  }
+  String name=modules.length == 1 ? modules[0].getName() : project.getName();
+  final PackagingElementFactory factory=PackagingElementFactory.getInstance();
+  final CompositePackagingElement<?> archive=factory.createArchive(FileUtil.sanitizeFileName(name) + ".jar");
+  OrderEnumerator orderEnumerator=ProjectRootManager.getInstance(project).orderEntries(Arrays.asList(modules));
+  final Set<Library> libraries=new THashSet<Library>();
+  if (!includeTests) {
+    orderEnumerator=orderEnumerator.productionOnly();
+  }
+  orderEnumerator.using(myContext.getModulesProvider()).withoutSdk().runtimeOnly().recursively().forEach(new Processor<OrderEntry>(){
+    @Override public boolean process(    OrderEntry orderEntry){
+      if (orderEntry instanceof ModuleSourceOrderEntry) {
+        Module module=orderEntry.getOwnerModule();
+        archive.addOrFindChild(factory.createModuleOutput(module));
+        if (includeTests) {
+          archive.addOrFindChild(factory.createTestModuleOutput(module));
+        }
+      }
+ else       if (orderEntry instanceof LibraryOrderEntry) {
+        ContainerUtil.addIfNotNull(((LibraryOrderEntry)orderEntry).getLibrary(),libraries);
+      }
+      return true;
+    }
+  }
+);
+  final JarArtifactType jarArtifactType=JarArtifactType.getInstance();
+  if (manifestFile != null && !manifestFile.equals(ManifestFileUtil.findManifestFile(archive,myContext,jarArtifactType))) {
+    archive.addFirstChild(factory.createFileCopyWithParentDirectories(manifestFile.getPath(),ManifestFileUtil.MANIFEST_DIR_NAME));
+  }
+  final String artifactName=name + ":jar";
+  if (extractLibrariesToJar) {
+    addExtractedLibrariesToJar(archive,factory,libraries);
+    return new NewArtifactConfiguration(archive,artifactName,jarArtifactType);
+  }
+ else {
+    final ArtifactRootElement<?> root=factory.createArtifactRootElement();
+    List<String> classpath=new ArrayList<String>();
+    root.addOrFindChild(archive);
+    addLibraries(libraries,root,archive,classpath);
+    ManifestFileUtil.updateManifest(manifestFile,mainClassName,classpath,true);
+    return new NewArtifactConfiguration(root,artifactName,PlainArtifactType.getInstance());
+  }
+}
