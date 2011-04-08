@@ -1,0 +1,58 @@
+{
+  if (!myUseCyclicBuffer || myDeferredOutputLength + numberOfNewSymbols <= myCyclicBufferSize) {
+    return numberOfNewSymbols;
+  }
+  final int numberOfSymbolsToRemove=Math.min(myDeferredOutputLength,myDeferredOutputLength + numberOfNewSymbols - myCyclicBufferSize);
+  myDeferredTypes.clear();
+  if (DEBUG_PROCESSING) {
+    log("Starting console trimming. Need to delete %d symbols (deferred output length: %d, number of new symbols: %d, " + "cyclic buffer size: %d). Current state:",numberOfSymbolsToRemove,myDeferredOutputLength,numberOfNewSymbols,myCyclicBufferSize);
+    dumpDeferredOutput();
+  }
+  Context context=new Context(numberOfSymbolsToRemove);
+  TIntArrayList indicesOfTokensToRemove=new TIntArrayList();
+  for (int i=0; i < myDeferredTokens.size(); i++) {
+    TokenInfo tokenInfo=myDeferredTokens.get(i);
+    tokenInfo.startOffset-=context.removedSymbolsNumber;
+    tokenInfo.endOffset-=context.removedSymbolsNumber;
+    if (!context.canContinueProcessing()) {
+      myDeferredTypes.add(tokenInfo.contentType);
+      if (context.removedSymbolsNumber == 0) {
+        break;
+      }
+      continue;
+    }
+    int tokenLength=tokenInfo.getLength();
+    if (myContentTypesToNotStripOnCycling.contains(tokenInfo.contentType)) {
+      skip(context,tokenLength);
+      myDeferredTypes.add(tokenInfo.contentType);
+      continue;
+    }
+    int removedTokenSymbolsNumber=remove(context,tokenLength);
+    if (removedTokenSymbolsNumber == tokenLength) {
+      indicesOfTokensToRemove.add(i);
+    }
+ else {
+      tokenInfo.endOffset-=removedTokenSymbolsNumber;
+      myDeferredTypes.add(tokenInfo.contentType);
+    }
+  }
+  for (int i=indicesOfTokensToRemove.size() - 1; i >= 0; i--) {
+    myDeferredTokens.remove(indicesOfTokensToRemove.get(i));
+  }
+  if (!myDeferredTokens.isEmpty()) {
+    TokenInfo tokenInfo=myDeferredTokens.get(0);
+    if (tokenInfo.startOffset > 0) {
+      final HyperlinkInfo hyperlinkInfo=tokenInfo.getHyperlinkInfo();
+      myDeferredTokens.add(0,hyperlinkInfo != null ? new HyperlinkTokenInfo(ConsoleViewContentType.USER_INPUT,0,tokenInfo.startOffset,hyperlinkInfo) : new TokenInfo(ConsoleViewContentType.USER_INPUT,0,tokenInfo.startOffset));
+      myDeferredTypes.add(ConsoleViewContentType.USER_INPUT);
+    }
+  }
+  if (numberOfNewSymbols + myDeferredOutputLength > myCyclicBufferSize) {
+    int result=myCyclicBufferSize - myDeferredOutputLength;
+    if (result < 0) {
+      return 0;
+    }
+    return result;
+  }
+  return numberOfNewSymbols;
+}
