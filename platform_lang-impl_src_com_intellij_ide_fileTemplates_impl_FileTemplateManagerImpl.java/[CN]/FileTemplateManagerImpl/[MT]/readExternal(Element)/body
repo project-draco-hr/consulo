@@ -1,28 +1,67 @@
 {
-  Element deletedTemplatesElement=element.getChild(ELEMENT_DELETED_TEMPLATES);
-  if (deletedTemplatesElement != null) {
-    myDeletedTemplatesManager.readExternal(deletedTemplatesElement);
-  }
-  Element deletedIncludesElement=element.getChild(ELEMENT_DELETED_INCLUDES);
-  if (deletedIncludesElement != null) {
-    myPatternsManager.myDeletedTemplatesManager.readExternal(deletedIncludesElement);
-  }
-  Element recentElement=element.getChild(ELEMENT_RECENT_TEMPLATES);
+  final Element recentElement=element.getChild(ELEMENT_RECENT_TEMPLATES);
   if (recentElement != null) {
     myRecentList.readExternal(recentElement);
   }
-  Element templatesElement=element.getChild(ELEMENT_TEMPLATES);
+  final DeletedTemplatesManager deletedDefaults=new DeletedTemplatesManager();
+  Element deletedTemplatesElement=element.getChild(ELEMENT_DELETED_TEMPLATES);
+  if (deletedTemplatesElement != null) {
+    deletedDefaults.readExternal(deletedTemplatesElement);
+  }
+  final DeletedTemplatesManager deletedIncludes=new DeletedTemplatesManager();
+  Element deletedIncludesElement=element.getChild(ELEMENT_DELETED_INCLUDES);
+  if (deletedIncludesElement != null) {
+    deletedIncludes.readExternal(deletedIncludesElement);
+  }
+  final Set<String> templateNamesWithReformatOff=new HashSet<String>();
+  final Element templatesElement=element.getChild(ELEMENT_TEMPLATES);
   if (templatesElement != null) {
-    invalidate();
-    List children=templatesElement.getChildren();
-    notAdjusted.clear();
-    for (    final Object aChildren : children) {
-      Element child=(Element)aChildren;
-      String name=child.getAttributeValue(ATTRIBUTE_NAME);
-      boolean reformat=Boolean.TRUE.toString().equals(child.getAttributeValue(ATTRIBUTE_REFORMAT));
+    final List children=templatesElement.getChildren();
+    for (    final Object child : children) {
+      final Element childElement=(Element)child;
+      boolean reformat=Boolean.TRUE.toString().equals(childElement.getAttributeValue(ATTRIBUTE_REFORMAT));
       if (!reformat) {
-        notAdjusted.add(name);
+        final String name=childElement.getAttributeValue(ATTRIBUTE_NAME);
+        templateNamesWithReformatOff.add(name);
       }
+    }
+  }
+  for (  final FTManager manager : myAllManagers) {
+    final Element templatesGroup=element.getChild(getXmlElementGroupName(manager));
+    if (templatesGroup == null) {
+      continue;
+    }
+    final List children=element.getChildren(ELEMENT_TEMPLATE);
+    for (    final Object elem : children) {
+      final Element child=(Element)elem;
+      final String qName=child.getAttributeValue(ATTRIBUTE_NAME);
+      final FileTemplateBase template=manager.getTemplate(qName);
+      if (template == null) {
+        continue;
+      }
+      final boolean reformat=Boolean.TRUE.toString().equals(child.getAttributeValue(ATTRIBUTE_REFORMAT));
+      template.setReformatCode(reformat);
+      if (template instanceof BundledFileTemplate) {
+        final boolean enabled=Boolean.getBoolean(child.getAttributeValue(ATTRIBUTE_ENABLED,"true"));
+        ((BundledFileTemplate)template).setEnabled(enabled);
+      }
+    }
+  }
+  final boolean hasDeletedDefaultsInOlderFormat=!deletedDefaults.DELETED_DEFAULT_TEMPLATES.isEmpty();
+  final boolean hasDeletedincludesinOlderFormat=!deletedIncludes.DELETED_DEFAULT_TEMPLATES.isEmpty();
+  final boolean hasTemplatesWithReformatAttibuteAltered=!templateNamesWithReformatOff.isEmpty();
+  final boolean hasSettingsInOlderFormat=hasDeletedDefaultsInOlderFormat || hasDeletedincludesinOlderFormat || hasTemplatesWithReformatAttibuteAltered;
+  if (hasSettingsInOlderFormat) {
+    final Collection<FileTemplateBase> allDefaults=myDefaultTemplatesManager.getAllTemplates(true);
+    if (hasDeletedDefaultsInOlderFormat) {
+      applyDeletedState(deletedDefaults,allDefaults);
+    }
+    if (hasDeletedincludesinOlderFormat) {
+      applyDeletedState(deletedIncludes,myPatternsManager.getAllTemplates(true));
+    }
+    if (hasTemplatesWithReformatAttibuteAltered) {
+      applyReformatState(templateNamesWithReformatOff,allDefaults);
+      applyReformatState(templateNamesWithReformatOff,myInternalTemplatesManager.getAllTemplates(true));
     }
   }
 }
