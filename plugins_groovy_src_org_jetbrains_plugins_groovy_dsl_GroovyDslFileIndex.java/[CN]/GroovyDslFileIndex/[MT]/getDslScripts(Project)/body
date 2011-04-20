@@ -1,18 +1,31 @@
 {
   return CachedValuesManager.getManager(project).getCachedValue(project,SCRIPTS_CACHE,new CachedValueProvider<List<GroovyDslScript>>(){
     @Override public Result<List<GroovyDslScript>> compute(){
+      if (stopGdsl) {
+        return Result.create(Collections.<GroovyDslScript>emptyList());
+      }
       int count=0;
       List<GroovyDslScript> result=new ArrayList<GroovyDslScript>();
+      try {
+        for (        Pair<File,GroovyDslExecutor> pair : getStandardScripts()) {
+          result.add(new GroovyDslScript(project,null,pair.second,pair.first.getPath()));
+        }
+      }
+ catch (      OutOfMemoryError e) {
+        stopGdsl=true;
+        throw e;
+      }
+catch (      NoClassDefFoundError e) {
+        stopGdsl=true;
+        throw e;
+      }
       final LinkedBlockingQueue<Pair<VirtualFile,GroovyDslExecutor>> queue=new LinkedBlockingQueue<Pair<VirtualFile,GroovyDslExecutor>>();
-      final GroovyDslIndexedRootProvider[] indexedRootProviders=ContainerUtil.findAllAsArray(IndexableSetContributor.EP_NAME.getExtensions(),GroovyDslIndexedRootProvider.class);
-      final AdditionalIndexableFileSet standardSet=new AdditionalIndexableFileSet(indexedRootProviders);
       final ProjectFileIndex fileIndex=ProjectRootManager.getInstance(project).getFileIndex();
-      final AdditionalIndexedRootsScope scope=new AdditionalIndexedRootsScope(GlobalSearchScope.allScope(project),standardSet);
-      for (      VirtualFile vfile : FileBasedIndex.getInstance().getContainingFiles(NAME,OUR_KEY,scope)) {
+      for (      VirtualFile vfile : FileBasedIndex.getInstance().getContainingFiles(NAME,OUR_KEY,GlobalSearchScope.allScope(project))) {
         if (!vfile.isValid()) {
           continue;
         }
-        if (!standardSet.isInSet(vfile) && !fileIndex.isInLibraryClasses(vfile) && !fileIndex.isInLibrarySource(vfile)) {
+        if (!fileIndex.isInLibraryClasses(vfile) && !fileIndex.isInLibrarySource(vfile)) {
           if (!fileIndex.isInSourceContent(vfile) || !isActivated(vfile)) {
             continue;
           }
@@ -24,7 +37,7 @@
           count++;
         }
  else {
-          result.add(new GroovyDslScript(project,vfile,cached));
+          result.add(new GroovyDslScript(project,vfile,cached,vfile.getPath()));
         }
       }
       try {
@@ -34,7 +47,7 @@
           if (pair != null) {
             count--;
             if (pair.second != null) {
-              result.add(new GroovyDslScript(project,pair.first,pair.second));
+              result.add(new GroovyDslScript(project,pair.first,pair.second,pair.first.getPath()));
             }
           }
         }
