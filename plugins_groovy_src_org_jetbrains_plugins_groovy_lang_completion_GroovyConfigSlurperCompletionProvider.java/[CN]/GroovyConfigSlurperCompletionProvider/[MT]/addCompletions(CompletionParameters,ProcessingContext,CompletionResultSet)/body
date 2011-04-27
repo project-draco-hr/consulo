@@ -1,0 +1,67 @@
+{
+  PsiFile file=parameters.getOriginalFile();
+  if (!(file instanceof GroovyFile))   return;
+  GroovyFile groovyFile=(GroovyFile)file;
+  if (!groovyFile.isScript())   return;
+  GrReferenceExpression ref=(GrReferenceExpression)parameters.getPosition().getParent();
+  if (ref == null)   return;
+  List<String> prefix=null;
+  Set<String> variants=null;
+  for (  ConfigSlurperSupport configSlurperSupport : ConfigSlurperSupport.EP_NAME.getExtensions()) {
+    ConfigSlurperSupport.PropertiesProvider provider=configSlurperSupport.getProvider(groovyFile);
+    if (provider == null)     continue;
+    if (prefix == null) {
+      prefix=getPrefix(ref);
+      if (prefix == null)       return;
+      variants=new HashSet<String>();
+    }
+    provider.collectVariants(prefix,variants);
+  }
+  if (variants == null || variants.isEmpty())   return;
+  PsiElement parent=ref.getParent();
+  if (parent instanceof GrAssignmentExpression) {
+    parent=parent.getParent();
+  }
+  if (parent == null)   return;
+  Set<String> processedPrefixes=new HashSet<String>();
+  for (PsiElement e=parent.getFirstChild(); e != null; e=e.getNextSibling()) {
+    if (e instanceof GrAssignmentExpression) {
+      PsiElement left=((GrAssignmentExpression)e).getLValue();
+      if (left instanceof GrReferenceExpression) {
+        String s=refToString((GrReferenceExpression)left);
+        if (s == null)         continue;
+        int dotIndex=s.indexOf('.');
+        if (dotIndex > 0) {
+          processedPrefixes.add(s.substring(0,dotIndex));
+        }
+        variants.remove(s);
+      }
+    }
+ else     if (myAddPrefixes && e instanceof GrMethodCall) {
+      GrMethodCall call=(GrMethodCall)e;
+      if (isPropertyCall(call)) {
+        String name=extractPropertyName(call);
+        if (name == null)         continue;
+        processedPrefixes.add(name);
+        for (Iterator<String> itr=variants.iterator(); itr.hasNext(); ) {
+          String s=itr.next();
+          if (name.length() + 1 < s.length() && s.startsWith(name) && s.charAt(name.length() + 1) == '.') {
+            itr.remove();
+          }
+        }
+      }
+    }
+  }
+  for (  String variant : variants) {
+    if (myAddPrefixes) {
+      int dotIndex=variant.indexOf('.');
+      if (dotIndex > 0) {
+        String s=variant.substring(0,dotIndex);
+        if (processedPrefixes.add(s)) {
+          result.addElement(LookupElementBuilder.create(s));
+        }
+      }
+    }
+    result.addElement(TailTypeDecorator.withTail(LookupElementBuilder.create(variant),TailType.EQ));
+  }
+}
