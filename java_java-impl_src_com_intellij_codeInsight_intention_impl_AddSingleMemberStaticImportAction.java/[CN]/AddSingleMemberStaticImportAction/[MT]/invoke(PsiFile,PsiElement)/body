@@ -1,0 +1,59 @@
+{
+  if (!CodeInsightUtilBase.prepareFileForWrite(file))   return;
+  final PsiReferenceExpression refExpr=(PsiReferenceExpression)element.getParent();
+  final PsiElement resolved=refExpr.resolve();
+  file.accept(new JavaRecursiveElementWalkingVisitor(){
+    @Override public void visitReferenceExpression(    PsiReferenceExpression expression){
+      super.visitReferenceExpression(expression);
+      String referenceName=refExpr.getReferenceName();
+      if (referenceName != null && referenceName.equals(expression.getReferenceName())) {
+        PsiElement resolved=expression.resolve();
+        if (resolved != null) {
+          expression.putUserData(TEMP_REFERENT_USER_DATA,resolved);
+        }
+      }
+    }
+  }
+);
+  if (resolved != null) {
+    RefactoringUtil.bindToElementViaStaticImport(((PsiMember)resolved).getContainingClass(),((PsiNamedElement)resolved).getName(),((PsiJavaFile)file).getImportList());
+  }
+  file.accept(new JavaRecursiveElementVisitor(){
+    @Override public void visitReferenceExpression(    PsiReferenceExpression expression){
+      if (expression.getParameterList() != null && expression.getParameterList().getFirstChild() != null)       return;
+      if (refExpr.getReferenceName().equals(expression.getReferenceName())) {
+        if (!expression.isQualified()) {
+          PsiElement referent=expression.getUserData(TEMP_REFERENT_USER_DATA);
+          if (referent instanceof PsiMember && referent != expression.resolve()) {
+            PsiElementFactory factory=JavaPsiFacade.getInstance(expression.getProject()).getElementFactory();
+            try {
+              PsiReferenceExpression copy=(PsiReferenceExpression)factory.createExpressionFromText("A." + expression.getReferenceName(),null);
+              expression=(PsiReferenceExpression)expression.replace(copy);
+              ((PsiReferenceExpression)expression.getQualifierExpression()).bindToElement(((PsiMember)referent).getContainingClass());
+            }
+ catch (            IncorrectOperationException e) {
+              LOG.error(e);
+            }
+          }
+          expression.putUserData(TEMP_REFERENT_USER_DATA,null);
+        }
+ else {
+          if (expression.getQualifierExpression() instanceof PsiReferenceExpression) {
+            PsiElement aClass=((PsiReferenceExpression)expression.getQualifierExpression()).resolve();
+            if (aClass == ((PsiMember)resolved).getContainingClass()) {
+              try {
+                expression.getQualifierExpression().delete();
+              }
+ catch (              IncorrectOperationException e) {
+                LOG.error(e);
+              }
+            }
+          }
+        }
+        expression.putUserData(TEMP_REFERENT_USER_DATA,null);
+      }
+      super.visitReferenceExpression(expression);
+    }
+  }
+);
+}
