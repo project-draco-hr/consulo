@@ -1,0 +1,86 @@
+{
+  final SAXTransformerFactory transformerFactory=(SAXTransformerFactory)TransformerFactory.newInstance();
+  final URL descrExtractorXsltUrl=getClass().getResource("description-text.xsl");
+  final Source xslSource;
+  final Transformer transformer;
+  try {
+    xslSource=new StreamSource(URLUtil.openStream(descrExtractorXsltUrl));
+    transformer=transformerFactory.newTransformer(xslSource);
+  }
+ catch (  IOException e) {
+    throw new ConversionException("Cannot find inspection descriptions converter.");
+  }
+catch (  TransformerConfigurationException e) {
+    throw new ConversionException("Fail to load inspection descriptions converter.");
+  }
+  final Writer w;
+  if (outputPath != null) {
+    final File outputFile=new File(outputPath);
+    try {
+      w=new FileWriter(outputFile);
+    }
+ catch (    IOException e) {
+      throw new ConversionException("Cannot edit file: " + outputFile.getPath());
+    }
+  }
+ else {
+    w=new PrintWriter(System.out);
+  }
+  try {
+    for (    File inspectionData : inspectionsResults) {
+      if (inspectionData.isDirectory()) {
+        warn("Folder isn't expected here: " + inspectionData.getName());
+        continue;
+      }
+      final String fileNameWithoutExt=FileUtil.getNameWithoutExtension(inspectionData);
+      if (InspectionApplication.DESCRIPTIONS.equals(fileNameWithoutExt)) {
+        continue;
+      }
+      final InspectionProfileEntry tool=tools.get(fileNameWithoutExt).getTool();
+      w.append(getToolPresentableName(tool)).append("\n");
+      writeInspectionDescription(w,tool,transformer);
+      w.append("\n");
+      final SAXBuilder builder=new SAXBuilder();
+      try {
+        final Document doc=builder.build(inspectionData);
+        final Element root=doc.getRootElement();
+        final List problems=root.getChildren(PROBLEM_ELEMENT);
+        final int maxFileColonLineLength=getMaxFileColonLineNumLength(inspectionData,tool,problems);
+        for (        Object problem : problems) {
+          final Element fileElement=((Element)problem).getChild(FILE_ELEMENT);
+          final String filePath=getPath(fileElement);
+          if (resultsIgnored(inspectionData,tool)) {
+            continue;
+          }
+          final Element lineElement=((Element)problem).getChild(LINE_ELEMENT);
+          final Element problemDescrElement=((Element)problem).getChild(DESCRIPTION_ELEMENT);
+          final String severity=((Element)problem).getChild(PROBLEM_CLASS_ELEMENT).getAttributeValue(SEVERITY_ATTRIBUTE);
+          final String fileLineNum=lineElement.getText();
+          w.append("  ").append(filePath).append(':').append(fileLineNum);
+          for (int i=maxFileColonLineLength - 1 - filePath.length()- fileLineNum.length() + 4; i >= 0; i--) {
+            w.append(' ');
+          }
+          w.append("[").append(severity).append("] ");
+          w.append(problemDescrElement.getText()).append('\n');
+        }
+      }
+ catch (      JDOMException e) {
+        throw new ConversionException("Unknown results format, file = " + inspectionData.getPath() + ". Error: "+ e.getMessage());
+      }
+      w.append("\n");
+    }
+  }
+ catch (  IOException e) {
+    throw new ConversionException("Cannot write inspection results: " + e.getMessage());
+  }
+ finally {
+    if (w != null) {
+      try {
+        w.close();
+      }
+ catch (      IOException e) {
+        warn("Cannot save inspection results: " + e.getMessage());
+      }
+    }
+  }
+}
