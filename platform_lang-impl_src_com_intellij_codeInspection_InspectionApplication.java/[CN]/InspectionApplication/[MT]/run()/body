@@ -1,10 +1,11 @@
 {
+  File tmpDir=null;
   try {
     myProjectPath=myProjectPath.replace(File.separatorChar,'/');
     VirtualFile vfsProject=LocalFileSystem.getInstance().findFileByPath(myProjectPath);
     if (vfsProject == null) {
       logError(InspectionsBundle.message("inspection.application.file.cannot.be.found",myProjectPath));
-      InspectionMain.printHelp();
+      printHelp();
     }
     logMessage(1,InspectionsBundle.message("inspection.application.opening.project"));
     if (ConversionService.getInstance().convertSilently(myProjectPath,createConversionListener()).openingIsCanceled()) {
@@ -55,7 +56,7 @@
       VirtualFile vfsDir=LocalFileSystem.getInstance().findFileByPath(mySourceDirectory);
       if (vfsDir == null) {
         logError(InspectionsBundle.message("inspection.application.directory.cannot.be.found",mySourceDirectory));
-        InspectionMain.printHelp();
+        printHelp();
       }
       PsiDirectory psiDirectory=PsiManager.getInstance(myProject).findDirectory(vfsDir);
       scope=new AnalysisScope(psiDirectory);
@@ -64,13 +65,34 @@
     if (!myRunWithEditorSettings) {
       logMessageLn(1,InspectionsBundle.message("inspection.application.chosen.profile.log message",inspectionProfile.getName()));
     }
+    InspectionsReportConverter reportConverter=getReportConverter(myOutputFormat);
+    if (reportConverter == null && myOutputFormat.endsWith(".xsl")) {
+      reportConverter=new XSLTReportConverter(myOutputFormat);
+    }
+    final String resultsDataPath;
+    if ((reportConverter == null || !reportConverter.useTmpDirForRawData()) && myOutPath != null) {
+      resultsDataPath=myOutPath;
+    }
+ else {
+      try {
+        tmpDir=FileUtil.createTempDirectory("inspections","data");
+        resultsDataPath=tmpDir.getPath();
+      }
+ catch (      IOException e) {
+        LOG.error(e);
+        System.err.println("Cannot create tmp directory.");
+        System.exit(1);
+        return;
+      }
+    }
+    final List<File> inspectionsResults=new ArrayList<File>();
     ProgressManager.getInstance().runProcess(new Runnable(){
       public void run(){
         if (!InspectionManagerEx.canRunInspections(myProject,false)) {
           if (myErrorCodeRequired)           System.exit(1);
           return;
         }
-        inspectionContext.launchInspectionsOffline(scope,myOutPath,myRunGlobalToolsOnly,im);
+        inspectionContext.launchInspectionsOffline(scope,resultsDataPath,myRunGlobalToolsOnly,im,inspectionsResults);
         logMessageLn(1,"\n" + InspectionsBundle.message("inspection.capitalized.done") + "\n");
       }
     }
@@ -111,16 +133,32 @@
       }
     }
 );
-    describeInspections(myOutPath + File.separatorChar + DESCRIPTIONS+ XML_EXTENSION,myRunWithEditorSettings ? null : inspectionProfile.getName());
+    final String descriptionsFile=resultsDataPath + File.separatorChar + DESCRIPTIONS+ XML_EXTENSION;
+    describeInspections(descriptionsFile,myRunWithEditorSettings ? null : inspectionProfile.getName());
+    inspectionsResults.add(new File(descriptionsFile));
+    if (reportConverter != null) {
+      try {
+        reportConverter.convert(resultsDataPath,myOutPath,inspectionContext.getTools(),inspectionsResults);
+      }
+ catch (      InspectionsReportConverter.ConversionException e) {
+        logError("\n" + e.getMessage());
+        printHelp();
+      }
+    }
   }
  catch (  IOException e) {
     LOG.error(e);
     logError(e.getMessage());
-    InspectionMain.printHelp();
+    printHelp();
   }
 catch (  Throwable e) {
     LOG.error(e);
     logError(e.getMessage());
     if (myErrorCodeRequired)     System.exit(1);
+  }
+ finally {
+    if (tmpDir != null) {
+      FileUtil.delete(tmpDir);
+    }
   }
 }

@@ -1,49 +1,7 @@
 {
-  IndentData alignOffset=getAlignOffset();
+  AlignmentImpl alignment=CoreFormatterUtil.getAlignment(myCurrentBlock);
   WhiteSpace whiteSpace=myCurrentBlock.getWhiteSpace();
-  if (alignOffset == null) {
-    if (whiteSpace.containsLineFeeds()) {
-      adjustSpacingByIndentOffset();
-    }
- else {
-      whiteSpace.arrangeSpaces(myCurrentBlock.getSpaceProperty());
-    }
-    return true;
-  }
-  if (whiteSpace.containsLineFeeds()) {
-    whiteSpace.setSpaces(alignOffset.getSpaces(),alignOffset.getIndentSpaces());
-    storeAlignmentMapping();
-    return true;
-  }
-  IndentData indentBeforeBlock=myCurrentBlock.getNumberOfSymbolsBeforeBlock();
-  int diff=alignOffset.getTotalSpaces() - indentBeforeBlock.getTotalSpaces();
-  if (diff == 0) {
-    storeAlignmentMapping();
-    return true;
-  }
-  if (diff > 0) {
-    whiteSpace.setSpaces(whiteSpace.getSpaces() + diff,whiteSpace.getIndentSpaces());
-    if (!whiteSpace.containsLineFeeds()) {
-      whiteSpace.setForceSkipTabulationsUsage(true);
-    }
-    storeAlignmentMapping();
-    return true;
-  }
-  AlignmentImpl alignment=myCurrentBlock.getAlignmentAtStartOffset();
   if (alignment == null) {
-    return true;
-  }
-  if (!alignment.isAllowBackwardShift()) {
-    return true;
-  }
-  LeafBlockWrapper offsetResponsibleBlock=alignment.getOffsetRespBlockBefore(myCurrentBlock);
-  if (offsetResponsibleBlock == null) {
-    return true;
-  }
-  if (offsetResponsibleBlock.getWhiteSpace().isIsReadOnly()) {
-    return true;
-  }
-  if (!allowBackwardAlignment(offsetResponsibleBlock)) {
     if (whiteSpace.containsLineFeeds()) {
       adjustSpacingByIndentOffset();
     }
@@ -52,22 +10,41 @@
     }
     return true;
   }
-  Set<LeafBlockWrapper> blocksCausedRealignment=myBackwardShiftedAlignedBlocks.get(offsetResponsibleBlock);
-  if (blocksCausedRealignment != null && blocksCausedRealignment.contains(myCurrentBlock)) {
-    LOG.error(String.format("Formatting error - code block %s is set to be shifted right because of its alignment with " + "block %s more than once. I.e. moving the former block because of alignment algorithm causes " + "subsequent block to be shifted right as well - cyclic dependency",offsetResponsibleBlock.getTextRange(),myCurrentBlock.getTextRange()));
-    blocksCausedRealignment.add(myCurrentBlock);
+  BlockAlignmentProcessor alignmentProcessor=ALIGNMENT_PROCESSORS.get(alignment.getAnchor());
+  if (alignmentProcessor == null) {
+    LOG.error(String.format("Can't find alignment processor for alignment anchor %s",alignment.getAnchor()));
     return true;
   }
-  myBackwardShiftedAlignedBlocks.clear();
-  myBackwardShiftedAlignedBlocks.put(offsetResponsibleBlock,blocksCausedRealignment=new HashSet<LeafBlockWrapper>());
-  blocksCausedRealignment.add(myCurrentBlock);
-  storeAlignmentMapping(myCurrentBlock,offsetResponsibleBlock);
-  WhiteSpace previousWhiteSpace=offsetResponsibleBlock.getWhiteSpace();
-  previousWhiteSpace.setSpaces(previousWhiteSpace.getSpaces() - diff,previousWhiteSpace.getIndentOffset());
-  if (!previousWhiteSpace.containsLineFeeds()) {
-    previousWhiteSpace.setForceSkipTabulationsUsage(true);
-  }
-  myCurrentBlock=offsetResponsibleBlock.getNextBlock();
-  onCurrentLineChanged();
-  return false;
+  BlockAlignmentProcessor.Context context=new BlockAlignmentProcessor.Context(alignment,myCurrentBlock,myAlignmentMappings,myBackwardShiftedAlignedBlocks);
+  BlockAlignmentProcessor.Result result=alignmentProcessor.applyAlignment(context);
+switch (result) {
+case TARGET_BLOCK_PROCESSED_NOT_ALIGNED:
+    return true;
+case TARGET_BLOCK_ALIGNED:
+  storeAlignmentMapping();
+return true;
+case BACKWARD_BLOCK_ALIGNED:
+LeafBlockWrapper offsetResponsibleBlock=alignment.getOffsetRespBlockBefore(myCurrentBlock);
+if (offsetResponsibleBlock == null) {
+return true;
+}
+Set<LeafBlockWrapper> blocksCausedRealignment;
+myBackwardShiftedAlignedBlocks.clear();
+myBackwardShiftedAlignedBlocks.put(offsetResponsibleBlock,blocksCausedRealignment=new HashSet<LeafBlockWrapper>());
+blocksCausedRealignment.add(myCurrentBlock);
+storeAlignmentMapping(myCurrentBlock,offsetResponsibleBlock);
+myCurrentBlock=offsetResponsibleBlock.getNextBlock();
+onCurrentLineChanged();
+return false;
+case UNABLE_TO_ALIGN_BACKWARD_BLOCK:
+if (whiteSpace.containsLineFeeds()) {
+adjustSpacingByIndentOffset();
+}
+ else {
+whiteSpace.arrangeSpaces(myCurrentBlock.getSpaceProperty());
+}
+return true;
+default :
+return true;
+}
 }
