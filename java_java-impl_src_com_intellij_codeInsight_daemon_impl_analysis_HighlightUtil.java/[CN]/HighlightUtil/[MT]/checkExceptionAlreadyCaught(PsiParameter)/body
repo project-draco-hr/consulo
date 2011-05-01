@@ -1,0 +1,34 @@
+{
+  final PsiElement scope=parameter.getDeclarationScope();
+  if (!(scope instanceof PsiCatchSection))   return null;
+  final PsiCatchSection catchSection=(PsiCatchSection)scope;
+  final PsiCatchSection[] allCatchSections=catchSection.getTryStatement().getCatchSections();
+  final int startFrom=ArrayUtil.find(allCatchSections,catchSection) - 1;
+  if (startFrom < 0)   return null;
+  final List<PsiTypeElement> typeElements=PsiUtil.getParameterTypeElements(parameter);
+  final boolean isInMultiCatch=typeElements.size() > 1;
+  final Collection<HighlightInfo> result=Lists.newArrayList();
+  for (  PsiTypeElement typeElement : typeElements) {
+    final PsiClass catchClass=PsiUtil.resolveClassInClassTypeOnly(typeElement.getType());
+    if (catchClass == null)     continue;
+    for (int i=startFrom; i >= 0; i--) {
+      final PsiCatchSection upperCatchSection=allCatchSections[i];
+      final PsiType upperCatchType=upperCatchSection.getCatchType();
+      final boolean highlight=upperCatchType instanceof PsiDisjunctionType ? checkMultipleTypes(catchClass,((PsiDisjunctionType)upperCatchType).getDisjunctions()) : checkSingleType(catchClass,upperCatchType);
+      if (highlight) {
+        final String className=PsiFormatUtil.formatClass(catchClass,PsiFormatUtilBase.SHOW_NAME | PsiFormatUtilBase.SHOW_FQ_NAME);
+        final String description=JavaErrorMessages.message("exception.already.caught",className);
+        final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.ERROR,typeElement,description);
+        result.add(highlightInfo);
+        QuickFixAction.registerQuickFixAction(highlightInfo,new MoveCatchUpFix(catchSection,upperCatchSection));
+        if (isInMultiCatch) {
+          QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteMultiCatchFix(typeElement));
+        }
+ else {
+          QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteCatchFix(parameter));
+        }
+      }
+    }
+  }
+  return result.size() > 0 ? result : null;
+}
