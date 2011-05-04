@@ -1,0 +1,48 @@
+{
+  final PsiElement scope=parameter.getDeclarationScope();
+  if (!(scope instanceof PsiCatchSection))   return null;
+  final PsiCatchSection catchSection=(PsiCatchSection)scope;
+  final PsiCatchSection[] allCatchSections=catchSection.getTryStatement().getCatchSections();
+  final int idx=ArrayUtil.find(allCatchSections,catchSection);
+  if (idx <= 0)   return null;
+  thrownTypes=Sets.newHashSet(thrownTypes);
+  thrownTypes.add(PsiType.getJavaLangError(parameter.getManager(),parameter.getResolveScope()));
+  thrownTypes.add(PsiType.getJavaLangRuntimeException(parameter.getManager(),parameter.getResolveScope()));
+  final Collection<HighlightInfo> result=Lists.newArrayList();
+  final List<PsiTypeElement> parameterTypeElements=PsiUtil.getParameterTypeElements(parameter);
+  final boolean isMultiCatch=parameterTypeElements.size() > 1;
+  for (  PsiTypeElement catchTypeElement : parameterTypeElements) {
+    final PsiType catchType=catchTypeElement.getType();
+    Collection<PsiClassType> caught=ContainerUtil.findAll(thrownTypes,new Condition<PsiClassType>(){
+      @Override public boolean value(      PsiClassType type){
+        return catchType.isAssignableFrom(type);
+      }
+    }
+);
+    if (caught.isEmpty())     continue;
+    final Collection<PsiClassType> caughtCopy=Sets.newHashSet(caught);
+    for (int i=0; i < idx; i++) {
+      final PsiParameter prevCatchParameter=allCatchSections[i].getParameter();
+      if (prevCatchParameter == null)       continue;
+      for (      PsiTypeElement prevCatchTypeElement : PsiUtil.getParameterTypeElements(prevCatchParameter)) {
+        final PsiType prevCatchType=prevCatchTypeElement.getType();
+        for (Iterator<PsiClassType> iterator=caught.iterator(); iterator.hasNext(); ) {
+          if (prevCatchType.isAssignableFrom(iterator.next()))           iterator.remove();
+        }
+        if (caught.isEmpty())         break;
+      }
+    }
+    if (caught.isEmpty()) {
+      final String message=JavaErrorMessages.message("exception.already.caught.warn",formatTypes(caughtCopy),caughtCopy.size());
+      final HighlightInfo highlightInfo=HighlightInfo.createHighlightInfo(HighlightInfoType.WARNING,catchSection,message);
+      if (isMultiCatch) {
+        QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteMultiCatchFix(catchTypeElement));
+      }
+ else {
+        QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteCatchFix(parameter));
+      }
+      result.add(highlightInfo);
+    }
+  }
+  return result;
+}
