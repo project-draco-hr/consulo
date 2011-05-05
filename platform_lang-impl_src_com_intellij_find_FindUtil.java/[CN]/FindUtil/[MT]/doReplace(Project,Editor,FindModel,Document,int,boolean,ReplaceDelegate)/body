@@ -4,6 +4,7 @@
   int occurrences=0;
   List<Pair<TextRange,String>> rangesToChange=new ArrayList<Pair<TextRange,String>>();
   boolean replaced=false;
+  boolean reallyReplaced=false;
   int offset=caretOffset;
   while (offset >= 0 && offset < editor.getDocument().getTextLength()) {
     caretOffset=offset;
@@ -40,18 +41,23 @@
         ((DocumentEx)document).setInBulkUpdate(true);
       }
     }
-    boolean reallyReplace=toPrompt;
-    TextRange textRange=doReplace(project,document,model,result,toReplace,reallyReplace,rangesToChange);
-    int newOffset=model.isForward() ? textRange.getEndOffset() : textRange.getStartOffset();
-    if (newOffset == offset) {
-      newOffset+=model.isForward() ? 1 : -1;
+    if (delegate == null || delegate.shouldReplace(result,toReplace)) {
+      boolean reallyReplace=toPrompt;
+      if (reallyReplace) {
+        if (!reallyReplaced) {
+          editor.getCaretModel().moveToOffset(0);
+          reallyReplaced=true;
+        }
+      }
+      TextRange textRange=doReplace(project,document,model,result,toReplace,reallyReplace,rangesToChange);
+      replaced=true;
+      int newOffset=model.isForward() ? textRange.getEndOffset() : textRange.getStartOffset();
+      if (newOffset == offset) {
+        newOffset+=model.isForward() ? 1 : -1;
+      }
+      offset=newOffset;
+      occurrences++;
     }
-    offset=newOffset;
-    occurrences++;
-    if (!replaced) {
-      editor.getCaretModel().moveToOffset(0);
-    }
-    replaced=true;
   }
   if (replaced) {
     if (!toPrompt) {
@@ -68,7 +74,7 @@
         TextRange range=pair.getFirst();
         String replace=pair.getSecond();
         newText.append(text,offsetBefore,range.getStartOffset());
-        if (delegate.shouldReplace(range,replace)) {
+        if (delegate == null || delegate.shouldReplace(range,replace)) {
           newText.append(replace);
         }
  else {
@@ -80,20 +86,31 @@
         }
       }
       newText.append(text,offsetBefore,text.length());
+      if (caretOffset > newText.length()) {
+        caretOffset=newText.length();
+      }
+      final int finalCaretOffset=caretOffset;
       CommandProcessor.getInstance().executeCommand(project,new Runnable(){
         public void run(){
           ApplicationManager.getApplication().runWriteAction(new Runnable(){
             public void run(){
               document.setText(newText);
+              editor.getCaretModel().moveToOffset(finalCaretOffset);
             }
           }
 );
         }
       }
 ,null,document);
-      if (caretOffset > document.getTextLength())       caretOffset=document.getTextLength();
     }
-    editor.getCaretModel().moveToOffset(caretOffset);
+ else {
+      if (reallyReplaced) {
+        if (caretOffset > document.getTextLength()) {
+          caretOffset=document.getTextLength();
+        }
+        editor.getCaretModel().moveToOffset(caretOffset);
+      }
+    }
   }
   ReplaceInProjectManager.reportNumberReplacedOccurences(project,occurrences);
   return replaced;
