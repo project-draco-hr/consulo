@@ -2,11 +2,25 @@
   final GrExpression lValue=expression.getLValue();
   GrExpression rValue=expression.getRValue();
   final IElementType token=expression.getOperationToken();
+  boolean toWrap=false;
+  PsiElement realLValue=PsiUtil.skipParentheses(lValue,false);
+  if (realLValue instanceof GrReferenceExpression) {
+    PsiElement resolved=((GrReferenceExpression)realLValue).resolve();
+    if (resolved instanceof GrVariable && context.analyzedVars.toWrap((GrVariable)resolved))     toWrap=true;
+  }
   if (token == mASSIGN) {
     lValue.accept(this);
-    builder.append(" = ");
+    if (toWrap) {
+      builder.append(".set(");
+    }
+ else {
+      builder.append(" = ");
+    }
     if (rValue != null) {
       rValue.accept(this);
+    }
+    if (toWrap) {
+      builder.append(')');
     }
     return;
   }
@@ -14,13 +28,30 @@
   final PsiElement resolved=resolveResult.getElement();
   if (resolved instanceof PsiMethod) {
     lValue.accept(this);
-    builder.append(" = ");
+    if (toWrap) {
+      builder.append(".set(");
+    }
+ else {
+      builder.append(" = ");
+    }
     if (rValue == null) {
       rValue=factory.createExpressionFromText("null");
     }
-    invokeMethodOn(((PsiMethod)resolved),lValue,new GrExpression[]{rValue},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),expression);
+    invokeMethodOn(((PsiMethod)resolved),(GrExpression)lValue.copy(),new GrExpression[]{rValue},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),expression);
+    if (toWrap) {
+      builder.append(')');
+    }
   }
  else {
+    if (toWrap) {
+      lValue.accept(this);
+      builder.append(".set(");
+      GrBinaryExpression bin=(GrBinaryExpression)factory.createExpressionFromText("a" + expression.getOpToken().getText().charAt(0) + "b",expression);
+      GrExpression newLValue=(GrExpression)bin.getLeftOperand().replace(lValue);
+      GrExpression newRValue=rValue == null ? null : (GrExpression)bin.getRightOperand().replace(rValue);
+      writeSimpleBinaryExpression(bin.getOperationToken(),newLValue,newRValue);
+      builder.append(')');
+    }
     writeSimpleBinaryExpression(expression.getOpToken(),lValue,rValue);
   }
 }
