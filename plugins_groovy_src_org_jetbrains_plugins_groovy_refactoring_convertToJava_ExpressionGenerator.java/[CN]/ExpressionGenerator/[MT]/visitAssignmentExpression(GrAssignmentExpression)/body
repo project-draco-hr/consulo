@@ -8,50 +8,57 @@
     PsiElement resolved=((GrReferenceExpression)realLValue).resolve();
     if (resolved instanceof GrVariable && context.analyzedVars.toWrap((GrVariable)resolved))     toWrap=true;
   }
+  StringBuilder curBuilder;
+  ExpressionGenerator curGenerator;
+  boolean doNeedExpression=toWrap && PsiUtil.resultOfExpressionUsed(expression);
+  if (doNeedExpression) {
+    curBuilder=new StringBuilder();
+    curGenerator=new ExpressionGenerator(curBuilder,context);
+  }
+ else {
+    curBuilder=builder;
+    curGenerator=this;
+  }
+  lValue.accept(curGenerator);
+  if (toWrap) {
+    curBuilder.append(".set(");
+  }
+ else {
+    curBuilder.append(" = ");
+  }
   if (token == mASSIGN) {
-    lValue.accept(this);
-    if (toWrap) {
-      builder.append(".set(");
-    }
- else {
-      builder.append(" = ");
-    }
     if (rValue != null) {
-      rValue.accept(this);
-    }
-    if (toWrap) {
-      builder.append(')');
-    }
-    return;
-  }
-  final GroovyResolveResult resolveResult=PsiImplUtil.extractUniqueResult(expression.multiResolve(false));
-  final PsiElement resolved=resolveResult.getElement();
-  if (resolved instanceof PsiMethod) {
-    lValue.accept(this);
-    if (toWrap) {
-      builder.append(".set(");
-    }
- else {
-      builder.append(" = ");
-    }
-    if (rValue == null) {
-      rValue=factory.createExpressionFromText("null");
-    }
-    invokeMethodOn(((PsiMethod)resolved),(GrExpression)lValue.copy(),new GrExpression[]{rValue},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),expression);
-    if (toWrap) {
-      builder.append(')');
+      rValue.accept(curGenerator);
     }
   }
  else {
-    if (toWrap) {
+    final GroovyResolveResult resolveResult=PsiImplUtil.extractUniqueResult(expression.multiResolve(false));
+    final PsiElement resolved=resolveResult.getElement();
+    if (resolved instanceof PsiMethod && !shouldNotReplaceOperatorWithMethod(lValue.getType(),rValue,expression.getOperationToken())) {
+      if (rValue == null) {
+        rValue=factory.createExpressionFromText("null");
+      }
+      curGenerator.invokeMethodOn(((PsiMethod)resolved),(GrExpression)lValue.copy(),new GrExpression[]{rValue},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),expression);
+    }
+ else {
+      if (toWrap) {
+        GrBinaryExpression bin=(GrBinaryExpression)factory.createExpressionFromText("a" + expression.getOpToken().getText().charAt(0) + "b",expression);
+        GrExpression newLValue=(GrExpression)bin.getLeftOperand().replace(lValue);
+        GrExpression newRValue=rValue == null ? null : (GrExpression)bin.getRightOperand().replace(rValue);
+        curGenerator.writeSimpleBinaryExpression(bin.getOperationToken(),newLValue,newRValue);
+      }
+ else {
+        curGenerator.writeSimpleBinaryExpression(expression.getOpToken(),lValue,rValue);
+      }
+    }
+  }
+  if (toWrap) {
+    curBuilder.append(')');
+    if (doNeedExpression) {
+      curBuilder.append(';');
+      context.myStatements.add(curBuilder.toString());
       lValue.accept(this);
-      builder.append(".set(");
-      GrBinaryExpression bin=(GrBinaryExpression)factory.createExpressionFromText("a" + expression.getOpToken().getText().charAt(0) + "b",expression);
-      GrExpression newLValue=(GrExpression)bin.getLeftOperand().replace(lValue);
-      GrExpression newRValue=rValue == null ? null : (GrExpression)bin.getRightOperand().replace(rValue);
-      writeSimpleBinaryExpression(bin.getOperationToken(),newLValue,newRValue);
-      builder.append(')');
+      builder.append(".get()");
     }
-    writeSimpleBinaryExpression(expression.getOpToken(),lValue,rValue);
   }
 }
