@@ -22,26 +22,42 @@
     invokeMethodOn(setter,qualifier,new GrExpression[]{fromText},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
   }
  else   if (resolved instanceof PsiVariable) {
-    PsiElement parent=unary.getParent();
-    boolean addParentheses=!(parent instanceof GrControlStatement || parent instanceof GrStatementOwner || parent instanceof GrArgumentList|| parent instanceof GrParenthesizedExpression);
-    if (addParentheses) {
-      builder.append('(');
-    }
-    boolean wrap=context.analyzedVars.toWrap((GrVariable)resolved);
-    if (wrap) {
-      operand.accept(this);
-      builder.append(".set(");
+    boolean wrap=context.analyzedVars.toWrap((PsiVariable)resolved);
+    boolean doNeedExpression=PsiUtil.resultOfExpressionUsed(unary);
+    StringBuilder curBuilder;
+    ExpressionGenerator curGenerator;
+    if (doNeedExpression && wrap) {
+      curBuilder=new StringBuilder();
+      curGenerator=new ExpressionGenerator(curBuilder,context);
     }
  else {
-      operand.accept(this);
-      builder.append(" = ");
+      curBuilder=builder;
+      curGenerator=this;
     }
-    invokeMethodOn(method,(GrExpression)operand.copy(),GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
+    PsiElement parent=unary.getParent();
+    boolean shouldInsertParentheses=parent instanceof GrExpression;
+    if (shouldInsertParentheses) {
+      curBuilder.append('(');
+    }
+    operand.accept(curGenerator);
     if (wrap) {
-      builder.append(')');
+      curBuilder.append(".set(");
     }
-    if (addParentheses) {
-      builder.append(')');
+ else {
+      curBuilder.append(" = ");
+    }
+    curGenerator.invokeMethodOn(method,(GrExpression)operand.copy(),GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
+    if (shouldInsertParentheses) {
+      curBuilder.append(')');
+    }
+    if (wrap) {
+      curBuilder.append(')');
+      if (doNeedExpression) {
+        curBuilder.append(';');
+        context.myStatements.add(curBuilder.toString());
+        operand.accept(this);
+        builder.append(".get()");
+      }
     }
   }
   return true;
