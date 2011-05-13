@@ -17,21 +17,57 @@
     final PsiMethod setter=GroovyPropertyUtils.findPropertySetter(type,propertyName,unary);
     if (setter == null)     return false;
     final ExpressionGenerator generator=new ExpressionGenerator(new StringBuilder(),context);
-    generator.invokeMethodOn(method,operand,GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
+    if (shouldNotReplaceOperatorWithMethod(operand.getType(),null,unary.getOperationTokenType())) {
+      writeSimpleUnary(operand,unary,generator);
+    }
+ else {
+      generator.invokeMethodOn(method,operand,GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
+    }
     final GrExpression fromText=factory.createExpressionFromText(generator.toString(),unary);
     invokeMethodOn(setter,qualifier,new GrExpression[]{fromText},GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
   }
  else   if (resolved instanceof PsiVariable) {
-    PsiElement parent=unary.getParent();
-    boolean addParentheses=!(parent instanceof GrControlStatement || parent instanceof GrStatementOwner || parent instanceof GrArgumentList|| parent instanceof GrParenthesizedExpression);
-    if (addParentheses) {
-      builder.append('(');
+    boolean wrap=context.analyzedVars.toWrap((PsiVariable)resolved);
+    boolean doNeedExpression=PsiUtil.resultOfExpressionUsed(unary);
+    StringBuilder curBuilder;
+    ExpressionGenerator curGenerator;
+    if (doNeedExpression && wrap) {
+      curBuilder=new StringBuilder();
+      curGenerator=new ExpressionGenerator(curBuilder,context);
     }
-    operand.accept(this);
-    builder.append(" = ");
-    invokeMethodOn(method,operand,GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
-    if (addParentheses) {
-      builder.append(')');
+ else {
+      curBuilder=builder;
+      curGenerator=this;
+    }
+    PsiElement parent=unary.getParent();
+    boolean shouldInsertParentheses=parent instanceof GrExpression;
+    if (shouldInsertParentheses) {
+      curBuilder.append('(');
+    }
+    operand.accept(curGenerator);
+    if (wrap) {
+      curBuilder.append(".set(");
+    }
+ else {
+      curBuilder.append(" = ");
+    }
+    if (shouldNotReplaceOperatorWithMethod(operand.getType(),null,unary.getOperationTokenType())) {
+      writeSimpleUnary((GrExpression)operand.copy(),unary,curGenerator);
+    }
+ else {
+      curGenerator.invokeMethodOn(method,(GrExpression)operand.copy(),GrExpression.EMPTY_ARRAY,GrNamedArgument.EMPTY_ARRAY,GrClosableBlock.EMPTY_ARRAY,resolveResult.getSubstitutor(),unary);
+    }
+    if (shouldInsertParentheses) {
+      curBuilder.append(')');
+    }
+    if (wrap) {
+      curBuilder.append(')');
+      if (doNeedExpression) {
+        curBuilder.append(';');
+        context.myStatements.add(curBuilder.toString());
+        operand.accept(this);
+        builder.append(".get()");
+      }
     }
   }
   return true;

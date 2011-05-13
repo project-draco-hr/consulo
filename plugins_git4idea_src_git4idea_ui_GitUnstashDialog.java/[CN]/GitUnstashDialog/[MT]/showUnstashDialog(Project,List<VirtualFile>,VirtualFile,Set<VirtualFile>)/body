@@ -7,10 +7,14 @@
   affectedRoots.add(d.getGitRoot());
   GitLineHandler h=d.handler(false);
   final AtomicBoolean needToEscapedBraces=new AtomicBoolean(false);
+  final AtomicBoolean conflict=new AtomicBoolean();
   h.addLineListener(new GitLineHandlerAdapter(){
     public void onLineAvailable(    String line,    Key outputType){
       if (line.startsWith("fatal: Needed a single revision")) {
         needToEscapedBraces.set(true);
+      }
+ else       if (line.contains("Merge conflict")) {
+        conflict.set(true);
       }
     }
   }
@@ -20,7 +24,15 @@
     h=d.handler(true);
     rc=GitHandlerUtil.doSynchronously(h,GitBundle.getString("unstash.unstashing"),h.printableCommandLine(),false);
   }
-  if (rc != 0) {
+  if (conflict.get()) {
+    VirtualFile root=d.getGitRoot();
+    boolean conflictsResolved=new UnstashConflictResolver(project,d.getSelectedStash()).merge(Collections.singleton(root));
+    if (conflictsResolved) {
+      LOG.info("loadRoot " + root + " conflicts resolved, dropping stash");
+      GitStashUtils.dropStash(project,root);
+    }
+  }
+ else   if (rc != 0) {
     GitUIUtil.showOperationErrors(project,h.errors(),h.printableCommandLine());
   }
 }
