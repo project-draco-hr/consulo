@@ -7,7 +7,8 @@
 ;
   final Factory<BaseInjection> producer=new NullableFactory<BaseInjection>(){
     public BaseInjection create(){
-      return getSelectedInjection();
+      final InjInfo info=getSelectedInjection();
+      return info == null ? null : info.injection;
     }
   }
 ;
@@ -35,7 +36,14 @@
 ;
   final AnAction removeAction=new AnAction("Remove","Remove",Icons.DELETE_ICON){
     @Override public void update(    final AnActionEvent e){
-      e.getPresentation().setEnabled(!getSelectedInjections().isEmpty());
+      boolean enabled=false;
+      for (      InjInfo info : getSelectedInjections()) {
+        if (!info.isBundled()) {
+          enabled=true;
+          break;
+        }
+      }
+      e.getPresentation().setEnabled(enabled);
     }
     @Override public void actionPerformed(    final AnActionEvent e){
       performRemove();
@@ -60,9 +68,9 @@
       if (action != null)       action.update(e);
     }
     @Override public void actionPerformed(    final AnActionEvent e){
-      final BaseInjection injection=getSelectedInjection();
+      final InjInfo injection=getSelectedInjection();
       if (injection != null) {
-        addInjection(injection.copy());
+        addInjection(injection.injection.copy());
       }
     }
   }
@@ -74,13 +82,6 @@
   addAction.registerCustomShortcutSet(CommonShortcuts.INSERT,myInjectionsTable);
   removeAction.registerCustomShortcutSet(CommonShortcuts.DELETE,myInjectionsTable);
   editAction.registerCustomShortcutSet(CommonShortcuts.ENTER,myInjectionsTable);
-  group.add(new AnAction("Import","Import",IconLoader.getIcon("/actions/install.png")){
-    @Override public void actionPerformed(    final AnActionEvent e){
-      doImportAction(e.getDataContext());
-      updateCountLabel();
-    }
-  }
-);
   group.addSeparator();
   group.add(new AnAction("Enable Selected Injections","Enable Selected Injections",Icons.SELECT_ALL_ICON){
     @Override public void actionPerformed(    final AnActionEvent e){
@@ -100,5 +101,77 @@
     }
   }
 .registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,0)),myInjectionsTable);
+  if (myInfos.length > 1) {
+    group.addSeparator();
+    final AnAction shareAction=new AnAction("Make Global",null,IconLoader.getIcon("/actions/import.png")){
+      @Override public void actionPerformed(      final AnActionEvent e){
+        final List<InjInfo> injections=getSelectedInjections();
+        final CfgInfo cfg=getTargetCfgInfo(injections);
+        if (cfg == null)         return;
+        for (        InjInfo info : injections) {
+          if (info.cfgInfo == cfg)           continue;
+          if (info.isBundled())           continue;
+          info.cfgInfo.injectionInfos.remove(info);
+          cfg.addInjection(info.injection);
+        }
+        final int[] selectedRows=myInjectionsTable.getSelectedRows();
+        myInjectionsTable.getListTableModel().setItems(getInjInfoList(myInfos));
+        TableUtil.selectRows(myInjectionsTable,selectedRows);
+      }
+      @Override public void update(      final AnActionEvent e){
+        final CfgInfo cfg=getTargetCfgInfo(getSelectedInjections());
+        e.getPresentation().setEnabled(cfg != null);
+        e.getPresentation().setText(cfg == getDefaultCfgInfo() ? "Make Global" : "Move to Project");
+        super.update(e);
+      }
+      @Nullable private CfgInfo getTargetCfgInfo(      final List<InjInfo> injections){
+        CfgInfo cfg=null;
+        for (        InjInfo info : injections) {
+          if (info.isBundled()) {
+            continue;
+          }
+          if (cfg == null)           cfg=info.cfgInfo;
+ else           if (cfg != info.cfgInfo)           return info.cfgInfo;
+        }
+        if (cfg == null)         return cfg;
+        for (        CfgInfo info : myInfos) {
+          if (info != cfg)           return info;
+        }
+        throw new AssertionError();
+      }
+    }
+;
+    shareAction.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,InputEvent.SHIFT_DOWN_MASK)),myInjectionsTable);
+    group.add(shareAction);
+  }
+  group.addSeparator();
+  group.add(new AnAction("Import","Import",IconLoader.getIcon("/actions/install.png")){
+    @Override public void actionPerformed(    final AnActionEvent e){
+      doImportAction(e.getDataContext());
+      updateCountLabel();
+    }
+  }
+);
+  group.add(new AnAction("Export","Export",IconLoader.getIcon("/actions/export.png")){
+    @Override public void actionPerformed(    final AnActionEvent e){
+      final List<BaseInjection> injections=getInjectionList(getSelectedInjections());
+      final VirtualFileWrapper wrapper=FileChooserFactory.getInstance().createSaveFileDialog(new FileSaverDescriptor("Export Selected Injections to File...","","xml"),myProject).save(null,null);
+      if (wrapper == null)       return;
+      final Configuration configuration=new Configuration();
+      configuration.setInjections(injections);
+      final Document document=new Document(configuration.getState());
+      try {
+        JDOMUtil.writeDocument(document,wrapper.getFile(),"\n");
+      }
+ catch (      IOException ex) {
+        final String msg=ex.getLocalizedMessage();
+        Messages.showErrorDialog(myProject,msg != null && msg.length() > 0 ? msg : ex.toString(),"Export failed");
+      }
+    }
+    @Override public void update(    final AnActionEvent e){
+      e.getPresentation().setEnabled(!getSelectedInjections().isEmpty());
+    }
+  }
+);
   return group;
 }
