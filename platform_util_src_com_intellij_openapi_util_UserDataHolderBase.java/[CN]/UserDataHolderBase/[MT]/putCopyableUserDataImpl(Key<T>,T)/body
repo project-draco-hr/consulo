@@ -1,19 +1,30 @@
 {
-synchronized (COPYABLE_MAP_LOCK) {
-    Map<Key,Object> copyMap=getUserData(COPYABLE_USER_MAP_KEY);
-    if (copyMap == null) {
-      if (value == null)       return;
-      copyMap=createDataMap(1);
-      putUserData(COPYABLE_USER_MAP_KEY,copyMap);
-    }
-    if (value != null) {
-      copyMap.put(key,value);
-    }
+  while (true) {
+    try {
+      Map<Key,Object> copyMap=getOrCreateCopyableMap(value != null);
+      if (copyMap == null)       break;
+      if (value == null) {
+        copyMap.remove(key);
+        if (copyMap.isEmpty()) {
+          ((StripedLockConcurrentHashMap<Key,Object>)copyMap).blockModification();
+          ConcurrentMap<Key,Object> newCopyMap;
+          if (copyMap.isEmpty()) {
+            newCopyMap=null;
+          }
  else {
-      copyMap.remove(key);
-      if (copyMap.isEmpty()) {
-        putUserData(COPYABLE_USER_MAP_KEY,null);
+            newCopyMap=createDataMap(copyMap.size());
+            newCopyMap.putAll(copyMap);
+          }
+          boolean replaced=replace(COPYABLE_USER_MAP_KEY,copyMap,newCopyMap);
+          if (!replaced)           continue;
+        }
       }
+ else {
+        copyMap.put(key,value);
+      }
+      break;
+    }
+ catch (    ConcurrentModificationException ignored) {
     }
   }
 }
