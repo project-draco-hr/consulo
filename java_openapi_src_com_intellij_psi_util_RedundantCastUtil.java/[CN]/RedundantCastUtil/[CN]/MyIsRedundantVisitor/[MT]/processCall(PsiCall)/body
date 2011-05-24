@@ -1,0 +1,57 @@
+{
+  PsiExpressionList argumentList=expression.getArgumentList();
+  if (argumentList == null)   return;
+  PsiExpression[] args=argumentList.getExpressions();
+  PsiMethod oldMethod=expression.resolveMethod();
+  if (oldMethod == null)   return;
+  PsiParameter[] parameters=oldMethod.getParameterList().getParameters();
+  try {
+    for (int i=0; i < args.length; i++) {
+      final PsiExpression arg=deparenthesizeExpression(args[i]);
+      if (arg instanceof PsiTypeCastExpression) {
+        PsiTypeCastExpression cast=(PsiTypeCastExpression)arg;
+        if (i == args.length - 1 && args.length == parameters.length && parameters[i].isVarArgs()) {
+          continue;
+        }
+        PsiCall newCall=(PsiCall)expression.copy();
+        final PsiExpressionList argList=newCall.getArgumentList();
+        LOG.assertTrue(argList != null);
+        PsiExpression[] newArgs=argList.getExpressions();
+        PsiTypeCastExpression castExpression=(PsiTypeCastExpression)deparenthesizeExpression(newArgs[i]);
+        PsiExpression castOperand=castExpression.getOperand();
+        if (castOperand == null)         return;
+        castExpression.replace(castOperand);
+        if (newCall instanceof PsiEnumConstant) {
+          final PsiEnumConstant enumConstant=(PsiEnumConstant)expression;
+          PsiClass containingClass=enumConstant.getContainingClass();
+          final JavaPsiFacade facade=JavaPsiFacade.getInstance(enumConstant.getProject());
+          final PsiClassType type=facade.getElementFactory().createType(containingClass);
+          final JavaResolveResult newResult=facade.getResolveHelper().resolveConstructor(type,newCall.getArgumentList(),enumConstant);
+          if (oldMethod.equals(newResult.getElement()) && newResult.isValidResult()) {
+            addToResults(cast);
+          }
+        }
+ else {
+          final JavaResolveResult newResult=newCall.resolveMethodGenerics();
+          if (oldMethod.equals(newResult.getElement()) && newResult.isValidResult() && Comparing.equal(((PsiCallExpression)newCall).getType(),((PsiCallExpression)expression).getType())) {
+            addToResults(cast);
+          }
+        }
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    return;
+  }
+  for (  PsiExpression arg : args) {
+    if (arg instanceof PsiTypeCastExpression) {
+      PsiExpression castOperand=((PsiTypeCastExpression)arg).getOperand();
+      if (castOperand != null) {
+        castOperand.accept(this);
+      }
+    }
+ else {
+      arg.accept(this);
+    }
+  }
+}
