@@ -3,9 +3,9 @@
   if (psiClass == null) {
     return null;
   }
-  final TestDataDescriptor cached=CACHE.get(psiClass.getQualifiedName());
-  if (cached != null) {
-    return cached.isComplete() ? cached : null;
+  final Pair<TestDataDescriptor,Long> cached=CACHE.get(psiClass.getQualifiedName());
+  if (cached != null && cached.second + CACHE_ENTRY_TTL_MS > System.currentTimeMillis()) {
+    return cached.first.isComplete() ? cached.first : null;
   }
   TestFramework[] frameworks=Extensions.getExtensions(TestFramework.EXTENSION_NAME);
   TestFramework framework=null;
@@ -21,20 +21,25 @@
   final PsiElement setUpMethod=framework.findSetUpMethod(psiClass);
   final PsiElement tearDownMethod=framework.findTearDownMethod(psiClass);
   TestDataDescriptor descriptor=new TestDataDescriptor();
+  List<String> testNames=new ArrayList<String>();
   for (  PsiMethod method : psiClass.getMethods()) {
     final String name=getTestName(method.getName());
-    if (method == setUpMethod || method == tearDownMethod || name.equals(psiClass.getName())) {
+    if (method == setUpMethod || method == tearDownMethod || name.equals(psiClass.getName()) || isUtilityMethod(method,psiClass,framework)) {
       continue;
     }
-    final Collection<VirtualFile> matchedFiles=getMatchedFiles(gotoModel,name);
-    if (!descriptor.isComplete()) {
-      descriptor.populate(name,matchedFiles);
-    }
-    if (descriptor.isComplete()) {
-      CACHE.put(psiClass.getQualifiedName(),descriptor);
-      return descriptor;
-    }
+    testNames.add(name);
   }
-  CACHE.put(psiClass.getQualifiedName(),new TestDataDescriptor());
-  return null;
+  ProjectFileIndex fileIndex=ProjectRootManager.getInstance(psiClass.getProject()).getFileIndex();
+  final Pair<String,Collection<VirtualFile>> matchedFiles=getMatchedFiles(gotoModel,fileIndex,testNames,psiClass);
+  if (matchedFiles == null) {
+    CACHE.put(psiClass.getQualifiedName(),new Pair<TestDataDescriptor,Long>(descriptor,System.currentTimeMillis()));
+    return descriptor;
+  }
+  descriptor.populate(matchedFiles.first,matchedFiles.second);
+  if (!descriptor.isComplete()) {
+    CACHE.put(psiClass.getQualifiedName(),new Pair<TestDataDescriptor,Long>(descriptor,System.currentTimeMillis()));
+    return null;
+  }
+  CACHE.put(psiClass.getQualifiedName(),new Pair<TestDataDescriptor,Long>(descriptor,System.currentTimeMillis()));
+  return descriptor;
 }
