@@ -1,0 +1,49 @@
+{
+  boolean cancelled=false;
+  final Collection<MavenArtifact> result=new LinkedHashSet<MavenArtifact>();
+  MavenEmbeddersManager manager=MavenProjectsManager.getInstance(project).getEmbeddersManager();
+  MavenEmbedderWrapper embedder=manager.getEmbedder(MavenEmbeddersManager.FOR_DOWNLOAD);
+  try {
+    embedder.customizeForResolve(new SoutMavenConsole(),new MavenProgressIndicator(indicator));
+    final List<MavenRemoteRepository> remoteRepositories=convertRepositories(repositories);
+    final List<MavenArtifact> firstResult=embedder.resolveTransitively(Collections.singletonList(new MavenArtifactInfo(mavenId,"jar",null)),remoteRepositories);
+    for (    MavenArtifact artifact : firstResult) {
+      if (!artifact.isResolved())       continue;
+      if (MavenConstants.SCOPE_TEST.equals(artifact.getScope()))       continue;
+      result.add(artifact);
+    }
+    if (!extraTypes.isEmpty()) {
+      final HashSet<String> allowedClassifiers=new HashSet<String>();
+      final Collection<MavenArtifactInfo> resolve=new LinkedHashSet<MavenArtifactInfo>();
+      for (      MavenExtraArtifactType extraType : extraTypes) {
+        allowedClassifiers.add(extraType.getDefaultClassifier());
+        resolve.add(new MavenArtifactInfo(mavenId,extraType.getDefaultExtension(),extraType.getDefaultClassifier()));
+        for (        MavenArtifact artifact : firstResult) {
+          if (MavenConstants.SCOPE_TEST.equals(artifact.getScope()))           continue;
+          resolve.add(new MavenArtifactInfo(artifact.getMavenId(),extraType.getDefaultExtension(),extraType.getDefaultClassifier()));
+        }
+      }
+      final List<MavenArtifact> secondResult=embedder.resolveTransitively(new ArrayList<MavenArtifactInfo>(resolve),remoteRepositories);
+      for (      MavenArtifact artifact : secondResult) {
+        if (!artifact.isResolved())         continue;
+        if (MavenConstants.SCOPE_TEST.equals(artifact.getScope()))         continue;
+        if (!allowedClassifiers.contains(artifact.getClassifier()))         continue;
+        result.add(artifact);
+      }
+    }
+  }
+ catch (  MavenProcessCanceledException e) {
+    cancelled=true;
+  }
+ finally {
+    manager.release(embedder);
+    if (!cancelled) {
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          resultProcessor.process(new ArrayList<MavenArtifact>(result));
+        }
+      }
+);
+    }
+  }
+}
