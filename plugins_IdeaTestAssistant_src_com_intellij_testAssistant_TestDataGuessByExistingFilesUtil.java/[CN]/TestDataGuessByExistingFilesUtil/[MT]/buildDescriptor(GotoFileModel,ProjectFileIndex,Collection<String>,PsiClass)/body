@@ -1,12 +1,12 @@
 {
   List<Trinity<NameUtil.Matcher,String,String>> input=new ArrayList<Trinity<NameUtil.Matcher,String,String>>();
+  Set<String> testNamesLowerCase=new HashSet<String>();
   for (  String testName : testNames) {
     String pattern=String.format("*%s*",testName);
     input.add(new Trinity<NameUtil.Matcher,String,String>(NameUtil.buildMatcher(pattern,0,true,true,pattern.toLowerCase().equals(pattern)),testName,pattern));
+    testNamesLowerCase.add(testName.toLowerCase());
   }
-  String dir=null;
-  String testName=null;
-  List<VirtualFile> files=new ArrayList<VirtualFile>();
+  Set<TestLocationDescriptor> descriptors=new HashSet<TestLocationDescriptor>();
   for (  String name : gotoModel.getNames(false)) {
     boolean currentNameProcessed=false;
     for (    Trinity<NameUtil.Matcher,String,String> trinity : input) {
@@ -30,22 +30,32 @@
         if (i < 0 || (i + trinity.second.length() < filePath.length()) && Character.isDigit(filePath.charAt(i + trinity.second.length()))) {
           continue;
         }
-        currentNameProcessed=true;
-        final String parentPath=PathUtil.getParentPath(file.getPath());
-        if (dir == null || dir.equals(parentPath)) {
-          dir=parentPath;
-          if (testName == null || !testName.equals(trinity.second)) {
-            files.clear();
-          }
-          testName=trinity.second;
-          files.add(file);
+        TestLocationDescriptor current=new TestLocationDescriptor();
+        current.populate(trinity.second,file);
+        if (!current.isComplete()) {
           continue;
         }
-        if (moreRelevantPath(file,files,psiClass,trinity.second)) {
-          testName=trinity.second;
-          dir=parentPath;
-          files.clear();
-          files.add(file);
+        String pattern=current.filePrefix.toLowerCase();
+        if (!StringUtil.isEmpty(current.filePrefix)) {
+          boolean skip=false;
+          for (          String testName : testNamesLowerCase) {
+            if (testName.startsWith(pattern)) {
+              skip=true;
+              break;
+            }
+          }
+          if (skip) {
+            continue;
+          }
+        }
+        currentNameProcessed=true;
+        if (descriptors.isEmpty() || descriptors.iterator().next().dir.equals(current.dir)) {
+          descriptors.add(current);
+          continue;
+        }
+        if (moreRelevantPath(current,descriptors,psiClass)) {
+          descriptors.clear();
+          descriptors.add(current);
         }
       }
       if (currentNameProcessed) {
@@ -53,5 +63,5 @@
       }
     }
   }
-  return (testName == null || files.isEmpty()) ? null : new Pair<String,Collection<VirtualFile>>(testName,files);
+  return new TestDataDescriptor(descriptors);
 }
