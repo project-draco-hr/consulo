@@ -1,0 +1,46 @@
+{
+  for (  CommentCompleteHandler handler : Extensions.getExtensions(CommentCompleteHandler.EP_NAME)) {
+    if (handler.isApplicable(comment,commenter)) {
+      return handler.isCommentComplete(comment,commenter);
+    }
+  }
+  String commentText=comment.getText();
+  final boolean docComment=isDocComment(comment,commenter);
+  final String expectedCommentEnd=docComment ? commenter.getDocumentationCommentSuffix() : commenter.getBlockCommentSuffix();
+  if (!commentText.endsWith(expectedCommentEnd))   return false;
+  final PsiFile containingFile=comment.getContainingFile();
+  final Language language=comment.getParent().getLanguage();
+  Lexer lexer=LanguageParserDefinitions.INSTANCE.forLanguage(language).createLexer(containingFile.getProject());
+  final String commentPrefix=docComment ? commenter.getDocumentationCommentPrefix() : commenter.getBlockCommentPrefix();
+  lexer.start(commentText,commentPrefix == null ? 0 : commentPrefix.length(),commentText.length());
+  QuoteHandler fileTypeHandler=TypedHandler.getQuoteHandler(containingFile,editor);
+  JavaLikeQuoteHandler javaLikeQuoteHandler=fileTypeHandler instanceof JavaLikeQuoteHandler ? (JavaLikeQuoteHandler)fileTypeHandler : null;
+  while (true) {
+    IElementType tokenType=lexer.getTokenType();
+    if (tokenType == null) {
+      return false;
+    }
+    if (javaLikeQuoteHandler != null && javaLikeQuoteHandler.getStringTokenTypes() != null && javaLikeQuoteHandler.getStringTokenTypes().contains(tokenType)) {
+      String text=commentText.substring(lexer.getTokenStart(),lexer.getTokenEnd());
+      int endOffset=comment.getTextRange().getEndOffset();
+      if (text.endsWith(expectedCommentEnd) && endOffset < containingFile.getTextLength() && containingFile.getText().charAt(endOffset) == '\n') {
+        return true;
+      }
+    }
+    if (lexer.getTokenEnd() == commentText.length()) {
+      if (lexer.getTokenType() == commenter.getLineCommentTokenType()) {
+        lexer.start(commentText,lexer.getTokenStart() + commenter.getLineCommentPrefix().length(),commentText.length());
+        lexer.advance();
+        continue;
+      }
+ else       if (isInvalidPsi(comment)) {
+        return false;
+      }
+      return lexer.getTokenEnd() - lexer.getTokenStart() == 1;
+    }
+    if (tokenType == commenter.getDocumentationCommentTokenType() || tokenType == commenter.getBlockCommentTokenType()) {
+      return false;
+    }
+    lexer.advance();
+  }
+}

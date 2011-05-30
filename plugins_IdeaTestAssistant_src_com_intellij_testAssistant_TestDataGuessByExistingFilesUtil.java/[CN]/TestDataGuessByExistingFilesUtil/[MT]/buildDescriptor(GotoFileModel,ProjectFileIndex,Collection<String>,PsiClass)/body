@@ -1,0 +1,67 @@
+{
+  List<Trinity<Matcher,String,String>> input=new ArrayList<Trinity<Matcher,String,String>>();
+  Set<String> testNamesLowerCase=new HashSet<String>();
+  for (  String testName : testNames) {
+    String pattern=String.format("*%s*",testName);
+    input.add(new Trinity<Matcher,String,String>(NameUtil.buildMatcher(pattern,0,true,true,pattern.toLowerCase().equals(pattern)),testName,pattern));
+    testNamesLowerCase.add(testName.toLowerCase());
+  }
+  Set<TestLocationDescriptor> descriptors=new HashSet<TestLocationDescriptor>();
+  for (  String name : gotoModel.getNames(false)) {
+    boolean currentNameProcessed=false;
+    for (    Trinity<Matcher,String,String> trinity : input) {
+      if (!trinity.first.matches(name)) {
+        continue;
+      }
+      final Object[] elements=gotoModel.getElementsByName(name,false,trinity.third);
+      if (elements == null) {
+        continue;
+      }
+      for (      Object element : elements) {
+        if (!(element instanceof PsiFile)) {
+          continue;
+        }
+        final VirtualFile file=((PsiFile)element).getVirtualFile();
+        if (file == null || fileIndex.isInSource(file)) {
+          continue;
+        }
+        final String filePath=PathUtil.getFileName(file.getPath()).toLowerCase();
+        int i=filePath.indexOf(trinity.second.toLowerCase());
+        if (i < 0 || (i + trinity.second.length() < filePath.length()) && Character.isDigit(filePath.charAt(i + trinity.second.length()))) {
+          continue;
+        }
+        TestLocationDescriptor current=new TestLocationDescriptor();
+        current.populate(trinity.second,file);
+        if (!current.isComplete()) {
+          continue;
+        }
+        String pattern=current.filePrefix.toLowerCase();
+        if (!StringUtil.isEmpty(current.filePrefix)) {
+          boolean skip=false;
+          for (          String testName : testNamesLowerCase) {
+            if (testName.startsWith(pattern)) {
+              skip=true;
+              break;
+            }
+          }
+          if (skip) {
+            continue;
+          }
+        }
+        currentNameProcessed=true;
+        if (descriptors.isEmpty() || descriptors.iterator().next().dir.equals(current.dir)) {
+          descriptors.add(current);
+          continue;
+        }
+        if (moreRelevantPath(current,descriptors,psiClass)) {
+          descriptors.clear();
+          descriptors.add(current);
+        }
+      }
+      if (currentNameProcessed) {
+        break;
+      }
+    }
+  }
+  return new TestDataDescriptor(descriptors);
+}
