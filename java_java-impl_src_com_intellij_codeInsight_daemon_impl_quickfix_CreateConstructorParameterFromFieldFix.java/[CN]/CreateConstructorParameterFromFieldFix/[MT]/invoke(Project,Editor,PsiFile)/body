@@ -1,17 +1,15 @@
 {
   if (!CodeInsightUtilBase.prepareFileForWrite(file))   return;
-  PsiClass aClass=getField().getContainingClass();
-  PsiMethod[] constructors=aClass.getConstructors();
+  PsiMethod[] constructors=myClass.getConstructors();
   if (constructors.length == 0) {
-    final AddDefaultConstructorFix defaultConstructorFix=new AddDefaultConstructorFix(aClass);
+    final AddDefaultConstructorFix defaultConstructorFix=new AddDefaultConstructorFix(myClass);
     ApplicationManager.getApplication().runWriteAction(new Runnable(){
       public void run(){
         defaultConstructorFix.invoke(project,editor,file);
       }
     }
 );
-    aClass=getField().getContainingClass();
-    constructors=aClass.getConstructors();
+    constructors=myClass.getConstructors();
   }
   Arrays.sort(constructors,new Comparator<PsiMethod>(){
     @Override public int compare(    PsiMethod c1,    PsiMethod c2){
@@ -28,7 +26,39 @@
     }
   }
 );
-  for (  PsiMethod constructor : constructors) {
-    if (!addParameterToConstructor(project,file,editor,constructor))     break;
+  final ArrayList<PsiMethod> constrs=filterConstructorsIfFieldAlreadyAssigned(constructors,getField());
+  if (constrs.size() > 1) {
+    final PsiMethodMember[] members=new PsiMethodMember[constrs.size()];
+    int i=0;
+    for (    PsiMethod constructor : constrs) {
+      members[i++]=new PsiMethodMember(constructor);
+    }
+    final List<PsiMethodMember> elements;
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      elements=Arrays.asList(members);
+    }
+ else {
+      final MemberChooser<PsiMethodMember> chooser=new MemberChooser<PsiMethodMember>(members,false,true,project);
+      chooser.setTitle("Choose constructors to add parameter to");
+      chooser.show();
+      elements=chooser.getSelectedElements();
+      if (elements == null)       return;
+    }
+    for (    PsiMethodMember member : elements) {
+      if (!addParameterToConstructor(project,file,editor,member.getElement(),new PsiField[]{getField()}))       break;
+    }
+  }
+ else   if (!constrs.isEmpty()) {
+    final Collection<SmartPsiElementPointer<PsiField>> fieldsToFix=getFieldsToFix();
+    final PsiMethod constructor=constrs.get(0);
+    final List<PsiField> fields=new ArrayList<PsiField>();
+    for (    SmartPsiElementPointer<PsiField> elementPointer : fieldsToFix) {
+      final PsiField field=elementPointer.getElement();
+      if (field != null && filterConstructorsIfFieldAlreadyAssigned(new PsiMethod[]{constructor},field).contains(constructor)) {
+        fields.add(field);
+      }
+    }
+    addParameterToConstructor(project,file,editor,constructor,constrs.size() == constructors.length ? fields.toArray(new PsiField[fields.size()]) : new PsiField[]{getField()});
+    fieldsToFix.clear();
   }
 }

@@ -1,0 +1,179 @@
+{
+  myModel=model;
+  myDiffWindow=wnd;
+  mySourceDirField.setText(model.getSourceDir().getPath());
+  myTargetDirField.setText(model.getTargetDir().getPath());
+  mySourceDirLabel.setIcon(model.getSourceDir().getIcon());
+  myTargetDirLabel.setIcon(model.getTargetDir().getIcon());
+  myModel.setTable(myTable);
+  myModel.setPanel(this);
+  Disposer.register(this,myModel);
+  myTable.setModel(myModel);
+  new TableSpeedSearch(myTable);
+  final DirDiffTableCellRenderer renderer=new DirDiffTableCellRenderer(myTable);
+  myTable.setDefaultRenderer(Object.class,renderer);
+  myTable.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  final Project project=myModel.getProject();
+  myTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    @Override public void valueChanged(    ListSelectionEvent e){
+      final int lastIndex=e.getLastIndex();
+      final int firstIndex=e.getFirstIndex();
+      final DirDiffElement last=myModel.getElementAt(lastIndex);
+      final DirDiffElement first=myModel.getElementAt(firstIndex);
+      if (last == null || first == null)       return;
+      if (last.isSeparator()) {
+        myTable.getSelectionModel().setLeadSelectionIndex(lastIndex + ((lastIndex < firstIndex) ? 1 : -1));
+      }
+ else       if (first.isSeparator()) {
+        myTable.getSelectionModel().setLeadSelectionIndex(firstIndex + ((firstIndex < lastIndex) ? 1 : -1));
+      }
+ else {
+        update(false);
+      }
+      myDiffWindow.setTitle(myModel.getTitle());
+    }
+  }
+);
+  myTable.addKeyListener(new KeyAdapter(){
+    @Override public void keyPressed(    KeyEvent e){
+      final int keyCode=e.getKeyCode();
+      final int rows=myTable.getRowCount();
+      int row=myTable.getSelectedRow();
+      if (keyCode == KeyEvent.VK_DOWN && row != rows - 1) {
+        row++;
+        final DirDiffElement element=myModel.getElementAt(row);
+        if (element == null)         return;
+        if (element.isSeparator()) {
+          row++;
+        }
+      }
+ else       if (keyCode == KeyEvent.VK_UP && row != 0) {
+        row--;
+        final DirDiffElement element=myModel.getElementAt(row);
+        if (element == null)         return;
+        if (element.isSeparator()) {
+          row--;
+        }
+      }
+ else {
+        return;
+      }
+      final DirDiffElement element=myModel.getElementAt(row);
+      if (element == null)       return;
+      if (!element.isSeparator()) {
+        e.consume();
+        myTable.changeSelection(row,(myModel.getColumnCount() - 1) / 2,false,false);
+      }
+    }
+  }
+);
+  final TableColumnModel columnModel=myTable.getColumnModel();
+  final TableColumn operationColumn=columnModel.getColumn((columnModel.getColumnCount() - 1) / 2);
+  operationColumn.setMaxWidth(25);
+  operationColumn.setMinWidth(25);
+  for (int i=0; i < columnModel.getColumnCount(); i++) {
+    final String name=myModel.getColumnName(i);
+    final TableColumn column=columnModel.getColumn(i);
+    if (DirDiffTableModel.COLUMN_DATE.equals(name)) {
+      column.setMaxWidth(90);
+      column.setMinWidth(90);
+    }
+ else     if (DirDiffTableModel.COLUMN_SIZE.equals(name)) {
+      column.setMaxWidth(120);
+      column.setMinWidth(120);
+    }
+  }
+  final DirDiffToolbarActions actions=new DirDiffToolbarActions(myModel,this.getPanel());
+  final ActionToolbar toolbar=ActionManager.getInstance().createActionToolbar("DirDiff",actions,true);
+  registerCustomShortcuts(actions,myRootPanel);
+  myToolBarPanel.add(toolbar.getComponent(),BorderLayout.CENTER);
+  final JBLoadingPanel loadingPanel=new JBLoadingPanel(new BorderLayout(),wnd.getDisposable());
+  loadingPanel.add(myComponent,BorderLayout.CENTER);
+  myTable.putClientProperty(myModel.DECORATOR,loadingPanel);
+  myTable.addComponentListener(new ComponentAdapter(){
+    @Override public void componentShown(    ComponentEvent e){
+      myTable.removeComponentListener(this);
+      myModel.reloadModel();
+    }
+  }
+);
+  myRootPanel.removeAll();
+  myRootPanel.add(loadingPanel,BorderLayout.CENTER);
+  myFilter=new FilterComponent("dir.diff.filter",15,false){
+    @Override public void filter(){
+      fireFilterUpdated();
+    }
+    @Override protected void onEscape(    KeyEvent e){
+      e.consume();
+      focusTable();
+    }
+    @Override protected JComponent getPopupLocationComponent(){
+      return UIUtil.findComponentOfType(super.getPopupLocationComponent(),JTextComponent.class);
+    }
+  }
+;
+  myModel.addModelListener(new DirDiffModelListener(){
+    @Override public void updateStarted(){
+      myFilter.setEnabled(false);
+    }
+    @Override public void updateFinished(){
+      myFilter.setEnabled(true);
+    }
+  }
+);
+  myFilter.getTextEditor().setColumns(10);
+  myFilter.setFilter(myModel.getSettings().getFilter());
+  oldFilter=myFilter.getFilter();
+  myFilterPanel.add(myFilter,BorderLayout.CENTER);
+  myFilterLabel.setLabelFor(myFilter);
+  final Callable<DiffElement> srcChooser=myModel.getSourceDir().getElementChooser(project);
+  final Callable<DiffElement> trgChooser=myModel.getTargetDir().getElementChooser(project);
+  if (srcChooser != null) {
+    mySourceDirField.setButtonEnabled(true);
+    mySourceDirField.addActionListener(new AbstractAction(){
+      @Override public void actionPerformed(      ActionEvent e){
+        try {
+          final Callable<DiffElement> chooser=myModel.getSourceDir().getElementChooser(project);
+          if (chooser == null)           return;
+          final DiffElement newElement=chooser.call();
+          if (newElement != null) {
+            myModel.setSourceDir(newElement);
+            mySourceDirField.setText(newElement.getPath());
+          }
+        }
+ catch (        Exception e1) {
+        }
+      }
+    }
+);
+  }
+ else {
+    mySourceDirField.setButtonEnabled(false);
+    mySourceDirField.getButton().setVisible(false);
+    mySourceDirField.setEditable(false);
+  }
+  if (trgChooser != null) {
+    myTargetDirField.setButtonEnabled(true);
+    myTargetDirField.addActionListener(new AbstractAction(){
+      @Override public void actionPerformed(      ActionEvent e){
+        try {
+          final Callable<DiffElement> chooser=myModel.getTargetDir().getElementChooser(project);
+          if (chooser == null)           return;
+          final DiffElement newElement=chooser.call();
+          if (newElement != null) {
+            myModel.setTargetDir(newElement);
+            myTargetDirField.setText(newElement.getPath());
+          }
+        }
+ catch (        Exception e1) {
+        }
+      }
+    }
+);
+  }
+ else {
+    myTargetDirField.setButtonEnabled(false);
+    myTargetDirField.getButton().setVisible(false);
+    myTargetDirField.setEditable(false);
+  }
+}

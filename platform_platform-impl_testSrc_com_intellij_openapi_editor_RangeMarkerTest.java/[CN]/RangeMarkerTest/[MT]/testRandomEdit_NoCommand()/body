@@ -1,0 +1,78 @@
+{
+  final int N=100;
+  final Random gen=new Random();
+  int N_TRIES=Timings.adjustAccordingToMySpeed(7000);
+  System.out.println("N_TRIES = " + N_TRIES);
+  DocumentEx document=null;
+  for (int tryn=0; tryn < N_TRIES; tryn++) {
+    ((UndoManagerImpl)UndoManager.getInstance(getProject())).flushCurrentCommandMerger();
+    ((UndoManagerImpl)UndoManager.getGlobalInstance()).flushCurrentCommandMerger();
+    if (document != null) {
+      ((UndoManagerImpl)UndoManager.getInstance(getProject())).clearUndoRedoQueueInTests(document);
+      ((UndoManagerImpl)UndoManager.getGlobalInstance()).clearUndoRedoQueueInTests(document);
+    }
+    if (tryn % 10000 == 0) {
+      System.out.println(tryn);
+    }
+    document=(DocumentEx)EditorFactory.getInstance().createDocument(StringUtil.repeatSymbol(' ',N));
+    final DocumentEx finalDocument=document;
+    new WriteCommandAction(getProject()){
+      @Override protected void run(      Result result) throws Exception {
+        List<Pair<RangeMarker,TextRange>> adds=new ArrayList<Pair<RangeMarker,TextRange>>();
+        List<Pair<RangeMarker,TextRange>> dels=new ArrayList<Pair<RangeMarker,TextRange>>();
+        List<Trinity<Integer,Integer,Integer>> edits=new ArrayList<Trinity<Integer,Integer,Integer>>();
+        try {
+          for (int i=0; i < 30; i++) {
+            int x=gen.nextInt(N);
+            int y=x + gen.nextInt(N - x);
+            RangeMarkerEx r=(RangeMarkerEx)finalDocument.createRangeMarker(x,y);
+            adds.add(Pair.create((RangeMarker)r,TextRange.create(r)));
+          }
+          for (int i=0; i < 10; i++) {
+            int offset=gen.nextInt(finalDocument.getTextLength());
+            if (gen.nextBoolean()) {
+              int length=gen.nextInt(5);
+              edits.add(Trinity.create(offset,0,length));
+              finalDocument.insertString(offset,StringUtil.repeatSymbol(' ',length));
+            }
+ else {
+              int length=gen.nextInt(finalDocument.getTextLength() - offset);
+              edits.add(Trinity.create(offset,length,0));
+              finalDocument.deleteString(offset,offset + length);
+            }
+          }
+          List<Pair<RangeMarker,TextRange>> candidates=new ArrayList<Pair<RangeMarker,TextRange>>(adds);
+          while (!candidates.isEmpty()) {
+            int size=candidates.size();
+            int x=gen.nextInt(size);
+            Pair<RangeMarker,TextRange> c=candidates.remove(x);
+            RangeMarkerEx r=(RangeMarkerEx)c.first;
+            assertEquals(size - 1,candidates.size());
+            dels.add(c);
+            r.dispose();
+          }
+        }
+ catch (        AssertionError e) {
+          String s="adds: ";
+          for (          Pair<RangeMarker,TextRange> c : adds) {
+            TextRange t=c.second;
+            s+=t.getStartOffset() + "," + t.getEndOffset()+ ", ";
+          }
+          s+="\nedits: ";
+          for (          Trinity<Integer,Integer,Integer> edit : edits) {
+            s+=edit.first + "," + edit.second+ ","+ edit.third+ ",  ";
+          }
+          s+="\ndels: ";
+          for (          Pair<RangeMarker,TextRange> c : dels) {
+            int index=adds.indexOf(c);
+            assertSame(c,adds.get(index));
+            s+=index + ", ";
+          }
+          System.err.println(s);
+          throw e;
+        }
+      }
+    }
+.execute();
+  }
+}

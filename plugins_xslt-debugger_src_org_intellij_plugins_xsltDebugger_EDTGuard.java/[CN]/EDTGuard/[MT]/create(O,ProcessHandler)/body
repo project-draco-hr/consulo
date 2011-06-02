@@ -1,0 +1,79 @@
+{
+  final Pair<LinkedBlockingQueue<Call>,LinkedBlockingQueue<Call.Result>> queue=Pair.create(new LinkedBlockingQueue<Call>(10),new LinkedBlockingQueue<Call.Result>());
+  final Thread thread=new Thread("Async Invocation Thread for " + process){
+    @Override public void run(){
+      try {
+        while (!Thread.currentThread().isInterrupted()) {
+          final Call call=queue.first.take();
+          if (call != null) {
+            queue.second.offer(call.invoke());
+          }
+        }
+      }
+ catch (      InterruptedException e) {
+      }
+    }
+  }
+;
+  thread.start();
+  final AtomicBoolean ref=new AtomicBoolean();
+  final Disposable d=new Disposable(){
+    boolean disposed;
+    @Override public void dispose(){
+      if (!disposed) {
+        disposed=true;
+        ref.set(true);
+        thread.interrupt();
+      }
+    }
+  }
+;
+  process.addProcessListener(new ProcessAdapter(){
+    @Override public void processTerminated(    ProcessEvent event){
+synchronized (d) {
+        Disposer.dispose(d);
+      }
+    }
+    @Override public void processWillTerminate(    ProcessEvent event,    boolean willBeDestroyed){
+      if (!willBeDestroyed) {
+synchronized (d) {
+          Disposer.dispose(d);
+        }
+      }
+    }
+  }
+);
+  final Alarm alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD,d);
+  final Alarm alarm2=new Alarm(Alarm.ThreadToUse.OWN_THREAD,alarm);
+  final Runnable watchdog=new Runnable(){
+    @Override public void run(){
+      ref.set(true);
+    }
+  }
+;
+  final Runnable ping=new Runnable(){
+    @Override public void run(){
+synchronized (d) {
+        if (alarm.isDisposed()) {
+          return;
+        }
+        alarm2.addRequest(watchdog,200);
+        try {
+          ref.set(!target.ping());
+        }
+ catch (        Exception e) {
+          ref.set(true);
+        }
+ finally {
+          alarm2.cancelRequest(watchdog);
+        }
+      }
+    }
+  }
+;
+  alarm.addRequest(ping,500);
+  final EDTGuard guard=new EDTGuard(target,queue,ref);
+  final ClassLoader classLoader=target.getClass().getClassLoader();
+  final Class<?>[] interfaces=target.getClass().getInterfaces();
+  return (T)Proxy.newProxyInstance(classLoader,interfaces,guard);
+}

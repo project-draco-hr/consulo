@@ -2,6 +2,7 @@
   final MessageBusConnection conn=project.getMessageBus().connect();
   myConnections.put(project,conn);
   final ProjectRef projRef=new ProjectRef(project);
+  final int projectId=getProjectId(project);
   conn.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootListener(){
     private VirtualFile[] myRootsBefore;
     public void beforeRootsChange(    final ModuleRootEvent event){
@@ -14,31 +15,47 @@
     }
     public void rootsChanged(    final ModuleRootEvent event){
       try {
-        try {
-          final VirtualFile[] rootsAfter=ProjectRootManager.getInstance(projRef.get()).getContentSourceRoots();
+        final VirtualFile[] rootsBefore=myRootsBefore;
+        myRootsBefore=null;
+        final VirtualFile[] rootsAfter=ProjectRootManager.getInstance(projRef.get()).getContentSourceRoots();
+        final Set<VirtualFile> newRoots=new HashSet<VirtualFile>();
+        final Set<VirtualFile> oldRoots=new HashSet<VirtualFile>();
 {
-            final Set<VirtualFile> newRoots=new HashSet<VirtualFile>();
+          if (rootsAfter.length > 0) {
             ContainerUtil.addAll(newRoots,rootsAfter);
-            if (myRootsBefore != null) {
-              newRoots.removeAll(Arrays.asList(myRootsBefore));
-            }
-            scanSourceContent(projRef,newRoots,newRoots.size(),true);
           }
+          if (rootsBefore != null) {
+            newRoots.removeAll(Arrays.asList(rootsBefore));
+          }
+        }
 {
-            final Set<VirtualFile> oldRoots=new HashSet<VirtualFile>();
-            if (myRootsBefore != null) {
-              ContainerUtil.addAll(oldRoots,myRootsBefore);
-            }
-            if (!oldRoots.isEmpty()) {
-              oldRoots.removeAll(Arrays.asList(rootsAfter));
-            }
-            scanSourceContent(projRef,oldRoots,oldRoots.size(),false);
+          if (rootsBefore != null) {
+            ContainerUtil.addAll(oldRoots,rootsBefore);
+          }
+          if (!oldRoots.isEmpty() && rootsAfter.length > 0) {
+            oldRoots.removeAll(Arrays.asList(rootsAfter));
           }
         }
-  finally {
-          myRootsBefore=null;
+        startAsyncScan(projectId);
+        new Task.Backgroundable(project,CompilerBundle.message("compiler.initial.scanning.progress.text"),false){
+          public void run(          @NotNull final ProgressIndicator indicator){
+            try {
+              if (newRoots.size() > 0) {
+                scanSourceContent(projRef,newRoots,newRoots.size(),true);
+              }
+              if (oldRoots.size() > 0) {
+                scanSourceContent(projRef,oldRoots,oldRoots.size(),false);
+              }
+              markOldOutputRoots(projRef,buildOutputRootsLayout(projRef));
+            }
+ catch (            ProjectRef.ProjectClosedException swallowed) {
+            }
+ finally {
+              terminateAsyncScan(projectId);
+            }
+          }
         }
-        markOldOutputRoots(projRef,buildOutputRootsLayout(projRef));
+.queue();
       }
  catch (      ProjectRef.ProjectClosedException e) {
         LOG.info(e);
