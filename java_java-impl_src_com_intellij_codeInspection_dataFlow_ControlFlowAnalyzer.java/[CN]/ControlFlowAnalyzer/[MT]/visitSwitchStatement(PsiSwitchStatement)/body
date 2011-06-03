@@ -2,11 +2,19 @@
   startElement(switchStmt);
   PsiElementFactory psiFactory=JavaPsiFacade.getInstance(switchStmt.getProject()).getElementFactory();
   PsiExpression caseExpression=switchStmt.getExpression();
+  Set<PsiEnumConstant> enumVals=null;
   if (caseExpression != null) {
     caseExpression.accept(this);
     generateBoxingUnboxingInstructionFor(caseExpression,PsiType.INT);
-    if (TypeConversionUtil.isEnumType(caseExpression.getType())) {
+    final PsiClass psiClass=PsiUtil.resolveClassInType(caseExpression.getType());
+    if (psiClass != null && psiClass.isEnum()) {
       addInstruction(new FieldReferenceInstruction(caseExpression,"switch statement expression"));
+      enumVals=new HashSet<PsiEnumConstant>();
+      for (      PsiField f : psiClass.getFields()) {
+        if (f instanceof PsiEnumConstant) {
+          enumVals.add((PsiEnumConstant)f);
+        }
+      }
     }
  else {
       addInstruction(new PopInstruction());
@@ -34,6 +42,11 @@
               pushUnknown();
             }
             addInstruction(new ConditionalGotoInstruction(offset,false,statement));
+            if (enumVals != null) {
+              if (caseValue instanceof PsiReferenceExpression) {
+                enumVals.remove(((PsiReferenceExpression)caseValue).resolve());
+              }
+            }
           }
  catch (          IncorrectOperationException e) {
             LOG.error(e);
@@ -41,8 +54,10 @@
         }
       }
     }
-    int offset=defaultLabel != null ? getStartOffset(defaultLabel) : getEndOffset(body);
-    addInstruction(new GotoInstruction(offset));
+    if (enumVals == null || !enumVals.isEmpty()) {
+      int offset=defaultLabel != null ? getStartOffset(defaultLabel) : getEndOffset(body);
+      addInstruction(new GotoInstruction(offset));
+    }
     body.accept(this);
   }
   finishElement(switchStmt);
