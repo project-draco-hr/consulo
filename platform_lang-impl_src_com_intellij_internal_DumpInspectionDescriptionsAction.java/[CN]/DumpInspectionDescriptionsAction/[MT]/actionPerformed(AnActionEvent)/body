@@ -1,22 +1,61 @@
 {
   final InspectionProfile profile=(InspectionProfile)InspectionProfileManager.getInstance().getRootProfile();
   final InspectionProfileEntry[] tools=profile.getInspectionTools(null);
-  System.out.println("String[][] inspections = ");
+  final Collection<String> classes=Sets.newTreeSet();
+  final Map<String,Collection<String>> groups=Maps.newTreeMap();
+  final String tempDirectory=FileUtil.getTempDirectory();
+  final File descDirectory=new File(tempDirectory,"inspections");
+  if (!descDirectory.mkdirs() && !descDirectory.isDirectory()) {
+    LOG.error("Unable to create directory: " + descDirectory.getAbsolutePath());
+    return;
+  }
   for (  InspectionProfileEntry tool : tools) {
-    String group=tool.getGroupDisplayName();
-    if (group.length() == 0)     group="General";
-    System.out.print("{\"" + group + "\", ");
-    System.out.print("\"" + tool.getDisplayName() + "\", ");
-    System.out.println("\"inspections/" + tool.getShortName() + ".html\"}, ");
-    try {
-      @NonNls final String description=ResourceUtil.loadText(getDescriptionUrl(tool));
-      FileWriter writer=new FileWriter("/Users/max/inspections/" + tool.getShortName() + ".html");
-      writer.write(description);
-      writer.close();
-    }
- catch (    IOException e1) {
-      e1.printStackTrace();
+    classes.add(getInspectionClass(tool).getName());
+    final String group=getGroupName(tool);
+    Collection<String> names=groups.get(group);
+    if (names == null)     groups.put(group,(names=Sets.newTreeSet()));
+    names.add(tool.getShortName());
+    final URL url=getDescriptionUrl(tool);
+    if (url != null) {
+      doDump(new File(descDirectory,tool.getShortName() + ".html"),new Processor(){
+        @Override public void process(        BufferedWriter writer) throws Exception {
+          writer.write(ResourceUtil.loadText(url));
+        }
+      }
+);
     }
   }
-  System.out.println("};");
+  doNotify("Inspection descriptions dumped to\n" + descDirectory.getAbsolutePath());
+  final File fqnListFile=new File(tempDirectory,"inspection_fqn_list.txt");
+  final boolean fqnOk=doDump(fqnListFile,new Processor(){
+    @Override public void process(    BufferedWriter writer) throws Exception {
+      for (      String name : classes) {
+        writer.write(name);
+        writer.newLine();
+      }
+    }
+  }
+);
+  if (fqnOk) {
+    doNotify("Inspection class names dumped to\n" + fqnListFile.getAbsolutePath());
+  }
+  final File groupsFile=new File(tempDirectory,"inspection_groups.txt");
+  final boolean groupsOk=doDump(groupsFile,new Processor(){
+    @Override public void process(    BufferedWriter writer) throws Exception {
+      for (      Map.Entry<String,Collection<String>> entry : groups.entrySet()) {
+        writer.write(entry.getKey());
+        writer.write(':');
+        writer.newLine();
+        for (        String name : entry.getValue()) {
+          writer.write("  ");
+          writer.write(name);
+          writer.newLine();
+        }
+      }
+    }
+  }
+);
+  if (groupsOk) {
+    doNotify("Inspection groups dumped to\n" + fqnListFile.getAbsolutePath());
+  }
 }
