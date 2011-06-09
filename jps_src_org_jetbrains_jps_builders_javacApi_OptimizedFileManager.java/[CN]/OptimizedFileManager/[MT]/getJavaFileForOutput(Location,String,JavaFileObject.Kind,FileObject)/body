@@ -3,14 +3,14 @@
   final String classFileName=result.toUri().toString();
   final String sourceFileName=fileObject.toUri().toString();
   return new ForwardingJavaFileObject<JavaFileObject>(result){
+    private OutputStream superOpenOutputStream() throws IOException {
+      return super.openOutputStream();
+    }
     @Override public OutputStream openOutputStream() throws IOException {
-      final OutputStream result=super.openOutputStream();
       return new OutputStream(){
         public void flush() throws IOException {
-          result.flush();
         }
         public void close() throws IOException {
-          result.close();
         }
         public void write(        int b) throws IOException {
           assert(false);
@@ -18,13 +18,35 @@
         public void write(        byte[] b) throws IOException {
           assert(false);
         }
-        public void write(        byte[] b,        int off,        int len) throws IOException {
-          if (kind.equals(JavaFileObject.Kind.CLASS) && callback != null) {
-            final ClassReader reader=new ClassReader(b,off,len);
-            callback.associate(classFileName,Callbacks.getDefaultLookup(sourceFileName),reader);
+        public void write(        final byte[] b,        final int off,        final int len) throws IOException {
+          final byte[] buffer=Arrays.copyOfRange(b,off,len);
+          if (kind.equals(JavaFileObject.Kind.CLASS)) {
+            loader.defineClass(className.replaceAll("\\.","/"),buffer);
+            if (callback != null) {
+              final ClassReader reader=new ClassReader(buffer);
+              callback.associate(classFileName,Callbacks.getDefaultLookup(sourceFileName),reader);
+            }
+            myWriters.add(new DelayedClassFileWriter(){
+              public void commit() throws IOException {
+                final OutputStream result=superOpenOutputStream();
+                final ClassReader reader=new ClassReader(buffer);
+                final byte[] instrumented=InstrumentationUtil.instrumentNotNull(reader,loader);
+                if (instrumented != null) {
+                  result.write(instrumented);
+                }
+ else {
+                  result.write(buffer);
+                }
+                result.close();
+              }
+            }
+);
           }
-          result.write(b,off,len);
-          result.flush();
+ else {
+            final OutputStream result=superOpenOutputStream();
+            result.write(buffer);
+            result.close();
+          }
         }
       }
 ;
