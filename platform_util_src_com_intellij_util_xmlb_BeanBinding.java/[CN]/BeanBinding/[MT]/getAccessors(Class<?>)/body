@@ -1,26 +1,28 @@
 {
-  try {
-    List<Accessor> accessors=new ArrayList<Accessor>();
-    BeanInfo info=Introspector.getBeanInfo(aClass,Introspector.IGNORE_ALL_BEANINFO);
-    PropertyDescriptor[] propertyDescriptors=info.getPropertyDescriptors();
-    for (    PropertyDescriptor propertyDescriptor : propertyDescriptors) {
-      if (propertyDescriptor.getName().equals(CLASS_PROPERTY))       continue;
-      final Method readMethod=propertyDescriptor.getReadMethod();
-      final Method writeMethod=propertyDescriptor.getWriteMethod();
-      if (readMethod != null && writeMethod != null && XmlSerializerImpl.findAnnotation(readMethod.getAnnotations(),Transient.class) == null && XmlSerializerImpl.findAnnotation(writeMethod.getAnnotations(),Transient.class) == null) {
-        accessors.add(new PropertyAccessor(propertyDescriptor));
-      }
-    }
-    Field[] fields=aClass.getFields();
-    for (    Field field : fields) {
-      final int modifiers=field.getModifiers();
-      if (Modifier.isPublic(modifiers) && !Modifier.isStatic(modifiers) && !Modifier.isFinal(modifiers)&& !Modifier.isTransient(modifiers)&& XmlSerializerImpl.findAnnotation(field.getAnnotations(),Transient.class) == null) {
-        accessors.add(new FieldAccessor(field));
-      }
-    }
-    return accessors;
+  final List<Accessor> accessors=Lists.newArrayList();
+  final Map<String,Pair<Method,Method>> candidates=Maps.newTreeMap();
+  for (  Method method : aClass.getMethods()) {
+    if (!Modifier.isPublic(method.getModifiers()))     continue;
+    final Pair<String,Boolean> propertyData=getPropertyData(method.getName());
+    if (propertyData == null || propertyData.first.equals(CLASS_PROPERTY))     continue;
+    if (method.getParameterTypes().length != (propertyData.second ? 1 : 0))     continue;
+    Pair<Method,Method> candidate=candidates.get(propertyData.first);
+    if (candidate == null)     candidate=Pair.empty();
+    if ((propertyData.second ? candidate.second : candidate.first) != null)     continue;
+    candidate=Pair.create(propertyData.second ? candidate.first : method,propertyData.second ? method : candidate.second);
+    candidates.put(propertyData.first,candidate);
   }
- catch (  IntrospectionException e) {
-    throw new XmlSerializationException(e);
+  for (  Map.Entry<String,Pair<Method,Method>> candidate : candidates.entrySet()) {
+    final Pair<Method,Method> methods=candidate.getValue();
+    if (methods.first != null && methods.second != null && methods.first.getReturnType().equals(methods.second.getParameterTypes()[0]) && XmlSerializerImpl.findAnnotation(methods.first.getAnnotations(),Transient.class) == null && XmlSerializerImpl.findAnnotation(methods.second.getAnnotations(),Transient.class) == null) {
+      accessors.add(new PropertyAccessor(candidate.getKey(),methods.first.getReturnType(),methods.first,methods.second));
+    }
   }
+  for (  Field field : aClass.getFields()) {
+    final int modifiers=field.getModifiers();
+    if (Modifier.isPublic(modifiers) && !Modifier.isStatic(modifiers) && !Modifier.isFinal(modifiers)&& !Modifier.isTransient(modifiers)&& XmlSerializerImpl.findAnnotation(field.getAnnotations(),Transient.class) == null) {
+      accessors.add(new FieldAccessor(field));
+    }
+  }
+  return accessors;
 }
