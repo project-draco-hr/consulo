@@ -6,12 +6,14 @@
   final AtomicReference<String> firstCommit=new AtomicReference<String>("HEAD");
   final AtomicReference<String> firstCommitParent=new AtomicReference<String>("HEAD");
   final AtomicReference<FilePath> currentPath=new AtomicReference<FilePath>(path);
+  final AtomicReference<GitLineHandler> logHandler=new AtomicReference<GitLineHandler>();
   final Consumer<GitLogRecord> resultAdapter=new Consumer<GitLogRecord>(){
     public void consume(    GitLogRecord record){
       if (record == null) {
         exceptionConsumer.consume(new VcsException("revision details are null."));
         return;
       }
+      record.setUsedHandler(logHandler.get());
       final GitRevisionNumber revision=new GitRevisionNumber(record.getHash(),record.getDate());
       firstCommit.set(record.getHash());
       final String[] parentHashes=record.getParentsHashes();
@@ -42,10 +44,10 @@
   }
 ;
   while (currentPath.get() != null && firstCommitParent.get() != null) {
-    GitLineHandler logHandler=getLogHandler(project,finalRoot,logParser,currentPath.get(),firstCommitParent.get(),parameters);
+    logHandler.set(getLogHandler(project,finalRoot,logParser,currentPath.get(),firstCommitParent.get(),parameters));
     final MyTokenAccumulator accumulator=new MyTokenAccumulator(logParser);
     final Semaphore semaphore=new Semaphore();
-    logHandler.addLineListener(new GitLineHandlerAdapter(){
+    logHandler.get().addLineListener(new GitLineHandlerAdapter(){
       @Override public void onLineAvailable(      String line,      Key outputType){
         final GitLogRecord record=accumulator.acceptLine(line);
         if (record != null) {
@@ -67,7 +69,7 @@
     }
 );
     semaphore.down();
-    logHandler.start();
+    logHandler.get().start();
     semaphore.waitFor();
     currentPath.set(getFirstCommitRenamePath(project,finalRoot,firstCommit.get(),currentPath.get()));
   }

@@ -1,42 +1,161 @@
 {
   initBorders();
-  final List<Presentation> items=new ArrayList<Presentation>();
-  final EditorFactory editorFactory=EditorFactory.getInstance();
-  final Document document=editorFactory.createDocument("");
-  myEditor=(EditorEx)editorFactory.createEditor(document,myProject);
+  myTree=new Tree(new DefaultTreeModel(new DefaultMutableTreeNode()));
+  UIUtil.setLineStyleAngled(myTree);
+  myTree.setRootVisible(false);
+  myTree.setShowsRootHandles(true);
+  myTree.updateUI();
+  final TreeCellRenderer renderer=myTree.getCellRenderer();
+  myTree.setCellRenderer(new TreeCellRenderer(){
+    @Override public Component getTreeCellRendererComponent(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+      final Component c=renderer.getTreeCellRendererComponent(tree,value,selected,expanded,leaf,row,hasFocus);
+      if (value instanceof DefaultMutableTreeNode) {
+        final Object userObject=((DefaultMutableTreeNode)value).getUserObject();
+        if (userObject instanceof ViewerNodeDescriptor) {
+          final Object element=((ViewerNodeDescriptor)userObject).getElement();
+          if ((element instanceof PsiElement && FileContextUtil.getFileContext(((PsiElement)element).getContainingFile()) != null) || element instanceof ViewerTreeStructure.Inject) {
+            final TextAttributes attr=EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.INJECTED_LANGUAGE_FRAGMENT);
+            c.setBackground(attr.getBackgroundColor());
+          }
+        }
+      }
+      return c;
+    }
+  }
+);
+  ToolTipManager.sharedInstance().registerComponent(myTree);
+  TreeUtil.installActions(myTree);
+  new TreeSpeedSearch(myTree);
+  myTreeBuilder=new ViewerTreeBuilder(myProject,myTree);
+  myTree.addTreeSelectionListener(new MyTreeSelectionListener());
+  JScrollPane scrollPane=ScrollPaneFactory.createScrollPane(myTree);
+  JPanel panel=new JPanel(new BorderLayout());
+  panel.add(scrollPane,BorderLayout.CENTER);
+  myStructureTreePanel.setLayout(new BorderLayout());
+  myStructureTreePanel.add(panel,BorderLayout.CENTER);
+  myRefs=new JBList(new DefaultListModel());
+  JScrollPane refScrollPane=ScrollPaneFactory.createScrollPane(myRefs);
+  JPanel refPanel=new JPanel(new BorderLayout());
+  refPanel.add(refScrollPane,BorderLayout.CENTER);
+  myReferencesPanel.setLayout(new BorderLayout());
+  myReferencesPanel.add(refPanel,BorderLayout.CENTER);
+  final GoToListener listener=new GoToListener();
+  myRefs.addKeyListener(listener);
+  myRefs.addMouseListener(listener);
+  myRefs.getSelectionModel().addListSelectionListener(listener);
+  myRefs.setCellRenderer(new DefaultListCellRenderer(){
+    public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean isSelected,    boolean cellHasFocus){
+      final Component comp=super.getListCellRendererComponent(list,value,index,isSelected,cellHasFocus);
+      if (resolve(index) == null) {
+        comp.setForeground(Color.red);
+      }
+      return comp;
+    }
+  }
+);
   myEditor.getSettings().setFoldingOutlineShown(false);
-  document.addDocumentListener(myEditorListener);
+  myEditor.getDocument().addDocumentListener(myEditorListener);
   myEditor.getSelectionModel().addSelectionListener(myEditorListener);
   myEditor.getCaretModel().addCaretListener(myEditorListener);
-  for (  PsiViewerExtension extension : Extensions.getExtensions(PsiViewerExtension.EP_NAME)) {
-    final Presentation p=new Presentation(extension.getName());
-    p.setIcon(extension.getIcon());
-    handlers.put(p.getText(),extension);
-    items.add(p);
+  getPeer().getWindow().setFocusTraversalPolicy(new LayoutFocusTraversalPolicy(){
+    @Override public Component getInitialComponent(    Window window){
+      return myEditor.getComponent();
+    }
   }
-  Set<FileType> allFileTypes=new HashSet<FileType>();
+);
+  final PsiViewerSettings settings=PsiViewerSettings.getSettings();
+  final String type=settings.type;
+  SourceWrapper lastUsed=null;
+  for (  PsiViewerExtension extension : Extensions.getExtensions(PsiViewerExtension.EP_NAME)) {
+    final SourceWrapper wrapper=new SourceWrapper(extension);
+    mySourceWrappers.add(wrapper);
+    if (lastUsed == null && wrapper.getText().equals(type))     lastUsed=wrapper;
+  }
+  final Set<FileType> allFileTypes=Sets.newHashSet();
   Collections.addAll(allFileTypes,FileTypeManager.getInstance().getRegisteredFileTypes());
   for (  Language language : Language.getRegisteredLanguages()) {
-    FileType fileType=language.getAssociatedFileType();
+    final FileType fileType=language.getAssociatedFileType();
     if (fileType != null) {
       allFileTypes.add(fileType);
     }
   }
   for (  FileType fileType : allFileTypes) {
     if (fileType != StdFileTypes.GUI_DESIGNER_FORM && fileType != StdFileTypes.IDEA_MODULE && fileType != StdFileTypes.IDEA_PROJECT && fileType != StdFileTypes.IDEA_WORKSPACE && fileType != FileTypes.ARCHIVE && fileType != FileTypes.UNKNOWN && fileType != FileTypes.PLAIN_TEXT && !(fileType instanceof AbstractFileType) && !fileType.isBinary() && !fileType.isReadOnly()) {
-      final Presentation p=new Presentation(fileType.getName() + " file");
-      p.setIcon(fileType.getIcon());
-      handlers.put(p.getText(),fileType);
-      items.add(p);
+      final SourceWrapper wrapper=new SourceWrapper(fileType);
+      mySourceWrappers.add(wrapper);
+      if (lastUsed == null && wrapper.getText().equals(type))       lastUsed=wrapper;
     }
   }
-  final Presentation[] popupItems=items.toArray(new Presentation[items.size()]);
-  Arrays.sort(popupItems,new Comparator<Presentation>(){
-    public int compare(    Presentation p1,    Presentation p2){
-      return p1.getText().toUpperCase().compareTo(p2.getText().toUpperCase());
+  myFileTypeComboBox.setModel(new CollectionComboBoxModel(Lists.newArrayList(mySourceWrappers),lastUsed));
+  myFileTypeComboBox.setRenderer(new ListCellRendererWrapper<SourceWrapper>(myFileTypeComboBox.getRenderer()){
+    @Override public void customize(    JList list,    SourceWrapper value,    int index,    boolean selected,    boolean hasFocus){
+      if (value != null) {
+        setText(value.getText());
+        setIcon(value.getIcon());
+      }
     }
   }
 );
+  myFileTypeComboBox.setKeySelectionManager(new JComboBox.KeySelectionManager(){
+    private static final int TIMEOUT=1000;
+    private final StringBuilder myPrefix=new StringBuilder();
+    private long myTimeStamp=0;
+    @Override public int selectionForKey(    char ch,    ComboBoxModel model){
+      final long now=System.currentTimeMillis();
+      if (now - myTimeStamp > TIMEOUT) {
+        myPrefix.delete(0,myPrefix.length());
+      }
+      myTimeStamp=now;
+      if (Character.isLetterOrDigit(ch)) {
+        myPrefix.append(ch);
+      }
+ else       if (ch == '\b') {
+        myPrefix.delete(0,myPrefix.length());
+        return 0;
+      }
+      final String prefix=myPrefix.toString().toLowerCase();
+      for (int i=0, size=model.getSize(); i < size; i++) {
+        final SourceWrapper item=(SourceWrapper)model.getElementAt(i);
+        if (item.getText().toLowerCase().startsWith(prefix)) {
+          return i;
+        }
+      }
+      return -1;
+    }
+  }
+);
+  myFileTypeComboBox.addActionListener(new ActionListener(){
+    @Override public void actionPerformed(    ActionEvent e){
+      updateDialectsCombo(null);
+      updateExtensionsCombo();
+      updateEditor();
+    }
+  }
+);
+  myDialectComboBox.addActionListener(new ActionListener(){
+    @Override public void actionPerformed(    ActionEvent e){
+      updateEditor();
+    }
+  }
+);
+  myFileTypeComboBox.addFocusListener(new AutoExpandFocusListener(myFileTypeComboBox));
+  if (lastUsed == null && mySourceWrappers.size() > 0) {
+    myFileTypeComboBox.setSelectedIndex(0);
+  }
+  myDialectComboBox.setRenderer(new ListCellRendererWrapper<Language>(myDialectComboBox.getRenderer()){
+    @Override public void customize(    final JList list,    final Language value,    final int index,    final boolean selected,    final boolean hasFocus){
+      setText(value != null ? value.getDisplayName() : "<default>");
+    }
+  }
+);
+  myDialectComboBox.addFocusListener(new AutoExpandFocusListener(myDialectComboBox));
+  myExtensionComboBox.setRenderer(new ListCellRendererWrapper<String>(myExtensionComboBox.getRenderer()){
+    @Override public void customize(    JList list,    String value,    int index,    boolean selected,    boolean hasFocus){
+      if (value != null)       setText("." + value);
+    }
+  }
+);
+  myExtensionComboBox.addFocusListener(new AutoExpandFocusListener(myExtensionComboBox));
   final ViewerTreeStructure treeStructure=(ViewerTreeStructure)myTreeBuilder.getTreeStructure();
   myShowWhiteSpacesBox.addActionListener(new ActionListener(){
     public void actionPerformed(    ActionEvent e){
@@ -52,53 +171,26 @@
     }
   }
 );
-  myTextPanel.setLayout(new BorderLayout());
-  myTextPanel.add(myEditor.getComponent(),BorderLayout.CENTER);
-  myGroup=new DefaultActionGroup();
-  for (  final Presentation popupItem : popupItems) {
-    myGroup.add(new PopupItemAction(popupItem));
-  }
-  final PsiViewerSettings settings=PsiViewerSettings.getSettings();
-  final String type=settings.type;
-  for (  Presentation popupItem : popupItems) {
-    if (popupItem.getText().equals(type)) {
-      updatePresentation(popupItem);
-      break;
-    }
-  }
-  ApplicationManager.getApplication().runWriteAction(new Runnable(){
-    public void run(){
-      myEditor.getDocument().setText(settings.text);
-      myEditor.getSelectionModel().setSelection(0,settings.text.length());
-    }
-  }
-);
   myShowWhiteSpacesBox.setSelected(settings.showWhiteSpaces);
   treeStructure.setShowWhiteSpaces(settings.showWhiteSpaces);
   myShowTreeNodesCheckBox.setSelected(settings.showTreeNodes);
   treeStructure.setShowTreeNodes(settings.showTreeNodes);
-  final ChoosePsiTypeButton typeButton=new ChoosePsiTypeButton();
-  myButtonPanel.add(typeButton.createCustomComponent(myPresentation),BorderLayout.CENTER);
-  updateDialectsCombo();
-  updateExtentionsCombo();
-  myDialectsComboBox.setRenderer(new ListCellRendererWrapper<Language>(myDialectsComboBox.getRenderer()){
-    @Override public void customize(    final JList list,    final Language value,    final int index,    final boolean selected,    final boolean hasFocus){
-      setText(value != null ? value.getDisplayName() : "<no dialect>");
-    }
+  myTextPanel.setLayout(new BorderLayout());
+  myTextPanel.add(myEditor.getComponent(),BorderLayout.CENTER);
+  final AccessToken token=ApplicationManager.getApplication().acquireWriteActionLock(getClass());
+  try {
+    myEditor.getDocument().setText(settings.text);
+    myEditor.getSelectionModel().setSelection(0,settings.text.length());
   }
-);
-  if (myDialectsComboBox.isVisible()) {
-    for (int i=0; i < myLanguageDialects.length; i++) {
-      if (settings.dialect.equals(myLanguageDialects[i].toString())) {
-        myDialectsComboBox.setSelectedIndex(i + 1);
-        break;
-      }
-    }
+  finally {
+    token.finish();
   }
+  updateDialectsCombo(settings.dialect);
+  updateExtensionsCombo();
   registerCustomKeyboardActions();
   final Dimension size=DimensionService.getInstance().getSize(getDimensionServiceKey(),myProject);
   if (size == null) {
-    DimensionService.getInstance().setSize(getDimensionServiceKey(),new Dimension(600,600));
+    DimensionService.getInstance().setSize(getDimensionServiceKey(),new Dimension(800,600));
   }
   myTextSplit.setDividerLocation(settings.textDividerLocation);
   myTreeSplit.setDividerLocation(settings.treeDividerLocation);
