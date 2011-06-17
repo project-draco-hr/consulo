@@ -1,18 +1,36 @@
 {
   return new RecursionGuard(){
-    @Override public <T>T doPreventingRecursion(    Object key,    Computable<T> computation){
+    @Override public <T>T doPreventingRecursion(    Object key,    boolean memoize,    Computable<T> computation){
       MyKey realKey=new MyKey(id,key);
       LinkedHashMap<MyKey,Integer> progressMap=ourProgress.get();
       if (progressMap.containsKey(realKey)) {
-        prohibitResultCaching(key);
+        _prohibitResultCaching(key);
         return null;
       }
+      if (memoize) {
+        SoftReference reference=ourIntermediateCache.get().get(realKey);
+        if (reference != null) {
+          Object o=reference.get();
+          if (o != null) {
+            return o == NULL ? null : (T)o;
+          }
+        }
+      }
       progressMap.put(realKey,ourStamp.get());
+      int startStamp=ourMemoizationStamp.get();
       try {
-        return computation.compute();
+        T result=computation.compute();
+        if (memoize && ourMemoizationStamp.get() == startStamp) {
+          ourIntermediateCache.get().put(realKey,new SoftReference<Object>(result == null ? NULL : result));
+        }
+        return result;
       }
   finally {
-        ourStamp.set(progressMap.remove(realKey));
+        Integer value=progressMap.remove(realKey);
+        ourStamp.set(value);
+        if (value == 0) {
+          ourIntermediateCache.get().clear();
+        }
       }
     }
     @Override public StackStamp markStack(){
@@ -35,6 +53,9 @@
       return result;
     }
     @Override public void prohibitResultCaching(    Object since){
+      ourMemoizationStamp.set(_prohibitResultCaching(since));
+    }
+    private int _prohibitResultCaching(    Object since){
       int stamp=ourStamp.get() + 1;
       ourStamp.set(stamp);
       boolean inLoop=false;
@@ -46,6 +67,7 @@
           inLoop=true;
         }
       }
+      return stamp;
     }
   }
 ;
