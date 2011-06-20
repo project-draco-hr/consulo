@@ -1,0 +1,40 @@
+{
+  try {
+    ApplicationManager.getApplication().assertIsDispatchThread();
+    if (myProject.isDisposed()) {
+      return;
+    }
+    Pair<Object,SyncAction>[] actions;
+synchronized (myActions) {
+      actions=myActions.toArray(new Pair[myActions.size()]);
+    }
+    final Set<Trinity<Module,SyncAction,MvcFramework>> rawActions=new LinkedHashSet<Trinity<Module,SyncAction,MvcFramework>>();
+    for (    final Pair<Object,SyncAction> pair : actions) {
+      for (      Module module : determineModuleBySyncActionObject(pair.first)) {
+        if (!module.isDisposed()) {
+          final MvcFramework framework=(pair.second == SyncAction.CreateAppStructureIfNeeded) ? getFrameworkByFrameworkSdk(module) : getFramework(module);
+          if (framework != null && !framework.isAuxModule(module)) {
+            rawActions.add(Trinity.create(module,pair.second,framework));
+          }
+        }
+      }
+    }
+    boolean isProjectStructureUpdated=false;
+    for (    final Trinity<Module,SyncAction,MvcFramework> rawAction : rawActions) {
+      final Module module=rawAction.first;
+      if (module.isDisposed()) {
+        continue;
+      }
+      if (rawAction.second == SyncAction.UpdateProjectStructure && rawAction.third.updatesWholeProject()) {
+        if (isProjectStructureUpdated)         continue;
+        isProjectStructureUpdated=true;
+      }
+      rawAction.second.doAction(module,rawAction.third);
+    }
+  }
+  finally {
+synchronized (myActions) {
+      myActions.clear();
+    }
+  }
+}
