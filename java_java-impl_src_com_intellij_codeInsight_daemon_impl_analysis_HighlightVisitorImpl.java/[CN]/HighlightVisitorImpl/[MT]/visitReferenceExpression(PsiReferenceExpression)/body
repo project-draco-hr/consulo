@@ -1,12 +1,14 @@
 {
-  visitReferenceElement(expression);
+  JavaResolveResult resultForIncompleteCode=doVisitReferenceElement(expression);
   if (!myHolder.hasErrorResults()) {
     visitExpression(expression);
     if (myHolder.hasErrorResults())     return;
   }
   JavaResolveResult result;
+  JavaResolveResult[] results;
   try {
-    result=expression.advancedResolve(false);
+    results=expression.multiResolve(true);
+    result=results.length == 1 ? results[0] : JavaResolveResult.EMPTY;
   }
  catch (  IndexNotReadyException e) {
     return;
@@ -29,7 +31,16 @@
       if (!myHolder.hasErrorResults())       myHolder.add(HighlightControlFlowUtil.checkFinalVariableInitializedInLoop(expression,resolved));
     }
   }
-  if (!myHolder.hasErrorResults())   myHolder.add(HighlightUtil.checkExpressionRequired(expression));
+  PsiElement parent=expression.getParent();
+  if (parent instanceof PsiMethodCallExpression && ((PsiMethodCallExpression)parent).getMethodExpression() == expression && (!result.isAccessible() || !result.isStaticsScopeCorrect())) {
+    PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)parent;
+    PsiExpressionList list=methodCallExpression.getArgumentList();
+    if (!HighlightMethodUtil.isDummyConstructorCall(methodCallExpression,myResolveHelper,list,expression)) {
+      HighlightInfo info=HighlightMethodUtil.checkAmbiguousMethodCall(expression,results,list,resolved,result,methodCallExpression,myResolveHelper);
+      myHolder.add(info);
+    }
+  }
+  if (!myHolder.hasErrorResults())   myHolder.add(HighlightUtil.checkExpressionRequired(expression,resultForIncompleteCode));
   if (!myHolder.hasErrorResults() && resolved instanceof PsiField) {
     try {
       myHolder.add(HighlightUtil.checkIllegalForwardReferenceToField(expression,(PsiField)resolved));
