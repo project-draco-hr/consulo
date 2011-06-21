@@ -1,0 +1,48 @@
+{
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    @Override public void run(){
+      try {
+        myDocument=null;
+        final String convertedPath=FilePathsHelper.convertPath(filePath);
+        if (filePath.getVirtualFile() != null) {
+          myDocument=FileDocumentManager.getInstance().getDocument(filePath.getVirtualFile());
+          if (myDocument != null) {
+            final List<BeforeAfter<TextRange>> cached=cache.get(new Pair<Long,String>(myDocument.getModificationStamp(),convertedPath));
+            if (cached != null) {
+              myOldDocument=documentFromRevision(change.getBeforeRevision());
+              myRanges=cached;
+              return;
+            }
+          }
+        }
+        if (myDocument == null) {
+          myDocument=documentFromRevision(change.getAfterRevision());
+          final List<BeforeAfter<TextRange>> cached=cache.get(new Pair<Long,String>(-1L,convertedPath));
+          if (cached != null) {
+            myRanges=cached;
+            return;
+          }
+        }
+        myOldDocument=documentFromRevision(change.getBeforeRevision());
+        final TextCompareProcessor processor=new TextCompareProcessor(ComparisonPolicy.DEFAULT);
+        final ArrayList<LineFragment> lineFragments=processor.process(myOldDocument.getText(),myDocument.getText());
+        myRanges=new ArrayList<BeforeAfter<TextRange>>(lineFragments.size());
+        for (        LineFragment lineFragment : lineFragments) {
+          if (!lineFragment.isEqual()) {
+            final TextRange oldRange=lineFragment.getRange(FragmentSide.SIDE1);
+            final TextRange newRange=lineFragment.getRange(FragmentSide.SIDE2);
+            myRanges.add(new BeforeAfter<TextRange>(new TextRange(myOldDocument.getLineNumber(oldRange.getStartOffset()),myOldDocument.getLineNumber(oldRange.getEndOffset())),new TextRange(myDocument.getLineNumber(newRange.getStartOffset()),myDocument.getLineNumber(newRange.getEndOffset()))));
+          }
+        }
+        cache.put(new Pair<Long,String>(myDocument.getModificationStamp(),convertedPath),new ArrayList<BeforeAfter<TextRange>>(myRanges));
+      }
+ catch (      VcsException e) {
+        myException=e;
+      }
+catch (      FilesTooBigForDiffException e) {
+        myException=new VcsException(e);
+      }
+    }
+  }
+);
+}
