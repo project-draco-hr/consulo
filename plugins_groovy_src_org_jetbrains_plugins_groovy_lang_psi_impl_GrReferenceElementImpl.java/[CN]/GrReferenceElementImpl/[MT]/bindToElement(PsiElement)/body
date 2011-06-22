@@ -1,12 +1,22 @@
 {
   if (isReferenceTo(element))   return this;
+  final boolean fullyQualified=isFullyQualified();
+  final boolean preserveQualification=CodeStyleSettingsManager.getSettings(getProject()).USE_FQ_CLASS_NAMES && fullyQualified;
   if (element instanceof PsiClass) {
-    final String newName=((PsiClass)element).getName();
-    final GrReferenceElementImpl newElement=((GrReferenceElementImpl)handleElementRename(newName));
-    if (newElement.isReferenceTo(element))     return newElement;
     final String qualifiedName=((PsiClass)element).getQualifiedName();
-    if (qualifiedName == null)     return newElement;
-    return newElement.bindWithQualifiedRef(qualifiedName);
+    if (!preserveQualification || qualifiedName == null) {
+      final String newName=((PsiClass)element).getName();
+      setQualifier(null);
+      final GrReferenceElementImpl newElement=((GrReferenceElementImpl)handleElementRename(newName));
+      if (newElement.isReferenceTo(element) || qualifiedName == null || JavaPsiFacade.getInstance(getProject()).findClass(qualifiedName,getResolveScope()) == null) {
+        return newElement;
+      }
+    }
+    final GrReferenceElement<Q> qualifiedRef=bindWithQualifiedRef(qualifiedName);
+    if (!preserveQualification) {
+      PsiUtil.shortenReference(qualifiedRef);
+    }
+    return qualifiedRef;
   }
  else   if (element instanceof PsiMember) {
     PsiMember member=(PsiMember)element;
@@ -16,11 +26,14 @@
     final PsiClass psiClass=member.getContainingClass();
     if (psiClass == null)     throw new IncorrectOperationException();
     String qName=psiClass.getQualifiedName() + "." + member.getName();
-    return bindWithQualifiedRef(qName);
+    final GrReferenceElement<Q> qualifiedRef=bindWithQualifiedRef(qName);
+    if (!preserveQualification) {
+      PsiUtil.shortenReference(qualifiedRef);
+    }
+    return qualifiedRef;
   }
  else   if (element instanceof PsiPackage) {
-    final String qName=((PsiPackage)element).getQualifiedName();
-    return bindWithQualifiedRef(qName);
+    return bindWithQualifiedRef(((PsiPackage)element).getQualifiedName());
   }
   throw new IncorrectOperationException("Cannot bind to:" + element + " of class "+ element.getClass());
 }
