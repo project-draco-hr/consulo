@@ -4,17 +4,13 @@
   if (document instanceof DocumentEx && ((DocumentEx)document).isInBulkUpdate())   return;
   final MarkupModel markup=document.getMarkupModel(project);
   assertMarkupConsistent(markup,project);
-  Editor[] editors=EditorFactory.getInstance().getEditors(document,project);
-  if (editors.length <= 0)   return;
-  final int start=e.getOffset();
+  final int start=e.getOffset() - 1;
   final int end=start + Math.max(e.getOldLength(),e.getNewLength());
-  final boolean[] highlightersChanged={false};
-  final List<HighlightInfo> removed=new ArrayList<HighlightInfo>();
-  final boolean[] documentChangedInsideHighlighter={false};
+  final List<HighlightInfo> toRemove=new ArrayList<HighlightInfo>();
   DaemonCodeAnalyzerImpl.processHighlights(document,project,null,start,end,new Processor<HighlightInfo>(){
     public boolean process(    HighlightInfo info){
       RangeHighlighter highlighter=info.highlighter;
-      boolean toRemove=false;
+      boolean remove=false;
       if (info.needUpdateOnTyping()) {
         int highlighterStart=highlighter.getStartOffset();
         int highlighterEnd=highlighter.getEndOffset();
@@ -26,29 +22,24 @@
             highlighterEnd+=1;
           }
         }
-        if (!highlighter.isValid()) {
-          toRemove=true;
-        }
- else         if (start < highlighterEnd && highlighterStart <= end) {
-          documentChangedInsideHighlighter[0]=true;
-          toRemove=true;
+        if (!highlighter.isValid() || start < highlighterEnd && highlighterStart <= end) {
+          remove=true;
         }
       }
-      if (toRemove) {
-        highlightersChanged[0]=true;
-        removed.add(info);
+      if (remove) {
+        toRemove.add(info);
       }
       return true;
     }
   }
 );
-  for (  HighlightInfo info : removed) {
+  for (  HighlightInfo info : toRemove) {
     if (!info.highlighter.isValid() || info.type.equals(HighlightInfoType.WRONG_REF)) {
       info.highlighter.dispose();
     }
   }
   assertMarkupConsistent(markup,project);
-  if (highlightersChanged[0] || documentChangedInsideHighlighter[0]) {
+  if (!toRemove.isEmpty()) {
     disableWhiteSpaceOptimization(document);
   }
 }

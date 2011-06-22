@@ -1,0 +1,49 @@
+{
+  final PsiDirectory psiDirectory=(PsiDirectory)element;
+  final T aPackage=getPackage(psiDirectory);
+  final String qualifiedName=aPackage != null ? getQualifiedName(aPackage) : "";
+  if (aPackage == null || qualifiedName.length() == 0 || !isIdentifier(psiDirectory.getName(),project)) {
+    PsiElementRenameHandler.rename(element,project,nameSuggestionContext,editor);
+  }
+ else {
+    PsiDirectory[] directories=aPackage.getDirectories();
+    final VirtualFile[] virtualFiles=occursInPackagePrefixes(aPackage);
+    if (virtualFiles.length == 0 && directories.length == 1) {
+      PsiElementRenameHandler.rename(aPackage,project,nameSuggestionContext,editor);
+    }
+ else {
+      final ProjectFileIndex projectFileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+      boolean inLib=false;
+      for (      PsiDirectory directory : directories) {
+        inLib|=!projectFileIndex.isInContent(directory.getVirtualFile());
+      }
+      final PsiDirectory[] projectDirectories=aPackage.getDirectories(GlobalSearchScope.projectScope(project));
+      if (inLib) {
+        final String promptMessage="Package \'" + aPackage.getName() + "\' contains directories in libraries which cannot be renamed. Do you want to rename current directory";
+        if (projectDirectories.length > 0) {
+          int ret=Messages.showDialog(project,promptMessage + " or all directories in project?",RefactoringBundle.message("warning.title"),new String[]{RefactoringBundle.message("rename.current.directory"),RefactoringBundle.message("rename.directories"),CommonBundle.getCancelButtonText()},0,Messages.getWarningIcon());
+          if (ret == -1)           return;
+          renameDirs(project,nameSuggestionContext,editor,psiDirectory,aPackage,ret == 0 ? new PsiDirectory[]{psiDirectory} : projectDirectories);
+        }
+ else {
+          if (Messages.showDialog(project,promptMessage + "?",RefactoringBundle.message("warning.title"),new String[]{CommonBundle.getOkButtonText(),CommonBundle.getCancelButtonText()},0,Messages.getWarningIcon()) == DialogWrapper.OK_EXIT_CODE) {
+            renameDirs(project,nameSuggestionContext,editor,psiDirectory,aPackage,psiDirectory);
+          }
+        }
+      }
+ else {
+        final StringBuffer message=new StringBuffer();
+        RenameUtil.buildPackagePrefixChangedMessage(virtualFiles,message,qualifiedName);
+        buildMultipleDirectoriesInPackageMessage(message,getQualifiedName(aPackage),directories);
+        message.append(RefactoringBundle.message("directories.and.all.references.to.package.will.be.renamed",psiDirectory.getVirtualFile().getPresentableUrl()));
+        int ret=Messages.showDialog(project,message.toString(),RefactoringBundle.message("warning.title"),new String[]{RefactoringBundle.message("rename.package.button.text"),RefactoringBundle.message("rename.directory.button.text"),CommonBundle.getCancelButtonText()},0,Messages.getWarningIcon());
+        if (ret == 0) {
+          PsiElementRenameHandler.rename(aPackage,project,nameSuggestionContext,editor);
+        }
+ else         if (ret == 1) {
+          renameDirs(project,nameSuggestionContext,editor,psiDirectory,aPackage,psiDirectory);
+        }
+      }
+    }
+  }
+}
