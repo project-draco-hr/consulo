@@ -7,11 +7,6 @@
  else {
     occurences=CodeInsightUtil.findReferenceExpressions(method,myLocalVar);
   }
-  PsiExpression expressionToRemoveParamFrom=myExpr;
-  if (myExpr == null) {
-    expressionToRemoveParamFrom=myLocalVar.getInitializer();
-  }
-  TIntArrayList parametersToRemove=expressionToRemoveParamFrom == null ? new TIntArrayList() : Util.findParametersToRemove(method,expressionToRemoveParamFrom,occurences);
   boolean mustBeFinal=false;
   if (myLocalVar != null) {
     for (    PsiExpression occurrence : occurences) {
@@ -30,15 +25,23 @@
   final String propName=myLocalVar != null ? JavaCodeStyleManager.getInstance(myProject).variableNameToPropertyName(myLocalVar.getName(),VariableKind.LOCAL_VARIABLE) : null;
   final PsiType initializerType=IntroduceParameterProcessor.getInitializerType(null,myExpr,myLocalVar);
   TypeSelectorManagerImpl typeSelectorManager=myExpr != null ? new TypeSelectorManagerImpl(myProject,initializerType,myExpr,occurences) : new TypeSelectorManagerImpl(myProject,initializerType,occurences);
-  NameSuggestionsGenerator nameSuggestionsGenerator=createNameSuggestionGenerator(myExpr,propName,myProject);
   boolean isInplaceAvailableOnDataContext=myEditor != null && myEditor.getSettings().isVariableInplaceRenameEnabled();
   if (myExpr != null) {
     isInplaceAvailableOnDataContext&=myExpr.isPhysical();
   }
   if (isInplaceAvailableOnDataContext) {
-    myInplaceIntroduceParameterPopup=new InplaceIntroduceParameterPopup(myProject,myEditor,classMemberRefs,typeSelectorManager,myExpr,myLocalVar,method,methodToSearchFor,occurences,parametersToRemove,mustBeFinal);
-    if (myInplaceIntroduceParameterPopup.startInplaceIntroduceTemplate()) {
-      return;
+    final AbstractInplaceIntroducer activeIntroducer=AbstractInplaceIntroducer.getActiveIntroducer(myEditor);
+    if (activeIntroducer == null) {
+      myInplaceIntroduceParameterPopup=new InplaceIntroduceParameterPopup(myProject,myEditor,classMemberRefs,typeSelectorManager,myExpr,myLocalVar,method,methodToSearchFor,occurences,getParamsToRemove(method,occurences),mustBeFinal);
+      if (myInplaceIntroduceParameterPopup.startInplaceIntroduceTemplate()) {
+        return;
+      }
+    }
+ else {
+      AbstractInplaceIntroducer.stopIntroduce(myEditor);
+      myExpr=(PsiExpression)activeIntroducer.getExpr();
+      myLocalVar=(PsiLocalVariable)activeIntroducer.getLocalVariable();
+      occurences=(PsiExpression[])activeIntroducer.getOccurrences();
     }
   }
   if (ApplicationManager.getApplication().isUnitTestMode()) {
@@ -46,13 +49,13 @@
     boolean replaceAllOccurences=true;
     boolean isDeleteLocalVariable=true;
     PsiExpression initializer=myLocalVar != null && myExpr == null ? myLocalVar.getInitializer() : myExpr;
-    new IntroduceParameterProcessor(myProject,method,methodToSearchFor,initializer,myExpr,myLocalVar,isDeleteLocalVariable,parameterName,replaceAllOccurences,IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE,mustBeFinal,false,null,parametersToRemove).run();
+    new IntroduceParameterProcessor(myProject,method,methodToSearchFor,initializer,myExpr,myLocalVar,isDeleteLocalVariable,parameterName,replaceAllOccurences,IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE,mustBeFinal,false,null,getParamsToRemove(method,occurences)).run();
   }
  else {
     if (myEditor != null) {
       RefactoringUtil.highlightAllOccurences(myProject,occurences,myEditor);
     }
-    new IntroduceParameterDialog(myProject,classMemberRefs,occurences,myLocalVar,myExpr,nameSuggestionsGenerator,typeSelectorManager,methodToSearchFor,method,parametersToRemove,mustBeFinal).show();
+    new IntroduceParameterDialog(myProject,classMemberRefs,occurences,myLocalVar,myExpr,createNameSuggestionGenerator(myExpr,propName,myProject),typeSelectorManager,methodToSearchFor,method,getParamsToRemove(method,occurences),mustBeFinal).show();
     if (myEditor != null) {
       myEditor.getSelectionModel().removeSelection();
     }
