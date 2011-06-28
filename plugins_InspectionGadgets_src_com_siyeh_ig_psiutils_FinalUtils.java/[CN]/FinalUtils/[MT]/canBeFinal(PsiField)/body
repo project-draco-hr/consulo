@@ -1,0 +1,70 @@
+{
+  PsiClass containingClass=field.getContainingClass();
+  if (containingClass == null) {
+    return false;
+  }
+  final boolean fieldIsStatic=field.hasModifierProperty(PsiModifier.STATIC);
+  final PsiField[] fields=containingClass.getFields();
+  final DefiniteAssignmentVisitor visitor=new DefiniteAssignmentVisitor(field);
+  if (field.hasInitializer()) {
+    visitor.setDefiniteAssignment(true,false);
+  }
+  for (  PsiField aField : fields) {
+    if (!fieldIsStatic && aField.hasModifierProperty(PsiModifier.STATIC)) {
+      continue;
+    }
+    final PsiExpression initializer=aField.getInitializer();
+    if (initializer != null) {
+      initializer.accept(visitor);
+      if (!visitor.isFinalCandidate()) {
+        return false;
+      }
+    }
+  }
+  final PsiClassInitializer[] initializers=containingClass.getInitializers();
+  for (  PsiClassInitializer initializer : initializers) {
+    if (fieldIsStatic ^ initializer.hasModifierProperty(PsiModifier.STATIC)) {
+      continue;
+    }
+    initializer.accept(visitor);
+    if (!visitor.isFinalCandidate()) {
+      return false;
+    }
+  }
+  if (!fieldIsStatic) {
+    final boolean definitelyAssigned=visitor.isDefinitelyAssigned();
+    final boolean definitelyUnassigned=visitor.isDefinitelyUnassigned();
+    final PsiMethod[] constructors=containingClass.getConstructors();
+    for (    PsiMethod constructor : constructors) {
+      visitor.setDefiniteAssignment(definitelyAssigned,definitelyUnassigned);
+      constructor.accept(visitor);
+      if (!visitor.isDefinitelyAssigned()) {
+        return false;
+      }
+      if (!visitor.isFinalCandidate()) {
+        return false;
+      }
+    }
+  }
+  if (!visitor.isDefinitelyAssigned()) {
+    return false;
+  }
+  if (!visitor.isFinalCandidate()) {
+    return false;
+  }
+  visitor.setDefiniteAssignment(true,false);
+  checkMembers(fieldIsStatic,containingClass,null,visitor);
+  if (!visitor.isFinalCandidate()) {
+    return false;
+  }
+  PsiClass aClass=containingClass.getContainingClass();
+  while (aClass != null) {
+    checkMembers(fieldIsStatic,aClass,containingClass,visitor);
+    if (!visitor.isFinalCandidate()) {
+      return false;
+    }
+    containingClass=aClass;
+    aClass=containingClass.getContainingClass();
+  }
+  return true;
+}
