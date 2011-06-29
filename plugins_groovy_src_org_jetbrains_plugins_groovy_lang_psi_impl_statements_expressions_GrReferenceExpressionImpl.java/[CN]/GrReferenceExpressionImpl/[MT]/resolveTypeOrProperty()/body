@@ -1,56 +1,21 @@
 {
-  String name=getReferenceName();
-  if (name == null)   return GroovyResolveResult.EMPTY_ARRAY;
-  if (checkForMapKey())   return GroovyResolveResult.EMPTY_ARRAY;
-  EnumSet<ClassHint.ResolveKind> kinds=getParent() instanceof GrReferenceExpression ? ResolverProcessor.RESOLVE_KINDS_CLASS_PACKAGE : ResolverProcessor.RESOLVE_KINDS_CLASS;
-  GroovyResolveResult[] classCandidates=null;
-  if (findClassOrPackageAtFirst()) {
-    ResolverProcessor classProcessor=new ClassResolverProcessor(name,this,kinds);
-    GrReferenceResolveUtil.resolveImpl(classProcessor,this);
-    classCandidates=classProcessor.getCandidates();
-    if (classCandidates.length > 0)     return classCandidates;
-  }
-  ResolverProcessor processor=new PropertyResolverProcessor(name,this);
-  GrReferenceResolveUtil.resolveImpl(processor,this);
-  final GroovyResolveResult[] fieldCandidates=processor.getCandidates();
-  if (hasAt()) {
-    return fieldCandidates;
-  }
-  for (  GroovyResolveResult candidate : fieldCandidates) {
-    final PsiElement element=candidate.getElement();
-    if (element instanceof PsiField) {
-      final PsiClass containingClass=((PsiField)element).getContainingClass();
-      if (containingClass != null && PsiTreeUtil.isContextAncestor(containingClass,this,true))       return fieldCandidates;
-    }
- else {
-      return fieldCandidates;
-    }
-  }
-  final boolean isPropertyName=GroovyPropertyUtils.isPropertyName(name);
-  final boolean isLValue=PsiUtil.isLValue(this);
-  String[] accessorNames=isLValue ? GroovyPropertyUtils.suggestSettersName(name) : GroovyPropertyUtils.suggestGettersName(name);
-  List<GroovyResolveResult> accessorResults=new ArrayList<GroovyResolveResult>();
-  for (  String accessorName : accessorNames) {
-    AccessorResolverProcessor accessorResolver=new AccessorResolverProcessor(accessorName,this,!isLValue);
-    GrReferenceResolveUtil.resolveImpl(accessorResolver,this);
-    final GroovyResolveResult[] candidates=accessorResolver.getCandidates();
-    if (candidates.length > 0 && candidates[candidates.length - 1].isStaticsOK()) {
-      if (isPropertyName || candidates[candidates.length - 1].getElement() instanceof GrAccessorMethod) {
-        if (candidates.length == 1)         return candidates;
-        return new GroovyResolveResult[]{candidates[candidates.length - 1]};
+  if (isDefinitelyKeyOfMap())   return GroovyResolveResult.EMPTY_ARRAY;
+  final GroovyResolveResult[] results=resolveTypeOrPropertyInner();
+  if (results.length == 0)   return GroovyResolveResult.EMPTY_ARRAY;
+  if (!ResolveUtil.mayBeKeyOfMap(this))   return results;
+  List<GroovyResolveResult> filtered=new ArrayList<GroovyResolveResult>();
+  for (  GroovyResolveResult result : results) {
+    final PsiElement element=result.getElement();
+    if (element instanceof PsiMember) {
+      final PsiClass containingClass=((PsiMember)element).getContainingClass();
+      if (containingClass != null) {
+        if (!InheritanceUtil.isInheritor(containingClass,CommonClassNames.JAVA_UTIL_MAP))         continue;
+        final String name=containingClass.getQualifiedName();
+        if (name != null && name.startsWith("java."))         continue;
       }
+      if (!((PsiMember)element).hasModifierProperty(PsiModifier.PRIVATE))       continue;
     }
- else {
-      ContainerUtil.addAll(accessorResults,candidates);
-    }
+    filtered.add(result);
   }
-  if (fieldCandidates.length > 0)   return fieldCandidates;
-  if (classCandidates == null) {
-    ResolverProcessor classProcessor=new ClassResolverProcessor(name,this,kinds);
-    GrReferenceResolveUtil.resolveImpl(classProcessor,this);
-    classCandidates=classProcessor.getCandidates();
-  }
-  if (classCandidates.length > 0)   return classCandidates;
-  if (accessorResults.size() > 0)   return new GroovyResolveResult[]{accessorResults.get(0)};
-  return GroovyResolveResult.EMPTY_ARRAY;
+  return ContainerUtil.toArray(filtered,new GroovyResolveResult[filtered.size()]);
 }
