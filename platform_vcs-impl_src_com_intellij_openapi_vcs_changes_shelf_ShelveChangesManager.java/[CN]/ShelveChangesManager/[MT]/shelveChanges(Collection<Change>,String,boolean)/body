@@ -1,0 +1,38 @@
+{
+  final List<Change> textChanges=new ArrayList<Change>();
+  final List<ShelvedBinaryFile> binaryFiles=new ArrayList<ShelvedBinaryFile>();
+  for (  Change change : changes) {
+    if (ChangesUtil.getFilePath(change).isDirectory()) {
+      continue;
+    }
+    if (change.getBeforeRevision() instanceof BinaryContentRevision || change.getAfterRevision() instanceof BinaryContentRevision) {
+      binaryFiles.add(shelveBinaryFile(change));
+    }
+ else {
+      textChanges.add(change);
+    }
+  }
+  final ShelvedChangeList changeList;
+  try {
+    File patchPath=getPatchPath(commitMessage);
+    ProgressManager.checkCanceled();
+    final List<FilePatch> patches=IdeaTextPatchBuilder.buildPatch(myProject,textChanges,myProject.getBaseDir().getPresentableUrl(),false);
+    ProgressManager.checkCanceled();
+    myFileProcessor.savePathFile(new CompoundShelfFileProcessor.ContentProvider(){
+      public void writeContentTo(      final Writer writer) throws IOException {
+        UnifiedDiffWriter.write(patches,writer,"\n");
+      }
+    }
+,patchPath);
+    changeList=new ShelvedChangeList(patchPath.toString(),commitMessage.replace('\n',' '),binaryFiles);
+    myShelvedChangeLists.add(changeList);
+    ProgressManager.checkCanceled();
+    if (rollback) {
+      new RollbackWorker(myProject,false).doRollback(changes,true,null,VcsBundle.message("shelve.changes.action"));
+    }
+  }
+  finally {
+    notifyStateChanged();
+  }
+  return changeList;
+}
