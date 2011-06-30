@@ -6,8 +6,8 @@
   myTable=new JBTable(myTableModel);
   DefaultCellEditor defaultEditor=(DefaultCellEditor)myTable.getDefaultEditor(Object.class);
   defaultEditor.setClickCountToStart(1);
-  myTable.setTableHeader(null);
   myTable.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  myTable.setCellSelectionEnabled(true);
   myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setCellRenderer(new CheckBoxTableCellRenderer());
   myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setMaxWidth(new JCheckBox().getPreferredSize().width);
   myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_NAME_COLUMN).setCellRenderer(new DefaultTableCellRenderer(){
@@ -43,27 +43,42 @@
     }
   }
 );
-  myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN).setCellEditor(new AbstractTableCellEditor(){
+  final TableColumn typeColumn=myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN);
+  typeColumn.setCellEditor(new AbstractTableCellEditor(){
     TypeSelector myCurrentSelector;
+    final JBComboBoxTableCellEditorComponent myEditorComponent=new JBComboBoxTableCellEditorComponent();
     @Nullable public Object getCellEditorValue(){
-      return myCurrentSelector.getSelectedType();
+      return myEditorComponent.getEditorValue();
     }
     public Component getTableCellEditorComponent(    final JTable table,    final Object value,    final boolean isSelected,    final int row,    final int column){
+      myEditorComponent.setCell(table,row,column);
+      myEditorComponent.setOptions(myParameterTypeSelectors[row].getTypes());
+      myEditorComponent.setDefaultValue(getVariableData()[row].type);
+      myEditorComponent.setToString(new Function<Object,String>(){
+        @Override public String fun(        Object o){
+          return ((PsiType)o).getPresentableText();
+        }
+      }
+);
       myCurrentSelector=myParameterTypeSelectors[row];
-      return myCurrentSelector.getComponent();
+      return myEditorComponent;
     }
   }
 );
   myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN).setCellRenderer(new DefaultTableCellRenderer(){
+    private JLabel myLabel;
+    private JPanel myPanel;
+{
+      myLabel=new JLabel();
+      myPanel=new JPanel(new BorderLayout());
+      myPanel.add(myLabel,BorderLayout.CENTER);
+      myPanel.add(new JBLabel(PlatformIcons.COMBOBOX_ARROW_ICON),BorderLayout.EAST);
+    }
     public Component getTableCellRendererComponent(    JTable table,    Object value,    boolean isSelected,    boolean hasFocus,    int row,    int column){
-      if (myParameterTypeSelectors[row].getComponent() instanceof JComboBox) {
-        myTypeRendererCombo.setSelectedIndex(row);
-        return myTypeRendererCombo;
-      }
-      super.getTableCellRendererComponent(table,value,isSelected,hasFocus,row,column);
-      VariableData data=getVariableData()[row];
-      setText(data.type.getPresentableText());
-      return this;
+      myLabel.setText(String.valueOf(value));
+      myPanel.setBackground(isSelected ? table.getSelectionBackground() : table.getBackground());
+      myLabel.setForeground(isSelected ? table.getSelectionForeground() : table.getForeground());
+      return myPanel;
     }
   }
 );
@@ -94,31 +109,6 @@
     }
   }
 );
-  inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_F2,0),"edit_parameter_name");
-  actionMap.put("edit_parameter_name",new AbstractAction(){
-    public void actionPerformed(    ActionEvent e){
-      if (!myTable.isEditing()) {
-        int row=myTable.getSelectedRow();
-        if (row >= 0 && row < myTableModel.getRowCount()) {
-          TableUtil.editCellAt(myTable,row,MyTableModel.PARAMETER_NAME_COLUMN);
-        }
-      }
-    }
-  }
-);
-  inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,0),"invokeImpl");
-  actionMap.put("invokeImpl",new AbstractAction(){
-    public void actionPerformed(    ActionEvent e){
-      TableCellEditor editor=myTable.getCellEditor();
-      if (editor != null) {
-        editor.stopCellEditing();
-      }
- else {
-        doEnterAction();
-      }
-    }
-  }
-);
   actionMap.put("doCancel",new AbstractAction(){
     public void actionPerformed(    ActionEvent e){
       TableCellEditor editor=myTable.getCellEditor();
@@ -131,65 +121,10 @@
     }
   }
 );
-  JPanel listPanel=new JPanel(new BorderLayout());
-  JScrollPane scrollPane=ScrollPaneFactory.createScrollPane(myTable);
-  listPanel.add(scrollPane,BorderLayout.CENTER);
-  listPanel.setBorder(BorderFactory.createEmptyBorder(4,4,4,4));
+  final AddRemoveUpDownPanel.Buttons[] upDownButtons={AddRemoveUpDownPanel.Buttons.UP,AddRemoveUpDownPanel.Buttons.DOWN};
+  JPanel listPanel=EditableRowTable.wrapToTableWithButtons(myTable,myTableModel,new CustomLineBorder(0,1,1,1),upDownButtons);
   add(listPanel,BorderLayout.CENTER);
-  JPanel buttonsPanel=new JPanel();
-  buttonsPanel.setBorder(BorderFactory.createEmptyBorder(4,4,4,4));
-  add(buttonsPanel,BorderLayout.EAST);
-  buttonsPanel.setLayout(new GridBagLayout());
-  GridBagConstraints gbConstraints=new GridBagConstraints();
-  gbConstraints.gridwidth=GridBagConstraints.REMAINDER;
-  gbConstraints.fill=GridBagConstraints.HORIZONTAL;
-  gbConstraints.insets=new Insets(2,4,2,4);
-  myUpButton=new JButton();
-  myUpButton.setText(UIBundle.message("row.move.up"));
-  myUpButton.setDefaultCapable(false);
-  buttonsPanel.add(myUpButton,gbConstraints);
-  myDownButton=new JButton();
-  myDownButton.setText(UIBundle.message("row.move.down"));
-  myDownButton.setDefaultCapable(false);
-  buttonsPanel.add(myDownButton,gbConstraints);
-  gbConstraints.weighty=1;
-  buttonsPanel.add(new JPanel(),gbConstraints);
-  myUpButton.addActionListener(new ActionListener(){
-    public void actionPerformed(    ActionEvent e){
-      if (myTable.isEditing()) {
-        final boolean isStopped=myTable.getCellEditor().stopCellEditing();
-        if (!isStopped)         return;
-      }
-      moveSelectedItem(-1);
-      updateSignature();
-      myTable.requestFocus();
-    }
-  }
-);
-  myDownButton.addActionListener(new ActionListener(){
-    public void actionPerformed(    ActionEvent e){
-      if (myTable.isEditing()) {
-        final boolean isStopped=myTable.getCellEditor().stopCellEditing();
-        if (!isStopped)         return;
-      }
-      moveSelectedItem(+1);
-      updateSignature();
-      myTable.requestFocus();
-    }
-  }
-);
-  myTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
-    public void valueChanged(    ListSelectionEvent e){
-      updateMoveButtons();
-    }
-  }
-);
-  if (getVariableData().length <= 1) {
-    myUpButton.setEnabled(false);
-    myDownButton.setEnabled(false);
-  }
- else {
+  if (getVariableData().length > 1) {
     myTable.getSelectionModel().setSelectionInterval(0,0);
   }
-  updateMoveButtons();
 }
