@@ -1,0 +1,154 @@
+{
+  final boolean isAnalyzeShown=((ApplicationEx)ApplicationManager.getApplication()).isInternal();
+  final AnActionButton addButton=new AnActionButton(ProjectBundle.message("button.add"),null,PlatformIcons.TABLE_ADD_ROW){
+    @Override public void actionPerformed(    AnActionEvent e){
+      initPopupActions();
+      final JBPopup popup=JBPopupFactory.getInstance().createListPopup(new BaseListPopupStep<AddItemPopupAction<?>>(null,myPopupActions){
+        @Override public Icon getIconFor(        AddItemPopupAction<?> aValue){
+          return aValue.getIcon();
+        }
+        @Override public boolean hasSubstep(        AddItemPopupAction<?> selectedValue){
+          return selectedValue.hasSubStep();
+        }
+        public boolean isMnemonicsNavigationEnabled(){
+          return true;
+        }
+        public PopupStep onChosen(        final AddItemPopupAction<?> selectedValue,        final boolean finalChoice){
+          if (selectedValue.hasSubStep()) {
+            return selectedValue.createSubStep();
+          }
+          return doFinalStep(new Runnable(){
+            public void run(){
+              selectedValue.execute();
+            }
+          }
+);
+        }
+        @NotNull public String getTextFor(        AddItemPopupAction<?> value){
+          return "&" + value.getIndex() + "  "+ value.getTitle();
+        }
+      }
+);
+      popup.showUnderneathOf(getComponent());
+    }
+  }
+;
+  final ClasspathPanelAction removeAction=new ClasspathPanelAction(this){
+    @Override public void run(){
+      final List removedRows=TableUtil.removeSelectedItems(myEntryTable);
+      if (removedRows.isEmpty()) {
+        return;
+      }
+      for (      final Object removedRow : removedRows) {
+        final ClasspathTableItem<?> item=(ClasspathTableItem<?>)((Object[])removedRow)[ClasspathTableModel.ITEM_COLUMN];
+        final OrderEntry orderEntry=item.getEntry();
+        if (orderEntry == null) {
+          continue;
+        }
+        getRootModel().removeOrderEntry(orderEntry);
+      }
+      final int[] selectedRows=myEntryTable.getSelectedRows();
+      myModel.fireTableDataChanged();
+      TableUtil.selectRows(myEntryTable,selectedRows);
+      final StructureConfigurableContext context=ModuleStructureConfigurable.getInstance(myState.getProject()).getContext();
+      context.getDaemonAnalyzer().queueUpdate(new ModuleProjectStructureElement(context,getRootModel().getModule()));
+    }
+  }
+;
+  final AnActionButton removeButton=new AnActionButton(ProjectBundle.message("button.remove"),null,PlatformIcons.TABLE_REMOVE_ROW){
+    @Override public void actionPerformed(    AnActionEvent e){
+      removeAction.actionPerformed(null);
+    }
+  }
+;
+  myEditButton=new AnActionButton(ProjectBundle.message("module.classpath.button.edit"),null,PlatformIcons.TABLE_EDIT_ROW){
+    @Override public void actionPerformed(    AnActionEvent e){
+      final int row=myEntryTable.getSelectedRow();
+      final ClasspathTableItem<?> item=myModel.getItemAt(row);
+      final OrderEntry entry=item.getEntry();
+      if (!(entry instanceof LibraryOrderEntry))       return;
+      final Library library=((LibraryOrderEntry)entry).getLibrary();
+      if (library == null) {
+        return;
+      }
+      final LibraryTableModifiableModelProvider provider;
+      final LibraryTable table=library.getTable();
+      if (table == null) {
+        final LibraryTable moduleLibraryTable=getRootModel().getModuleLibraryTable();
+        provider=new LibraryTableModifiableModelProvider(){
+          public LibraryTable.ModifiableModel getModifiableModel(){
+            return moduleLibraryTable.getModifiableModel();
+          }
+        }
+;
+      }
+ else {
+        provider=getStructureConfigurableContext().createModifiableModelProvider(table.getTableLevel());
+      }
+      EditExistingLibraryDialog dialog=EditExistingLibraryDialog.createDialog(ClasspathPanelImpl.this,provider,library,myState.getProject());
+      dialog.setContextModule(getRootModel().getModule());
+      dialog.show();
+      myEntryTable.repaint();
+      ModuleStructureConfigurable.getInstance(myState.getProject()).getTree().repaint();
+    }
+  }
+;
+  final AnActionButton upButton=new AnActionButton(ProjectBundle.message("module.classpath.button.move.up"),null,PlatformIcons.TABLE_MOVE_ROW_UP){
+    @Override public void actionPerformed(    AnActionEvent e){
+      moveSelectedRows(-1);
+    }
+  }
+;
+  final AnActionButton downButton=new AnActionButton(ProjectBundle.message("module.classpath.button.move.down"),null,PlatformIcons.TABLE_MOVE_ROW_DOWN){
+    @Override public void actionPerformed(    AnActionEvent e){
+      moveSelectedRows(+1);
+    }
+  }
+;
+  final AnActionButton analyzeButton=new AnActionButton(ProjectBundle.message("classpath.panel.analyze"),null,PlatformIcons.TABLE_ANALYZE){
+    @Override public void actionPerformed(    AnActionEvent e){
+      AnalyzeDependenciesDialog.show(getRootModel().getModule());
+    }
+  }
+;
+  List<AnActionButton> actions=new ArrayList<AnActionButton>();
+  actions.add(addButton);
+  actions.add(removeButton);
+  actions.add(upButton);
+  actions.add(downButton);
+  actions.add(myEditButton);
+  if (isAnalyzeShown) {
+    actions.add(analyzeButton);
+  }
+  myEntryTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      if (e.getValueIsAdjusting()) {
+        return;
+      }
+      final int[] selectedRows=myEntryTable.getSelectedRows();
+      boolean removeButtonEnabled=true;
+      int minRow=myEntryTable.getRowCount() + 1;
+      int maxRow=-1;
+      for (      final int selectedRow : selectedRows) {
+        minRow=Math.min(minRow,selectedRow);
+        maxRow=Math.max(maxRow,selectedRow);
+        final ClasspathTableItem<?> item=myModel.getItemAt(selectedRow);
+        if (!item.isRemovable()) {
+          removeButtonEnabled=false;
+        }
+      }
+      upButton.setEnabled(minRow > 0 && minRow < myEntryTable.getRowCount());
+      downButton.setEnabled(maxRow >= 0 && maxRow < myEntryTable.getRowCount() - 1);
+      removeButton.setEnabled(removeButtonEnabled);
+      ClasspathTableItem<?> selectedItem=selectedRows.length == 1 ? myModel.getItemAt(selectedRows[0]) : null;
+      myEditButton.setEnabled(selectedItem != null && selectedItem.isEditable());
+    }
+  }
+);
+  addButton.setShortcut(KeyboardShortcut.fromString("alt A"));
+  removeButton.setShortcut(KeyboardShortcut.fromString("alt DELETE"));
+  upButton.setShortcut(KeyboardShortcut.fromString("alt UP"));
+  downButton.setShortcut(KeyboardShortcut.fromString("alt DOWN"));
+  myEntryTable.setBorder(new LineBorder(UIUtil.getBorderColor()));
+  return EditableRowTable.wrapToTableWithButtons(myEntryTable,myModel,new CustomLineBorder(0,1,1,1),new AddRemoveUpDownPanel.Buttons[0],actions.toArray(new AnActionButton[actions.size()]));
+}
