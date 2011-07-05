@@ -1,36 +1,78 @@
 {
   threadFinished=false;
-  try {
-    while (!isDisposed) {
+  while (!isDisposed) {
+    try {
+      boolean success=false;
+      Document document=null;
+      Project project=null;
+      ProgressIndicator indicator=null;
       try {
-        Document document;
 synchronized (documentsToCommit) {
-          int size=documentsToCommit.size();
-          if (size == 0) {
+          if (!myEnabled || documentsToCommit.isEmpty()) {
             documentsToCommit.wait();
             continue;
           }
-          document=documentsToCommit.get(size - 1);
-        }
-        if (document == THE_POISON_PILL)         break;
-        boolean success=commit(myProject,document,null,recreateIndicator(),false);
-synchronized (documentsToCommit) {
-          if (success) {
-            documentsToCommit.remove(document);
+          CommitTask task=documentsToCommit.pullFirst();
+          document=task.document;
+          indicator=task.indicator;
+          project=task.project;
+          log("Pulled",document,false,indicator);
+          if (getCommitStage(document) != CommitStage.QUEUED_TO_COMMIT || project.isDisposed() || !ArrayUtil.contains(document,PsiDocumentManager.getInstance(project).getUncommittedDocuments())) {
+            continue;
           }
-          documentsToCommit.notifyAll();
+          if (indicator.isRunning()) {
+            useIndicator(indicator);
+            document.putUserData(COMMIT_PROGRESS,indicator);
+          }
+ else {
+            success=true;
+          }
+        }
+        Runnable finishRunnable=null;
+        if (!success && !indicator.isCanceled()) {
+          try {
+            finishRunnable=commit(document,project,null,indicator,false);
+            success=finishRunnable != null;
+            log("Committed",document,false,finishRunnable,indicator);
+          }
+  finally {
+            document.putUserData(COMMIT_PROGRESS,null);
+          }
+        }
+synchronized (documentsToCommit) {
+          if (indicator.isCanceled()) {
+            success=false;
+          }
+          if (success) {
+            UIUtil.invokeLaterIfNeeded(finishRunnable);
+          }
+          log("Invoked later",document,false,success,finishRunnable,indicator);
         }
       }
  catch (      ProcessCanceledException ignored) {
+        int i=0;
+        cancel(ignored);
+        log("PCE",document,false,ignored);
+        success=false;
       }
 catch (      InterruptedException ignored) {
+        int i=0;
+        log("IE",document,false,ignored);
+        cancel(ignored);
       }
 catch (      Throwable e) {
         LOG.error(e);
+        cancel(e);
+      }
+      if (!success && indicator.isRunning()) {
+        doQueue(document,project,CommitStage.QUEUED_TO_COMMIT,"re-added on failure");
       }
     }
+ catch (    Throwable e) {
+      e.printStackTrace();
+    }
   }
-  finally {
-    threadFinished=true;
-  }
+  threadFinished=true;
+  wakeUpQueue();
+  log("Good bye",null,false);
 }
