@@ -1,0 +1,48 @@
+{
+  path=getLastCommitName(project,path);
+  final VirtualFile root=GitUtil.getGitRoot(path);
+  final GitLineHandler h=new GitLineHandler(project,root,GitCommand.LOG);
+  final GitLogParser parser=new GitLogParser(project,SHORT_HASH,COMMIT_TIME,SHORT_PARENTS,AUTHOR_NAME);
+  parser.parseStatusBeforeName(false);
+  h.setNoSSH(true);
+  h.setStdoutSuppressed(true);
+  h.addParameters(parameters);
+  h.addParameters(parser.getPretty(),"--encoding=UTF-8","--full-history");
+  h.endOptions();
+  if (paths != null && !paths.isEmpty()) {
+    h.addRelativeFiles(paths);
+  }
+ else {
+    h.addParameters("--sparse");
+    h.addRelativePaths(path);
+  }
+  final Semaphore semaphore=new Semaphore();
+  h.addLineListener(new GitLineHandlerListener(){
+    @Override public void onLineAvailable(    final String line,    final Key outputType){
+      try {
+        if (ProcessOutputTypes.STDOUT.equals(outputType)) {
+          if (isCanceled != null && isCanceled.get()) {
+            h.cancel();
+            return;
+          }
+          GitLogRecord record=parser.parseOneRecord(line);
+          consumer.consume(new CommitHashPlusParents(record.getShortHash(),record.getParentsShortHashes(),record.getLongTimeStamp() * 1000,record.getAuthorName()));
+        }
+      }
+ catch (      ProcessCanceledException e) {
+        h.cancel();
+        semaphore.up();
+      }
+    }
+    @Override public void processTerminated(    int exitCode){
+      semaphore.up();
+    }
+    @Override public void startFailed(    Throwable exception){
+    }
+  }
+);
+  semaphore.down();
+  h.start();
+  semaphore.waitFor();
+  consumer.finished();
+}
