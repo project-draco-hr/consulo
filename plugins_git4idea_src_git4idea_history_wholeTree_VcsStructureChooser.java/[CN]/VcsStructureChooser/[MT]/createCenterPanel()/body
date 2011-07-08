@@ -1,0 +1,152 @@
+{
+  final FileChooserDescriptor descriptor=new FileChooserDescriptor(true,true,true,true,false,true);
+  calculateRoots();
+  final ArrayList<VirtualFile> list=new ArrayList<VirtualFile>(myRoots);
+  final Comparator<VirtualFile> comparator=new Comparator<VirtualFile>(){
+    @Override public int compare(    VirtualFile o1,    VirtualFile o2){
+      final String module1=myModulesSet.get(o1);
+      final String path1=module1 != null ? module1 : o1.getPath();
+      final String module2=myModulesSet.get(o2);
+      final String path2=module2 != null ? module2 : o2.getPath();
+      return path1.compareToIgnoreCase(path2);
+    }
+  }
+;
+  for (  VirtualFile root : list) {
+    descriptor.addRoot(root);
+  }
+  myTree=new Tree();
+  myTree.setMinimumSize(new Dimension(200,200));
+  myTree.setBorder(BORDER);
+  myTree.setShowsRootHandles(true);
+  myTree.setRootVisible(true);
+  final MyCheckboxTreeCellRenderer cellRenderer=new MyCheckboxTreeCellRenderer(mySelectionManager,myModulesSet,myVcs.getProject(),myTree,myRoots);
+  final FileSystemTreeImpl fileSystemTree=new FileSystemTreeImpl(myVcs.getProject(),descriptor,myTree,cellRenderer,null,new Convertor<TreePath,String>(){
+    @Override public String convert(    TreePath o){
+      final DefaultMutableTreeNode lastPathComponent=((DefaultMutableTreeNode)o.getLastPathComponent());
+      final Object uo=lastPathComponent.getUserObject();
+      if (uo instanceof FileNodeDescriptor) {
+        final VirtualFile file=((FileNodeDescriptor)uo).getElement().getFile();
+        final String module=myModulesSet.get(file);
+        if (module != null)         return module;
+        return file == null ? "" : file.getName();
+      }
+      return o.toString();
+    }
+  }
+);
+  final AbstractTreeUi ui=fileSystemTree.getTreeBuilder().getUi();
+  ui.setNodeDescriptorComparator(new Comparator<NodeDescriptor>(){
+    @Override public int compare(    NodeDescriptor o1,    NodeDescriptor o2){
+      if (o1 instanceof FileNodeDescriptor && o2 instanceof FileNodeDescriptor) {
+        final VirtualFile f1=((FileNodeDescriptor)o1).getElement().getFile();
+        final VirtualFile f2=((FileNodeDescriptor)o2).getElement().getFile();
+        return comparator.compare(f1,f2);
+      }
+      return o1.getIndex() - o2.getIndex();
+    }
+  }
+);
+  myRoot=(DefaultMutableTreeNode)myTree.getModel().getRoot();
+  myTree.addMouseListener(new MouseAdapter(){
+    public void mouseClicked(    MouseEvent e){
+      int row=myTree.getRowForLocation(e.getX(),e.getY());
+      if (row < 0)       return;
+      final Object o=myTree.getPathForRow(row).getLastPathComponent();
+      if (myRoot == o || getFile(o) == null)       return;
+      Rectangle rowBounds=myTree.getRowBounds(row);
+      cellRenderer.setBounds(rowBounds);
+      Rectangle checkBounds=cellRenderer.myCheckbox.getBounds();
+      checkBounds.setLocation(rowBounds.getLocation());
+      if (checkBounds.height == 0)       checkBounds.height=rowBounds.height;
+      if (checkBounds.contains(e.getPoint())) {
+        mySelectionManager.toggleSelection((DefaultMutableTreeNode)o);
+        myTree.revalidate();
+        myTree.repaint();
+        e.consume();
+      }
+    }
+  }
+);
+  myTree.addKeyListener(new KeyAdapter(){
+    public void keyPressed(    KeyEvent e){
+      if (e.getKeyCode() == KeyEvent.VK_SPACE) {
+        TreePath treePath=myTree.getLeadSelectionPath();
+        if (treePath == null)         return;
+        final Object o=treePath.getLastPathComponent();
+        if (myRoot == o || getFile(o) == null)         return;
+        mySelectionManager.toggleSelection((DefaultMutableTreeNode)o);
+        myTree.revalidate();
+        myTree.repaint();
+        e.consume();
+      }
+    }
+  }
+);
+  final Splitter splitter=new Splitter(true,0.7f);
+  splitter.setFirstComponent(new JBScrollPane(fileSystemTree.getTree()));
+  final JPanel wrapper=new JPanel(new BorderLayout());
+  mySelectedLabel=new JLabel(DEFAULT_TEXT);
+  mySelectedLabel.setBorder(BorderFactory.createEmptyBorder(2,0,2,0));
+  wrapper.add(mySelectedLabel,BorderLayout.NORTH);
+  mySelectedList=new JBList(new CollectionListModel(new ArrayList<VirtualFile>()));
+  mySelectedList.setCellRenderer(new WithModulesListCellRenderer(myVcs.getProject(),myModulesSet));
+  wrapper.add(ScrollPaneFactory.createScrollPane(mySelectedList),BorderLayout.CENTER);
+  splitter.setSecondComponent(wrapper);
+  mySelectionManager.setSelectionChangeListener(new PlusMinus<VirtualFile>(){
+    @Override public void plus(    VirtualFile virtualFile){
+      final CollectionListModel model=(CollectionListModel)mySelectedList.getModel();
+      model.add(virtualFile);
+      model.sort(FilePathComparator.getInstance());
+      recalculateErrorText();
+      mySelectedList.revalidate();
+      mySelectedList.repaint();
+    }
+    private void recalculateErrorText(){
+      checkEmptyness();
+      if (mySelectionManager.canAddSelection()) {
+        mySelectedLabel.setText(DEFAULT_TEXT);
+      }
+ else {
+        mySelectedLabel.setText(CAN_NOT_ADD_TEXT);
+      }
+      mySelectedLabel.revalidate();
+    }
+    @Override public void minus(    VirtualFile virtualFile){
+      final CollectionListModel defaultListModel=(CollectionListModel)mySelectedList.getModel();
+      for (int i=0; i < defaultListModel.getSize(); i++) {
+        final VirtualFile elementAt=(VirtualFile)defaultListModel.getElementAt(i);
+        if (virtualFile.equals(elementAt)) {
+          defaultListModel.remove(i);
+          break;
+        }
+      }
+      defaultListModel.sort(FilePathComparator.getInstance());
+      recalculateErrorText();
+      mySelectedList.revalidate();
+      mySelectedList.repaint();
+    }
+  }
+);
+  mySelectedList.addKeyListener(new KeyAdapter(){
+    @Override public void keyReleased(    KeyEvent e){
+      if (e.getModifiers() == 0 && e.getKeyCode() == KeyEvent.VK_DELETE) {
+        final int[] idx=mySelectedList.getSelectedIndices();
+        if (idx != null && idx.length > 0) {
+          final int answer=Messages.showYesNoDialog(myVcs.getProject(),"Remove selected paths from filter?","Remove from filter",Messages.getQuestionIcon());
+          if (Messages.OK == answer) {
+            Arrays.sort(idx);
+            for (int i=idx.length - 1; i >= 0; --i) {
+              int i1=idx[i];
+              mySelectionManager.removeSelection((VirtualFile)((CollectionListModel)mySelectedList.getModel()).getElementAt(i1));
+              myTree.revalidate();
+              myTree.repaint();
+            }
+          }
+        }
+      }
+    }
+  }
+);
+  return splitter;
+}
