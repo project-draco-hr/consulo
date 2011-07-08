@@ -1,0 +1,23 @@
+{
+  CompletionContext context=createCompletionContext(hostFile,hostStartOffset,hostEditor,hostMap);
+  CompletionParameters parameters=createCompletionParameters(invocationCount,initContext,context);
+  final Editor editor=initContext.getEditor();
+  final Semaphore freezeSemaphore=new Semaphore();
+  freezeSemaphore.down();
+  final CompletionProgressIndicator indicator=new CompletionProgressIndicator(editor,parameters,this,freezeSemaphore,initContext.getOffsetMap(),hasModifiers);
+  boolean sync=(invokedExplicitly || ApplicationManager.getApplication().isUnitTestMode()) && !CompletionAutoPopupHandler.ourTestingAutopopup;
+  CompletionServiceImpl.setCompletionPhase(sync ? new CompletionPhase.Synchronous(indicator) : new CompletionPhase.BgCalculation(indicator));
+  final AtomicReference<LookupElement[]> data=startCompletionThread(parameters,indicator,initContext);
+  if (!sync) {
+    return;
+  }
+  if (freezeSemaphore.waitFor(2000)) {
+    final LookupElement[] allItems=data.get();
+    if (allItems != null) {
+      completionFinished(initContext.getStartOffset(),initContext.getSelectionEndOffset(),indicator,allItems,hasModifiers);
+      return;
+    }
+  }
+  CompletionServiceImpl.setCompletionPhase(new CompletionPhase.BgCalculation(indicator));
+  indicator.showLookup();
+}
