@@ -1,9 +1,10 @@
 {
   HttpConfigurable.getInstance().setAuthenticator();
   final List<Pair<DownloadableFileDescription,File>> downloadedFiles=new ArrayList<Pair<DownloadableFileDescription,File>>();
-  final List<VirtualFile> existingFiles=new ArrayList<VirtualFile>();
+  final List<File> existingFiles=new ArrayList<File>();
   final Ref<Exception> exceptionRef=Ref.create(null);
   final Ref<DownloadableFileDescription> currentFile=new Ref<DownloadableFileDescription>();
+  final File ioDir=VfsUtil.virtualToIoFile(dir);
   ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
     public void run(){
       final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
@@ -13,10 +14,10 @@
           currentFile.set(description);
           if (indicator != null) {
             indicator.checkCanceled();
-            indicator.setText(IdeBundle.message("progress.0.of.1.file.downloaded.text",i,myFileDescriptions.size()));
+            indicator.setText(IdeBundle.message("progress.downloading.0.of.1.file.text",i + 1,myFileDescriptions.size()));
           }
-          final VirtualFile existing=dir.findChild(description.getDefaultFileName());
-          long size=existing != null ? existing.getLength() : -1;
+          final File existing=new File(ioDir,description.getDefaultFileName());
+          long size=existing.exists() ? existing.length() : -1;
           if (!download(description,size,downloadedFiles)) {
             existingFiles.add(existing);
           }
@@ -32,30 +33,30 @@ catch (      IOException e) {
   }
 ,myDialogTitle,true,myProject,myParent);
   Exception exception=exceptionRef.get();
-  if (exception == null) {
-    try {
-      return moveToDir(existingFiles,downloadedFiles,dir);
-    }
- catch (    IOException e) {
-      if (myProject != null) {
-        Messages.showErrorDialog(myProject,myDialogTitle,e.getMessage());
+  if (exception != null) {
+    deleteFiles(downloadedFiles);
+    if (exception instanceof IOException) {
+      String message=IdeBundle.message("error.file.download.failed",exception.getMessage());
+      if (currentFile.get() != null) {
+        message+=": " + currentFile.get().getDownloadUrl();
       }
+      final boolean tryAgain=IOExceptionDialog.showErrorDialog(myDialogTitle,message);
+      if (tryAgain) {
+        return doDownload(dir);
+      }
+    }
+    return null;
+  }
+  try {
+    return moveToDir(existingFiles,downloadedFiles,dir);
+  }
+ catch (  IOException e) {
+    if (myProject != null) {
+      Messages.showErrorDialog(myProject,myDialogTitle,e.getMessage());
+    }
  else {
-        Messages.showErrorDialog(myParent,myDialogTitle,e.getMessage());
-      }
-      return VirtualFile.EMPTY_ARRAY;
+      Messages.showErrorDialog(myParent,myDialogTitle,e.getMessage());
     }
+    return null;
   }
-  deleteFiles(downloadedFiles);
-  if (exception instanceof IOException) {
-    String message=IdeBundle.message("error.library.download.failed",exception.getMessage());
-    if (currentFile.get() != null) {
-      message+=": " + currentFile.get().getDownloadUrl();
-    }
-    final boolean tryAgain=IOExceptionDialog.showErrorDialog(myDialogTitle,message);
-    if (tryAgain) {
-      return doDownload(dir);
-    }
-  }
-  return VirtualFile.EMPTY_ARRAY;
 }
