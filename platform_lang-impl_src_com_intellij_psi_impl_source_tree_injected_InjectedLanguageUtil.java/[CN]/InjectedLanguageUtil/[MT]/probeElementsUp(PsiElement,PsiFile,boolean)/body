@@ -3,11 +3,12 @@
   final Project project=psiManager.getProject();
   InjectedLanguageManagerImpl injectedManager=InjectedLanguageManagerImpl.getInstanceImpl(project);
   if (injectedManager == null)   return null;
-  for (PsiElement current=element; current != null && current != hostPsiFile; current=current.getParent()) {
+  MultiHostRegistrarImpl registrar=null;
+  PsiElement current;
+  nextParent:   for (current=element; current != null && current != hostPsiFile; current=current.getParent()) {
     ProgressManager.checkCanceled();
     if ("EL".equals(current.getLanguage().getID()))     break;
     ParameterizedCachedValue<MultiHostRegistrarImpl,PsiElement> data=current.getUserData(INJECTED_PSI_KEY);
-    MultiHostRegistrarImpl registrar;
     if (data == null) {
       registrar=InjectedPsiCachedValueProvider.doCompute(current,injectedManager,project,hostPsiFile);
       if (registrar != null) {
@@ -21,6 +22,10 @@
  else {
       registrar=data.getValue(current);
     }
+    if (registrar == NULL_REGISTRAR) {
+      registrar=null;
+      break;
+    }
     if (registrar != null) {
       List<Pair<Place,PsiFile>> places=registrar.result;
       TextRange elementRange=element.getTextRange();
@@ -28,12 +33,18 @@
         Place place=pair.first;
         for (        PsiLanguageInjectionHost.Shred shred : place) {
           if (shred.host.getTextRange().intersects(elementRange)) {
-            if (place.isValid())             return registrar;
+            if (place.isValid())             break nextParent;
           }
         }
       }
     }
     if (!probeUp)     break;
   }
-  return null;
+  if (registrar == null) {
+    for (PsiElement e=element; e != current && e != null && e != hostPsiFile; e=e.getParent()) {
+      ProgressManager.checkCanceled();
+      e.putUserData(INJECTED_PSI_KEY,NULL_VALUE);
+    }
+  }
+  return registrar;
 }
