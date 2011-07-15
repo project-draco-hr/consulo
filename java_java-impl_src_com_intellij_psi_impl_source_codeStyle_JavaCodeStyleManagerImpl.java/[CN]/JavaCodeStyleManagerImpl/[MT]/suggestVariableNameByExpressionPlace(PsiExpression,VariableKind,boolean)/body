@@ -1,0 +1,74 @@
+{
+  if (expr.getParent() instanceof PsiExpressionList) {
+    PsiExpressionList list=(PsiExpressionList)expr.getParent();
+    PsiElement listParent=list.getParent();
+    PsiSubstitutor subst=PsiSubstitutor.EMPTY;
+    PsiMethod method=null;
+    if (listParent instanceof PsiMethodCallExpression) {
+      final JavaResolveResult resolveResult=((PsiMethodCallExpression)listParent).getMethodExpression().advancedResolve(false);
+      method=(PsiMethod)resolveResult.getElement();
+      subst=resolveResult.getSubstitutor();
+    }
+ else {
+      if (listParent instanceof PsiAnonymousClass) {
+        listParent=listParent.getParent();
+      }
+      if (listParent instanceof PsiNewExpression) {
+        method=((PsiNewExpression)listParent).resolveConstructor();
+      }
+    }
+    if (method != null) {
+      final PsiElement navElement=method.getNavigationElement();
+      if (navElement instanceof PsiMethod) {
+        method=(PsiMethod)navElement;
+      }
+      PsiExpression[] expressions=list.getExpressions();
+      int index=-1;
+      for (int i=0; i < expressions.length; i++) {
+        if (expressions[i] == expr) {
+          index=i;
+          break;
+        }
+      }
+      PsiParameter[] parms=method.getParameterList().getParameters();
+      if (index < parms.length) {
+        String name=parms[index].getName();
+        if (name != null && TypeConversionUtil.areTypesAssignmentCompatible(subst.substitute(parms[index].getType()),expr)) {
+          name=variableNameToPropertyName(name,VariableKind.PARAMETER);
+          String[] names=getSuggestionsByName(name,variableKind,false,correctKeywords);
+          if (expressions.length == 1) {
+            final String methodName=method.getName();
+            String[] words=NameUtil.nameToWords(methodName);
+            if (words.length > 0) {
+              final String firstWord=words[0];
+              if (SET_PREFIX.equals(firstWord)) {
+                final String propertyName=methodName.substring(firstWord.length());
+                final String[] setterNames=getSuggestionsByName(propertyName,variableKind,false,correctKeywords);
+                names=ArrayUtil.mergeArrays(names,setterNames,String.class);
+              }
+            }
+          }
+          return new NamesByExprInfo(name,names);
+        }
+      }
+    }
+  }
+ else   if (expr.getParent() instanceof PsiAssignmentExpression && variableKind == VariableKind.PARAMETER) {
+    final PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)expr.getParent();
+    if (expr == assignmentExpression.getRExpression()) {
+      final PsiExpression leftExpression=assignmentExpression.getLExpression();
+      if (leftExpression instanceof PsiReferenceExpression && ((PsiReferenceExpression)leftExpression).getQualifier() == null) {
+        String name=leftExpression.getText();
+        if (name != null) {
+          final PsiElement resolve=((PsiReferenceExpression)leftExpression).resolve();
+          if (resolve instanceof PsiVariable) {
+            name=variableNameToPropertyName(name,getVariableKind((PsiVariable)resolve));
+          }
+          String[] names=getSuggestionsByName(name,variableKind,false,correctKeywords);
+          return new NamesByExprInfo(name,names);
+        }
+      }
+    }
+  }
+  return new NamesByExprInfo(null,ArrayUtil.EMPTY_STRING_ARRAY);
+}
