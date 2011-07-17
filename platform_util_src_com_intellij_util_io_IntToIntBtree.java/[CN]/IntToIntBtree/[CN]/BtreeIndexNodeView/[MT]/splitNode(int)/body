@@ -1,0 +1,97 @@
+{
+  if (doSanityCheck) {
+    myAssert(isFull());
+    dump("before split:" + isIndexLeaf());
+  }
+  short maxIndex=(short)(getMaxChildrenCount() / 2);
+  BtreeIndexNodeView newIndexNode=new BtreeIndexNodeView(btree);
+  newIndexNode.setAddress(btree.nextPage());
+  newIndexNode.setParentAddress(parentAddress);
+  boolean indexLeaf=isIndexLeaf();
+  newIndexNode.setIndexLeaf(indexLeaf);
+  short recordCount=getChildrenCount();
+  short recordCountInNewNode=(short)(recordCount - maxIndex);
+  newIndexNode.setChildrenCount(recordCountInNewNode);
+  int medianKey;
+  if (indexLeaf) {
+    if (btree.isLarge) {
+      final int bytesToMove=recordCountInNewNode * INTERIOR_SIZE;
+      getBytes(indexToOffset(maxIndex),btree.buffer,0,bytesToMove);
+      newIndexNode.putBytes(newIndexNode.indexToOffset(0),btree.buffer,0,bytesToMove);
+    }
+ else {
+      for (int i=0; i < recordCountInNewNode; ++i) {
+        newIndexNode.setAddressAt(i,addressAt(i + maxIndex));
+        newIndexNode.setKeyAt(i,keyAt(i + maxIndex));
+      }
+    }
+    medianKey=newIndexNode.keyAt(0);
+  }
+ else {
+    BtreeIndexNodeView c=new BtreeIndexNodeView(btree);
+    for (int i=0; i < recordCountInNewNode; ++i) {
+      int address=addressAt(i + maxIndex);
+      c.setAddress(-address);
+      c.setParentAddress(newIndexNode.address);
+      c.sync();
+      newIndexNode.setAddressAt(i,address);
+      newIndexNode.setKeyAt(i,keyAt(i + maxIndex));
+    }
+    int address=addressAt(recordCount);
+    c.setAddress(-address);
+    c.setParentAddress(newIndexNode.address);
+    c.sync();
+    newIndexNode.setAddressAt(recordCountInNewNode,address);
+    --maxIndex;
+    medianKey=keyAt(maxIndex);
+  }
+  setChildrenCount(maxIndex);
+  if (parentAddress != 0) {
+    BtreeIndexNodeView parent=new BtreeIndexNodeView(btree);
+    parent.setAddress(parentAddress);
+    if (doSanityCheck) {
+      int medianKeyInParent=parent.search(medianKey);
+      int ourKey=keyAt(0);
+      int ourKeyInParent=parent.search(ourKey);
+      parent.dump("About to insert " + medianKey + ","+ newIndexNode.address+ ","+ medianKeyInParent+ " our key "+ ourKey+ ", "+ ourKeyInParent);
+      myAssert(medianKeyInParent < 0);
+      myAssert(!parent.isFull());
+    }
+    parent.insert(medianKey,-newIndexNode.address);
+    parent.setAddress(newIndexNode.parentAddress());
+    if (doSanityCheck) {
+      parent.dump("After modifying parent");
+      int search=parent.search(medianKey);
+      myAssert(search >= 0);
+      myAssert(parent.addressAt(search + 1) == -newIndexNode.address);
+      dump("old node after split:");
+      newIndexNode.dump("new node after split:");
+    }
+  }
+ else {
+    if (doSanityCheck) {
+      btree.root.dump("Splitting root:" + medianKey);
+    }
+    int newRootAddress=btree.nextPage();
+    if (doSanityCheck) {
+      System.out.println("Pages:" + btree.pagesCount + ", elements:"+ btree.size+ ", average:"+ (btree.maxStepsSearched + 1));
+    }
+    btree.setRootAddress(newRootAddress);
+    parentAddress=newRootAddress;
+    btree.root.setChildrenCount((short)1);
+    btree.root.setKeyAt(0,medianKey);
+    btree.root.setAddressAt(0,-address);
+    btree.root.setAddressAt(1,-newIndexNode.address);
+    btree.root.sync();
+    newIndexNode.setParentAddress(newRootAddress);
+    setParentAddress(newRootAddress);
+    if (doSanityCheck) {
+      btree.root.dump("New root");
+      dump("First child");
+      newIndexNode.dump("Second child");
+    }
+  }
+  sync();
+  newIndexNode.sync();
+  return parentAddress;
+}
