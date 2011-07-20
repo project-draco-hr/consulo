@@ -12,7 +12,12 @@
     }
     if (!doQuickImport(virtualFile,wizardContext))     return null;
     if (wizardContext.getProjectName() == null) {
-      wizardContext.setProjectName(IdeBundle.message("project.import.default.name",getName()) + ProjectFileType.DOT_DEFAULT_EXTENSION);
+      if (wizardContext.getProjectStorageFormat() == StorageScheme.DEFAULT) {
+        wizardContext.setProjectName(IdeBundle.message("project.import.default.name",getName()) + ProjectFileType.DOT_DEFAULT_EXTENSION);
+      }
+ else {
+        wizardContext.setProjectName(IdeBundle.message("project.import.default.name.dotIdea",getName()));
+      }
     }
     wizardContext.setProjectFileDirectory(virtualFile.getParent().getPath());
     Project defaultProject=ProjectManager.getInstance().getDefaultProject();
@@ -21,18 +26,36 @@
       jdk=ProjectJdkTable.getInstance().findMostRecentSdkOfType(JavaSdk.getInstance());
     }
     wizardContext.setProjectJdk(jdk);
-    final String projectPath=wizardContext.getProjectFileDirectory() + File.separator + wizardContext.getProjectName()+ ProjectFileType.DOT_DEFAULT_EXTENSION;
+    final String dotIdeaFilePath=wizardContext.getProjectFileDirectory() + File.separator + ".idea";
+    final String projectFilePath=wizardContext.getProjectFileDirectory() + File.separator + wizardContext.getProjectName()+ ProjectFileType.DOT_DEFAULT_EXTENSION;
     boolean shouldOpenExisting=false;
-    File projectFile=new File(projectPath);
-    if (!ApplicationManager.getApplication().isHeadlessEnvironment() && projectFile.exists()) {
-      int result=Messages.showDialog(projectToClose,IdeBundle.message("project.import.open.existing",projectFile.getName(),projectFile.getParent(),virtualFile.getName()),IdeBundle.message("title.open.project"),new String[]{IdeBundle.message("project.import.open.existing.reimport"),IdeBundle.message("project.import.open.existing.openExisting"),CommonBundle.message("button.cancel")},0,Messages.getQuestionIcon());
+    File dotIdeaFile=new File(dotIdeaFilePath);
+    File projectFile=new File(projectFilePath);
+    String pathToOpen;
+    if (wizardContext.getProjectStorageFormat() == StorageScheme.DEFAULT) {
+      pathToOpen=projectFilePath;
+    }
+ else {
+      pathToOpen=dotIdeaFile.getParent();
+    }
+    if (!ApplicationManager.getApplication().isHeadlessEnvironment() && (projectFile.exists() || dotIdeaFile.exists())) {
+      String existingName;
+      if (dotIdeaFile.exists()) {
+        existingName="an existing project";
+        pathToOpen=dotIdeaFile.getParent();
+      }
+ else {
+        existingName="'" + projectFile.getName() + "'";
+        pathToOpen=projectFilePath;
+      }
+      int result=Messages.showDialog(projectToClose,IdeBundle.message("project.import.open.existing",existingName,projectFile.getParent(),virtualFile.getName()),IdeBundle.message("title.open.project"),new String[]{IdeBundle.message("project.import.open.existing.reimport"),IdeBundle.message("project.import.open.existing.openExisting"),CommonBundle.message("button.cancel")},0,Messages.getQuestionIcon());
       if (result == 2)       return null;
       shouldOpenExisting=result == 1;
     }
     final Project projectToOpen;
     if (shouldOpenExisting) {
       try {
-        projectToOpen=ProjectManagerEx.getInstanceEx().loadProject(projectPath);
+        projectToOpen=ProjectManagerEx.getInstanceEx().loadProject(pathToOpen);
       }
  catch (      IOException e) {
         return null;
@@ -45,7 +68,7 @@ catch (      InvalidDataException e) {
       }
     }
  else {
-      projectToOpen=ProjectManagerEx.getInstanceEx().newProject(FileUtil.getNameWithoutExtension(projectFile),projectPath,true,false);
+      projectToOpen=ProjectManagerEx.getInstanceEx().newProject(wizardContext.getProjectName(),pathToOpen,true,false);
       if (projectToOpen == null || !getBuilder().validate(projectToClose,projectToOpen)) {
         return null;
       }
@@ -54,8 +77,8 @@ catch (      InvalidDataException e) {
         public void run(){
           Sdk jdk=wizardContext.getProjectJdk();
           if (jdk != null)           NewProjectUtil.applyJdkToProject(projectToOpen,jdk);
-          final String projectFilePath=wizardContext.getProjectFileDirectory();
-          CompilerProjectExtension.getInstance(projectToOpen).setCompilerOutputUrl(getUrl(StringUtil.endsWithChar(projectFilePath,'/') ? projectFilePath + "classes" : projectFilePath + "/classes"));
+          final String projectDirPath=wizardContext.getProjectFileDirectory();
+          CompilerProjectExtension.getInstance(projectToOpen).setCompilerOutputUrl(getUrl(StringUtil.endsWithChar(projectDirPath,'/') ? projectDirPath + "classes" : projectDirPath + "/classes"));
         }
       }
 );
@@ -64,7 +87,7 @@ catch (      InvalidDataException e) {
     if (!forceOpenInNewFrame) {
       NewProjectUtil.closePreviousProject(projectToClose);
     }
-    ProjectUtil.updateLastProjectLocation(projectPath);
+    ProjectUtil.updateLastProjectLocation(pathToOpen);
     ProjectManagerEx.getInstanceEx().openProject(projectToOpen);
     return projectToOpen;
   }
