@@ -1,36 +1,58 @@
 {
   final ArrayList<Debugger.Variable> variables=new ArrayList<Debugger.Variable>();
-  XPathContext context=myXPathContext;
-  while (context != null) {
-    final StackFrame frame=context.getStackFrame();
-    final SlotManager map=frame.getStackFrameMap();
-    final int numberOfVariables=map.getNumberOfVariables();
-    System.out.println("numberOfVariables = " + numberOfVariables);
-    for (int i=0; i < numberOfVariables; i++) {
-      final ValueRepresentation valueRepresentation=context.evaluateLocalVariable(i);
-      System.out.println("valueRepresentation = " + valueRepresentation);
-    }
-    final ValueRepresentation[] values=frame.getStackFrameValues();
-    System.out.println("values = " + Arrays.toString(values));
-    for (int i=0, valuesLength=values.length; i < valuesLength; i++) {
-      final ValueRepresentation value=values[i];
-      variables.add(new VariableImpl(map.getVariableMap().get(i).getDisplayName(),new Value(){
+  final HashMap<StructuredQName,GlobalVariable> globalVariables=myXPathContext.getController().getExecutable().getCompiledGlobalVariables();
+  if (globalVariables != null) {
+    for (    StructuredQName name : globalVariables.keySet()) {
+      final GlobalVariable globalVariable=globalVariables.get(name);
+      variables.add(new VariableImpl(globalVariable.getVariableQName().getDisplayName(),new Value(){
         public Object getValue(){
           try {
-            return value.getStringValue();
+            final ValueRepresentation valueRepresentation=globalVariable.evaluateVariable(myXPathContext);
+            return valueRepresentation != null ? valueRepresentation.getStringValue() : null;
           }
  catch (          XPathException e) {
             return " - error: " + e.getMessage() + " - ";
           }
         }
         public Type getType(){
-          return XPathType.UNKNOWN;
+          return new ObjectType(globalVariable.getRequiredType().toString());
         }
       }
 ,false,Debugger.Variable.Kind.VARIABLE,"",-1));
     }
+  }
+  XPathContext context=myXPathContext;
+  while (context != null) {
+    final StackFrame frame=context.getStackFrame();
+    final SlotManager map=frame.getStackFrameMap();
+    final ValueRepresentation[] values=frame.getStackFrameValues();
+    for (int i=0, valuesLength=values.length; i < valuesLength; i++) {
+      final ValueRepresentation value=values[i];
+      if (value != null) {
+        variables.add(new VariableImpl(map.getVariableMap().get(i).getDisplayName(),new Value(){
+          public Object getValue(){
+            try {
+              return value.getStringValue();
+            }
+ catch (            XPathException e) {
+              return " - error: " + e.getMessage() + " - ";
+            }
+          }
+          public Type getType(){
+            if (value instanceof net.sf.saxon.value.Value) {
+              final ItemType type=((net.sf.saxon.value.Value)value).getItemType(myXPathContext.getConfiguration().getTypeHierarchy());
+              return new ObjectType(type.toString());
+            }
+ else             if (value instanceof NodeInfo) {
+              return XPathType.NODESET;
+            }
+            return XPathType.UNKNOWN;
+          }
+        }
+,false,Debugger.Variable.Kind.VARIABLE,"",-1));
+      }
+    }
     context=context.getCaller();
-    System.out.println("context = " + context);
   }
   return variables;
 }

@@ -16,30 +16,58 @@
   newIndexNode.setAddress(btree.nextPage());
   boolean indexLeaf=isIndexLeaf();
   newIndexNode.setIndexLeaf(indexLeaf);
-  short recordCount=getChildrenCount();
-  short recordCountInNewNode=(short)(recordCount - maxIndex);
-  newIndexNode.setChildrenCount(recordCountInNewNode);
+  int nextPage=getNextPage();
+  setNextPage(newIndexNode.address);
+  newIndexNode.setNextPage(nextPage);
+  final short recordCount=getChildrenCount();
   int medianKey;
-  if (btree.isLarge) {
-    final int bytesToMove=recordCountInNewNode * INTERIOR_SIZE;
-    getBytes(indexToOffset(maxIndex),btree.buffer,0,bytesToMove);
-    newIndexNode.putBytes(newIndexNode.indexToOffset(0),btree.buffer,0,bytesToMove);
-  }
- else {
-    for (int i=0; i < recordCountInNewNode; ++i) {
-      newIndexNode.setAddressAt(i,addressAt(i + maxIndex));
-      newIndexNode.setKeyAt(i,keyAt(i + maxIndex));
+  if (indexLeaf && isHashedLeaf()) {
+    TIntIntHashMap map=new TIntIntHashMap(recordCount);
+    getBytes(indexToOffset(0),btree.buffer,0,btree.pageSize - btree.metaDataLeafPageLength);
+    int[] keys=new int[recordCount];
+    int keyNumber=0;
+    for (int i=0; i < btree.hashPageCapacity; ++i) {
+      if (hashGetState(i) == HASH_FULL) {
+        int key=Bits.getInt(btree.buffer,i * INTERIOR_SIZE + KEY_OFFSET);
+        keys[keyNumber++]=key;
+        map.put(key,Bits.getInt(btree.buffer,i * INTERIOR_SIZE));
+        hashSetState(i,HASH_FREE);
+      }
+    }
+    setChildrenCount((short)0);
+    newIndexNode.setChildrenCount((short)0);
+    Arrays.sort(keys);
+    final int avg=keys.length / 2;
+    medianKey=keys[avg];
+    for (int i=0; i < avg; ++i) {
+      insert(keys[i],map.get(keys[i]));
+      newIndexNode.insert(keys[avg + i],map.get(keys[avg + i]));
     }
   }
-  if (indexLeaf) {
-    medianKey=newIndexNode.keyAt(0);
-  }
  else {
-    newIndexNode.setAddressAt(recordCountInNewNode,addressAt(recordCount));
-    --maxIndex;
-    medianKey=keyAt(maxIndex);
+    short recordCountInNewNode=(short)(recordCount - maxIndex);
+    newIndexNode.setChildrenCount(recordCountInNewNode);
+    if (btree.isLarge) {
+      final int bytesToMove=recordCountInNewNode * INTERIOR_SIZE;
+      getBytes(indexToOffset(maxIndex),btree.buffer,0,bytesToMove);
+      newIndexNode.putBytes(newIndexNode.indexToOffset(0),btree.buffer,0,bytesToMove);
+    }
+ else {
+      for (int i=0; i < recordCountInNewNode; ++i) {
+        newIndexNode.setAddressAt(i,addressAt(i + maxIndex));
+        newIndexNode.setKeyAt(i,keyAt(i + maxIndex));
+      }
+    }
+    if (indexLeaf) {
+      medianKey=newIndexNode.keyAt(0);
+    }
+ else {
+      newIndexNode.setAddressAt(recordCountInNewNode,addressAt(recordCount));
+      --maxIndex;
+      medianKey=keyAt(maxIndex);
+    }
+    setChildrenCount(maxIndex);
   }
-  setChildrenCount(maxIndex);
   if (parent != null) {
     if (doSanityCheck) {
       int medianKeyInParent=parent.search(medianKey);
