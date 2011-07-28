@@ -1,7 +1,57 @@
 {
   final boolean isAnalyzeShown=((ApplicationEx)ApplicationManager.getApplication()).isInternal();
-  final AnActionButton addButton=new AnActionButton(ProjectBundle.message("button.add"),null,IconUtil.getAddRowIcon()){
+  final ClasspathPanelAction removeAction=new ClasspathPanelAction(this){
+    @Override public void run(){
+      final List removedRows=TableUtil.removeSelectedItems(myEntryTable);
+      if (removedRows.isEmpty()) {
+        return;
+      }
+      for (      final Object removedRow : removedRows) {
+        final ClasspathTableItem<?> item=(ClasspathTableItem<?>)((Object[])removedRow)[ClasspathTableModel.ITEM_COLUMN];
+        final OrderEntry orderEntry=item.getEntry();
+        if (orderEntry == null) {
+          continue;
+        }
+        getRootModel().removeOrderEntry(orderEntry);
+      }
+      final int[] selectedRows=myEntryTable.getSelectedRows();
+      myModel.fireTableDataChanged();
+      TableUtil.selectRows(myEntryTable,selectedRows);
+      final StructureConfigurableContext context=ModuleStructureConfigurable.getInstance(myState.getProject()).getContext();
+      context.getDaemonAnalyzer().queueUpdate(new ModuleProjectStructureElement(context,getRootModel().getModule()));
+    }
+  }
+;
+  myEditButton=new AnActionButton(ProjectBundle.message("module.classpath.button.edit"),null,IconUtil.getEditIcon()){
     @Override public void actionPerformed(    AnActionEvent e){
+      final OrderEntry entry=getSelectedEntry();
+      if (!(entry instanceof LibraryOrderEntry))       return;
+      final Library library=((LibraryOrderEntry)entry).getLibrary();
+      if (library == null) {
+        return;
+      }
+      final LibraryTable table=library.getTable();
+      final String tableLevel=table != null ? table.getTableLevel() : LibraryTableImplUtil.MODULE_LEVEL;
+      final LibraryTablePresentation presentation=LibraryEditingUtil.getLibraryTablePresentation(getProject(),tableLevel);
+      final LibraryTableModifiableModelProvider provider=getModifiableModelProvider(tableLevel);
+      EditExistingLibraryDialog dialog=EditExistingLibraryDialog.createDialog(ClasspathPanelImpl.this,provider,library,myState.getProject(),presentation,getStructureConfigurableContext());
+      dialog.setContextModule(getRootModel().getModule());
+      dialog.show();
+      myEntryTable.repaint();
+      ModuleStructureConfigurable.getInstance(myState.getProject()).getTree().repaint();
+    }
+  }
+;
+  final AnActionButton analyzeButton=new AnActionButton(ProjectBundle.message("classpath.panel.analyze"),null,SystemInfo.isMac ? PlatformIcons.TABLE_ANALYZE : PlatformIcons.ANALYZE){
+    @Override public void actionPerformed(    AnActionEvent e){
+      AnalyzeDependenciesDialog.show(getRootModel().getModule());
+    }
+  }
+;
+  myEntryTable.setBorder(new LineBorder(UIUtil.getBorderColor()));
+  final ToolbarDecorator decorator=ToolbarDecorator.createDecorator(myEntryTable);
+  decorator.setAddAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
       initPopupActions();
       final JBPopup popup=JBPopupFactory.getInstance().createListPopup(new BaseListPopupStep<AddItemPopupAction<?>>(null,myPopupActions){
         @Override public Icon getIconFor(        AddItemPopupAction<?> aValue){
@@ -29,82 +79,29 @@
         }
       }
 );
-      final RelativePoint point=getPreferredPopupPoint();
-      if (point == null) {
-        popup.showInBestPositionFor(e.getDataContext());
-      }
- else {
-        popup.show(point);
-      }
+      popup.show(button.getPreferredPopupPoint());
     }
   }
-;
-  final ClasspathPanelAction removeAction=new ClasspathPanelAction(this){
-    @Override public void run(){
-      final List removedRows=TableUtil.removeSelectedItems(myEntryTable);
-      if (removedRows.isEmpty()) {
-        return;
-      }
-      for (      final Object removedRow : removedRows) {
-        final ClasspathTableItem<?> item=(ClasspathTableItem<?>)((Object[])removedRow)[ClasspathTableModel.ITEM_COLUMN];
-        final OrderEntry orderEntry=item.getEntry();
-        if (orderEntry == null) {
-          continue;
-        }
-        getRootModel().removeOrderEntry(orderEntry);
-      }
-      final int[] selectedRows=myEntryTable.getSelectedRows();
-      myModel.fireTableDataChanged();
-      TableUtil.selectRows(myEntryTable,selectedRows);
-      final StructureConfigurableContext context=ModuleStructureConfigurable.getInstance(myState.getProject()).getContext();
-      context.getDaemonAnalyzer().queueUpdate(new ModuleProjectStructureElement(context,getRootModel().getModule()));
-    }
-  }
-;
-  final AnActionButton removeButton=new AnActionButton(ProjectBundle.message("button.remove"),null,IconUtil.getRemoveRowIcon()){
-    @Override public void actionPerformed(    AnActionEvent e){
+).setRemoveAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
       removeAction.actionPerformed(null);
     }
   }
-;
-  myEditButton=new AnActionButton(ProjectBundle.message("module.classpath.button.edit"),null,IconUtil.getEditIcon()){
-    @Override public void actionPerformed(    AnActionEvent e){
-      final OrderEntry entry=getSelectedEntry();
-      if (!(entry instanceof LibraryOrderEntry))       return;
-      final Library library=((LibraryOrderEntry)entry).getLibrary();
-      if (library == null) {
-        return;
-      }
-      final LibraryTable table=library.getTable();
-      final String tableLevel=table != null ? table.getTableLevel() : LibraryTableImplUtil.MODULE_LEVEL;
-      final LibraryTablePresentation presentation=LibraryEditingUtil.getLibraryTablePresentation(getProject(),tableLevel);
-      final LibraryTableModifiableModelProvider provider=getModifiableModelProvider(tableLevel);
-      EditExistingLibraryDialog dialog=EditExistingLibraryDialog.createDialog(ClasspathPanelImpl.this,provider,library,myState.getProject(),presentation,getStructureConfigurableContext());
-      dialog.setContextModule(getRootModel().getModule());
-      dialog.show();
-      myEntryTable.repaint();
-      ModuleStructureConfigurable.getInstance(myState.getProject()).getTree().repaint();
-    }
-  }
-;
-  final AnActionButton upButton=new AnActionButton(ProjectBundle.message("module.classpath.button.move.up"),null,IconUtil.getMoveRowUpIcon()){
-    @Override public void actionPerformed(    AnActionEvent e){
+).setUpAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
       moveSelectedRows(-1);
     }
   }
-;
-  final AnActionButton downButton=new AnActionButton(ProjectBundle.message("module.classpath.button.move.down"),null,IconUtil.getMoveRowDownIcon()){
-    @Override public void actionPerformed(    AnActionEvent e){
+).setDownAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
       moveSelectedRows(+1);
     }
   }
-;
-  final AnActionButton analyzeButton=new AnActionButton(ProjectBundle.message("classpath.panel.analyze"),null,SystemInfo.isMac ? PlatformIcons.TABLE_ANALYZE : PlatformIcons.ANALYZE){
-    @Override public void actionPerformed(    AnActionEvent e){
-      AnalyzeDependenciesDialog.show(getRootModel().getModule());
-    }
+).addExtraAction(myEditButton);
+  if (isAnalyzeShown) {
+    decorator.addExtraAction(analyzeButton);
   }
-;
+  final JPanel panel=decorator.createPanel();
   myEntryTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
     public void valueChanged(    ListSelectionEvent e){
       if (e.getValueIsAdjusting()) {
@@ -122,23 +119,11 @@
           removeButtonEnabled=false;
         }
       }
-      upButton.setEnabled(minRow > 0 && minRow < myEntryTable.getRowCount());
-      downButton.setEnabled(maxRow >= 0 && maxRow < myEntryTable.getRowCount() - 1);
-      removeButton.setEnabled(removeButtonEnabled);
+      ToolbarDecorator.findRemoveButton(panel).setEnabled(removeButtonEnabled);
       ClasspathTableItem<?> selectedItem=selectedRows.length == 1 ? myModel.getItemAt(selectedRows[0]) : null;
       myEditButton.setEnabled(selectedItem != null && selectedItem.isEditable());
     }
   }
 );
-  addButton.setShortcut(CustomShortcutSet.fromString("alt A","INSERT"));
-  removeButton.setShortcut(CustomShortcutSet.fromString("alt DELETE"));
-  upButton.setShortcut(CustomShortcutSet.fromString("alt UP"));
-  downButton.setShortcut(CustomShortcutSet.fromString("alt DOWN"));
-  myEntryTable.setBorder(new LineBorder(UIUtil.getBorderColor()));
-  final ToolbarDecorator decorator=ToolbarDecorator.createDecorator(myEntryTable);
-  decorator.addExtraAction(addButton).addExtraAction(removeButton).addExtraAction(upButton).addExtraAction(downButton).addExtraAction(myEditButton);
-  if (isAnalyzeShown) {
-    decorator.addExtraAction(analyzeButton);
-  }
-  return decorator.createPanel();
+  return panel;
 }
