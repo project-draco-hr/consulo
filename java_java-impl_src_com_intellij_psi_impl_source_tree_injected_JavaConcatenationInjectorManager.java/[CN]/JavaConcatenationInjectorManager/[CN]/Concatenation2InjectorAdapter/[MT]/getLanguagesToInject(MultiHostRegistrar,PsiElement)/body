@@ -1,17 +1,41 @@
 {
   if (myManager.myConcatenationInjectors.isEmpty())   return;
-  ParameterizedCachedValue<MultiHostRegistrarImpl,PsiElement> cachedValue=context.getUserData(INJECTED_PSI_IN_CONCATENATION);
+  Project project=context.getProject();
+  long modificationCount=PsiManager.getInstance(project).getModificationTracker().getModificationCount();
+  Pair<PsiElement,PsiElement[]> pair=computeAnchorAndOperands(context);
+  PsiElement anchor=pair.first;
+  PsiElement[] operands=pair.second;
+  Integer noInjectionTimestamp=anchor.getUserData(NO_CONCAT_INJECTION_TIMESTAMP);
   MultiHostRegistrarImpl result;
-  if (cachedValue == null) {
-    CachedValueProvider.Result<MultiHostRegistrarImpl> res=CONCATENATION_PSI_CACHED_VALUE_PROVIDER.compute(context);
-    result=res == null ? null : res.getValue();
+  ParameterizedCachedValue<MultiHostRegistrarImpl,PsiElement> data=null;
+  if (noInjectionTimestamp != null && noInjectionTimestamp == modificationCount) {
+    result=null;
   }
  else {
-    result=cachedValue.getValue(context);
+    data=anchor.getUserData(INJECTED_PSI_IN_CONCATENATION);
+    if (data == null) {
+      result=doCompute(context,project,anchor,operands);
+      if (result != null) {
+      }
+    }
+ else {
+      result=data.getValue(context);
+    }
   }
   if (result != null && result.result != null) {
-    for (    Pair<Place,PsiFile> pair : result.result) {
-      ((MultiHostRegistrarImpl)registrar).addToResults(pair.first,pair.second);
+    for (    Pair<Place,PsiFile> p : result.result) {
+      ((MultiHostRegistrarImpl)registrar).addToResults(p.first,p.second);
     }
+    if (data == null) {
+      CachedValueProvider.Result<MultiHostRegistrarImpl> cachedResult=CachedValueProvider.Result.create(result,PsiModificationTracker.MODIFICATION_COUNT,getInstance(project));
+      ParameterizedCachedValue<MultiHostRegistrarImpl,PsiElement> cachedValue=CachedValuesManager.getManager(context.getProject()).createParameterizedCachedValue(CONCATENATION_PSI_CACHED_VALUE_PROVIDER,false);
+      ((PsiParameterizedCachedValue<MultiHostRegistrarImpl,PsiElement>)cachedValue).setValue(cachedResult);
+      anchor.putUserData(INJECTED_PSI_IN_CONCATENATION,cachedValue);
+      anchor.putUserData(NO_CONCAT_INJECTION_TIMESTAMP,null);
+    }
+  }
+ else {
+    anchor.putUserData(INJECTED_PSI_IN_CONCATENATION,null);
+    anchor.putUserData(NO_CONCAT_INJECTION_TIMESTAMP,(int)modificationCount);
   }
 }
