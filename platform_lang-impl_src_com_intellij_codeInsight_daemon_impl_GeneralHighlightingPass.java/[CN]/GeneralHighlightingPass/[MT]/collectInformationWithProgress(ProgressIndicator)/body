@@ -18,18 +18,22 @@
     }
     collectHighlights(inside,new Runnable(){
       @Override public void run(){
-        THashSet<HighlightInfo> injectedResult=new THashSet<HighlightInfo>();
+        Set<HighlightInfo> injectedResult=new THashSet<HighlightInfo>();
         if (!addInjectedPsiHighlights(injected,progress,Collections.synchronizedSet(injectedResult)))         throw new ProcessCanceledException();
-        final List<HighlightInfo> toApplyOutside=new ArrayList<HighlightInfo>(gotHighlights.size());
-        for (        HighlightInfo info : injectedResult) {
+        final List<HighlightInfo> injectionsOutside=new ArrayList<HighlightInfo>(gotHighlights.size());
+        Set<HighlightInfo> result;
+synchronized (injectedResult) {
+          result=injectedResult;
+        }
+        for (        HighlightInfo info : result) {
           if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
             gotHighlights.add(info);
           }
  else {
-            toApplyOutside.add(info);
+            injectionsOutside.add(info);
           }
         }
-        if (outsideResult.isEmpty() && toApplyOutside.isEmpty()) {
+        if (outsideResult.isEmpty() && injectionsOutside.isEmpty()) {
           return;
         }
         final ProperTextRange priorityIntersection=myPriorityRange.intersection(new TextRange(myStartOffset,myEndOffset));
@@ -53,18 +57,16 @@
         }
         myApplyCommand=new Runnable(){
           @Override public void run(){
-            final List<HighlightInfo> insideInfos=new ArrayList<HighlightInfo>(gotHighlights.size());
             ProperTextRange range=new ProperTextRange(myStartOffset,myEndOffset);
+            List<HighlightInfo> toApply=new ArrayList<HighlightInfo>();
             for (            HighlightInfo info : gotHighlights) {
               if (!range.containsRange(info.getStartOffset(),info.getEndOffset()))               continue;
-              if (myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
-                insideInfos.add(info);
-              }
- else {
-                toApplyOutside.add(info);
+              if (!myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
+                toApply.add(info);
               }
             }
-            UpdateHighlightersUtil.setHighlightersOutsideRange(myProject,myDocument,toApplyOutside,getColorsScheme(),myStartOffset,myEndOffset,myPriorityRange,Pass.UPDATE_ALL);
+            toApply.addAll(injectionsOutside);
+            UpdateHighlightersUtil.setHighlightersOutsideRange(myProject,myDocument,toApply,getColorsScheme(),myStartOffset,myEndOffset,myPriorityRange,Pass.UPDATE_ALL);
           }
         }
 ;
