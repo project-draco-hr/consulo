@@ -1,48 +1,52 @@
 {
+  final boolean indexLeaf=isIndexLeaf();
   if (doSanityCheck) {
     myAssert(isFull());
-    dump("before split:" + isIndexLeaf());
+    dump("before split:" + indexLeaf);
   }
+  final boolean hashedLeaf=isHashedLeaf();
+  final short recordCount=getChildrenCount();
   BtreeIndexNodeView parent=null;
+  HashLeafData hashLeafData=null;
   if (parentAddress != 0) {
     parent=new BtreeIndexNodeView(btree);
     parent.setAddress(parentAddress);
     if (btree.offloadToSiblingsBeforeSplit) {
-      if (doOffloadToSiblingsSorted(parent))       return parentAddress;
+      if (hashedLeaf) {
+        hashLeafData=new HashLeafData(this,recordCount);
+        if (doOffloadToSiblingsWhenHashed(parent,hashLeafData))         return parentAddress;
+      }
+ else {
+        if (doOffloadToSiblingsSorted(parent))         return parentAddress;
+      }
     }
   }
   short maxIndex=(short)(getMaxChildrenCount() / 2);
   BtreeIndexNodeView newIndexNode=new BtreeIndexNodeView(btree);
   newIndexNode.setAddress(btree.nextPage(false));
-  boolean indexLeaf=isIndexLeaf();
   newIndexNode.setIndexLeaf(indexLeaf);
   int nextPage=getNextPage();
   setNextPage(newIndexNode.address);
   newIndexNode.setNextPage(nextPage);
-  final short recordCount=getChildrenCount();
-  int medianKey;
-  if (indexLeaf && isHashedLeaf()) {
-    TIntIntHashMap map=new TIntIntHashMap(recordCount);
-    getBytes(indexToOffset(0),btree.buffer,0,btree.pageSize - btree.metaDataLeafPageLength);
-    int[] keys=new int[recordCount];
-    int keyNumber=0;
-    for (int i=0; i < btree.hashPageCapacity; ++i) {
-      if (hashGetState(i) == HASH_FULL) {
-        int key=Bits.getInt(btree.buffer,i * INTERIOR_SIZE + KEY_OFFSET);
-        keys[keyNumber++]=key;
-        map.put(key,Bits.getInt(btree.buffer,i * INTERIOR_SIZE));
-        hashSetState(i,HASH_FREE);
+  int medianKey=-1;
+  if (indexLeaf && hashedLeaf) {
+    if (hashLeafData == null)     hashLeafData=new HashLeafData(this,recordCount);
+    final int[] keys=hashLeafData.keys;
+    boolean defaultSplit=true;
+    if (defaultSplit) {
+      hashLeafData.clean();
+      final TIntIntHashMap map=hashLeafData.values;
+      final int avg=keys.length / 2;
+      medianKey=keys[avg];
+      --btree.hashedPagesCount;
+      setChildrenCount((short)0);
+      newIndexNode.setChildrenCount((short)0);
+      for (int i=0; i < avg; ++i) {
+        int key=keys[i];
+        insert(key,map.get(key));
+        key=keys[avg + i];
+        newIndexNode.insert(key,map.get(key));
       }
-    }
-    Arrays.sort(keys);
-    final int avg=keys.length / 2;
-    medianKey=keys[avg];
-    --btree.hashedPagesCount;
-    setChildrenCount((short)0);
-    newIndexNode.setChildrenCount((short)0);
-    for (int i=0; i < avg; ++i) {
-      insert(keys[i],map.get(keys[i]));
-      newIndexNode.insert(keys[avg + i],map.get(keys[avg + i]));
     }
   }
  else {
