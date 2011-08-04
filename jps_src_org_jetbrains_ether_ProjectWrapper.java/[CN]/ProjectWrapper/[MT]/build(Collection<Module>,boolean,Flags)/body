@@ -4,19 +4,27 @@
   for (  ModuleChunk c : chunks) {
     final Set<Module> chunkModules=c.getElements();
     if (!DefaultGroovyMethods.intersect(modules,chunkModules).isEmpty()) {
+      final Set<StringCache.S> removedSources=new HashSet<StringCache.S>();
       if (incremental) {
         final Set<StringCache.S> chunkSources=new HashSet<StringCache.S>();
         final Set<StringCache.S> outdatedSources=new HashSet<StringCache.S>();
-        final Set<StringCache.S> removedSources=new HashSet<StringCache.S>();
         for (        Module m : chunkModules) {
           final ModuleWrapper mw=getModule(m.getName());
           outdatedSources.addAll(tests ? mw.getOutdatedTests() : mw.getOutdatedSources());
           chunkSources.addAll(tests ? mw.getTests() : mw.getSources());
           removedSources.addAll(tests ? mw.getRemovedTests() : mw.getRemovedSources());
         }
-        incremental=iterativeCompile(c,tests,chunkSources,outdatedSources,removedSources,flags);
+        final BuildStatus result=iterativeCompile(c,tests,chunkSources,outdatedSources,removedSources,flags);
+        incremental=result == BuildStatus.INCREMENTAL;
+        if (result == BuildStatus.FAILURE) {
+          return result;
+        }
       }
  else {
+        for (        Module m : chunkModules) {
+          final ModuleWrapper mw=getModule(m.getName());
+          removedSources.addAll(tests ? mw.getRemovedTests() : mw.getRemovedSources());
+        }
         final Set<Module> toClean=new HashSet<Module>();
         for (        Module m : chunkModules) {
           if (!cleared.contains(m)) {
@@ -27,12 +35,22 @@
           builder.clearChunk(new ModuleChunk(toClean),null,ProjectWrapper.this);
           cleared.addAll(toClean);
         }
-        builder.buildChunk(c,tests,null,backendCallback,ProjectWrapper.this);
+        final Mappings delta=new Mappings(ProjectWrapper.this);
+        final Callbacks.Backend deltaCallback=delta.getCallback();
+        try {
+          builder.buildChunk(c,tests,null,deltaCallback,ProjectWrapper.this);
+        }
+ catch (        Exception e) {
+          e.printStackTrace();
+          return BuildStatus.FAILURE;
+        }
         for (        Module m : c.getElements()) {
           final ModuleWrapper module=getModule(m.getName());
           affectedFiles.removeAll(tests ? module.getTests() : module.getSources());
         }
+        dependencyMapping.integrate(delta,removedSources);
       }
     }
   }
+  return BuildStatus.INCREMENTAL;
 }
