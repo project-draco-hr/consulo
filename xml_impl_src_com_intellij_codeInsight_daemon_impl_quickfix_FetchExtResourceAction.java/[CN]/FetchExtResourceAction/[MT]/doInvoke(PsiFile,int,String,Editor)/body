@@ -1,59 +1,30 @@
 {
   final String url=findUrl(file,offset,uri);
   final Project project=file.getProject();
-  if (!ApplicationManager.getApplication().isUnitTestMode()) {
-    ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
-      public void run(){
-        while (true) {
-          try {
-            final ProgressWindow[] result=new ProgressWindow[1];
-            ApplicationManager.getApplication().invokeAndWait(new Runnable(){
-              public void run(){
-                final ProgressWindow progressWindow=new ProgressWindow(true,project);
-                progressWindow.setTitle(XmlBundle.message("fetching.resource.title"));
-                result[0]=progressWindow;
-              }
-            }
-,ModalityState.defaultModalityState());
-            ProgressManager.getInstance().runProcess(new Runnable(){
-              public void run(){
-                try {
-                  HttpConfigurable.getInstance().prepareURL(url);
-                  fetchDtd(project,uri,url);
-                }
- catch (                IOException ex) {
-                  FetchingResourceIOException exceptionDescribingIOProblem;
-                  if (ex instanceof FetchingResourceIOException) {
-                    exceptionDescribingIOProblem=(FetchingResourceIOException)ex;
-                  }
- else {
-                    exceptionDescribingIOProblem=new FetchingResourceIOException(ex,url);
-                  }
-                  throw new FetchingResourceProblemRuntimeWrapper(exceptionDescribingIOProblem);
-                }
-              }
-            }
-,result[0]);
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    return;
+  }
+  ProgressManager.getInstance().run(new Task.Backgroundable(project,XmlBundle.message("fetching.resource.title")){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      while (true) {
+        try {
+          HttpConfigurable.getInstance().prepareURL(url);
+          fetchDtd(project,uri,url,indicator);
+          return;
+        }
+ catch (        IOException ex) {
+          LOG.info(ex);
+          @SuppressWarnings("InstanceofCatchParameter") String problemUrl=ex instanceof FetchingResourceIOException ? ((FetchingResourceIOException)ex).url : url;
+          String message=XmlBundle.message("error.fetching.title");
+          if (!url.equals(problemUrl)) {
+            message=XmlBundle.message("error.fetching.dependent.resource.title");
           }
- catch (          FetchingResourceProblemRuntimeWrapper e) {
-            String message=XmlBundle.message("error.fetching.title");
-            FetchingResourceIOException ioproblem=(FetchingResourceIOException)e.getCause();
-            if (!url.equals(ioproblem.url)) {
-              message=XmlBundle.message("error.fetching.dependent.resource.title");
-            }
-            final IOException cause=(IOException)ioproblem.getCause();
-            LOG.info(cause);
-            if (!IOExceptionDialog.showErrorDialog(message,XmlBundle.message("error.fetching.resource",ioproblem.url))) {
-              break;
-            }
- else {
-              continue;
-            }
+          if (!IOExceptionDialog.showErrorDialog(message,XmlBundle.message("error.fetching.resource",problemUrl))) {
+            break;
           }
-          break;
         }
       }
     }
-);
   }
+);
 }
