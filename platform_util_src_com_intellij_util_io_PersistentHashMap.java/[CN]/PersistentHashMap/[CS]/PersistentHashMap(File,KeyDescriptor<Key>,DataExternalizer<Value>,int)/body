@@ -1,11 +1,33 @@
 {
   super(checkDataFiles(file),keyDescriptor,initialSize);
-  myParentValueRefOffset=getRecordSize();
+  final PersistentEnumeratorBase.RecordBufferHandler<PersistentEnumeratorBase> recordHandler=myEnumerator.getRecordHandler();
+  myParentValueRefOffset=recordHandler.getRecordBuffer(myEnumerator).length;
   myRecordBuffer=new byte[myParentValueRefOffset + 8 + 4];
+  myEnumerator.setRecordHandler(new PersistentEnumeratorBase.RecordBufferHandler<PersistentEnumeratorBase>(){
+    @Override int recordWriteOffset(    PersistentEnumeratorBase enumerator,    byte[] buf){
+      return recordHandler.recordWriteOffset(enumerator,buf);
+    }
+    @Override byte[] getRecordBuffer(    PersistentEnumeratorBase enumerator){
+      return myRecordBuffer;
+    }
+    @Override void setupRecord(    PersistentEnumeratorBase enumerator,    int hashCode,    int dataOffset,    byte[] buf){
+      recordHandler.setupRecord(enumerator,hashCode,dataOffset,buf);
+      for (int i=myParentValueRefOffset; i < myRecordBuffer.length; i++) {
+        buf[i]=0;
+      }
+    }
+  }
+);
+  myEnumerator.setMarkCleanCallback(new Flushable(){
+    @Override public void flush() throws IOException {
+      myEnumerator.putMetaData(myGarbageSize);
+    }
+  }
+);
   try {
     myValueExternalizer=valueExternalizer;
     myValueStorage=PersistentHashMapValueStorage.create(getDataFile(file).getPath());
-    myGarbageSize=getMetaData();
+    myGarbageSize=myEnumerator.getMetaData();
     if (makesSenseToCompact()) {
       compact();
     }
@@ -15,6 +37,6 @@
   }
 catch (  Throwable t) {
     LOG.error(t);
-    throw new CorruptedException(file);
+    throw new PersistentEnumerator.CorruptedException(file);
   }
 }
