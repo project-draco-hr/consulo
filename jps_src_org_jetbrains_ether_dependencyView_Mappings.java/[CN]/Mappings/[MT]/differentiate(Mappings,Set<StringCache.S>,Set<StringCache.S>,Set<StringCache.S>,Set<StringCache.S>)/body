@@ -12,19 +12,51 @@
     final Set<ClassRepr> pastClasses=(Set<ClassRepr>)sourceFileToClasses.foxyGet(fileName);
     final Set<StringCache.S> dependants=(Set<StringCache.S>)fileToFileDependency.foxyGet(fileName);
     final Set<UsageRepr.Usage> affectedUsages=new HashSet<UsageRepr.Usage>();
+    final Set<UsageRepr.AnnotationUsage> annotationQuery=new HashSet<UsageRepr.AnnotationUsage>();
     final Difference.Specifier<ClassRepr> classDiff=Difference.make(pastClasses,classes);
     for (    Pair<ClassRepr,Difference> changed : classDiff.changed()) {
       final ClassRepr it=changed.fst;
       final ClassRepr.Diff diff=(ClassRepr.Diff)changed.snd;
+      if (it.isAnnotation() && it.policy == RetentionPolicy.SOURCE) {
+        return false;
+      }
       if (diff.base() != Difference.NONE || !diff.interfaces().unchanged() || !diff.nestedClasses().unchanged()) {
         affectedUsages.add(it.createUsage());
+      }
+      if (it.isAnnotation()) {
+        if (diff.retentionChanged()) {
+          affectedUsages.add(it.createUsage());
+        }
+ else {
+          final Collection<ElementType> removedtargets=diff.targets().removed();
+          if (removedtargets.contains(ElementType.LOCAL_VARIABLE)) {
+            return false;
+          }
+          if (!removedtargets.isEmpty()) {
+            annotationQuery.add((UsageRepr.AnnotationUsage)UsageRepr.createAnnotationUsage(TypeRepr.createClassType(it.name),null,removedtargets));
+          }
+          for (          MethodRepr m : diff.methods().added()) {
+            if (!m.hasValue()) {
+              affectedUsages.add(it.createUsage());
+            }
+          }
+        }
       }
       for (      MethodRepr m : diff.methods().removed()) {
         affectedUsages.add(m.createUsage(it.name));
       }
-      for (      Pair<MethodRepr,Difference> m : diff.methods().changed()) {
-        if (m.snd.base() != Difference.NONE) {
-          affectedUsages.add(m.fst.createUsage(it.name));
+      for (      Pair<MethodRepr,Difference> mr : diff.methods().changed()) {
+        final MethodRepr m=mr.fst;
+        final MethodRepr.Diff d=(MethodRepr.Diff)mr.snd;
+        if (it.isAnnotation()) {
+          if (d.defaultRemoved()) {
+            final List<StringCache.S> l=new LinkedList<StringCache.S>();
+            l.add(m.name);
+            annotationQuery.add((UsageRepr.AnnotationUsage)UsageRepr.createAnnotationUsage(TypeRepr.createClassType(it.name),l,null));
+          }
+        }
+ else         if (mr.snd.base() != Difference.NONE) {
+          affectedUsages.add(mr.fst.createUsage(it.name));
         }
       }
       for (      FieldRepr f : diff.fields().removed()) {
@@ -56,6 +88,17 @@
           usages.retainAll(affectedUsages);
           if (!usages.isEmpty()) {
             affectedFiles.add(depFile);
+          }
+          if (annotationQuery.size() > 0) {
+            final Collection<UsageRepr.Usage> annotationUsages=sourceFileToAnnotationUsages.foxyGet(depFile);
+            for (            UsageRepr.Usage usage : annotationUsages) {
+              for (              UsageRepr.AnnotationUsage query : annotationQuery) {
+                if (query.satisfies(usage)) {
+                  affectedFiles.add(depFile);
+                  break;
+                }
+              }
+            }
           }
         }
       }
