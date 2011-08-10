@@ -1,66 +1,77 @@
 {
-  setTitle(DiagnosticBundle.message("error.list.title"));
-  JPanel root=new JPanel(new BorderLayout());
-  JPanel top=new JPanel(new BorderLayout());
-  JPanel toolbar=new JPanel(new FlowLayout());
-  myImmediatePopupCheckbox=new JCheckBox(DiagnosticBundle.message("error.list.popup.immediately.checkbox"));
-  myImmediatePopupCheckbox.setSelected(PropertiesComponent.getInstance().isTrueValue(IMMEDIATE_POPUP_OPTION));
-  myImmediatePopupCheckbox.setVisible(((ApplicationImpl)ApplicationManager.getApplication()).isInternal());
-  myCountLabel=new JLabel();
-  myInfoLabel=new JLabel();
-  ActionToolbar navToolbar=createNavigationToolbar();
-  toolbar.add(navToolbar.getComponent());
-  toolbar.add(myCountLabel);
-  top.add(toolbar,BorderLayout.WEST);
-  root.add(top,BorderLayout.NORTH);
-  myDetailsPane=new JTextPane();
-  myDetailsPane.setBackground(UIUtil.getTextFieldBackground());
-  myDetailsPane.setEditable(false);
-  JPanel infoPanel=new JPanel(new BorderLayout());
-  JPanel gapPanel=new JPanel(new FlowLayout(FlowLayout.LEFT,7,0));
-  gapPanel.add(myInfoLabel);
-  infoPanel.add(gapPanel,BorderLayout.NORTH);
-  infoPanel.add(ScrollPaneFactory.createScrollPane(myDetailsPane),BorderLayout.CENTER);
-  myMoreInfoPane=new JTextPane();
-  myMoreInfoPane.setBackground(UIUtil.getTextFieldBackground());
-  final JScrollPane scrollPane=ScrollPaneFactory.createScrollPane(myMoreInfoPane);
-  scrollPane.setPreferredSize(new Dimension(100,50));
-  final LabeledComponent<JScrollPane> labeledComponent=LabeledComponent.create(scrollPane,DiagnosticBundle.message("diagnostic.error.report.additional.info.label"));
-  labeledComponent.setBorder(BorderFactory.createEmptyBorder(4,0,0,0));
-  infoPanel.add(labeledComponent,BorderLayout.SOUTH);
-  myMoreInfoPane.getDocument().addDocumentListener(new DocumentAdapter(){
-    @Override protected void textChanged(    DocumentEvent e){
-      if (myMoreInfoPane.isEditable()) {
-        final AbstractMessage message=getSelectedMessage();
-        if (message != null) {
-          message.setAdditionalInfo(myMoreInfoPane.getText());
-        }
+  DefaultActionGroup goBack=new DefaultActionGroup();
+  BackAction back=new BackAction();
+  goBack.add(back);
+  ActionToolbar backToolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,goBack,true);
+  backToolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
+  myBackButtonPanel.add(backToolbar.getComponent(),BorderLayout.CENTER);
+  DefaultActionGroup goForward=new DefaultActionGroup();
+  ForwardAction forward=new ForwardAction();
+  new ShadowAction(forward,ActionManager.getInstance().getAction("Forward"),getRootPane());
+  goForward.add(forward);
+  ActionToolbar forwardToolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,goForward,true);
+  forwardToolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
+  myNextButtonPanel.add(forwardToolbar.getComponent(),BorderLayout.CENTER);
+  myTabs=new TabbedPaneWrapper(this);
+  final LabeledTextComponent.TextListener commentsListener=new LabeledTextComponent.TextListener(){
+    @Override public void textChanged(    String newText){
+      if (myMute) {
+        return;
+      }
+      AbstractMessage message=getSelectedMessage();
+      if (message != null) {
+        message.setAdditionalInfo(newText);
+      }
+    }
+  }
+;
+  if (!INTERNAL_MODE) {
+    myDetailsTabForm=new DetailsTabForm(null);
+    myCommentsTabForm=new CommentsTabForm();
+    myCommentsTabForm.addCommentsListener(commentsListener);
+    myTabs.addTab(DiagnosticBundle.message("error.comments.tab.title"),myCommentsTabForm.getContentPane());
+    myDetailsTabForm.setCommentsAreaVisible(false);
+  }
+ else {
+    myAnalyzeAction=new AnalyzeAction(ActionManager.getInstance().getAction("AnalyzeStacktraceOnError"));
+    myDetailsTabForm=new DetailsTabForm(myAnalyzeAction);
+    myDetailsTabForm.setCommentsAreaVisible(true);
+    myDetailsTabForm.addCommentsListener(commentsListener);
+  }
+  myTabs.addTab(DiagnosticBundle.message("error.details.tab.title"),myDetailsTabForm.getContentPane());
+  myAttachmentsTabForm=new AttachmentsTabForm();
+  int activeTabIndex=Integer.parseInt(PropertiesComponent.getInstance().getValue(ACTIVE_TAB_OPTION,"0"));
+  if (activeTabIndex >= myTabs.getTabCount() || activeTabIndex < 0) {
+    activeTabIndex=0;
+  }
+  myTabs.setSelectedIndex(activeTabIndex);
+  myTabs.addChangeListener(new ChangeListener(){
+    @Override public void stateChanged(    ChangeEvent e){
+      final JComponent c=getPreferredFocusedComponent();
+      if (c != null) {
+        IdeFocusManager.findInstanceByComponent(myContentPane).requestFocus(c,true);
       }
     }
   }
 );
-  root.add(infoPanel,BorderLayout.CENTER);
-  JPanel controlsPane=new JPanel(new BorderLayout());
-  myCredentialsPane=Box.createHorizontalBox();
-  myCredentialsLabel=new JLabel(DiagnosticBundle.message("diagnostic.error.report.submit.error.anonymously"));
-  myCredentialsPane.add(myCredentialsLabel);
-  myCredentialsPane.add(Box.createHorizontalGlue());
-  JButton specifyCredentialsButton=new JButton(DiagnosticBundle.message("diagnostic.error.report.use.jetbrains.account.button.label"));
-  specifyCredentialsButton.addActionListener(new ActionListener(){
-    @Override public void actionPerformed(    ActionEvent e){
-      new JetBrainsAccountDialog(getRootPane()).show();
-      updateCredentialsPane();
+  myTabsPanel.add(myTabs.getComponent(),BorderLayout.CENTER);
+  myDisableLink.setHyperlinkText(UIUtil.removeMnemonic(DiagnosticBundle.message("error.list.disable.plugin")));
+  myDisableLink.addHyperlinkListener(new HyperlinkListener(){
+    @Override public void hyperlinkUpdate(    HyperlinkEvent e){
+      if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+        disablePlugin();
+      }
     }
   }
 );
-  myCredentialsPane.add(specifyCredentialsButton);
-  controlsPane.add(myCredentialsPane,BorderLayout.CENTER);
-  myCredentialsPane.setBorder(BorderFactory.createEmptyBorder(4,0,0,0));
-  controlsPane.add(myImmediatePopupCheckbox,BorderLayout.SOUTH);
-  root.add(controlsPane,BorderLayout.SOUTH);
-  root.setPreferredSize(new Dimension(600,550));
-  rebuildHeaders();
-  moveSelectionToEarliestMessage();
-  updateControls();
-  return root;
+  myCredentialsLabel.addHyperlinkListener(new HyperlinkListener(){
+    @Override public void hyperlinkUpdate(    HyperlinkEvent e){
+      if (e.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+        new JetBrainsAccountDialog(getRootPane()).show();
+        updateCredentialsPane(getSelectedMessage());
+      }
+    }
+  }
+);
+  return myContentPane;
 }
