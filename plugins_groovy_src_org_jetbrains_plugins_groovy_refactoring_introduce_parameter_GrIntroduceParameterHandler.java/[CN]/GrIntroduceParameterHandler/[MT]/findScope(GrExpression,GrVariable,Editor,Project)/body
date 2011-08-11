@@ -1,0 +1,81 @@
+{
+  PsiElement place=expression == null ? variable : expression;
+  final List<GrParametersOwner> scopes=new ArrayList<GrParametersOwner>();
+  while (true) {
+    final GrParametersOwner parent=PsiTreeUtil.getParentOfType(place,GrMethod.class,GrClosableBlock.class);
+    if (parent == null)     break;
+    scopes.add(parent);
+    place=parent;
+  }
+  if (scopes.size() == 0) {
+    throw new GrIntroduceRefactoringError(GroovyRefactoringBundle.message("there.is.no.method.or.closure"));
+  }
+ else   if (scopes.size() == 1) {
+    final GrParametersOwner owner=scopes.get(0);
+    if (owner instanceof GrMethod) {
+      PsiMethod newMethod=SuperMethodWarningUtil.checkSuperMethod((PsiMethod)owner,RefactoringBundle.message("to.refactor"));
+      getContext(project,editor,expression,variable,owner,newMethod);
+      return;
+    }
+ else {
+      getContext(project,editor,expression,variable,owner,findVariableToUse(owner));
+      return;
+    }
+  }
+ else {
+    final JPanel panel=new JPanel(new BorderLayout());
+    final JCheckBox superMethod=new JCheckBox(USE_SUPER_METHOD_OF,true);
+    superMethod.setMnemonic('U');
+    panel.add(superMethod,BorderLayout.SOUTH);
+    final JBList list=new JBList(scopes.toArray());
+    list.setVisibleRowCount(5);
+    list.setCellRenderer(new MethodCellRenderer());
+    list.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+    list.setSelectedIndex(0);
+    final List<RangeHighlighter> highlighters=new ArrayList<RangeHighlighter>();
+    final TextAttributes attributes=EditorColorsManager.getInstance().getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
+    list.addListSelectionListener(new ListSelectionListener(){
+      public void valueChanged(      final ListSelectionEvent e){
+        final GrParametersOwner selectedMethod=(GrParametersOwner)list.getSelectedValue();
+        if (selectedMethod == null)         return;
+        dropHighlighters(highlighters);
+        updateView(selectedMethod,editor,attributes,highlighters,superMethod);
+      }
+    }
+);
+    updateView(scopes.get(0),editor,attributes,highlighters,superMethod);
+    final JScrollPane scrollPane=ScrollPaneFactory.createScrollPane(list);
+    scrollPane.setBorder(null);
+    panel.add(scrollPane,BorderLayout.CENTER);
+    final List<Pair<ActionListener,KeyStroke>> keyboardActions=Collections.singletonList(Pair.<ActionListener,KeyStroke>create(new ActionListener(){
+      @Override public void actionPerformed(      ActionEvent e){
+        final GrParametersOwner ToSearchIn=(GrParametersOwner)list.getSelectedValue();
+        if (myEnclosingMethodsPopup != null && myEnclosingMethodsPopup.isVisible()) {
+          myEnclosingMethodsPopup.cancel();
+        }
+        final PsiElement toSearchFor;
+        if (ToSearchIn instanceof GrMethod) {
+          toSearchFor=superMethod.isEnabled() && superMethod.isSelected() ? ((GrMethod)ToSearchIn).findDeepestSuperMethod() : ((GrMethod)ToSearchIn);
+        }
+ else {
+          toSearchFor=superMethod.isEnabled() && superMethod.isSelected() ? ToSearchIn.getParent() : null;
+        }
+        Runnable runnable=new Runnable(){
+          public void run(){
+            getContext(project,editor,expression,variable,ToSearchIn,toSearchFor);
+          }
+        }
+;
+        IdeFocusManager.findInstance().doWhenFocusSettlesDown(runnable);
+      }
+    }
+,KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,0)));
+    myEnclosingMethodsPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(panel,list).setTitle("Introduce parameter to method").setMovable(false).setResizable(false).setRequestFocus(true).setKeyboardActions(keyboardActions).addListener(new JBPopupAdapter(){
+      @Override public void onClosed(      LightweightWindowEvent event){
+        dropHighlighters(highlighters);
+      }
+    }
+).createPopup();
+    myEnclosingMethodsPopup.showInBestPositionFor(editor);
+  }
+}
