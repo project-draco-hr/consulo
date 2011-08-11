@@ -5,27 +5,34 @@
   SelectionModel sm=editor.getSelectionModel();
   final boolean smartUndo=!sm.hasSelection() && !sm.hasBlockSelection() && process != null && process.isAutopopupCompletion();
   final Runnable restore=CodeCompletionHandlerBase.rememberDocumentState(editor);
-  if (smartUndo) {
+  final ScrollingModelEx scrollingModel=(ScrollingModelEx)editor.getScrollingModel();
+  scrollingModel.accumulateViewportChanges();
+  try {
+    if (smartUndo) {
+      CommandProcessor.getInstance().executeCommand(editor.getProject(),new Runnable(){
+        @Override public void run(){
+          lookup.performGuardedChange(baseChange);
+        }
+      }
+,null,"Just insert the completion char");
+    }
     CommandProcessor.getInstance().executeCommand(editor.getProject(),new Runnable(){
       @Override public void run(){
-        lookup.performGuardedChange(baseChange);
-      }
-    }
-,null,"Just insert the completion char");
-  }
-  CommandProcessor.getInstance().executeCommand(editor.getProject(),new Runnable(){
-    @Override public void run(){
-      if (smartUndo) {
-        AccessToken token=WriteAction.start();
-        try {
-          lookup.performGuardedChange(restore);
-        }
+        if (smartUndo) {
+          AccessToken token=WriteAction.start();
+          try {
+            lookup.performGuardedChange(restore);
+          }
   finally {
-          token.finish();
+            token.finish();
+          }
         }
+        lookup.finishLookup(charTyped);
       }
-      lookup.finishLookup(charTyped);
     }
-  }
 ,null,"Undo inserting the completion char and select the item");
+  }
+  finally {
+    scrollingModel.flushViewportChanges();
+  }
 }
