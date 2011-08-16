@@ -1,6 +1,76 @@
 {
   final Project project=PlatformDataKeys.PROJECT.getData(e.getDataContext());
-  final VirtualFile[] virtualFiles=FileChooser.chooseFiles(project,new FileChooserDescriptor(false,true,false,true,false,false));
+  final VirtualFile[] virtualFiles=FileChooser.chooseFiles(project,new FileChooserDescriptor(false,true,false,true,false,true));
   if (virtualFiles.length == 0)   return;
-  new MyDialog(project,virtualFiles).show();
+  if (virtualFiles.length > MAX_REPOS) {
+    VcsBalloonProblemNotifier.showOverVersionControlView(project,"Too many roots (more than " + MAX_REPOS + ") selected.",MessageType.ERROR);
+    return;
+  }
+  final List<VirtualFile> wrongRoots=new SmartList<VirtualFile>();
+  final List<VirtualFile> correctRoots=new SmartList<VirtualFile>();
+  for (  VirtualFile vf : virtualFiles) {
+    if (!GitUtil.isGitRoot(new File(vf.getPath()))) {
+      wrongRoots.add(vf);
+    }
+ else {
+      correctRoots.add(vf);
+    }
+  }
+  if (!wrongRoots.isEmpty()) {
+    VcsBalloonProblemNotifier.showOverVersionControlView(project,"These files are not Git repository roots:\n" + StringUtil.join(wrongRoots,new Function<VirtualFile,String>(){
+      @Override public String fun(      VirtualFile virtualFile){
+        return virtualFile.getPath();
+      }
+    }
+,"\n"),MessageType.ERROR);
+  }
+  if (wrongRoots.size() != virtualFiles.length) {
+    if (project == null || project.isDefault()) {
+      ProgressManager.getInstance().run(new MyPrepareToShowForDefaultProject(null,correctRoots));
+      return;
+    }
+    final ToolWindow window=ToolWindowManager.getInstance(project).getToolWindow(ChangesViewContentManager.TOOLWINDOW_ID);
+    final Project finalProject=project;
+    Runnable showContent=new Runnable(){
+      @Override public void run(){
+        ContentManager cm=window.getContentManager();
+        if (checkForProjectScope(cm,project,correctRoots))         return;
+        int cnt=0;
+        Content[] contents=cm.getContents();
+        for (        Content content : contents) {
+          final JComponent component=content.getComponent();
+          if (component instanceof MyContentComponent) {
+            cnt=Math.max(cnt,((MyContentComponent)component).getCount());
+            List<VirtualFile> roots=((MyContentComponent)component).getRoots();
+            if (Comparing.equal(roots,correctRoots)) {
+              cm.setSelectedContent(content);
+              alreadyOpened(project);
+              return;
+            }
+          }
+        }
+        LogFactoryService logFactoryService=LogFactoryService.getInstance(finalProject);
+        final GitLog gitLog=logFactoryService.createComponent(false);
+        gitLog.rootsChanged(correctRoots);
+        final ContentFactory contentFactory=ContentFactory.SERVICE.getInstance();
+        ++cnt;
+        MyContentComponent contentComponent=new MyContentComponent(new BorderLayout(),cnt);
+        contentComponent.setRoots(correctRoots);
+        contentComponent.add(gitLog.getVisualComponent(),BorderLayout.CENTER);
+        final Content content=contentFactory.createContent(contentComponent,"Log (" + cnt + ")",false);
+        content.setDescription("test!");
+        content.setCloseable(true);
+        Disposer.register(content,gitLog);
+        cm.addContent(content);
+        cm.setSelectedContent(content);
+      }
+    }
+;
+    if (!window.isVisible()) {
+      window.activate(showContent,true);
+    }
+ else {
+      showContent.run();
+    }
+  }
 }
