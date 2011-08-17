@@ -5,6 +5,7 @@
   final int projectId=getProjectId(project);
   conn.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootListener(){
     private VirtualFile[] myRootsBefore;
+    private Alarm myAlarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD,conn);
     public void beforeRootsChange(    final ModuleRootEvent event){
       try {
         myRootsBefore=ProjectRootManager.getInstance(projRef.get()).getContentSourceRoots();
@@ -36,26 +37,32 @@
             oldRoots.removeAll(Arrays.asList(rootsAfter));
           }
         }
-        startAsyncScan(projectId);
-        new Task.Backgroundable(project,CompilerBundle.message("compiler.initial.scanning.progress.text"),false){
-          public void run(          @NotNull final ProgressIndicator indicator){
-            try {
-              if (newRoots.size() > 0) {
-                scanSourceContent(projRef,newRoots,newRoots.size(),true);
-              }
-              if (oldRoots.size() > 0) {
-                scanSourceContent(projRef,oldRoots,oldRoots.size(),false);
-              }
-              markOldOutputRoots(projRef,buildOutputRootsLayout(projRef));
-            }
- catch (            ProjectRef.ProjectClosedException swallowed) {
-            }
+        myAlarm.cancelAllRequests();
+        myAlarm.addRequest(new Runnable(){
+          public void run(){
+            startAsyncScan(projectId);
+            new Task.Backgroundable(project,CompilerBundle.message("compiler.initial.scanning.progress.text"),false){
+              public void run(              @NotNull final ProgressIndicator indicator){
+                try {
+                  if (newRoots.size() > 0) {
+                    scanSourceContent(projRef,newRoots,newRoots.size(),true);
+                  }
+                  if (oldRoots.size() > 0) {
+                    scanSourceContent(projRef,oldRoots,oldRoots.size(),false);
+                  }
+                  markOldOutputRoots(projRef,buildOutputRootsLayout(projRef));
+                }
+ catch (                ProjectRef.ProjectClosedException swallowed) {
+                }
  finally {
-              terminateAsyncScan(projectId);
+                  terminateAsyncScan(projectId,false);
+                }
+              }
             }
+.queue();
           }
         }
-.queue();
+,500);
       }
  catch (      ProjectRef.ProjectClosedException e) {
         LOG.info(e);
