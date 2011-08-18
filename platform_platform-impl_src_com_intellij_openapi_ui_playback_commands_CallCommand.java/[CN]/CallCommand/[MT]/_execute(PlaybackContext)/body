@@ -1,0 +1,64 @@
+{
+  final ActionCallback cmdResult=new ActionCallback();
+  final String cmd=getText().substring(PREFIX.length()).trim();
+  final int open=cmd.indexOf("(");
+  if (open == -1) {
+    context.getCallback().error("( expected",getLine());
+    return new ActionCallback.Done();
+  }
+  final int close=cmd.lastIndexOf(")");
+  if (close == -1) {
+    context.getCallback().error(") expected",getLine());
+    return new ActionCallback.Done();
+  }
+  final String methodName=cmd.substring(0,open);
+  String[] args=cmd.substring(open + 1,close).split(",");
+  final boolean noArgs=args.length == 1 && args[0].length() == 0;
+  Class[] types=noArgs ? new Class[1] : new Class[args.length + 1];
+  types[0]=PlaybackContext.class;
+  for (int i=1; i < types.length; i++) {
+    types[i]=String.class;
+  }
+  try {
+    final Method m=PlaybackCallFacade.class.getMethod(methodName,types);
+    if (!m.getReturnType().isAssignableFrom(AsyncResult.class)) {
+      context.getCallback().error("Method " + methodName + " must return AsyncResult object",getLine());
+      return new ActionCallback.Rejected();
+    }
+    Object[] actualArgs=noArgs ? new Object[1] : new Object[args.length + 1];
+    actualArgs[0]=new PlaybackContext(context.getCallback(),getLine(),context.getRobot(),context.isUseDirectActionCall());
+    for (int i=1; i < actualArgs.length; i++) {
+      actualArgs[i]=args[i - 1];
+    }
+    AsyncResult result=(AsyncResult<String>)m.invoke(null,actualArgs);
+    if (result == null) {
+      context.getCallback().error("Method " + methodName + " must return AsyncResult object, but was null",getLine());
+      return new ActionCallback.Done();
+    }
+    result.doWhenDone(new AsyncResult.Handler<String>(){
+      @Override public void run(      String s){
+        if (s != null) {
+          context.getCallback().message("[" + methodName + "] "+ s,getLine());
+        }
+        cmdResult.setDone();
+      }
+    }
+).doWhenRejected(new AsyncResult.Handler<String>(){
+      @Override public void run(      String s){
+        context.getCallback().error("[" + methodName + "] "+ s,getLine());
+        cmdResult.setDone();
+      }
+    }
+);
+  }
+ catch (  NoSuchMethodException e) {
+    context.getCallback().error("No method found in PlaybackCallFacade",getLine());
+  }
+catch (  InvocationTargetException e) {
+    context.getCallback().error("InvocationTargetException while executing command: " + cmd,getLine());
+  }
+catch (  IllegalAccessException e) {
+    context.getCallback().error("IllegalAccessException while executing command: " + cmd,getLine());
+  }
+  return cmdResult;
+}
