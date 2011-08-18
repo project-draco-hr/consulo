@@ -1,0 +1,55 @@
+{
+  force();
+  long chunk=tailChunkAddress;
+  int chunkCount=0;
+  byte[] result=null;
+  RAReader reader=myCompactionModeReader;
+  CacheValue<RAReader> readerHandle=null;
+  if (reader == null) {
+    readerHandle=ourReadersCache.get(myPath);
+    reader=readerHandle.get();
+  }
+  try {
+    while (chunk != 0) {
+      int len=(int)Math.min(myBuffer.length,mySize - chunk);
+      reader.get(chunk,myBuffer,0,len);
+      final int sizePart=myBuffer[0];
+      final long prevChunkAddress;
+      final int chunkSize;
+      if (sizePart < 0) {
+        chunkSize=-sizePart - POSITIVE_VALUE_SHIFT;
+        prevChunkAddress=Bits.getInt(myBuffer,1);
+        byte[] b=new byte[(result != null ? result.length : 0) + chunkSize];
+        if (result != null)         System.arraycopy(result,0,b,b.length - result.length,result.length);
+        result=b;
+        checkPreconditions(result,chunkSize,0);
+        System.arraycopy(myBuffer,BYTE_LENGTH_INT_ADDRESS,result,0,chunkSize);
+      }
+ else {
+        chunkSize=Bits.getInt(myBuffer,0);
+        prevChunkAddress=Bits.getLong(myBuffer,4);
+        byte[] b=new byte[(result != null ? result.length : 0) + chunkSize];
+        if (result != null)         System.arraycopy(result,0,b,b.length - result.length,result.length);
+        result=b;
+        if (chunkSize < myBuffer.length - INT_LENGTH_LONG_ADDRESS) {
+          System.arraycopy(myBuffer,INT_LENGTH_LONG_ADDRESS,result,0,chunkSize);
+        }
+ else {
+          reader.get(chunk + INT_LENGTH_LONG_ADDRESS,result,0,chunkSize);
+        }
+      }
+      chunk=prevChunkAddress;
+      chunkCount++;
+    }
+  }
+  finally {
+    if (readerHandle != null) {
+      readerHandle.release();
+    }
+  }
+  if (chunkCount > 1 && !myCompactionMode) {
+    long l=appendBytes(new ByteSequence(result),0);
+    return new Pair<Long,byte[]>(l,result);
+  }
+  return new Pair<Long,byte[]>(tailChunkAddress,result);
+}
