@@ -1,0 +1,47 @@
+{
+  if (!CodeInsightUtilBase.prepareFileForWrite(file))   return;
+  final PsiJavaCodeReferenceElement refExpr=(PsiJavaCodeReferenceElement)element.getParent();
+  final PsiImportStaticStatement staticImport=(PsiImportStaticStatement)refExpr.advancedResolve(true).getCurrentFileResolveScope();
+  final List<PsiJavaCodeReferenceElement> expressionToExpand=new ArrayList<PsiJavaCodeReferenceElement>();
+  file.accept(new JavaRecursiveElementWalkingVisitor(){
+    @Override public void visitReferenceElement(    PsiJavaCodeReferenceElement expression){
+      if (refExpr != expression) {
+        final PsiElement resolveScope=expression.advancedResolve(true).getCurrentFileResolveScope();
+        if (resolveScope == staticImport) {
+          expressionToExpand.add(expression);
+        }
+      }
+      super.visitElement(expression);
+    }
+  }
+);
+  if (expressionToExpand.isEmpty()) {
+    expand(refExpr,staticImport);
+    staticImport.delete();
+  }
+ else {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      replaceAllAndDeleteImport(expressionToExpand,refExpr,staticImport);
+    }
+ else {
+      final BaseListPopupStep<String> step=new BaseListPopupStep<String>("Multiple Similar Calls Found",new String[]{REPLACE_THIS_OCCURRENCE,REPLACE_ALL_AND_DELETE_IMPORT}){
+        @Override public PopupStep onChosen(        final String selectedValue,        boolean finalChoice){
+          new WriteCommandAction(project,ExpandStaticImportAction.this.getText()){
+            @Override protected void run(            Result result) throws Throwable {
+              if (selectedValue == REPLACE_THIS_OCCURRENCE) {
+                expand(refExpr,staticImport);
+              }
+ else {
+                replaceAllAndDeleteImport(expressionToExpand,refExpr,staticImport);
+              }
+            }
+          }
+.execute();
+          return FINAL_CHOICE;
+        }
+      }
+;
+      JBPopupFactory.getInstance().createListPopup(step).showInBestPositionFor(editor);
+    }
+  }
+}
