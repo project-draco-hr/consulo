@@ -6,6 +6,13 @@
   myVcs=singleVcs;
   myListComments=new HashMap<String,String>();
   myAdditionalData=new PseudoMap<Object,Object>();
+  myDiffDetails=new ShortDiffDetails(myProject,new Getter<Change[]>(){
+    @Override public Change[] get(){
+      final List<Change> selectedChanges=myBrowser.getViewer().getSelectedChanges();
+      return selectedChanges.toArray(new Change[selectedChanges.size()]);
+    }
+  }
+,VcsChangeDetailsManager.getInstance(myProject));
   if (!myShowVcsCommit && ((myExecutors == null) || myExecutors.size() == 0)) {
     throw new IllegalArgumentException("nothing found to execute commit with");
   }
@@ -33,6 +40,19 @@
     myBrowser=browser;
     myBrowserExtender=browser.getExtender();
   }
+  final ZipperUpdater zipperUpdater=new ZipperUpdater(30,Alarm.ThreadToUse.SWING_THREAD,getDisposable());
+  final Runnable refreshShortDiffDetails=new Runnable(){
+    @Override public void run(){
+      myDiffDetails.refresh();
+    }
+  }
+;
+  myBrowser.getViewer().addSelectionListener(new Runnable(){
+    @Override public void run(){
+      zipperUpdater.queue(refreshShortDiffDetails);
+    }
+  }
+);
   myBrowserExtender.addToolbarActions(this);
   myBrowserExtender.addSelectedListChangeListener(new SelectedListChangeListener(){
     public void selectedListChanged(){
@@ -64,22 +84,6 @@
         myCommitMessageArea.setText(messageFromVcs);
       }
     }
-  }
-  myCheckSpellingBox=new JCheckBox(VcsBundle.message("checkbox.check.commit.message.spelling"));
-  myCheckSpellingBox.addItemListener(new ItemListener(){
-    @Override public void itemStateChanged(    ItemEvent e){
-      VcsConfiguration configuration=VcsConfiguration.getInstance(myProject);
-      boolean checkSpelling=e.getStateChange() == ItemEvent.SELECTED;
-      if (configuration != null) {
-        configuration.CHECK_COMMIT_MESSAGE_SPELLING=checkSpelling;
-      }
-      myCommitMessageArea.setCheckSpelling(checkSpelling);
-    }
-  }
-);
-  VcsConfiguration configuration=VcsConfiguration.getInstance(myProject);
-  if (configuration != null) {
-    myCheckSpellingBox.setSelected(configuration.CHECK_COMMIT_MESSAGE_SPELLING);
   }
   myActionName=VcsBundle.message("commit.dialog.title");
   myAdditionalOptionsPanel=new JPanel();
@@ -189,4 +193,19 @@
   for (  EditChangelistSupport support : Extensions.getExtensions(EditChangelistSupport.EP_NAME,project)) {
     support.installSearch(myCommitMessageArea.getEditorField(),myCommitMessageArea.getEditorField());
   }
+  myAdjustWhenShown=new AdjustComponentWhenShown(){
+    @Override protected boolean init(){
+      myDiffDetails.refresh();
+      String value=PropertiesComponent.getInstance().getValue(DETAILS_SHOW_OPTION);
+      if (value != null) {
+        Boolean asBoolean=Boolean.valueOf(value);
+        if (Boolean.TRUE.equals(asBoolean)) {
+          myDetailsSplitter.on();
+        }
+      }
+      return calcSplitterProportion();
+    }
+  }
+;
+  myAdjustWhenShown.install(myBrowser);
 }
