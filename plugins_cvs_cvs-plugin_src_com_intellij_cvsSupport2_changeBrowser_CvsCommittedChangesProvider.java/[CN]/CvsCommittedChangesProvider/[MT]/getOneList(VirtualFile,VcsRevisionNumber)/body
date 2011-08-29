@@ -1,36 +1,57 @@
 {
-  final FilePathImpl filePath=new FilePathImpl(file);
-  CvsRepositoryLocation cvsLocation=getLocationFor(filePath);
+  final File ioFile=new File(file.getPath());
+  final FilePath filePath=VcsContextFactory.SERVICE.getInstance().createFilePathOn(ioFile);
+  final VirtualFile vcsRoot=ProjectLevelVcsManager.getInstance(myProject).getVcsRootFor(filePath);
+  final CvsRepositoryLocation cvsLocation=getLocationFor(filePath);
   if (cvsLocation == null)   return null;
-  final String module=cvsLocation.getModuleName();
+  final String rootModule=CvsUtil.getModuleName(vcsRoot);
   final CvsEnvironment connectionSettings=cvsLocation.getEnvironment();
   if (connectionSettings.isOffline()) {
     return null;
   }
-  final CvsChangeListsBuilder builder=new CvsChangeListsBuilder(module,connectionSettings,myProject,cvsLocation.getRootFile());
-  final Calendar calendar=Calendar.getInstance();
-  calendar.set(1970,2,2);
-  Date dateFrom=calendar.getTime();
+  final CvsChangeListsBuilder builder=new CvsChangeListsBuilder(rootModule,connectionSettings,myProject,vcsRoot);
   final CvsChangeList[] result=new CvsChangeList[1];
-  final CvsResult executionResult=runRLogOperation(connectionSettings,module,dateFrom,null,new Consumer<LogInformationWrapper>(){
+  final LoadHistoryOperation operation=new LoadHistoryOperation(connectionSettings,new Consumer<LogInformationWrapper>(){
     public void consume(    LogInformationWrapper wrapper){
-      if (result[0] != null)       return;
-      final List<RevisionWrapper> wrappers=builder.revisionWrappersFromLog(wrapper);
-      if (wrappers != null) {
-        for (        RevisionWrapper revisionWrapper : wrappers) {
-          if (Comparing.equal(revisionWrapper.getRevision().getNumber(),number.asString())) {
-            result[0]=builder.addRevision(revisionWrapper);
-          }
-        }
-      }
+      final List<Revision> revisions=wrapper.getRevisions();
+      if (revisions.isEmpty())       return;
+      final RevisionWrapper revision=new RevisionWrapper(wrapper.getFile(),revisions.get(0),null);
+      result[0]=builder.addRevision(revision);
     }
   }
-);
+,cvsLocation.getModuleName(),number.asString());
+  final CvsResult executionResult=runRLogOperation(operation);
   if (executionResult.isCanceled()) {
     throw new ProcessCanceledException();
   }
  else   if (!executionResult.hasNoErrors()) {
     throw executionResult.composeError();
+  }
+  if (result[0] == null) {
+    return null;
+  }
+  final Date commitDate=result[0].getCommitDate();
+  final CvsEnvironment rootConnectionSettings=CvsEntriesManager.getInstance().getCvsConnectionSettingsFor(vcsRoot);
+  final long t=commitDate.getTime();
+  final Date dateFrom=new Date(t - CvsChangeList.SUITABLE_DIFF);
+  final Date dateTo=new Date(t + CvsChangeList.SUITABLE_DIFF);
+  final LoadHistoryOperation operation2=new LoadHistoryOperation(rootConnectionSettings,rootModule,dateFrom,dateTo,new Consumer<LogInformationWrapper>(){
+    @Override public void consume(    LogInformationWrapper wrapper){
+      final List<RevisionWrapper> wrappers=builder.revisionWrappersFromLog(wrapper);
+      if (wrappers != null) {
+        for (        RevisionWrapper revisionWrapper : wrappers) {
+          if (result[0].containsFileRevision(revisionWrapper)) {
+            continue;
+          }
+          builder.addRevision(revisionWrapper);
+        }
+      }
+    }
+  }
+);
+  final CvsResult cvsResult=runRLogOperation(operation2);
+  if (!cvsResult.hasNoErrors()) {
+    throw cvsResult.composeError();
   }
   return new Pair<CvsChangeList,FilePath>(result[0],filePath);
 }
