@@ -1,25 +1,39 @@
 {
   final JpsRemoteProto.Message message=(JpsRemoteProto.Message)e.getMessage();
-  final JpsServerResponseHandler handler=getHandler(message);
+  final UUID sessionId=ProtoUtil.fromProtoUUID(message.getSessionId());
+  final JpsRemoteProto.Message.Type messageType=message.getMessageType();
+  final JpsServerResponseHandler handler=getHandler(sessionId);
   if (handler == null) {
     return;
   }
-  if (message.getKind() == JpsRemoteProto.Message.Kind.FAILURE) {
-    handler.handleFailure(message.getFailure());
-  }
- else   if (message.getKind() == JpsRemoteProto.Message.Kind.RESPONSE) {
-    final JpsRemoteProto.Message.Response response=message.getResponse();
-    if (response.hasCompileResponse()) {
-      handler.handleCompileResponse(response.getCompileResponse());
+  boolean terminateSession=false;
+  try {
+    if (messageType == JpsRemoteProto.Message.Type.FAILURE) {
+      terminateSession=true;
+      handler.handleFailure(message.getFailure());
     }
- else     if (response.hasStatusResponse()) {
-      handler.handleStatusResponse(response.getStatusResponse());
+ else     if (messageType == JpsRemoteProto.Message.Type.RESPONSE) {
+      final JpsRemoteProto.Message.Response response=message.getResponse();
+      final JpsRemoteProto.Message.Response.Type responseType=response.getResponseType();
+      if (responseType == JpsRemoteProto.Message.Response.Type.COMMAND_RESPONSE) {
+        final JpsRemoteProto.Message.Response.CommandResponse commandResponse=response.getCommandResponse();
+        terminateSession=commandResponse.getCommandType() != JpsRemoteProto.Message.Response.CommandResponse.Type.COMMAND_ACCEPTED;
+        handler.handleCommandResponse(commandResponse);
+      }
+ else       if (responseType == JpsRemoteProto.Message.Response.Type.COMPILE_MESSAGE) {
+        handler.handleCompileMessage(response.getCompileMessage());
+      }
+ else {
+        throw new Exception("Unknown response: " + response);
+      }
     }
  else {
-      throw new Exception("Unknown response: " + response);
+      throw new Exception("Unknown message received: " + message);
     }
   }
- else {
-    throw new Exception("Unknown message received: " + message);
+  finally {
+    if (terminateSession) {
+      terminateSession(sessionId);
+    }
   }
 }

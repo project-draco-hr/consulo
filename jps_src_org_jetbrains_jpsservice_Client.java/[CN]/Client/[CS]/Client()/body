@@ -1,11 +1,31 @@
 {
-  myChannelFactory=new NioClientSocketChannelFactory(Executors.newCachedThreadPool(),Executors.newCachedThreadPool());
+  myChannelFactory=new NioClientSocketChannelFactory(Executors.newCachedThreadPool(),Executors.newCachedThreadPool(),1);
   myPipelineFactory=new ChannelPipelineFactory(){
     public ChannelPipeline getPipeline() throws Exception {
       return Channels.pipeline(new ProtobufVarint32FrameDecoder(),new ProtobufDecoder(JpsRemoteProto.Message.getDefaultInstance()),new ProtobufVarint32LengthFieldPrepender(),new ProtobufEncoder(),new JpsClientMessageHandler(){
-        protected JpsServerResponseHandler getHandler(        JpsRemoteProto.Message message){
-          final JpsRemoteProto.Message.UUID messageUuid=message.getMessageUuid();
-          return myResponseHandlers.remove(new UUID(messageUuid.getMostSigBits(),messageUuid.getLeastSigBits()));
+        protected JpsServerResponseHandler getHandler(        UUID sessionId){
+          return myHandlers.get(sessionId);
+        }
+        protected void terminateSession(        UUID sessionId){
+          final JpsServerResponseHandler handler=myHandlers.remove(sessionId);
+          if (handler != null) {
+            try {
+              handler.sessionTerminated();
+            }
+ catch (            Throwable ignored) {
+              ignored.printStackTrace();
+            }
+          }
+        }
+        public void channelClosed(        ChannelHandlerContext ctx,        ChannelStateEvent e) throws Exception {
+          try {
+            super.channelClosed(ctx,e);
+          }
+  finally {
+            for (            UUID uuid : new ArrayList<UUID>(myHandlers.keySet())) {
+              terminateSession(uuid);
+            }
+          }
         }
       }
 );

@@ -1,24 +1,39 @@
 {
   final JpsRemoteProto.Message message=(JpsRemoteProto.Message)e.getMessage();
-  final JpsRemoteProto.Message.Builder responseBuilder=JpsRemoteProto.Message.newBuilder();
-  responseBuilder.setMessageUuid(message.getMessageUuid());
-  if (message.getKind() != JpsRemoteProto.Message.Kind.REQUEST) {
-    responseBuilder.setKind(JpsRemoteProto.Message.Kind.FAILURE).setFailure(JpsProtoUtil.createFailure("Cannot handle message " + message.toString()));
+  final UUID sessionId=ProtoUtil.fromProtoUUID(message.getSessionId());
+  JpsRemoteProto.Message responseMessage=null;
+  boolean shutdown=false;
+  if (message.getMessageType() != JpsRemoteProto.Message.Type.REQUEST) {
+    responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Cannot handle message " + message.toString()));
   }
  else   if (!message.hasRequest()) {
-    responseBuilder.setKind(JpsRemoteProto.Message.Kind.FAILURE).setFailure(JpsProtoUtil.createFailure("No request in message: " + message.toString()));
+    responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("No request in message: " + message.toString()));
   }
  else {
     final JpsRemoteProto.Message.Request request=message.getRequest();
-    if (request.hasCompileRequest()) {
-      responseBuilder.setKind(JpsRemoteProto.Message.Kind.RESPONSE).setResponse(startBuild(request.getCompileRequest()));
+    final JpsRemoteProto.Message.Request.Type requestType=request.getRequestType();
+    if (requestType == JpsRemoteProto.Message.Request.Type.COMPILE_REQUEST) {
+      final JpsRemoteProto.Message.Response response=startBuild(sessionId,ctx,request.getCompileRequest());
+      if (response != null) {
+        responseMessage=ProtoUtil.toMessage(sessionId,response);
+      }
     }
- else     if (request.hasStatusRequest()) {
-      responseBuilder.setKind(JpsRemoteProto.Message.Kind.RESPONSE).setResponse(getBuildStatus(request.getStatusRequest()));
+ else     if (requestType == JpsRemoteProto.Message.Request.Type.SHUTDOWN_COMMAND) {
+      shutdown=true;
+      responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandAcceptedResponse(null));
     }
  else {
-      responseBuilder.setKind(JpsRemoteProto.Message.Kind.FAILURE).setFailure(JpsProtoUtil.createFailure("Unknown request: " + message));
+      responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Unknown request: " + message));
     }
   }
-  Channels.write(ctx,e.getFuture(),responseBuilder.build());
+  if (responseMessage != null) {
+    final ChannelFuture future=Channels.write(ctx.getChannel(),responseMessage);
+    if (shutdown) {
+      future.addListener(new ChannelFutureListener(){
+        public void operationComplete(        ChannelFuture future) throws Exception {
+        }
+      }
+);
+    }
+  }
 }
