@@ -1,0 +1,59 @@
+{
+  final VirtualFile vFile=event.getFile();
+  final PsiDirectory oldParentDir=myFileManager.findDirectory(event.getOldParent());
+  final PsiDirectory newParentDir=myFileManager.findDirectory(event.getNewParent());
+  if (oldParentDir == null && newParentDir == null)   return;
+  final PsiElement oldElement=vFile.isDirectory() ? myFileManager.getCachedDirectory(vFile) : myFileManager.getCachedPsiFileInner(vFile);
+  myFileManager.removeInvalidFilesAndDirs(true);
+  final FileViewProvider viewProvider=myFileManager.findViewProvider(vFile);
+  final PsiElement newElement;
+  final FileViewProvider newViewProvider;
+  if (!vFile.isDirectory()) {
+    newViewProvider=myFileManager.createFileViewProvider(vFile,true);
+    newElement=newViewProvider.getPsi(viewProvider.getBaseLanguage());
+  }
+ else {
+    newElement=myFileManager.findDirectory(vFile);
+    newViewProvider=null;
+  }
+  if (oldElement == null && newElement == null)   return;
+  ApplicationManager.getApplication().runWriteAction(new ExternalChangeAction(){
+    public void run(){
+      PsiTreeChangeEventImpl treeEvent=new PsiTreeChangeEventImpl(myManager);
+      if (oldElement == null) {
+        myFileManager.cacheViewProvider(vFile,newViewProvider);
+        treeEvent.setParent(newParentDir);
+        treeEvent.setChild(newElement);
+        myManager.childAdded(treeEvent);
+      }
+ else {
+        if (newElement == null) {
+          myFileManager.removeCachedViewProvider(vFile);
+          treeEvent.setParent(oldParentDir);
+          treeEvent.setChild(oldElement);
+          myManager.childRemoved(treeEvent);
+        }
+ else {
+          if (oldElement.getClass().equals(newElement.getClass())) {
+            treeEvent.setOldParent(oldParentDir);
+            treeEvent.setNewParent(newParentDir);
+            treeEvent.setChild(newElement);
+            myManager.childMoved(treeEvent);
+          }
+ else {
+            myFileManager.cacheViewProvider(vFile,newViewProvider);
+            PsiTreeChangeEventImpl treeRemoveEvent=new PsiTreeChangeEventImpl(myManager);
+            treeRemoveEvent.setParent(oldParentDir);
+            treeRemoveEvent.setChild(oldElement);
+            myManager.childRemoved(treeRemoveEvent);
+            PsiTreeChangeEventImpl treeAddEvent=new PsiTreeChangeEventImpl(myManager);
+            treeAddEvent.setParent(newParentDir);
+            treeAddEvent.setChild(newElement);
+            myManager.childAdded(treeAddEvent);
+          }
+        }
+      }
+    }
+  }
+);
+}
