@@ -1,15 +1,60 @@
 {
+  if (mySkeletonBuilder == null) {
+    Collections.sort(lines,myCurrentComparator);
+  }
+  final Integer[] parentsIdx=new Integer[1];
+  parentsIdx[0]=0;
+  final Set<Integer> whatToRecount=mySkeletonBuilder == null ? null : new HashSet<Integer>();
+  final Map<Integer,Integer> indexRecalculation=new HashMap<Integer,Integer>();
   myStrategy.beforeStart();
-  new GroupingMerger<CommitI,String>(){
+  int idxFrom=findIdx(lines);
+  int recountFrom=new GroupingMerger<CommitI,String>(){
+    @Override protected CommitI wrapItem(    CommitI commitI){
+      if (mySkeletonBuilder != null && !commitI.holdsDecoration()) {
+        return new WireNumberCommitDecoration(commitI);
+      }
+      return super.wrapItem(commitI);
+    }
+    @Override protected void afterConsumed(    CommitI commitI,    int i){
+      if (mySkeletonBuilder != null && !commitI.holdsDecoration()) {
+        whatToRecount.add(i);
+      }
+    }
     @Override protected boolean filter(    CommitI commitI){
       return !commitI.holdsDecoration();
     }
     @Override protected String getGroup(    CommitI commitI){
-      return myStrategy.getGroupName(new Date(commitI.getTime()));
+      return mySkeletonBuilder != null ? "" : myStrategy.getGroupName(commitI);
     }
     @Override protected CommitI wrapGroup(    String s,    CommitI item){
       return new GroupHeaderDatePseudoCommit(s,item.getTime() - 1);
     }
+    @Override protected void oldBecame(    int was,    int is){
+      if (mySkeletonBuilder != null && was != is) {
+        indexRecalculation.put(was,is);
+      }
+    }
   }
-.firstPlusSecond(myLines,new ReadonlyList.ArrayListWrapper<CommitI>(lines),CommitIComparator.getInstance());
+.firstPlusSecond(myLines,new ReadonlyList.ArrayListWrapper<CommitI>(lines),myCurrentComparator,mySkeletonBuilder == null ? -1 : idxFrom);
+  if (mySkeletonBuilder != null) {
+    for (    SkeletonBuilder skeletonBuilder : mySkeletonBuilder.values()) {
+      skeletonBuilder.oldBecameNew(indexRecalculation);
+    }
+    for (int i=recountFrom; i < myLines.getSize(); i++) {
+      final CommitI commitI=myLines.get(i);
+      if (mySkeletonBuilder != null && !commitI.holdsDecoration() && whatToRecount.contains(i)) {
+        mySkeletonBuilder.get(commitI.selectRepository(myRootsHolder.getRoots())).consume(commitI,parents.get(parentsIdx[0]),myLines,i);
+        ++parentsIdx[0];
+      }
+    }
+    for (    Map.Entry<VirtualFile,TreeNavigationImpl> entry : myNavigation.entrySet()) {
+      final TreeNavigationImpl navigation=myNavigation.get(entry.getKey());
+      navigation.recalcIndex(myLines,mySkeletonBuilder.get(entry.getKey()).getFutureConvertor());
+    }
+    int size=0;
+    for (    VirtualFile file : myOrder) {
+      myAdditions.put(file,size);
+      size+=myNavigation.get(file).getMaximumWires();
+    }
+  }
 }
