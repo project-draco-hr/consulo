@@ -6,21 +6,49 @@
   if (!ApplicationManager.getApplication().isUnitTestMode() && !((ProjectEx)project).getStateStore().checkVersion())   return false;
   myOpenProjects.add(project);
   cacheOpenProjects();
-  fireProjectOpened(project);
+  if (ApplicationManager.getApplication().isDispatchThread()) {
+    fireProjectOpened(project);
+  }
+ else {
+    ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+      @Override public void run(){
+        fireProjectOpened(project);
+      }
+    }
+,ModalityState.defaultModalityState());
+  }
   final StartupManagerImpl startupManager=(StartupManagerImpl)StartupManager.getInstance(project);
-  boolean ok=myProgressManager.runProcessWithProgressSynchronously(new Runnable(){
-    public void run(){
+  boolean ok;
+  ProgressIndicator indicator=myProgressManager.getProgressIndicator();
+  if (indicator == null) {
+    ok=myProgressManager.runProcessWithProgressSynchronously(new Runnable(){
+      public void run(){
+        startupManager.runStartupActivities();
+      }
+    }
+,ProjectBundle.message("project.load.progress"),true,project);
+  }
+ else {
+    try {
       startupManager.runStartupActivities();
+      ok=true;
+    }
+ catch (    Throwable e) {
+      ok=false;
     }
   }
-,ProjectBundle.message("project.load.progress"),true,project);
   if (!ok) {
     closeProject(project,false,false);
     notifyProjectOpenFailed();
     return false;
   }
-  startupManager.startCacheUpdate();
-  startupManager.runPostStartupActivities();
+  ApplicationManager.getApplication().invokeLater(new Runnable(){
+    public void run(){
+      startupManager.runPostStartupActivities();
+      startupManager.startCacheUpdate();
+    }
+  }
+);
   if (!ApplicationManager.getApplication().isHeadlessEnvironment() && !ApplicationManager.getApplication().isUnitTestMode()) {
     StartupManager.getInstance(project).runWhenProjectIsInitialized(new Runnable(){
       public void run(){
