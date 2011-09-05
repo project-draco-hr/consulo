@@ -1,0 +1,58 @@
+{
+  return doForWindowAndTitle(new PairFunction<Pair<Window,String>,JRootPane,Integer>(){
+    @Override public Integer fun(    Pair<Window,String> windowAndTitle,    JRootPane pane){
+      String _windowTitle=windowAndTitle.getSecond();
+      Window _window=windowAndTitle.getFirst();
+      final ID focusedWindow=MacUtil.findWindowForTitle(_windowTitle);
+      if (focusedWindow != null) {
+        String fakeTitle=null;
+        final FocusTrackback[] focusTrackback={new FocusTrackback(new Object(),_window,true)};
+        ID pool=invoke("NSAutoreleasePool","new");
+        try {
+          final ID delegate=invoke(Foundation.getClass("NSAlertDelegate_"),"new");
+          cfRetain(delegate);
+          fakeTitle=String.format("MacSheetDialog-%d",delegate.intValue());
+          final ID buttonsArray=invoke("NSMutableArray","array");
+          for (          String s : buttons) {
+            invoke(buttonsArray,"addObject:",cfString(UIUtil.removeMnemonic(s)));
+          }
+          ID paramsArray=invoke("NSArray","arrayWithObjects:",cfString(title),cfString(StringUtil.stripHtml(message,true).replace("%","%%")),cfString(StringUtil.stripHtml(moreInfo == null ? "" : moreInfo,true).replace("%","%%")),focusedWindow,cfString(fakeTitle),cfString(errorStyle ? "error" : "-1"),cfString(doNotAskDialogOption == null || !doNotAskDialogOption.canBeHidden() ? "-1" : doNotAskDialogOption.getDoNotShowMessage()),buttonsArray,null);
+          invoke(delegate,"performSelectorOnMainThread:withObject:waitUntilDone:",Foundation.createSelector("showVariableButtonsSheet:"),paramsArray,true);
+        }
+  finally {
+          invoke(pool,"release");
+        }
+        if (fakeTitle != null) {
+          pane.putClientProperty(MacUtil.MAC_NATIVE_WINDOW_SHOWING,Boolean.TRUE);
+          pane.putClientProperty(MAC_SHEET_ID,fakeTitle);
+          MacUtil.startModal(pane);
+          Integer code=(Integer)pane.getClientProperty(MAC_SHEET_RESULT) - 1000;
+          boolean suppress=Boolean.TRUE == pane.getClientProperty(MAC_SHEET_SUPPRESS);
+          final int cancelCode=buttons.length - 1;
+          if (doNotAskDialogOption != null && doNotAskDialogOption.canBeHidden()) {
+            if (cancelCode != code || doNotAskDialogOption.shouldSaveOptionsOnCancel()) {
+              doNotAskDialogOption.setToBeShown(!suppress,code);
+            }
+          }
+          pane.putClientProperty(MAC_SHEET_RESULT,null);
+          pane.putClientProperty(MAC_SHEET_SUPPRESS,null);
+          if (focusTrackback[0] != null && !(focusTrackback[0].isSheduledForRestore() || focusTrackback[0].isWillBeSheduledForRestore())) {
+            focusTrackback[0].setWillBeSheduledForRestore();
+            IdeFocusManager mgr=IdeFocusManager.findInstanceByComponent(_window);
+            Runnable r=new Runnable(){
+              public void run(){
+                if (focusTrackback[0] != null)                 focusTrackback[0].restoreFocus();
+                focusTrackback[0]=null;
+              }
+            }
+;
+            mgr.doWhenFocusSettlesDown(r);
+          }
+          return code;
+        }
+      }
+      return -1;
+    }
+  }
+,window);
+}
