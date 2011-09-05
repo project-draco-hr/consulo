@@ -1,39 +1,15 @@
 {
   return RecursionManager.doPreventingRecursion(refExpr,true,new Computable<PsiType>(){
     @Override public PsiType compute(){
-      @SuppressWarnings("unchecked") GroovyPsiElement scope=PsiTreeUtil.getParentOfType(refExpr,GrMethod.class,GrClosableBlock.class,GrClassInitializer.class,GroovyFileBase.class);
-      if (scope instanceof GrMethod) {
-        scope=((GrMethod)scope).getBlock();
+      final GrControlFlowOwner scope=ControlFlowUtils.findControlFlowOwner(refExpr);
+      if (scope == null)       return null;
+      final Instruction[] flow=scope.getControlFlow();
+      ReadWriteVariableInstruction instruction=findInstruction(refExpr,flow);
+      if (instruction == null)       return null;
+      if (instruction.isWrite()) {
+        return getInitializerType(refExpr);
       }
- else       if (scope instanceof GrClassInitializer) {
-        scope=((GrClassInitializer)scope).getBlock();
-      }
-      if (scope != null) {
-        final Instruction[] flow=((GrControlFlowOwner)scope).getControlFlow();
-        ReadWriteVariableInstruction instruction=findInstruction(refExpr,flow);
-        if (instruction == null) {
-          return null;
-        }
-        if (instruction.isWrite()) {
-          return getInitializerType(refExpr);
-        }
-        final Pair<ReachingDefinitionsDfaInstance,List<TIntObjectHashMap<TIntHashSet>>> pair=getDefUseMaps((GrControlFlowOwner)scope);
-        final int varIndex=pair.first.getVarIndex(refExpr.getReferenceName());
-        final TIntObjectHashMap<TIntHashSet> allDefs=pair.second.get(instruction.num());
-        final TIntHashSet varDefs=allDefs.get(varIndex);
-        if (varDefs != null) {
-          PsiType result=null;
-          for (          int defIndex : varDefs.toArray()) {
-            PsiType defType=getDefinitionType(flow[defIndex]);
-            if (defType != null) {
-              defType=TypesUtil.boxPrimitiveType(defType,scope.getManager(),scope.getResolveScope());
-              result=result == null ? defType : TypesUtil.getLeastUpperBound(result,defType,scope.getManager());
-            }
-          }
-          return result;
-        }
-      }
-      return null;
+      return getInferredType(refExpr.getReferenceName(),instruction,flow,scope);
     }
   }
 );
