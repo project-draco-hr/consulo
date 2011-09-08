@@ -1,21 +1,8 @@
 {
   final GradleApiFacadeManager manager=ServiceManager.getService(GradleApiFacadeManager.class);
-  Runnable edtAction=new Runnable(){
+  final Ref<GradleProject> gradleProjectRef=new Ref<GradleProject>();
+  final Runnable setupExternalDependenciesTask=new Runnable(){
     @Override public void run(){
-      final Ref<GradleProject> gradleProjectRef=new Ref<GradleProject>();
-      ProgressManager.getInstance().run(new Task.Backgroundable(intellijProject,GradleBundle.message("gradle.library.resolve.progress.text"),false){
-        @Override public void run(        @NotNull ProgressIndicator indicator){
-          indicator.setIndeterminate(true);
-          try {
-            GradleProjectResolver resolver=manager.getFacade().getResolver();
-            gradleProjectRef.set(resolver.resolveProjectInfo(gradleProjectPath,true));
-          }
- catch (          Exception e) {
-            GradleLog.LOG.warn("Can't resolve external dependencies of the target gradle project (" + gradleProjectPath + ")",e);
-          }
-        }
-      }
-);
       final GradleProject gradleProject=gradleProjectRef.get();
       if (gradleProject == null) {
         return;
@@ -31,5 +18,25 @@
     }
   }
 ;
-  UIUtil.invokeLaterIfNeeded(edtAction);
+  Runnable resolveDependenciesTask=new Runnable(){
+    @Override public void run(){
+      ProgressManager.getInstance().run(new Task.Backgroundable(intellijProject,GradleBundle.message("gradle.library.resolve.progress.text"),false){
+        @Override public void run(        @NotNull ProgressIndicator indicator){
+          indicator.setIndeterminate(true);
+          try {
+            GradleProjectResolver resolver=manager.getFacade().getResolver();
+            GradleProject projectWithResolvedLibraries=resolver.resolveProjectInfo(gradleProjectPath,true);
+            gradleProjectRef.set(projectWithResolvedLibraries);
+            UIUtil.invokeLaterIfNeeded(setupExternalDependenciesTask);
+          }
+ catch (          Exception e) {
+            GradleLog.LOG.warn("Can't resolve external dependencies of the target gradle project (" + gradleProjectPath + ")",e);
+          }
+        }
+      }
+);
+    }
+  }
+;
+  UIUtil.invokeLaterIfNeeded(resolveDependenciesTask);
 }

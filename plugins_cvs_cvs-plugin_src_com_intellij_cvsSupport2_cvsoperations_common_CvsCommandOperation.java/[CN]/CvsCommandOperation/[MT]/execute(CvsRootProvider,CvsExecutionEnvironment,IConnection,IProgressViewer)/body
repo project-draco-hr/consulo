@@ -1,0 +1,59 @@
+{
+  final Command command=createCommand(root,executionEnvironment);
+  if (command == null)   return;
+  LOG.assertTrue(connection != null,root.getCvsRootAsString());
+  final CvsMessagesListener cvsMessagesListener=executionEnvironment.getCvsMessagesListener();
+  final long start=System.currentTimeMillis();
+  try {
+    final IClientEnvironment clientEnvironment=createEnvironment(connection,root,myUpdatedFilesManager,executionEnvironment);
+    myUpdatedFilesManager.setCvsFileSystem(clientEnvironment.getCvsFileSystem());
+    final EventManager eventManager=new EventManager(CvsApplicationLevelConfiguration.getCharset());
+    final IGlobalOptions globalOptions=command.getGlobalOptions();
+    final IRequestProcessor requestProcessor=new RequestProcessor(clientEnvironment,globalOptions,eventManager,new StreamLogger(),executionEnvironment.getCvsCommandStopper(),PServerCvsSettings.getTimeoutMillis());
+    eventManager.addFileInfoListener(this);
+    eventManager.addEntryListener(this);
+    eventManager.addMessageListener(this);
+    eventManager.addModuleExpansionListener(this);
+    final CvsMessagesTranslator cvsMessagesTranslator=new CvsMessagesTranslator(cvsMessagesListener,clientEnvironment.getCvsFileSystem(),myUpdatedFilesManager,root.getCvsRootAsString());
+    cvsMessagesTranslator.registerTo(eventManager);
+    final CvsEntriesManager cvsEntriesManager=CvsEntriesManager.getInstance();
+    if (shouldMakeChangesOnTheLocalFileSystem()) {
+      eventManager.addEntryListener(new MergeSupportingEntryListener(clientEnvironment,cvsEntriesManager,myUpdatedFilesManager));
+      eventManager.addMessageListener(myUpdatedFilesManager);
+    }
+    modifyOptions(command.getGlobalOptions());
+    final String commandString=composeCommandString(root,command);
+    cvsMessagesListener.commandStarted(commandString);
+    setProgressText(CvsBundle.message("progress.text.command.running.for.file",getOperationName(),root.getCvsRootAsString()));
+    try {
+      command.execute(requestProcessor,eventManager,eventManager,clientEnvironment,progressViewer);
+    }
+ catch (    AuthenticationException e) {
+      if (!root.isOffline()) {
+        ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+          public void run(){
+            final LoginPerformer.MyForRootProvider performer=new LoginPerformer.MyForRootProvider(Collections.singletonList(root),new Consumer<VcsException>(){
+              public void consume(              VcsException e){
+                LOG.info(e);
+              }
+            }
+);
+            performer.setForceCheck(true);
+            performer.loginAll(ModalityContextImpl.NON_MODAL);
+          }
+        }
+);
+        return;
+      }
+      throw root.processException(new CommandException(e,"Authentication problem"));
+    }
+    cvsMessagesTranslator.operationCompleted();
+  }
+ catch (  CommandException t) {
+    throw root.processException(t);
+  }
+ finally {
+    cvsMessagesListener.commandFinished(composeCommandString(root,command),System.currentTimeMillis() - start);
+    executeFinishActions();
+  }
+}
