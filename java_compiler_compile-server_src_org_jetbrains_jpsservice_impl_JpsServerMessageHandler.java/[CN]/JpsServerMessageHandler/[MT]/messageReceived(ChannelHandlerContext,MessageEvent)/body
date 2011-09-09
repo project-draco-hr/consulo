@@ -1,0 +1,45 @@
+{
+  final JpsRemoteProto.Message message=(JpsRemoteProto.Message)e.getMessage();
+  final UUID sessionId=ProtoUtil.fromProtoUUID(message.getSessionId());
+  JpsRemoteProto.Message responseMessage=null;
+  boolean shutdown=false;
+  if (message.getMessageType() != JpsRemoteProto.Message.Type.REQUEST) {
+    responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Cannot handle message " + message.toString()));
+  }
+ else   if (!message.hasRequest()) {
+    responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("No request in message: " + message.toString()));
+  }
+ else {
+    final JpsRemoteProto.Message.Request request=message.getRequest();
+    final JpsRemoteProto.Message.Request.Type requestType=request.getRequestType();
+    if (requestType == JpsRemoteProto.Message.Request.Type.COMPILE_REQUEST) {
+      final JpsRemoteProto.Message.Response response=startBuild(sessionId,ctx,request.getCompileRequest());
+      if (response != null) {
+        responseMessage=ProtoUtil.toMessage(sessionId,response);
+      }
+    }
+ else     if (requestType == JpsRemoteProto.Message.Request.Type.SHUTDOWN_COMMAND) {
+      shutdown=true;
+      responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandAcceptedResponse(null));
+    }
+ else {
+      responseMessage=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Unknown request: " + message));
+    }
+  }
+  if (responseMessage != null) {
+    final ChannelFuture future=Channels.write(ctx.getChannel(),responseMessage);
+    if (shutdown) {
+      future.addListener(new ChannelFutureListener(){
+        public void operationComplete(        ChannelFuture future) throws Exception {
+          myBuildsExecutorService.submit(new Runnable(){
+            public void run(){
+              myServer.stop();
+            }
+          }
+);
+        }
+      }
+);
+    }
+  }
+}
