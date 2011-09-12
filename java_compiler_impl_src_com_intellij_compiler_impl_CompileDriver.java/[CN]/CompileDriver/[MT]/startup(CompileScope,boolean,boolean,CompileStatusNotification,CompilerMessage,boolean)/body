@@ -1,49 +1,101 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
-  final CompilerTask compileTask=new CompilerTask(myProject,CompilerWorkspaceConfiguration.getInstance(myProject).COMPILE_IN_BACKGROUND,forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make"),ApplicationManager.getApplication().isUnitTestMode());
+  final boolean useServer=useCompileServer();
+  final String contentName=forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make");
+  final boolean compileInBackground=useServer ? true : CompilerWorkspaceConfiguration.getInstance(myProject).COMPILE_IN_BACKGROUND;
+  final CompilerTask compileTask=new CompilerTask(myProject,compileInBackground,contentName,ApplicationManager.getApplication().isUnitTestMode());
   StatusBar.Info.set("",myProject,"Compiler");
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
   FileDocumentManager.getInstance().saveAllDocuments();
-  final DependencyCache dependencyCache=createDependencyCache();
+  final DependencyCache dependencyCache=useServer ? null : createDependencyCache();
   final CompileContextImpl compileContext=new CompileContextImpl(myProject,compileTask,scope,dependencyCache,!isRebuild && !forceCompile,isRebuild);
   compileContext.putUserData(COMPILATION_START_TIMESTAMP,LocalTimeCounter.currentTime());
-  for (  Map.Entry<Pair<IntermediateOutputCompiler,Module>,Pair<VirtualFile,VirtualFile>> entry : myGenerationCompilerModuleToOutputDirMap.entrySet()) {
-    final Pair<VirtualFile,VirtualFile> outputs=entry.getValue();
-    final Pair<IntermediateOutputCompiler,Module> key=entry.getKey();
-    final Module module=key.getSecond();
-    compileContext.assignModule(outputs.getFirst(),module,false,key.getFirst());
-    compileContext.assignModule(outputs.getSecond(),module,true,key.getFirst());
+  if (!useServer) {
+    for (    Map.Entry<Pair<IntermediateOutputCompiler,Module>,Pair<VirtualFile,VirtualFile>> entry : myGenerationCompilerModuleToOutputDirMap.entrySet()) {
+      final Pair<VirtualFile,VirtualFile> outputs=entry.getValue();
+      final Pair<IntermediateOutputCompiler,Module> key=entry.getKey();
+      final Module module=key.getSecond();
+      compileContext.assignModule(outputs.getFirst(),module,false,key.getFirst());
+      compileContext.assignModule(outputs.getSecond(),module,true,key.getFirst());
+    }
+    attachAnnotationProcessorsOutputDirectories(compileContext);
   }
-  attachAnnotationProcessorsOutputDirectories(compileContext);
-  compileTask.start(new Runnable(){
-    public void run(){
-      if (compileContext.getProgressIndicator().isCanceled()) {
-        if (callback != null) {
-          callback.finished(true,0,0,compileContext);
-        }
-        return;
-      }
-      long start=System.currentTimeMillis();
-      try {
-        if (myProject.isDisposed()) {
+  final Runnable compileWork;
+  if (useServer) {
+    compileWork=new Runnable(){
+      public void run(){
+        if (compileContext.getProgressIndicator().isCanceled()) {
+          if (callback != null) {
+            callback.finished(true,0,0,compileContext);
+          }
           return;
         }
-        LOG.info("COMPILATION STARTED");
-        if (message != null) {
-          compileContext.addMessage(message);
+        long start=System.currentTimeMillis();
+        try {
+          if (myProject.isDisposed()) {
+            return;
+          }
+          LOG.info("COMPILATION STARTED (JPS SERVER)");
+          if (message != null) {
+            compileContext.addMessage(message);
+          }
+          final Future future=compileOnServer(compileContext,Arrays.asList(compileContext.getCompileScope().getAffectedModules()),compileContext.isMake(),callback);
+          if (future != null) {
+            try {
+              future.get();
+            }
+ catch (            InterruptedException e) {
+              LOG.error(e);
+            }
+catch (            ExecutionException e) {
+              LOG.error(e);
+            }
+          }
+ else {
+            callback.finished(false,compileContext.getMessageCount(CompilerMessageCategory.ERROR),compileContext.getMessageCount(CompilerMessageCategory.WARNING),compileContext);
+          }
         }
-        TranslatingCompilerFilesMonitor.getInstance().ensureInitializationCompleted(myProject,compileContext.getProgressIndicator());
-        doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
-      }
   finally {
-        compileContext.commitZipFiles();
-        final long finish=System.currentTimeMillis();
-        CompilerUtil.logDuration("\tCOMPILATION FINISHED; Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),finish - start);
-        CompilerCacheManager.getInstance(myProject).flushCaches();
+          final long finish=System.currentTimeMillis();
+          CompilerUtil.logDuration("\tCOMPILATION FINISHED; Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),finish - start);
+          CompilerCacheManager.getInstance(myProject).flushCaches();
+        }
       }
     }
+;
   }
-,new Runnable(){
+ else {
+    compileWork=new Runnable(){
+      public void run(){
+        if (compileContext.getProgressIndicator().isCanceled()) {
+          if (callback != null) {
+            callback.finished(true,0,0,compileContext);
+          }
+          return;
+        }
+        long start=System.currentTimeMillis();
+        try {
+          if (myProject.isDisposed()) {
+            return;
+          }
+          LOG.info("COMPILATION STARTED");
+          if (message != null) {
+            compileContext.addMessage(message);
+          }
+          TranslatingCompilerFilesMonitor.getInstance().ensureInitializationCompleted(myProject,compileContext.getProgressIndicator());
+          doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
+        }
+  finally {
+          compileContext.commitZipFiles();
+          final long finish=System.currentTimeMillis();
+          CompilerUtil.logDuration("\tCOMPILATION FINISHED; Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),finish - start);
+          CompilerCacheManager.getInstance(myProject).flushCaches();
+        }
+      }
+    }
+;
+  }
+  compileTask.start(compileWork,new Runnable(){
     public void run(){
       if (isRebuild) {
         final int rv=Messages.showOkCancelDialog(myProject,"You are about to rebuild the whole project.\nRun 'Make Project' instead?","Confirm Project Rebuild","Make","Rebuild",Messages.getQuestionIcon());

@@ -1,0 +1,44 @@
+{
+  final Client client=JpsServerManager.getInstance().getClient();
+  if (client == null) {
+    return null;
+  }
+  List<String> moduleNames=Collections.emptyList();
+  if (modules != null && modules.size() > 0) {
+    moduleNames=new ArrayList<String>(modules.size());
+    for (    Module module : modules) {
+      moduleNames.add(module.getName());
+    }
+  }
+  compileContext.getProgressIndicator().setIndeterminate(true);
+  return client.sendCompileRequest(myProject.getLocation(),moduleNames,!isMake,new JpsServerResponseHandlerAdapter(){
+    public void handleCompileMessage(    JpsRemoteProto.Message.Response.CompileMessage compileResponse){
+      final JpsRemoteProto.Message.Response.CompileMessage.Kind kind=compileResponse.getKind();
+      if (kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.PROGRESS) {
+        compileContext.getProgressIndicator().setText(compileResponse.getText());
+      }
+ else {
+        final CompilerMessageCategory category=kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.ERROR ? CompilerMessageCategory.ERROR : kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.WARNING ? CompilerMessageCategory.WARNING : CompilerMessageCategory.INFORMATION;
+        compileContext.addMessage(category,compileResponse.getText(),compileResponse.getSourceFilePath(),compileResponse.getLine(),compileResponse.getColumn());
+        System.out.println(compileResponse.getText());
+      }
+    }
+    public void handleCommandResponse(    JpsRemoteProto.Message.Response.CommandResponse response){
+      compileContext.getProgressIndicator().setText(response.getDescription());
+    }
+    public void handleFailure(    JpsRemoteProto.Message.Failure failure){
+      compileContext.addMessage(CompilerMessageCategory.ERROR,failure.getDescription(),null,-1,-1);
+      final String trace=failure.getStacktrace();
+      if (trace != null) {
+        LOG.info(trace);
+        System.out.println(trace);
+      }
+    }
+    public void sessionTerminated(){
+      if (callback != null) {
+        callback.finished(false,compileContext.getMessageCount(CompilerMessageCategory.ERROR),compileContext.getMessageCount(CompilerMessageCategory.WARNING),compileContext);
+      }
+    }
+  }
+);
+}
