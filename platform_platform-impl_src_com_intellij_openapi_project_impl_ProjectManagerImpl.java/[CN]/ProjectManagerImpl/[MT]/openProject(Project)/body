@@ -1,22 +1,22 @@
 {
-  if (ApplicationManager.getApplication().isUnitTestMode() && project.toString().contains("lighttemp")) {
+  final Application application=ApplicationManager.getApplication();
+  if (application.isUnitTestMode() && project.toString().contains("lighttemp")) {
     throw new AssertionError("must not open light project");
   }
-  if (myOpenProjects.contains(project))   return false;
-  if (!ApplicationManager.getApplication().isUnitTestMode() && !((ProjectEx)project).getStateStore().checkVersion())   return false;
+  if (myOpenProjects.contains(project)) {
+    return false;
+  }
+  if (!application.isUnitTestMode() && !((ProjectEx)project).getStateStore().checkVersion()) {
+    return false;
+  }
   myOpenProjects.add(project);
   cacheOpenProjects();
-  if (ApplicationManager.getApplication().isDispatchThread()) {
-    fireProjectOpened(project);
-  }
- else {
-    ApplicationManager.getApplication().invokeAndWait(new Runnable(){
-      @Override public void run(){
-        fireProjectOpened(project);
-      }
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    public void run(){
+      fireProjectOpened(project);
     }
-,ModalityState.defaultModalityState());
   }
+);
   final StartupManagerImpl startupManager=(StartupManagerImpl)StartupManager.getInstance(project);
   boolean ok;
   ProgressIndicator indicator=myProgressManager.getProgressIndicator();
@@ -34,6 +34,7 @@
       ok=true;
     }
  catch (    Throwable e) {
+      LOG.info(e);
       ok=false;
     }
   }
@@ -42,15 +43,20 @@
     notifyProjectOpenFailed();
     return false;
   }
-  startupManager.runPostStartupActivitiesNew();
-  ApplicationManager.getApplication().invokeLater(new Runnable(){
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    public void run(){
+      startupManager.startCacheUpdate();
+    }
+  }
+);
+  startupManager.runPostStartupActivitiesFromExtensions();
+  UIUtil.invokeLaterIfNeeded(new Runnable(){
     public void run(){
       startupManager.runPostStartupActivities();
     }
   }
 );
-  startupManager.startCacheUpdate();
-  if (!ApplicationManager.getApplication().isHeadlessEnvironment() && !ApplicationManager.getApplication().isUnitTestMode()) {
+  if (!application.isHeadlessEnvironment() && !application.isUnitTestMode()) {
     StartupManager.getInstance(project).runWhenProjectIsInitialized(new Runnable(){
       public void run(){
         final TrackingPathMacroSubstitutor macroSubstitutor=((ProjectEx)project).getStateStore().getStateStorageManager().getMacroSubstitutor();
