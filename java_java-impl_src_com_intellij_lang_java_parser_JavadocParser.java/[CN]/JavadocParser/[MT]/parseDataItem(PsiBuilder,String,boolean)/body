@@ -1,0 +1,69 @@
+{
+  IElementType tokenType=getTokenType(builder);
+  if (tokenType == JavaDocTokenType.DOC_INLINE_TAG_START) {
+    int braceScope=getBraceScope(builder);
+    if (braceScope > 0) {
+      setBraceScope(builder,braceScope + 1);
+      builder.remapCurrentToken(JavaDocTokenType.DOC_COMMENT_DATA);
+      builder.advanceLexer();
+      return;
+    }
+    final PsiBuilder.Marker tag=builder.mark();
+    builder.advanceLexer();
+    tokenType=getTokenType(builder);
+    if (tokenType != JavaDocTokenType.DOC_TAG_NAME && tokenType != JavaDocTokenType.DOC_COMMENT_BAD_CHARACTER) {
+      tag.rollbackTo();
+      builder.remapCurrentToken(JavaDocTokenType.DOC_COMMENT_DATA);
+      builder.advanceLexer();
+      return;
+    }
+    setBraceScope(builder,braceScope + 1);
+    String inlineTagName="";
+    while (true) {
+      tokenType=getTokenType(builder);
+      if (tokenType == JavaDocTokenType.DOC_TAG_NAME) {
+        inlineTagName=builder.getTokenText();
+      }
+ else       if (tokenType == null || tokenType == JavaDocTokenType.DOC_COMMENT_END) {
+        break;
+      }
+      parseDataItem(builder,inlineTagName,true);
+      if (tokenType == JavaDocTokenType.DOC_INLINE_TAG_END) {
+        braceScope=getBraceScope(builder);
+        if (braceScope > 0)         setBraceScope(builder,--braceScope);
+        if (braceScope == 0)         break;
+      }
+    }
+    tag.done(JavaDocElementType.DOC_INLINE_TAG);
+  }
+ else   if (TAG_VALUES_SET.contains(tokenType)) {
+    if (SEE_TAG.equals(tagName) && !isInline || LINK_TAG.equals(tagName) && isInline) {
+      parseSeeTagValue(builder);
+    }
+ else {
+      if (JavaParserUtil.getLanguageLevel(builder).isAtLeast(LanguageLevel.JDK_1_4) && LINK_PLAIN_TAG.equals(tagName) && isInline) {
+        parseSeeTagValue(builder);
+      }
+ else       if (!isInline && (THROWS_TAG.equals(tagName) || EXCEPTION_TAG.equals(tagName))) {
+        final PsiBuilder.Marker tagValue=builder.mark();
+        builder.remapCurrentToken(JavaDocElementType.DOC_REFERENCE_HOLDER);
+        builder.advanceLexer();
+        tagValue.done(JavaDocTokenType.DOC_TAG_VALUE_TOKEN);
+      }
+ else       if (!isInline && tagName != null && tagName.equals(PARAM_TAG)) {
+        parseSimpleTagValue(builder,true);
+      }
+ else {
+        if (JavaParserUtil.getLanguageLevel(builder).isAtLeast(LanguageLevel.JDK_1_5) && VALUE_TAG.equals(tagName) && isInline) {
+          parseSeeTagValue(builder);
+        }
+ else {
+          parseSimpleTagValue(builder,false);
+        }
+      }
+    }
+  }
+ else {
+    remapAndAdvance(builder);
+  }
+}
