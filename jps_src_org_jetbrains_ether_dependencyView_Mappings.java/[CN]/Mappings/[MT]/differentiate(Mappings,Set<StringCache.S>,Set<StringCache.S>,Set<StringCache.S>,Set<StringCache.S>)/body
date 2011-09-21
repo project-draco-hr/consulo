@@ -13,6 +13,7 @@
     final Set<StringCache.S> dependants=(Set<StringCache.S>)fileToFileDependency.foxyGet(fileName);
     final Set<UsageRepr.Usage> affectedUsages=new HashSet<UsageRepr.Usage>();
     final Set<UsageRepr.AnnotationUsage> annotationQuery=new HashSet<UsageRepr.AnnotationUsage>();
+    final Map<UsageRepr.Usage,UsageConstraint> usageConstraints=new HashMap<UsageRepr.Usage,UsageConstraint>();
     final Difference.Specifier<ClassRepr> classDiff=Difference.make(pastClasses,classes);
     for (    Pair<ClassRepr,Difference> changed : classDiff.changed()) {
       final ClassRepr it=changed.fst;
@@ -23,9 +24,20 @@
         return false;
       }
       if ((addedModifiers & Opcodes.ACC_PROTECTED) > 0) {
+        final UsageRepr.Usage usage=it.createUsage();
+        affectedUsages.add(usage);
+        usageConstraints.put(usage,new InheritanceConstraint(it.name));
+      }
+      if (diff.packageLocalOn()) {
+        final UsageRepr.Usage usage=it.createUsage();
+        affectedUsages.add(usage);
+        usageConstraints.put(usage,new PackageConstraint(it.getPackageName()));
       }
       if ((addedModifiers & Opcodes.ACC_FINAL) > 0 || (addedModifiers & Opcodes.ACC_PRIVATE) > 0) {
         affectedUsages.add(it.createUsage());
+      }
+      if ((addedModifiers & Opcodes.ACC_ABSTRACT) > 0) {
+        affectedUsages.add(UsageRepr.createClassNewUsage(it.name));
       }
       if ((addedModifiers & Opcodes.ACC_STATIC) > 0 || (removedModifiers & Opcodes.ACC_STATIC) > 0 || (addedModifiers & Opcodes.ACC_ABSTRACT) > 0) {
         affectedUsages.add(UsageRepr.createClassNewUsage(it.name));
@@ -88,14 +100,29 @@
     }
     if (dependants != null) {
       dependants.removeAll(compiledFiles);
-      for (      StringCache.S depFile : dependants) {
+      filewise:       for (      StringCache.S depFile : dependants) {
         final UsageRepr.Cluster depCluster=sourceFileToUsages.get(depFile);
         final Set<UsageRepr.Usage> depUsages=depCluster.getUsages();
         if (depUsages != null) {
           final Set<UsageRepr.Usage> usages=new HashSet<UsageRepr.Usage>(depUsages);
           usages.retainAll(affectedUsages);
           if (!usages.isEmpty()) {
-            affectedFiles.add(depFile);
+            for (            UsageRepr.Usage usage : usages) {
+              final UsageConstraint constraint=usageConstraints.get(usage);
+              if (constraint == null) {
+                affectedFiles.add(depFile);
+                continue filewise;
+              }
+ else {
+                final Set<StringCache.S> residenceClasses=depCluster.getResidence(usage);
+                for (                StringCache.S residentName : residenceClasses) {
+                  if (constraint.checkResidence(residentName)) {
+                    affectedFiles.add(depFile);
+                    continue filewise;
+                  }
+                }
+              }
+            }
           }
           if (annotationQuery.size() > 0) {
             final Collection<UsageRepr.Usage> annotationUsages=sourceFileToAnnotationUsages.foxyGet(depFile);
@@ -103,7 +130,7 @@
               for (              UsageRepr.AnnotationUsage query : annotationQuery) {
                 if (query.satisfies(usage)) {
                   affectedFiles.add(depFile);
-                  break;
+                  continue filewise;
                 }
               }
             }
