@@ -7,10 +7,6 @@
   if (availableRepos == null) {
     return;
   }
-  if (availableRepos.isEmpty()) {
-    Messages.showErrorDialog(project,"You don't have any repository available on GitHub.\nOnly your own or watched repositories can be cloned.","Cannot clone");
-    return;
-  }
   Collections.sort(availableRepos,new Comparator<RepositoryInfo>(){
     @Override public int compare(    final RepositoryInfo r1,    final RepositoryInfo r2){
       final int comparedOwners=r1.getOwner().compareTo(r2.getOwner());
@@ -18,47 +14,21 @@
     }
   }
 );
-  String clonePath;
-  final String lastProjectLocation=GeneralSettings.getInstance().getLastProjectLocation();
-  final String userHome=SystemProperties.getUserHome();
-  if (lastProjectLocation != null) {
-    clonePath=lastProjectLocation.replace('/',File.separatorChar);
+  final GitCloneDialog dialog=new GitCloneDialog(project);
+  for (int i=availableRepos.size() - 1; i >= 0; i--) {
+    dialog.prependToHistory(availableRepos.get(i).getUrl());
   }
- else {
-    clonePath=userHome.replace('/',File.separatorChar) + File.separator + ApplicationNamesInfo.getInstance().getLowercaseProductName()+ "Projects";
-  }
-  final GithubSettings settings=GithubSettings.getInstance();
-  final GithubCloneProjectDialog checkoutDialog=new GithubCloneProjectDialog(project,availableRepos);
-  final File file=new File(clonePath);
-  if (!file.exists() || !file.isDirectory()) {
-    clonePath=userHome;
-  }
-  checkoutDialog.setSelectedPath(clonePath);
-  checkoutDialog.show();
-  if (!checkoutDialog.isOK()) {
+  dialog.show();
+  if (!dialog.isOK()) {
     return;
   }
-  RepositoryInfo selectedRepository=checkoutDialog.getSelectedRepository();
-  final String owner=selectedRepository.getOwner();
-  final String name=selectedRepository.getName();
-  if (selectedRepository instanceof UnknownRepositoryInfo) {
-    selectedRepository=GithubUtil.getDetailedRepositoryInfo(project,owner,name);
-  }
-  if (selectedRepository == null) {
-    Messages.showErrorDialog(project,"Selected repository ''" + owner + "/"+ name+ "'' doesn't exist.","Cannot clone repository");
+  dialog.rememberSettings();
+  final VirtualFile destinationParent=LocalFileSystem.getInstance().findFileByIoFile(new File(dialog.getParentDirectory()));
+  if (destinationParent == null) {
     return;
   }
-  final boolean writeAccessAllowed=GithubUtil.isWriteAccessAllowed(project,selectedRepository);
-  if (!writeAccessAllowed) {
-    Messages.showErrorDialog(project,"It seems that you have only read access to the selected repository.\n" + "GitHub supports only https protocol for readonly access, which is not supported yet.\n" + "As a workaround, please fork it and clone your forked repository instead.\n"+ "More details are available here: http://youtrack.jetbrains.net/issue/IDEA-55298","Cannot clone repository");
-    return;
-  }
-  final String host=writeAccessAllowed ? "git@" + settings.getHost() + ":" : "https://github.com" + settings.getHost() + "/";
-  final String selectedPath=checkoutDialog.getSelectedPath();
-  final VirtualFile selectedPathFile=LocalFileSystem.getInstance().findFileByPath(selectedPath);
-  final String projectName=checkoutDialog.getProjectName();
-  final String repositoryName=name;
-  final String repositoryOwner=owner;
-  final String checkoutUrl=host + repositoryOwner + "/"+ repositoryName+ ".git";
-  GitCheckoutProvider.clone(project,listener,selectedPathFile,checkoutUrl,projectName,selectedPath);
+  final String sourceRepositoryURL=dialog.getSourceRepositoryURL();
+  final String directoryName=dialog.getDirectoryName();
+  final String parentDirectory=dialog.getParentDirectory();
+  GitCheckoutProvider.clone(project,listener,destinationParent,sourceRepositoryURL,directoryName,parentDirectory);
 }
