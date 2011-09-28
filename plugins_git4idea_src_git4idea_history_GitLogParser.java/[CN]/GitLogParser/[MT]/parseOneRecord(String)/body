@@ -1,55 +1,47 @@
 {
-  if (line.isEmpty()) {
-    return null;
+  Matcher matcher=ONE_RECORD.matcher(line);
+  if (!matcher.matches()) {
+    throwGFE("ONE_RECORD didn't match",line);
   }
-  line=removeRecordStartIndicator(line);
+  String commitInfo=matcher.group(1);
+  if (commitInfo == null) {
+    throwGFE("No match for group#1 in",line);
+  }
+  final Map<GitLogOption,String> res=parseCommitInfo(commitInfo);
   final List<String> paths=new ArrayList<String>(1);
-  final boolean includeStatus=myNameStatusOption == NameStatus.STATUS;
-  final List<List<String>> parts=includeStatus ? new ArrayList<List<String>>() : null;
+  final List<GitLogStatusInfo> statuses=new ArrayList<GitLogStatusInfo>();
   if (myNameStatusOption != NameStatus.NONE) {
-    final String[] infoAndPath=line.split(RECORD_END);
-    line=infoAndPath[0];
-    if (infoAndPath.length > 1) {
-      final List<String> nameAndPathSplit=new ArrayList<String>(Arrays.asList(infoAndPath[infoAndPath.length - 1].split("\n")));
-      for (Iterator<String> it=nameAndPathSplit.iterator(); it.hasNext(); ) {
-        if (it.next().trim().isEmpty()) {
-          it.remove();
+    String pathsAndStatuses=matcher.group(2);
+    if (pathsAndStatuses == null) {
+      throwGFE("No match for group#2 in",line);
+    }
+    if (myNameStatusOption == NameStatus.NAME) {
+      Matcher pathsMatcher=NAME_ONLY.matcher(pathsAndStatuses);
+      while (pathsMatcher.find()) {
+        String path1=pathsMatcher.group(1);
+        String path2=pathsMatcher.group(2);
+        assertNotNull(path1,"path",pathsAndStatuses);
+        paths.add(path1);
+        if (path2 != null) {
+          paths.add(path2);
         }
       }
-      for (      String pathLine : nameAndPathSplit) {
-        String[] partsArr;
-        if (includeStatus) {
-          final int idx=pathLine.indexOf("\t");
-          if (idx != -1) {
-            final String whatLeft=pathLine.substring(idx).trim();
-            partsArr=whatLeft.split("\\t");
-            final List<String> strings=new ArrayList<String>(partsArr.length + 1);
-            strings.add(pathLine.substring(0,1));
-            strings.addAll(Arrays.asList(partsArr));
-            parts.add(strings);
-          }
+    }
  else {
-            partsArr=pathLine.split("\\t");
-          }
+      Matcher nameStatusMatcher=NAME_STATUS.matcher(pathsAndStatuses);
+      while (nameStatusMatcher.find()) {
+        String status=nameStatusMatcher.group(1);
+        String path1=nameStatusMatcher.group(2);
+        String path2=nameStatusMatcher.group(3);
+        assertNotNull(status,"status",pathsAndStatuses);
+        assertNotNull(path1,"path1",pathsAndStatuses);
+        paths.add(path1);
+        if (path2 != null) {
+          paths.add(path2);
         }
- else {
-          partsArr=pathLine.split("\\t");
-        }
-        paths.addAll(Arrays.asList(partsArr));
+        statuses.add(new GitLogStatusInfo(GitChangeType.fromString(status),path1,path2));
       }
     }
   }
- else {
-    line=line.substring(0,line.length() - 1);
-  }
-  final String[] values=line.split(ITEMS_SEPARATOR);
-  final Map<GitLogOption,String> res=new HashMap<GitLogOption,String>(values.length);
-  int i=0;
-  for (; i < values.length && i < myOptions.length; i++) {
-    res.put(myOptions[i],values[i]);
-  }
-  for (; i < myOptions.length; i++) {
-    res.put(myOptions[i],"");
-  }
-  return new GitLogRecord(res,paths,parts,mySupportsRawBody);
+  return new GitLogRecord(res,paths,statuses,mySupportsRawBody);
 }
