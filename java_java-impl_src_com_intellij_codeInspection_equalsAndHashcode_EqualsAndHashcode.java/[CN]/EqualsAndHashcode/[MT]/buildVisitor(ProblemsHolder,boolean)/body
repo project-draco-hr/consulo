@@ -1,14 +1,20 @@
 {
-  if (!myInitialized.getAndSet(true)) {
-    final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(holder.getProject());
-    final PsiClass psiObjectClass=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>(){
-      @Nullable public PsiClass compute(){
-        return psiFacade.findClass("java.lang.Object");
+  final Project project=holder.getProject();
+  Pair<PsiMethod,PsiMethod> pair=CachedValuesManager.getManager(project).getCachedValue(project,new CachedValueProvider<Pair<PsiMethod,PsiMethod>>(){
+    @Override public Result<Pair<PsiMethod,PsiMethod>> compute(){
+      final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(project);
+      final PsiClass psiObjectClass=ApplicationManager.getApplication().runReadAction(new Computable<PsiClass>(){
+        @Nullable public PsiClass compute(){
+          return psiFacade.findClass("java.lang.Object",GlobalSearchScope.allScope(project));
+        }
       }
-    }
 );
-    if (psiObjectClass != null) {
+      if (psiObjectClass == null) {
+        return Result.create(null,ProjectRootManager.getInstance(project));
+      }
       PsiMethod[] methods=psiObjectClass.getMethods();
+      PsiMethod myEquals=null;
+      PsiMethod myHashCode=null;
       for (      PsiMethod method : methods) {
         @NonNls final String name=method.getName();
         if ("equals".equals(name)) {
@@ -18,8 +24,15 @@
           myHashCode=method;
         }
       }
+      return Result.create(Pair.create(myEquals,myHashCode),psiObjectClass);
     }
   }
+);
+  if (pair == null)   return new PsiElementVisitor(){
+  }
+;
+  final PsiMethod myEquals=pair.first;
+  final PsiMethod myHashCode=pair.second;
   if (myEquals == null || myHashCode == null || !myEquals.isValid() || !myHashCode.isValid())   return new PsiElementVisitor(){
   }
 ;
@@ -28,7 +41,7 @@
       super.visitClass(aClass);
       boolean[] hasEquals=new boolean[]{false};
       boolean[] hasHashCode=new boolean[]{false};
-      processClass(aClass,hasEquals,hasHashCode);
+      processClass(aClass,hasEquals,hasHashCode,myEquals,myHashCode);
       if (hasEquals[0] != hasHashCode[0]) {
         PsiIdentifier identifier=aClass.getNameIdentifier();
         holder.registerProblem(identifier != null ? identifier : aClass,hasEquals[0] ? InspectionsBundle.message("inspection.equals.hashcode.only.one.defined.problem.descriptor","<code>equals()</code>","<code>hashCode()</code>") : InspectionsBundle.message("inspection.equals.hashcode.only.one.defined.problem.descriptor","<code>hashCode()</code>","<code>equals()</code>"),(LocalQuickFix[])null);
