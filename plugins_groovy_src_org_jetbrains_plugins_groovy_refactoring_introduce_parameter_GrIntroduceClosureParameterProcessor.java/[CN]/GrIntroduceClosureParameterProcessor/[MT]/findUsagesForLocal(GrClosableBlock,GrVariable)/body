@@ -1,0 +1,44 @@
+{
+  final Instruction[] flow=ControlFlowUtils.findControlFlowOwner(initializer).getControlFlow();
+  final ArrayList<BitSet> writes=ControlFlowUtils.inferWriteAccessMap(flow,var);
+  Instruction writeInstr=null;
+  final PsiElement parent=initializer.getParent();
+  if (parent instanceof GrVariable) {
+    writeInstr=ContainerUtil.find(flow,new Condition<Instruction>(){
+      @Override public boolean value(      Instruction instruction){
+        return instruction.getElement() == var;
+      }
+    }
+);
+  }
+ else   if (parent instanceof GrAssignmentExpression) {
+    final GrReferenceExpression refExpr=(GrReferenceExpression)((GrAssignmentExpression)parent).getLValue();
+    final Instruction instruction=ContainerUtil.find(flow,new Condition<Instruction>(){
+      @Override public boolean value(      Instruction instruction){
+        return instruction.getElement() == refExpr;
+      }
+    }
+);
+    LOG.assertTrue(instruction != null);
+    final BitSet prev=writes.get(instruction.num());
+    if (prev.cardinality() == 1) {
+      writeInstr=flow[prev.nextSetBit(0)];
+    }
+  }
+  LOG.assertTrue(writeInstr != null);
+  Collection<PsiReference> result=new ArrayList<PsiReference>();
+  for (  Instruction instruction : flow) {
+    if (!(instruction instanceof ReadWriteVariableInstruction))     continue;
+    if (((ReadWriteVariableInstruction)instruction).isWrite())     continue;
+    final PsiElement element=instruction.getElement();
+    if (element instanceof GrVariable && element != var)     continue;
+    if (!(element instanceof GrReferenceExpression))     continue;
+    final GrReferenceExpression ref=(GrReferenceExpression)element;
+    if (ref.isQualified() || ref.resolve() != var)     continue;
+    final BitSet prev=writes.get(instruction.num());
+    if (prev.cardinality() == 1 && prev.get(writeInstr.num())) {
+      result.add(ref);
+    }
+  }
+  return result;
+}
