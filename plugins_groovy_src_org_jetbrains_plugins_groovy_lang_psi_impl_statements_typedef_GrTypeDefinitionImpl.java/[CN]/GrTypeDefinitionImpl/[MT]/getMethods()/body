@@ -1,20 +1,37 @@
 {
-  PsiMethod[] cached=myMethods;
+  CachedValue<PsiMethod[]> cached=getUserData(CACHED_METHODS);
   if (cached == null) {
-    GrTypeDefinitionBody body=getBody();
-    if (body != null) {
-      cached=body.getMethods();
-    }
+    cached=CachedValuesManager.getManager(getProject()).createCachedValue(new CachedValueProvider<PsiMethod[]>(){
+      @Override public Result<PsiMethod[]> compute(){
+        GrTypeDefinitionBody body=getBody();
+        List<PsiMethod> result=new ArrayList<PsiMethod>();
+        if (body != null) {
+          GrMethod[] groovyMethods=body.getMethods();
+          GrField[] fields=body.getFields();
+          for (          GrMethod method : groovyMethods) {
+            final GrReflectedMethod[] reflectedMethods=method.getReflectedMethods();
+            if (reflectedMethods.length > 0) {
+              result.addAll(Arrays.asList(reflectedMethods));
+            }
  else {
-      cached=PsiMethod.EMPTY_ARRAY;
+              result.add(method);
+            }
+          }
+          for (          GrField field : fields) {
+            if (!field.isProperty())             continue;
+            ContainerUtil.addAll(result,field.getGetters());
+            ContainerUtil.addIfNotNull(result,field.getSetter());
+          }
+        }
+        AstTransformContributor.runContributorsForMethods(GrTypeDefinitionImpl.this,result);
+        for (        GrField field : getSyntheticFields()) {
+          ContainerUtil.addIfNotNull(result,field.getSetter());
+          Collections.addAll(result,field.getGetters());
+        }
+        return Result.create(result.toArray(new PsiMethod[result.size()]),PsiModificationTracker.OUT_OF_CODE_BLOCK_MODIFICATION_COUNT);
+      }
     }
-    myMethods=cached;
+,false);
   }
-  List<PsiMethod> result=new ArrayList<PsiMethod>(Arrays.asList(cached));
-  AstTransformContributor.runContributorsForMethods(this,result);
-  for (  GrField field : getSyntheticFields()) {
-    ContainerUtil.addIfNotNull(result,field.getSetter());
-    Collections.addAll(result,field.getGetters());
-  }
-  return result.toArray(new PsiMethod[result.size()]);
+  return cached.getValue();
 }
