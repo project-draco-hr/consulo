@@ -1,64 +1,49 @@
 {
   ProjectWrapper pw=myProjects.get(projectPath);
   if (pw == null) {
-    pw=ProjectWrapper.load(new GantBinding(),projectPath,getStartupScript(),myPathVariables,true);
+    pw=ProjectWrapper.load(new GantBinding(),projectPath,getStartupScript(),myPathVariables,false);
     myProjects.put(projectPath,pw);
   }
   configureProject(pw,params,consumer);
-  List<Module> toCompile=null;
+  final Project project=pw.getProject();
+  final List<Module> toCompile=new ArrayList<Module>();
   if (modules != null && modules.size() > 0) {
-    for (    Module m : pw.getProject().getModules().values()) {
+    for (    Module m : project.getModules().values()) {
       if (modules.contains(m.getName())) {
-        if (toCompile == null) {
-          toCompile=new ArrayList<Module>();
-        }
         toCompile.add(m);
       }
     }
   }
+ else {
+    toCompile.addAll(project.getModules().values());
+  }
+  final CompileScope compileScope=new CompileScope(project){
+    public Collection<Module> getAffectedModules(){
+      return toCompile;
+    }
+  }
+;
+  final IncProjectBuilder builder=new IncProjectBuilder(project,BuilderRegistry.getInstance());
+  builder.addMessageHandler(new MessageHandler(){
+    public void processMessage(    BuildMessage msg){
+      if (msg instanceof CompilerMessage) {
+        consumer.consumeCompilerMessage(((CompilerMessage)msg).getCompilerName(),msg.getMessageText());
+      }
+ else {
+        consumer.consumeProgressMessage(msg.getMessageText());
+      }
+    }
+  }
+);
 switch (params.buildType) {
 case REBUILD:
-    if (toCompile == null || toCompile.isEmpty()) {
-      pw.rebuild();
-    }
- else {
-      pw.makeModules(toCompile,new ProjectWrapper.Flags(){
-        public boolean tests(){
-          return true;
-        }
-        public boolean incremental(){
-          return false;
-        }
-        public boolean force(){
-          return true;
-        }
-        public PrintStream logStream(){
-          return null;
-        }
-      }
-);
-    }
+    builder.build(compileScope);
   break;
 case MAKE:
-pw.makeModules(toCompile,new ProjectWrapper.Flags(){
-  public boolean tests(){
-    return true;
-  }
-  public boolean incremental(){
-    return true;
-  }
-  public boolean force(){
-    return false;
-  }
-  public PrintStream logStream(){
-    return null;
-  }
-}
-);
+builder.build(compileScope);
 break;
 case CLEAN:
-pw.clean();
+project.clean();
 break;
 }
-pw.save();
 }
