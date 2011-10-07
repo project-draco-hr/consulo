@@ -1,9 +1,45 @@
 {
-  boolean isLiteral=true;
-  for (int i=0; i < startOffsets.length && isLiteral; i++) {
-    if (findLiteralTokenType(file,startOffsets[i],endOffsets[i]) == null) {
-      isLiteral=false;
+  StringBuilder buffer=new StringBuilder();
+  int givenTextOffset=0;
+  boolean textWasChanged=false;
+  for (int i=0; i < startOffsets.length && givenTextOffset < text.length(); i++, givenTextOffset++, buffer.append('\n')) {
+    final int fileStartOffset=startOffsets[i];
+    final int fileEndOffset=endOffsets[i];
+    int givenTextStartOffset=Math.min(givenTextOffset,text.length());
+    final int givenTextEndOffset=Math.min(givenTextOffset + (fileEndOffset - fileStartOffset),text.length());
+    givenTextOffset=givenTextEndOffset;
+    for (PsiElement element=file.findElementAt(fileStartOffset); givenTextStartOffset < givenTextEndOffset; element=PsiTreeUtil.nextLeaf(element)) {
+      if (element == null) {
+        buffer.append(text.substring(givenTextStartOffset,givenTextEndOffset));
+        break;
+      }
+      TextRange elementRange=element.getTextRange();
+      int escapedStartOffset;
+      int escapedEndOffset;
+      if (element instanceof PsiJavaToken && SYMBOL_LITERAL_TYPES.contains(((PsiJavaToken)element).getTokenType()) && (elementRange.getStartOffset() < fileStartOffset || elementRange.getEndOffset() > fileEndOffset)) {
+        escapedStartOffset=elementRange.getStartOffset() + 1;
+        escapedEndOffset=elementRange.getEndOffset() - 1;
+      }
+ else {
+        escapedStartOffset=escapedEndOffset=elementRange.getStartOffset();
+      }
+      int numberOfSymbolsToCopy=escapedStartOffset - Math.max(fileStartOffset,elementRange.getStartOffset());
+      if (numberOfSymbolsToCopy > 0) {
+        buffer.append(text.substring(givenTextStartOffset,givenTextStartOffset + numberOfSymbolsToCopy));
+        givenTextStartOffset+=numberOfSymbolsToCopy;
+      }
+      numberOfSymbolsToCopy=Math.min(escapedEndOffset,fileEndOffset) - Math.max(fileStartOffset,escapedStartOffset);
+      if (numberOfSymbolsToCopy > 0) {
+        textWasChanged=true;
+        buffer.append(unescapeStringCharacters(text.substring(givenTextStartOffset,givenTextStartOffset + numberOfSymbolsToCopy)));
+        givenTextStartOffset+=numberOfSymbolsToCopy;
+      }
+      numberOfSymbolsToCopy=Math.min(fileEndOffset,elementRange.getEndOffset()) - Math.max(fileStartOffset,escapedEndOffset);
+      if (numberOfSymbolsToCopy > 0) {
+        buffer.append(text.substring(givenTextStartOffset,givenTextStartOffset + numberOfSymbolsToCopy));
+        givenTextStartOffset+=numberOfSymbolsToCopy;
+      }
     }
   }
-  return isLiteral ? StringUtil.unescapeStringCharacters(text) : null;
+  return textWasChanged ? buffer.toString() : null;
 }

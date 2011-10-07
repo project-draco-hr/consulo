@@ -1,40 +1,47 @@
 {
   final String localName=variable.getName();
   final Project project=variable.getProject();
-  final Collection<PsiReference> refs=ReferencesSearch.search(variable).findAll();
   GrExpression initializer=null;
   Instruction writeInstr=null;
-  final Instruction[] flow=ControlFlowUtils.findControlFlowOwner(variable).getControlFlow();
-  final ArrayList<BitSet> writes=ControlFlowUtils.inferWriteAccessMap(flow,variable);
-  GrReferenceExpression refExpr=null;
+  Instruction[] flow=null;
   if (invokedOnReference) {
     LOG.assertTrue(editor != null,"null editor but invokedOnReference==true");
     final PsiReference ref=TargetElementUtilBase.findReference(editor);
     LOG.assertTrue(ref != null);
-    final PsiElement cur=ref.getElement();
+    PsiElement cur=ref.getElement();
     if (cur instanceof GrReferenceExpression) {
-      refExpr=(GrReferenceExpression)cur;
-      final Instruction instruction=ContainerUtil.find(flow,new Condition<Instruction>(){
-        @Override public boolean value(        Instruction instruction){
-          return instruction.getElement() == cur;
+      GrControlFlowOwner controlFlowOwner;
+      do {
+        controlFlowOwner=ControlFlowUtils.findControlFlowOwner(cur);
+        if (controlFlowOwner == null)         break;
+        flow=controlFlowOwner.getControlFlow();
+        final ArrayList<BitSet> writes=ControlFlowUtils.inferWriteAccessMap(flow,variable);
+        final PsiElement finalCur=cur;
+        final Instruction instruction=ContainerUtil.find(flow,new Condition<Instruction>(){
+          @Override public boolean value(          Instruction instruction){
+            return instruction.getElement() == finalCur;
+          }
         }
-      }
 );
-      LOG.assertTrue(instruction != null);
-      final BitSet prev=writes.get(instruction.num());
-      if (prev.cardinality() == 1) {
-        writeInstr=flow[prev.nextSetBit(0)];
-        final PsiElement element=writeInstr.getElement();
-        if (element instanceof GrVariable) {
-          initializer=((GrVariable)element).getInitializerGroovy();
+        LOG.assertTrue(instruction != null);
+        final BitSet prev=writes.get(instruction.num());
+        if (prev.cardinality() == 1) {
+          writeInstr=flow[prev.nextSetBit(0)];
+          final PsiElement element=writeInstr.getElement();
+          if (element instanceof GrVariable) {
+            initializer=((GrVariable)element).getInitializerGroovy();
+          }
+ else           if (element instanceof GrReferenceExpression) {
+            initializer=PsiUtil.getInitializerFor((GrReferenceExpression)element);
+          }
         }
- else         if (element instanceof GrReferenceExpression) {
-          initializer=PsiUtil.getInitializerFor((GrReferenceExpression)element);
-        }
+        cur=controlFlowOwner;
       }
+ while (initializer == null);
     }
   }
  else {
+    flow=ControlFlowUtils.findControlFlowOwner(variable).getControlFlow();
     initializer=variable.getInitializerGroovy();
     writeInstr=ContainerUtil.find(flow,new Condition<Instruction>(){
       @Override public boolean value(      Instruction instruction){
@@ -48,45 +55,15 @@
     CommonRefactoringUtil.showErrorHint(variable.getProject(),editor,message,INLINE_VARIABLE,HelpID.INLINE_VARIABLE);
     return null;
   }
-  ArrayList<GrReferenceExpression> toInline=new ArrayList<GrReferenceExpression>();
-  for (  Instruction instruction : flow) {
-    if (!(instruction instanceof ReadWriteVariableInstruction))     continue;
-    if (((ReadWriteVariableInstruction)instruction).isWrite())     continue;
-    final PsiElement element=instruction.getElement();
-    if (element instanceof GrVariable && element != variable)     continue;
-    if (!(element instanceof GrReferenceExpression))     continue;
-    final GrReferenceExpression ref=(GrReferenceExpression)element;
-    if (ref.isQualified() || ref.resolve() != variable)     continue;
-    final BitSet prev=writes.get(instruction.num());
-    if (prev.cardinality() == 1 && prev.get(writeInstr.num())) {
-      toInline.add(ref);
-    }
+  int writeInstructionNumber=writeInstr.num();
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    return new InlineLocalVarSettings(initializer,writeInstructionNumber,flow);
   }
-  if (toInline.size() == 0) {
-    CommonRefactoringUtil.showErrorHint(project,editor,GroovyRefactoringBundle.message("variable.is.never.used.0",localName),INLINE_VARIABLE,HelpID.INLINE_VARIABLE);
-    return null;
+  final String question=GroovyRefactoringBundle.message("inline.local.variable.prompt.0.1",localName);
+  RefactoringMessageDialog dialog=new RefactoringMessageDialog(INLINE_VARIABLE,question,HelpID.INLINE_VARIABLE,"OptionPane.questionIcon",true,project);
+  dialog.show();
+  if (dialog.isOK()) {
+    return new InlineLocalVarSettings(initializer,writeInstructionNumber,flow);
   }
-  ArrayList<RangeHighlighter> highlighters=new ArrayList<RangeHighlighter>();
-  HighlightManager highlightManager=HighlightManager.getInstance(project);
-  EditorColorsManager colorsManager=EditorColorsManager.getInstance();
-  TextAttributes attributes=colorsManager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
-  final TextAttributes writeAttributes=colorsManager.getGlobalScheme().getAttributes(EditorColors.WRITE_SEARCH_RESULT_ATTRIBUTES);
-  if (refExpr != null && PsiUtil.isAccessedForReading(refExpr) && !toInline.contains(refExpr)) {
-    highlightManager.addOccurrenceHighlights(editor,new PsiElement[]{refExpr},attributes,true,null);
-    String message=RefactoringBundle.getCannotRefactorMessage(GroovyRefactoringBundle.message("variable.is.accessed.for.writing",localName));
-    CommonRefactoringUtil.showErrorHint(project,editor,message,INLINE_VARIABLE,HelpID.INLINE_VARIABLE);
-    setStatusBarInfo(project);
-    return null;
-  }
-  for (  GrReferenceExpression ref : toInline) {
-    if (PsiUtil.isAccessedForWriting(ref)) {
-      final String message=GroovyRefactoringBundle.message("variable.is.accessed.for.writing",localName);
-      HighlightManager.getInstance(project).addOccurrenceHighlights(editor,new PsiElement[]{ref},writeAttributes,true,null);
-      CommonRefactoringUtil.showErrorHint(project,editor,message,INLINE_VARIABLE,HelpID.INLINE_VARIABLE);
-      setStatusBarInfo(project);
-      return null;
-    }
-  }
-  highlightManager.addOccurrenceHighlights(editor,PsiUtilCore.toPsiElementArray(toInline),attributes,false,highlighters);
-  return showDialogAndGetSettings(localName,project,toInline,initializer,toInline.size() == refs.size());
+  return null;
 }
