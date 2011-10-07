@@ -8,15 +8,14 @@
   }
   List<ShelvedChange> shelvedChanges=ShelvedChangesViewManager.SHELVED_CHANGE_KEY.getData(dc);
   if (changeLists == null)   return;
-  final List<ShelvedChange> changesFromFirstList=changeLists[0].getChanges();
+  final List<ShelvedChange> changesFromFirstList=changeLists[0].getChanges(project);
   Collections.sort(changesFromFirstList,new MyComparator(project));
   int toSelectIdx=0;
   final ArrayList<DiffRequestPresentable> diffRequestPresentables=new ArrayList<DiffRequestPresentable>();
   final ApplyPatchContext context=new ApplyPatchContext(project.getBaseDir(),0,false,false);
-  final PatchesPreloader preloader=new PatchesPreloader();
+  final PatchesPreloader preloader=new PatchesPreloader(project);
   final List<String> missing=new LinkedList<String>();
   for (  final ShelvedChange shelvedChange : changesFromFirstList) {
-    final Change change=shelvedChange.getChange(project);
     final String beforePath=shelvedChange.getBeforePath();
     try {
       final VirtualFile f=ApplyTextFilePatch.findPatchTarget(context,beforePath,shelvedChange.getAfterPath(),FileStatus.ADDED.equals(shelvedChange.getFileStatus()));
@@ -28,18 +27,30 @@
       }
       diffRequestPresentables.add(new DiffRequestPresentableProxy(){
         @NotNull @Override protected DiffRequestPresentable init() throws VcsException {
-          if (isConflictingChange(change)) {
-            TextFilePatch patch=preloader.getPatch(shelvedChange);
+          if (shelvedChange.isConflictingChange(project)) {
+            final CommitContext commitContext=new CommitContext();
+            TextFilePatch patch=preloader.getPatch(shelvedChange,commitContext);
             final FilePath pathBeforeRename=context.getPathBeforeRename(f);
-            final ApplyPatchForBaseRevisionTexts threeTexts=ApplyPatchForBaseRevisionTexts.create(project,f,pathBeforeRename,patch);
+            final String relativePath=patch.getAfterName() == null ? patch.getBeforeName() : patch.getAfterName();
+            final ApplyPatchForBaseRevisionTexts threeTexts=ApplyPatchForBaseRevisionTexts.create(project,f,pathBeforeRename,patch,new Getter<CharSequence>(){
+              @Override public CharSequence get(){
+                final BaseRevisionTextPatchEP baseRevisionTextPatchEP=Extensions.findExtension(PatchEP.EP_NAME,project,BaseRevisionTextPatchEP.class);
+                if (baseRevisionTextPatchEP != null && commitContext != null) {
+                  return baseRevisionTextPatchEP.provideContent(relativePath,commitContext);
+                }
+                return null;
+              }
+            }
+);
             return new MergedDiffRequestPresentable(project,threeTexts,f,"Shelved Version");
           }
  else {
+            final Change change=shelvedChange.getChange(project);
             return new ChangeDiffRequestPresentable(project,change);
           }
         }
         @Override public String getPathPresentation(){
-          return ChangesUtil.getFilePath(change).getPath();
+          return shelvedChange.getAfterPath() == null ? shelvedChange.getBeforePath() : shelvedChange.getAfterPath();
         }
       }
 );
