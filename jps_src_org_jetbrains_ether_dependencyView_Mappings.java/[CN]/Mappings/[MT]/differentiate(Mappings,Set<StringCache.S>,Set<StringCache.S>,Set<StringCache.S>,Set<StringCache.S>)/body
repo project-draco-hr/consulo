@@ -72,6 +72,11 @@
           }
         }
       }
+      for (      MethodRepr m : diff.methods().added()) {
+        if ((it.access & Opcodes.ACC_INTERFACE) > 0 || (m.access & Opcodes.ACC_ABSTRACT) > 0) {
+          affectSubclasses(it.name,affectedFiles,affectedUsages,dependants,false);
+        }
+      }
       for (      MethodRepr m : diff.methods().removed()) {
         final Collection<StringCache.S> propagated=propagateMethodAccess(m.name,it.name);
         affectMethodUsages(m,propagated,m.createUsage(it.name),affectedUsages,dependants);
@@ -122,6 +127,46 @@
         }
       }
       final int mask=Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
+      for (      FieldRepr f : diff.fields().added()) {
+        final boolean fPrivate=(f.access & Opcodes.ACC_PRIVATE) > 0;
+        final boolean fProtected=(f.access & Opcodes.ACC_PROTECTED) > 0;
+        final boolean fPublic=(f.access & Opcodes.ACC_PUBLIC) > 0;
+        final boolean fPLocal=!fPrivate && !fProtected && !fPublic;
+        if (!fPrivate) {
+          final Collection<Pair<FieldRepr,ClassRepr>> overriden=findOverridenFields(f,it);
+          for (          Pair<FieldRepr,ClassRepr> p : overriden) {
+            final FieldRepr ff=p.fst;
+            final ClassRepr cc=p.snd;
+            final boolean ffPrivate=(ff.access & Opcodes.ACC_PRIVATE) > 0;
+            final boolean ffProtected=(ff.access & Opcodes.ACC_PROTECTED) > 0;
+            final boolean ffPublic=(ff.access & Opcodes.ACC_PUBLIC) > 0;
+            final boolean ffPLocal=!ffPrivate && !ffProtected && !ffPublic;
+            if (!ffPrivate) {
+              final Collection<StringCache.S> propagated=propagateFieldAccess(ff.name,cc.name);
+              final Set<UsageRepr.Usage> localUsages=new HashSet<UsageRepr.Usage>();
+              affectFieldUsages(ff,propagated,ff.createUsage(cc.name),localUsages,dependants);
+              if ((fPublic && (ffPublic || ffPLocal)) || (fProtected && ffProtected) || (fPLocal && ffPLocal)) {
+              }
+ else {
+                UsageConstraint constaint;
+                if ((ffProtected && fPublic) || (fProtected && ffPublic) || (ffPLocal && fProtected)) {
+                  constaint=new NegationConstraint(new InheritanceConstraint(cc.name));
+                }
+ else                 if (ffPublic && ffPLocal) {
+                  constaint=new NegationConstraint(new PackageConstraint(cc.getPackageName()));
+                }
+ else {
+                  constaint=new IntersectionConstraint(new NegationConstraint(new InheritanceConstraint(cc.name)),new NegationConstraint(new PackageConstraint(cc.getPackageName())));
+                }
+                for (                UsageRepr.Usage u : localUsages) {
+                  usageConstraints.put(u,constaint);
+                }
+              }
+              affectedUsages.addAll(localUsages);
+            }
+          }
+        }
+      }
       for (      FieldRepr f : diff.fields().removed()) {
         if ((f.access & mask) == mask && f.hasValue()) {
           return false;
@@ -143,7 +188,7 @@
             affectFieldUsages(field,propagated,field.createUsage(it.name),affectedUsages,dependants);
           }
  else           if ((d.base() & Difference.ACCESS) > 0) {
-            if ((d.addedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.removedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.addedModifiers() & Opcodes.ACC_PRIVATE) > 0) {
+            if ((d.addedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.removedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.addedModifiers() & Opcodes.ACC_PRIVATE) > 0 || (d.addedModifiers() & Opcodes.ACC_VOLATILE) > 0) {
               affectFieldUsages(field,propagated,field.createUsage(it.name),affectedUsages,dependants);
             }
  else {
