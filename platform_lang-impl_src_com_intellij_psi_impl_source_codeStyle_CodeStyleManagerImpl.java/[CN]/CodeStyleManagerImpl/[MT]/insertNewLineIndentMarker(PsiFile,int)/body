@@ -1,17 +1,23 @@
 {
   CheckUtil.checkWritable(file);
-  final Pair<ASTNode,CharTable> pair=doFindWhiteSpaceNode(file,offset);
-  ASTNode element=pair.first;
-  if (pair.first == null) {
+  final Pair<PsiElement,CharTable> pair=doFindWhiteSpaceNode(file,offset);
+  PsiElement element=pair.first;
+  if (element == null) {
     return null;
   }
-  ASTNode parent=element.getTreeParent();
-  int elementStart=element.getTextRange().getStartOffset();
-  if (element.getElementType() != TokenType.WHITE_SPACE) {
+  ASTNode node=SourceTreeToPsiMap.psiElementToTree(element);
+  if (node == null) {
     return null;
+  }
+  ASTNode parent=node.getTreeParent();
+  int elementStart=element.getTextRange().getStartOffset();
+  int rangeShift=0;
+  if (element.getContainingFile() != null) {
+    rangeShift=InjectedLanguageManager.getInstance(file.getProject()).injectedToHost(element,elementStart) - elementStart;
+    elementStart+=rangeShift;
   }
   if (offset == elementStart) {
-    for (ASTNode prev=TreeUtil.prevLeaf(element); ; prev=TreeUtil.prevLeaf(prev)) {
+    for (ASTNode prev=TreeUtil.prevLeaf(node); ; prev=TreeUtil.prevLeaf(prev)) {
       if (prev == null) {
         return null;
       }
@@ -24,10 +30,17 @@
     }
   }
   CharTable charTable=pair.second;
-  ASTNode space1=splitSpaceElement((TreeElement)element,offset - elementStart,charTable);
-  ASTNode marker=Factory.createSingleLeafElement(TokenType.NEW_LINE_INDENT,DUMMY_IDENTIFIER,charTable,file.getManager());
-  setSequentialProcessingAllowed(false);
-  parent.addChild(marker,space1.getTreeNext());
+  ASTNode marker;
+  CodeEditUtil.setAllowSuspendNodesReformatting(false);
+  try {
+    ASTNode space1=splitSpaceElement((TreeElement)element,offset - elementStart,charTable);
+    marker=Factory.createSingleLeafElement(TokenType.NEW_LINE_INDENT,DUMMY_IDENTIFIER,charTable,file.getManager());
+    setSequentialProcessingAllowed(false);
+    parent.addChild(marker,space1.getTreeNext());
+  }
+  finally {
+    CodeEditUtil.setAllowSuspendNodesReformatting(true);
+  }
   PsiElement psiElement=SourceTreeToPsiMap.treeElementToPsi(marker);
-  return psiElement == null ? null : psiElement.getTextRange();
+  return psiElement == null ? null : psiElement.getTextRange().shiftRight(rangeShift);
 }
