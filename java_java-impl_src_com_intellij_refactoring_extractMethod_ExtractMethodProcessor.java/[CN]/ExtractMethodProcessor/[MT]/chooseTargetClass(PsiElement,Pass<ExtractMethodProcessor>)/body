@@ -1,0 +1,63 @@
+{
+  final List<PsiVariable> inputVariables=myControlFlowWrapper.getInputVariables(codeFragment);
+  myNeedChangeContext=false;
+  myTargetClass=myCodeFragmentMember instanceof PsiMember ? ((PsiMember)myCodeFragmentMember).getContainingClass() : PsiTreeUtil.getParentOfType(myCodeFragmentMember,PsiClass.class);
+  if (!shouldAcceptCurrentTarget(extractPass,myTargetClass)) {
+    final LinkedHashMap<PsiClass,List<PsiVariable>> classes=new LinkedHashMap<PsiClass,List<PsiVariable>>();
+    final PsiElementProcessor<PsiClass> processor=new PsiElementProcessor<PsiClass>(){
+      @Override public boolean execute(      @NotNull PsiClass selectedClass){
+        final List<PsiVariable> array=classes.get(selectedClass);
+        myNeedChangeContext=myTargetClass != selectedClass;
+        myTargetClass=selectedClass;
+        if (array != null) {
+          for (          PsiVariable variable : array) {
+            if (!inputVariables.contains(variable)) {
+              inputVariables.addAll(array);
+            }
+          }
+        }
+        try {
+          return applyChosenClassAndExtract(inputVariables,extractPass);
+        }
+ catch (        PrepareFailedException e) {
+          if (myShowErrorDialogs) {
+            CommonRefactoringUtil.showErrorHint(myProject,myEditor,e.getMessage(),ExtractMethodHandler.REFACTORING_NAME,HelpID.EXTRACT_METHOD);
+            ExtractMethodHandler.highlightPrepareError(e,e.getFile(),myEditor,myProject);
+          }
+          return false;
+        }
+      }
+    }
+;
+    classes.put(myTargetClass,null);
+    PsiElement target=myTargetClass.getParent();
+    PsiElement targetMember=myTargetClass;
+    while (true) {
+      if (target instanceof PsiFile)       break;
+      if (target instanceof PsiClass) {
+        boolean success=true;
+        final List<PsiVariable> array=new ArrayList<PsiVariable>();
+        for (        PsiElement el : myElements) {
+          if (!ControlFlowUtil.collectOuterLocals(array,el,myCodeFragmentMember,targetMember)) {
+            success=false;
+            break;
+          }
+        }
+        if (success) {
+          classes.put((PsiClass)target,array);
+          if (shouldAcceptCurrentTarget(extractPass,target)) {
+            return processor.execute((PsiClass)target);
+          }
+        }
+      }
+      targetMember=target;
+      target=target.getParent();
+    }
+    if (classes.size() > 1) {
+      final PsiClass[] psiClasses=classes.keySet().toArray(new PsiClass[classes.size()]);
+      NavigationUtil.getPsiElementPopup(psiClasses,new PsiClassListCellRenderer(),"Choose Destination Class",processor).showInBestPositionFor(myEditor);
+      return true;
+    }
+  }
+  return applyChosenClassAndExtract(inputVariables,extractPass);
+}
