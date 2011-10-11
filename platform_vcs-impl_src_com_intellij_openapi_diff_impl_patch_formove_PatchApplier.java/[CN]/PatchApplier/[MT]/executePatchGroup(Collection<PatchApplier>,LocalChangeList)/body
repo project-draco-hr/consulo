@@ -1,0 +1,46 @@
+{
+  if (group.isEmpty())   return ApplyPatchStatus.SUCCESS;
+  final Project project=group.iterator().next().myProject;
+  ApplyPatchStatus result=ApplyPatchStatus.SUCCESS;
+  for (  PatchApplier patchApplier : group) {
+    result=ApplyPatchStatus.and(result,patchApplier.nonWriteActionPreCheck());
+    if (ApplyPatchStatus.FAILURE.equals(result))     return result;
+  }
+  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(project,false);
+  final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(null);
+  try {
+    CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+      public void run(){
+        for (        PatchApplier applier : group) {
+          if (!applier.createFiles()) {
+            refStatus.set(ApplyPatchStatus.FAILURE);
+            return;
+          }
+          applier.addSkippedItems(trigger);
+        }
+        trigger.prepare();
+        for (        PatchApplier applier : group) {
+          refStatus.set(ApplyPatchStatus.and(refStatus.get(),applier.executeWritable()));
+        }
+      }
+    }
+,VcsBundle.message("patch.apply.command"),null);
+  }
+  finally {
+    VcsFileListenerContextHelper.getInstance(project).clearContext();
+  }
+  result=refStatus.get();
+  result=result == null ? ApplyPatchStatus.FAILURE : result;
+  trigger.processIt();
+  final Set<FilePath> directlyAffected=new HashSet<FilePath>();
+  final Set<VirtualFile> indirectlyAffected=new HashSet<VirtualFile>();
+  for (  PatchApplier applier : group) {
+    directlyAffected.addAll(applier.getDirectlyAffected());
+    indirectlyAffected.addAll(applier.getIndirectlyAffected());
+  }
+  directlyAffected.addAll(trigger.getAffected());
+  final Consumer<Collection<FilePath>> mover=localChangeList == null ? null : createMover(project,localChangeList);
+  PatchApplier.refreshPassedFilesAndMoveToChangelist(project,null,directlyAffected,indirectlyAffected,mover);
+  showApplyStatus(project,result);
+  return result;
+}

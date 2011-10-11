@@ -8,23 +8,34 @@
     myStatus=patchStatus;
     return;
   }
-  final ApplyPatchStatus applyStatus=ApplicationManager.getApplication().runReadAction(new Computable<ApplyPatchStatus>(){
-    public ApplyPatchStatus compute(){
-      final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(ApplyPatchStatus.FAILURE);
-      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
-        public void run(){
-          refStatus.set(executeWritable());
+  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(myProject,mySilentAddDelete);
+  final ApplyPatchStatus applyStatus;
+  try {
+    applyStatus=ApplicationManager.getApplication().runReadAction(new Computable<ApplyPatchStatus>(){
+      public ApplyPatchStatus compute(){
+        final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(ApplyPatchStatus.FAILURE);
+        CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+          public void run(){
+            if (!createFiles()) {
+              refStatus.set(ApplyPatchStatus.FAILURE);
+              return;
+            }
+            addSkippedItems(trigger);
+            trigger.prepare();
+            refStatus.set(executeWritable());
+          }
         }
-      }
 ,VcsBundle.message("patch.apply.command"),null);
-      return refStatus.get();
+        return refStatus.get();
+      }
     }
-  }
 );
+  }
+  finally {
+    VcsFileListenerContextHelper.getInstance(myProject).clearContext();
+  }
   myStatus=ApplyPatchStatus.SUCCESS.equals(patchStatus) ? applyStatus : ApplyPatchStatus.and(patchStatus,applyStatus);
-  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(myProject);
-  addSkippedItems(trigger);
-  trigger.process();
+  trigger.processIt();
   if (myShowNotification || !ApplyPatchStatus.SUCCESS.equals(myStatus)) {
     showApplyStatus(myProject,myStatus);
   }
