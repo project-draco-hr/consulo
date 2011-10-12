@@ -1,0 +1,73 @@
+{
+  final Holder<Object> defaultValue=new Holder<Object>();
+  processSignature(signature);
+  return new EmptyVisitor(){
+    @Override public void visitEnd(){
+      if (notPrivate(access)) {
+        methods.add(new MethodRepr(access,n,signature,desc,exceptions,defaultValue.get()));
+      }
+    }
+    @Override public AnnotationVisitor visitAnnotation(    String desc,    boolean visible){
+      return new AnnotationCrawler((TypeRepr.ClassType)TypeRepr.getType(desc),n.equals("<init>") ? ElementType.CONSTRUCTOR : ElementType.METHOD);
+    }
+    @Override public AnnotationVisitor visitAnnotationDefault(){
+      return new EmptyVisitor(){
+        public void visit(        String name,        Object value){
+          defaultValue.set(value);
+        }
+      }
+;
+    }
+    @Override public AnnotationVisitor visitParameterAnnotation(    int parameter,    String desc,    boolean visible){
+      return new AnnotationCrawler((TypeRepr.ClassType)TypeRepr.getType(desc),ElementType.PARAMETER);
+    }
+    @Override public void visitMultiANewArrayInsn(    String desc,    int dims){
+      final TypeRepr.ArrayType typ=(TypeRepr.ArrayType)TypeRepr.getType(desc);
+      final TypeRepr.AbstractType element=typ.getDeepElementType();
+      if (element instanceof TypeRepr.ClassType) {
+        usages.addUsage(classNameHolder.get(),UsageRepr.createClassUsage(((TypeRepr.ClassType)element).className));
+        usages.addUsage(classNameHolder.get(),UsageRepr.createClassNewUsage(((TypeRepr.ClassType)element).className));
+      }
+      typ.updateClassUsages(usages.getUsages());
+      super.visitMultiANewArrayInsn(desc,dims);
+    }
+    @Override public void visitLocalVariable(    String name,    String desc,    String signature,    Label start,    Label end,    int index){
+      processSignature(signature);
+      TypeRepr.getType(desc).updateClassUsages(usages.getUsages());
+      super.visitLocalVariable(name,desc,signature,start,end,index);
+    }
+    @Override public void visitTryCatchBlock(    Label start,    Label end,    Label handler,    String type){
+      if (type != null) {
+        TypeRepr.createClassType(type).updateClassUsages(usages.getUsages());
+      }
+      super.visitTryCatchBlock(start,end,handler,type);
+    }
+    @Override public void visitTypeInsn(    int opcode,    String type){
+      final TypeRepr.AbstractType typ=type.startsWith("[") ? TypeRepr.getType(type) : TypeRepr.createClassType(type);
+      if (opcode == Opcodes.NEW) {
+        usages.addUsage(classNameHolder.get(),UsageRepr.createClassUsage(((TypeRepr.ClassType)typ).className));
+        usages.addUsage(classNameHolder.get(),UsageRepr.createClassNewUsage(((TypeRepr.ClassType)typ).className));
+      }
+ else       if (opcode == Opcodes.ANEWARRAY) {
+        if (typ instanceof TypeRepr.ClassType) {
+          usages.addUsage(classNameHolder.get(),UsageRepr.createClassUsage(((TypeRepr.ClassType)typ).className));
+          usages.addUsage(classNameHolder.get(),UsageRepr.createClassNewUsage(((TypeRepr.ClassType)typ).className));
+        }
+      }
+      typ.updateClassUsages(usages.getUsages());
+      super.visitTypeInsn(opcode,type);
+    }
+    @Override public void visitFieldInsn(    int opcode,    String owner,    String name,    String desc){
+      if (opcode == Opcodes.PUTFIELD || opcode == Opcodes.PUTSTATIC) {
+        usages.addUsage(classNameHolder.get(),UsageRepr.createFieldAssignUsage(name,owner,desc));
+      }
+      usages.addUsage(classNameHolder.get(),UsageRepr.createFieldUsage(name,owner,desc));
+      super.visitFieldInsn(opcode,owner,name,desc);
+    }
+    @Override public void visitMethodInsn(    int opcode,    String owner,    String name,    String desc){
+      usages.addUsage(classNameHolder.get(),UsageRepr.createMethodUsage(name,owner,desc));
+      super.visitMethodInsn(opcode,owner,name,desc);
+    }
+  }
+;
+}

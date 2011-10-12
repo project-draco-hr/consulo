@@ -1,0 +1,68 @@
+{
+  PsiType expressionType=null;
+  if (myExpression != null) {
+    if (myForcedReturnType != null) {
+      expressionType=myForcedReturnType;
+    }
+ else {
+      expressionType=RefactoringUtil.getTypeByExpressionWithExpectedType(myExpression);
+    }
+  }
+  if (expressionType == null) {
+    expressionType=PsiType.VOID;
+  }
+  myHasExpressionOutput=expressionType != PsiType.VOID;
+  PsiType returnStatementType=null;
+  if (myHasReturnStatement) {
+    returnStatementType=myCodeFragmentMember instanceof PsiMethod ? ((PsiMethod)myCodeFragmentMember).getReturnType() : null;
+  }
+  myHasReturnStatementOutput=returnStatementType != null && returnStatementType != PsiType.VOID;
+  if (myGenerateConditionalExit && myOutputVariables.length == 1) {
+    if (!(myOutputVariables[0].getType() instanceof PsiPrimitiveType)) {
+      myNullConditionalCheck=true;
+      for (      PsiStatement exitStatement : myExitStatements) {
+        if (exitStatement instanceof PsiReturnStatement) {
+          final PsiExpression returnValue=((PsiReturnStatement)exitStatement).getReturnValue();
+          myNullConditionalCheck&=returnValue == null || returnValue instanceof PsiLiteralExpression && PsiType.NULL.equals(returnValue.getType());
+        }
+      }
+      myNullConditionalCheck&=isNotNull(myOutputVariables[0]);
+    }
+  }
+  if (!myHasReturnStatementOutput && checkOutputVariablesCount() && !myNullConditionalCheck) {
+    showMultipleOutputMessage(expressionType);
+    return false;
+  }
+  myOutputVariable=myOutputVariables.length > 0 ? myOutputVariables[0] : null;
+  if (myHasReturnStatementOutput) {
+    myReturnType=returnStatementType;
+  }
+ else   if (myOutputVariable != null) {
+    myReturnType=myOutputVariable.getType();
+  }
+ else   if (myGenerateConditionalExit) {
+    myReturnType=PsiType.BOOLEAN;
+  }
+ else {
+    myReturnType=expressionType;
+  }
+  PsiElement container=PsiTreeUtil.getParentOfType(myElements[0],PsiClass.class,PsiMethod.class);
+  if (container instanceof PsiMethod) {
+    PsiElement[] elements=myElements;
+    if (myExpression == null) {
+      if (myOutputVariable != null) {
+        elements=ArrayUtil.append(myElements,myOutputVariable,PsiElement.class);
+      }
+      if (myCodeFragmentMember != null && myReturnType == ((PsiMethod)myCodeFragmentMember).getReturnType()) {
+        elements=ArrayUtil.append(myElements,((PsiMethod)myCodeFragmentMember).getReturnTypeElement(),PsiElement.class);
+      }
+    }
+    myTypeParameterList=RefactoringUtil.createTypeParameterListWithUsedTypeParameters(((PsiMethod)container).getTypeParameterList(),elements);
+  }
+  List<PsiClassType> exceptions=ExceptionUtil.getThrownCheckedExceptions(myElements);
+  myThrownExceptions=exceptions.toArray(new PsiClassType[exceptions.size()]);
+  if (container instanceof PsiMethod) {
+    checkLocalClasses((PsiMethod)container);
+  }
+  return true;
+}
