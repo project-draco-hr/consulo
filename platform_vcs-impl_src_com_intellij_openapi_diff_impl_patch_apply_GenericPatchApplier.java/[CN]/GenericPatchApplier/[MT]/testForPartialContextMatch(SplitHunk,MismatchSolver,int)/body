@@ -1,2 +1,56 @@
 {
+  final List<BeforeAfter<List<String>>> steps=splitHunk.getPatchSteps();
+  final BeforeAfter<List<String>> first=steps.get(0);
+  final BetterPoint betterPoint=new BetterPoint();
+  if (splitHunk.isInsertion())   return false;
+  final Iterator<FirstLineDescriptor> iterator=mismatchSolver.getStartLineVariationsIterator();
+  while (iterator.hasNext() && (betterPoint.getPoint() == null || !betterPoint.getPoint().idealFound())) {
+    final FirstLineDescriptor descriptor=iterator.next();
+    final Iterator<Integer> matchingIterator=getMatchingIterator(descriptor.getLine(),splitHunk.getStartLineBefore() + descriptor.getOffset(),maxWalkFromBinding);
+    while (matchingIterator.hasNext() && (betterPoint.getPoint() == null || !betterPoint.getPoint().idealFound())) {
+      final Integer lineNumber=matchingIterator.next();
+      final List<BeforeAfter<List<String>>> patchSteps=splitHunk.getPatchSteps();
+      final BeforeAfter<List<String>> step=patchSteps.get(descriptor.getStepNumber());
+      final FragmentResult fragmentResult=checkFragmented(lineNumber,descriptor.getOffsetInStep(),step,descriptor.isIsInBefore());
+      if (descriptor.getStepNumber() > 0 && fragmentResult.isStartAtEdge()) {
+        final List<BeforeAfter<List<String>>> list=Collections.unmodifiableList(patchSteps.subList(0,descriptor.getStepNumber()));
+        int offsetForStart=-descriptor.getOffsetInStep() - 1;
+        final SequentialStepsChecker backChecker=new SequentialStepsChecker(lineNumber + offsetForStart,false);
+        backChecker.go(list);
+        fragmentResult.setContainAlreadyApplied(fragmentResult.isContainAlreadyApplied() || backChecker.isUsesAlreadyApplied());
+        fragmentResult.setStart(fragmentResult.getStart() - backChecker.getSizeOfFragmentToBeReplaced());
+        fragmentResult.addDistance(backChecker.getDistance());
+        fragmentResult.setStartAtEdge(backChecker.getDistance() == 0);
+      }
+      if (steps.size() > descriptor.getStepNumber() + 1 && fragmentResult.isEndAtEdge()) {
+        final List<BeforeAfter<List<String>>> list=Collections.unmodifiableList(patchSteps.subList(descriptor.getStepNumber() + 1,patchSteps.size()));
+        if (!list.isEmpty()) {
+          final SequentialStepsChecker checker=new SequentialStepsChecker(fragmentResult.getEnd() + 1,true);
+          checker.go(list);
+          fragmentResult.setContainAlreadyApplied(fragmentResult.isContainAlreadyApplied() || checker.isUsesAlreadyApplied());
+          fragmentResult.setEnd(fragmentResult.getEnd() + checker.getSizeOfFragmentToBeReplaced());
+          fragmentResult.addDistance(checker.getDistance());
+          fragmentResult.setEndAtEdge(checker.getDistance() == 0);
+        }
+      }
+      final TextRange textRangeInOldDocument=new TextRange(fragmentResult.getStart(),fragmentResult.getEnd());
+      if (pointCanBeUsed(textRangeInOldDocument)) {
+        final int distance=fragmentResult.myDistance;
+        int contextDistance=0;
+        if (distance == 0) {
+          final int distanceBack=getDistanceBack(fragmentResult.getStart() - 1,splitHunk.getContextBefore());
+          final int distanceInContextAfter=getDistance(fragmentResult.getEnd() + 1,splitHunk.getContextAfter());
+          contextDistance=distanceBack + distanceInContextAfter;
+        }
+        betterPoint.feed(new Point(distance,textRangeInOldDocument,fragmentResult.isContainAlreadyApplied(),contextDistance,fragmentResult.getEnd() - fragmentResult.getStart()));
+      }
+    }
+  }
+  final Point pointPoint=betterPoint.getPoint();
+  if (pointPoint == null)   return false;
+  if (!mismatchSolver.isAllowMismatch() && pointPoint.getDistance() > 0) {
+    return false;
+  }
+  putCutIntoTransformations(pointPoint.getInOldDocument(),new MyAppliedData(splitHunk.getAfterAll(),pointPoint.myUsesAlreadyApplied,false,pointPoint.getDistance() == 0,ChangeType.REPLACE));
+  return true;
 }
