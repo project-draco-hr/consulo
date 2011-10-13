@@ -1,0 +1,35 @@
+{
+  if (typeDefinition.getName() == null)   return;
+  PsiModifierList modifierList=typeDefinition.getModifierList();
+  if (modifierList == null)   return;
+  final PsiAnnotation tupleConstructor=modifierList.findAnnotation(GroovyCommonClassNames.GROOVY_TRANSFORM_TUPLE_CONSTRUCTOR);
+  final boolean immutable=modifierList.findAnnotation(IMMUTABLE) != null || modifierList.findAnnotation(GroovyCommonClassNames.GROOVY_TRANSFORM_IMMUTABLE) != null;
+  final PsiAnnotation canonical=modifierList.findAnnotation(GroovyCommonClassNames.GROOVY_TRANSFORM_CANONICAL);
+  if (!immutable && canonical == null && tupleConstructor == null) {
+    return;
+  }
+  if (tupleConstructor != null && typeDefinition.getConstructors().length > 0 && !PsiUtil.getAnnoAttributeValue(tupleConstructor,"force",false)) {
+    return;
+  }
+  final GrLightMethodBuilder fieldsConstructor=new GrLightMethodBuilder(typeDefinition.getManager(),typeDefinition.getName());
+  fieldsConstructor.setConstructor(true).setNavigationElement(typeDefinition);
+  Set<String> excludes=new HashSet<String>();
+  if (tupleConstructor != null) {
+    for (    String s : PsiUtil.getAnnoAttributeValue(tupleConstructor,"excludes","").split(",")) {
+      final String name=s.trim();
+      if (StringUtil.isNotEmpty(name)) {
+        excludes.add(name);
+      }
+    }
+  }
+  if (tupleConstructor != null) {
+    final boolean superFields=PsiUtil.getAnnoAttributeValue(tupleConstructor,"includeSuperFields",false);
+    final boolean superProperties=PsiUtil.getAnnoAttributeValue(tupleConstructor,"includeSuperProperties",false);
+    if (superFields || superProperties) {
+      addParametersForSuper(typeDefinition,fieldsConstructor,superFields,superProperties,new HashSet<PsiClass>(),excludes);
+    }
+  }
+  addParameters(typeDefinition,fieldsConstructor,tupleConstructor == null || PsiUtil.getAnnoAttributeValue(tupleConstructor,"includeProperties",true),tupleConstructor != null ? PsiUtil.getAnnoAttributeValue(tupleConstructor,"includeFields",false) : canonical == null,!immutable,excludes);
+  collector.add(fieldsConstructor.setContainingClass(typeDefinition));
+  collector.add(new GrLightMethodBuilder(typeDefinition.getManager(),typeDefinition.getName()).addParameter("args",CommonClassNames.JAVA_UTIL_MAP,false).setConstructor(true).setContainingClass(typeDefinition));
+}
