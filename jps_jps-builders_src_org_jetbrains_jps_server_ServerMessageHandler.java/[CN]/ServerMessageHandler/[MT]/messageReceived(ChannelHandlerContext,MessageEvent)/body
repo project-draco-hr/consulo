@@ -1,0 +1,51 @@
+{
+  final JpsRemoteProto.Message message=(JpsRemoteProto.Message)e.getMessage();
+  final UUID sessionId=ProtoUtil.fromProtoUUID(message.getSessionId());
+  JpsRemoteProto.Message reply=null;
+  if (message.getMessageType() != JpsRemoteProto.Message.Type.REQUEST) {
+    reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Cannot handle message " + message.toString()));
+  }
+ else   if (!message.hasRequest()) {
+    reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("No request in message: " + message.toString()));
+  }
+ else {
+    final JpsRemoteProto.Message.Request request=message.getRequest();
+    final JpsRemoteProto.Message.Request.Type requestType=request.getRequestType();
+    final ServerState facade=ServerState.getInstance();
+switch (requestType) {
+case COMPILE_REQUEST:
+      reply=startBuild(sessionId,ctx,request.getCompileRequest());
+    break;
+case RELOAD_PROJECT_COMMAND:
+  final JpsRemoteProto.Message.Request.ReloadProjectCommand reloadProjectCommand=request.getReloadProjectCommand();
+facade.clearProjectCache(reloadProjectCommand.getProjectIdList());
+break;
+case SETUP_COMMAND:
+final Map<String,String> pathVars=new HashMap<String,String>();
+final JpsRemoteProto.Message.Request.SetupCommand setupCommand=request.getSetupCommand();
+for (JpsRemoteProto.Message.Request.SetupCommand.PathVariable variable : setupCommand.getPathVariableList()) {
+pathVars.put(variable.getName(),variable.getValue());
+}
+final List<GlobalLibrary> libs=new ArrayList<GlobalLibrary>();
+for (JpsRemoteProto.Message.Request.SetupCommand.GlobalLibrary library : setupCommand.getGlobalLibraryList()) {
+libs.add(library.hasHomePath() ? new SdkLibrary(library.getName(),library.getHomePath(),library.getPathList()) : new GlobalLibrary(library.getName(),library.getPathList()));
+}
+facade.setGlobals(libs,pathVars);
+reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandCompletedEvent(null));
+break;
+case SHUTDOWN_COMMAND:
+myBuildsExecutor.submit(new Runnable(){
+public void run(){
+myServer.stop();
+}
+}
+);
+break;
+default :
+reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createFailure("Unknown request: " + message));
+}
+}
+if (reply != null) {
+Channels.write(ctx.getChannel(),reply);
+}
+}
