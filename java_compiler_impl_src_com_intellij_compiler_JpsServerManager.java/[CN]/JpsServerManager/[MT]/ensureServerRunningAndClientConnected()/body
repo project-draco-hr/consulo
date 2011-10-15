@@ -1,0 +1,55 @@
+{
+  final OSProcessHandler ph=myProcessHandler;
+  if (ph == null || ph.isProcessTerminated() || ph.isProcessTerminating() || !myClient.isConnected()) {
+    shutdownServer(myClient,ph);
+    myProcessHandler=null;
+    final int port=NetUtils.findAvailableSocketPort();
+    final Process process=launchServer(port);
+    final OSProcessHandler processHandler=new OSProcessHandler(process,null);
+    final Ref<String> serverStartMessage=new Ref<String>(null);
+    final Semaphore semaphore=new Semaphore();
+    semaphore.down();
+    processHandler.addProcessListener(new ProcessAdapter(){
+      public void processTerminated(      ProcessEvent event){
+        try {
+          processHandler.removeProcessListener(this);
+        }
+  finally {
+          semaphore.up();
+        }
+      }
+      public void onTextAvailable(      ProcessEvent event,      Key outputType){
+        if (outputType == ProcessOutputTypes.STDERR) {
+          try {
+            final String text=event.getText();
+            if (text != null) {
+              if (text.contains(Server.SERVER_SUCCESS_START_MESSAGE) || text.contains(Server.SERVER_ERROR_START_MESSAGE)) {
+                processHandler.removeProcessListener(this);
+                serverStartMessage.set(text);
+              }
+            }
+          }
+  finally {
+            semaphore.up();
+          }
+        }
+      }
+    }
+);
+    processHandler.startNotify();
+    semaphore.waitFor();
+    final String startupMsg=serverStartMessage.get();
+    if (startupMsg == null || !startupMsg.contains(Server.SERVER_SUCCESS_START_MESSAGE)) {
+      throw new Exception("Server startup failed: " + startupMsg);
+    }
+    final boolean connected=myClient.connect(NetUtils.getLocalHostString(),port);
+    if (connected) {
+      final RequestFuture setupFuture=sendSetupRequest();
+      setupFuture.get();
+      myProcessHandler=processHandler;
+    }
+ else {
+      shutdownServer(myClient,processHandler);
+    }
+  }
+}
