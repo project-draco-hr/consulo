@@ -1,8 +1,15 @@
 {
   final OSProcessHandler ph=myProcessHandler;
-  if (ph == null || ph.isProcessTerminated() || ph.isProcessTerminating() || !myClient.isConnected()) {
-    shutdownServer(myClient,ph);
+  final Client cl=myClient;
+  final boolean processNotRunning=ph == null || ph.isProcessTerminated() || ph.isProcessTerminating();
+  final boolean clientNotConnected=cl == null || !cl.isConnected();
+  if (processNotRunning || clientNotConnected) {
+    shutdownServer(cl,ph);
     myProcessHandler=null;
+    myClient=null;
+    if (!forceRestart) {
+      return null;
+    }
     final int port=NetUtils.findAvailableSocketPort();
     final Process process=launchServer(port);
     final OSProcessHandler processHandler=new OSProcessHandler(process,null);
@@ -42,14 +49,22 @@
     if (startupMsg == null || !startupMsg.contains(Server.SERVER_SUCCESS_START_MESSAGE)) {
       throw new Exception("Server startup failed: " + startupMsg);
     }
-    final boolean connected=myClient.connect(NetUtils.getLocalHostString(),port);
-    if (connected) {
-      final RequestFuture setupFuture=sendSetupRequest();
-      setupFuture.get();
-      myProcessHandler=processHandler;
+    Client client=new Client();
+    boolean connected=false;
+    try {
+      connected=client.connect(NetUtils.getLocalHostString(),port);
+      if (connected) {
+        final RequestFuture setupFuture=sendSetupRequest(client);
+        setupFuture.get();
+        myProcessHandler=processHandler;
+        myClient=client;
+      }
     }
- else {
-      shutdownServer(myClient,processHandler);
+  finally {
+      if (!connected) {
+        shutdownServer(cl,processHandler);
+      }
     }
   }
+  return myClient;
 }
