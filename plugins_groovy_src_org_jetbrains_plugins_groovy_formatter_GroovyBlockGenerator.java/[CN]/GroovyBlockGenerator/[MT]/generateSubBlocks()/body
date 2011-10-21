@@ -1,0 +1,67 @@
+{
+  PsiElement blockPsi=myNode.getPsi();
+  if (blockPsi instanceof GrBinaryExpression && !(blockPsi.getParent() instanceof GrBinaryExpression)) {
+    return generateForBinaryExpr();
+  }
+  if ((myNode.getElementType() == mSTRING_LITERAL || myNode.getElementType() == mGSTRING_LITERAL) && myBlock.getTextRange().equals(myNode.getTextRange())) {
+    String text=myNode.getText();
+    if (text.length() > 6) {
+      if (text.substring(0,3).equals("'''") && text.substring(text.length() - 3).equals("'''") || text.substring(0,3).equals("\"\"\"") & text.substring(text.length() - 3).equals("\"\"\"")) {
+        return generateForMultiLineString(myNode,myAlignment,myWrap,mySettings,myGroovySettings,myInnerAlignments);
+      }
+    }
+  }
+  if (myNode.getElementType() == mGSTRING_BEGIN && myBlock.getTextRange().equals(myNode.getTextRange())) {
+    String text=myNode.getText();
+    if (text.length() > 3) {
+      if (text.substring(0,3).equals("\"\"\"")) {
+        return generateForMultiLineGStringBegin(myNode,myAlignment,myWrap,mySettings,myGroovySettings,myInnerAlignments);
+      }
+    }
+  }
+  if (myNode.getElementType() == GSTRING) {
+    final ArrayList<Block> subBlocks=new ArrayList<Block>();
+    ASTNode[] children=getGroovyChildren(myNode);
+    for (    ASTNode childNode : children) {
+      if (childNode.getTextRange().getLength() > 0) {
+        final Indent indent=GroovyIndentProcessor.getChildIndent(myBlock,childNode);
+        subBlocks.add(new GroovyBlock(childNode,myAlignment,indent,myWrap,mySettings,myGroovySettings,myInnerAlignments));
+      }
+    }
+    return subBlocks;
+  }
+  if (NESTED.contains(myNode.getElementType()) && blockPsi.getParent() != null && !NESTED.contains(blockPsi.getParent().getNode().getElementType())) {
+    final List<Block> subBlocks=new ArrayList<Block>();
+    Alignment dotsAlignment=mySettings.ALIGN_MULTILINE_CHAINED_METHODS ? Alignment.createAlignment() : null;
+    addNestedChildren(myNode.getPsi(),subBlocks,dotsAlignment,true);
+    return subBlocks;
+  }
+  if (isListLikeClause(blockPsi)) {
+    final ArrayList<Block> subBlocks=new ArrayList<Block>();
+    List<ASTNode> astNodes=visibleChildren(myNode);
+    final Alignment newAlignment=mustAlign(blockPsi,mySettings,astNodes) ? Alignment.createAlignment() : null;
+    for (    ASTNode childNode : astNodes) {
+      final Indent indent=GroovyIndentProcessor.getChildIndent(myBlock,childNode);
+      subBlocks.add(new GroovyBlock(childNode,isKeyword(childNode) ? null : newAlignment,indent,myWrap,mySettings,myGroovySettings,myInnerAlignments));
+    }
+    return subBlocks;
+  }
+  boolean classLevel=blockPsi instanceof GrTypeDefinitionBody;
+  if (blockPsi instanceof GrCodeBlock || blockPsi instanceof GroovyFile || classLevel) {
+    List<ASTNode> children=visibleChildren(myNode);
+    calculateAlignments(children,classLevel,mySettings,myInnerAlignments);
+    final ArrayList<Block> subBlocks=new ArrayList<Block>();
+    for (    ASTNode childNode : children) {
+      final Indent indent=GroovyIndentProcessor.getChildIndent(myBlock,childNode);
+      Alignment alignmentToUse=classLevel ? myAlignment : myInnerAlignments.get(childNode.getPsi());
+      subBlocks.add(new GroovyBlock(childNode,alignmentToUse,indent,myWrap,mySettings,myGroovySettings,myInnerAlignments));
+    }
+    return subBlocks;
+  }
+  final ArrayList<Block> subBlocks=new ArrayList<Block>();
+  for (  ASTNode childNode : visibleChildren(myNode)) {
+    final Indent indent=GroovyIndentProcessor.getChildIndent(myBlock,childNode);
+    subBlocks.add(new GroovyBlock(childNode,myInnerAlignments.get(childNode.getPsi()),indent,myWrap,mySettings,myGroovySettings,myInnerAlignments));
+  }
+  return subBlocks;
+}
