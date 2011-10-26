@@ -1,0 +1,78 @@
+{
+  final Map<PluginId,IdeaPluginDescriptorImpl> idToDescriptorMap=new HashMap<PluginId,IdeaPluginDescriptorImpl>();
+  final StringBuffer message=new StringBuffer();
+  boolean pluginsWithoutIdFound=false;
+  for (Iterator<IdeaPluginDescriptorImpl> it=result.iterator(); it.hasNext(); ) {
+    final IdeaPluginDescriptorImpl descriptor=it.next();
+    final PluginId id=descriptor.getPluginId();
+    if (id == null) {
+      pluginsWithoutIdFound=true;
+    }
+    if (idToDescriptorMap.containsKey(id)) {
+      message.append("<br>");
+      message.append(IdeBundle.message("message.duplicate.plugin.id"));
+      message.append(id);
+      it.remove();
+    }
+ else     if (descriptor.isEnabled()) {
+      idToDescriptorMap.put(id,descriptor);
+    }
+  }
+  addModulesAsDependents(idToDescriptorMap);
+  final List<String> disabledPluginIds=new ArrayList<String>();
+  final LinkedHashSet<String> faultyDescriptors=new LinkedHashSet<String>();
+  for (final Iterator<IdeaPluginDescriptorImpl> it=result.iterator(); it.hasNext(); ) {
+    final IdeaPluginDescriptorImpl pluginDescriptor=it.next();
+    checkDependants(pluginDescriptor,new Function<PluginId,IdeaPluginDescriptor>(){
+      public IdeaPluginDescriptor fun(      final PluginId pluginId){
+        return idToDescriptorMap.get(pluginId);
+      }
+    }
+,new Condition<PluginId>(){
+      public boolean value(      final PluginId pluginId){
+        if (!idToDescriptorMap.containsKey(pluginId)) {
+          pluginDescriptor.setEnabled(false);
+          if (!pluginId.getIdString().startsWith(MODULE_DEPENDENCY_PREFIX)) {
+            faultyDescriptors.add(pluginId.getIdString());
+            disabledPluginIds.add(pluginDescriptor.getPluginId().getIdString());
+            message.append("<br>");
+            final String name=pluginDescriptor.getName();
+            final IdeaPluginDescriptorImpl descriptor=idToDescriptorMap.get(pluginId);
+            String pluginName;
+            if (descriptor == null) {
+              pluginName=pluginId.getIdString();
+              if (disabledPluginNames.containsKey(pluginName)) {
+                pluginName=disabledPluginNames.get(pluginName);
+              }
+            }
+ else {
+              pluginName=descriptor.getName();
+            }
+            message.append(getDisabledPlugins().contains(pluginId.getIdString()) ? IdeBundle.message("error.required.plugin.disabled",name,pluginName) : IdeBundle.message("error.required.plugin.not.installed",name,pluginName));
+          }
+          it.remove();
+          return false;
+        }
+        return true;
+      }
+    }
+);
+  }
+  if (!disabledPluginIds.isEmpty()) {
+    myPlugins2Disable=disabledPluginIds;
+    myPlugins2Enable=faultyDescriptors;
+    message.append("<br>");
+    message.append("<br>").append("<a href=\"" + DISABLE + "\">Disable ").append(disabledPluginIds.size() == 1 ? disabledPluginNames.get(disabledPluginIds.iterator().next()) : "not loaded plugins").append("</a>");
+    message.append("<br>").append("<a href=\"" + ENABLE + "\">Enable ").append(faultyDescriptors.size() == 1 ? disabledPluginNames.get(faultyDescriptors.iterator().next()) : " all necessary plugins").append("</a>");
+    message.append("<br>").append("<a href=\"" + EDIT + "\">Open plugin manager</a>");
+  }
+  if (pluginsWithoutIdFound) {
+    message.append("<br>");
+    message.append(IdeBundle.message("error.plugins.without.id.found"));
+  }
+  if (message.length() > 0) {
+    message.insert(0,IdeBundle.message("error.problems.found.loading.plugins"));
+    return message.toString();
+  }
+  return null;
+}
