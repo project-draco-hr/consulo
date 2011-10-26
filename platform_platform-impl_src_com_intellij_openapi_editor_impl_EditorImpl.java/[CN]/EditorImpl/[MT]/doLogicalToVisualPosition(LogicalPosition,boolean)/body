@@ -1,0 +1,62 @@
+{
+  assertReadAccess();
+  if (!myFoldingModel.isFoldingEnabled() && !mySoftWrapModel.isSoftWrappingEnabled()) {
+    return new VisualPosition(logicalPos.line,logicalPos.column);
+  }
+  int offset=logicalPositionToOffset(logicalPos);
+  FoldRegion outermostCollapsed=myFoldingModel.getCollapsedRegionAtOffset(offset);
+  if (outermostCollapsed != null && offset > outermostCollapsed.getStartOffset()) {
+    if (offset < getDocument().getTextLength()) {
+      offset=outermostCollapsed.getStartOffset();
+      LogicalPosition foldStart=offsetToLogicalPosition(offset);
+      Integer depth=stackDepth.get();
+      if (depth >= 0) {
+        stackDepth.set(depth + 1);
+        if (depth > 15) {
+          LOG.error(String.format("Detected potential StackOverflowError at logical->visual position mapping. Given logical position: '%s'. State: %s",logicalPos,dumpState()));
+          stackDepth.set(-1);
+        }
+      }
+      try {
+        return doLogicalToVisualPosition(foldStart,true);
+      }
+  finally {
+        depth=stackDepth.get();
+        if (depth > 0) {
+          stackDepth.set(depth - 1);
+        }
+      }
+    }
+ else {
+      offset=outermostCollapsed.getEndOffset() + 3;
+    }
+  }
+  int line=logicalPos.line;
+  int column=logicalPos.column;
+  line-=myFoldingModel.getFoldedLinesCountBefore(offset);
+  FoldRegion[] topLevel=myFoldingModel.fetchTopLevel();
+  LogicalPosition anchorFoldingPosition=logicalPos;
+  for (int idx=myFoldingModel.getLastTopLevelIndexBefore(offset); idx >= 0; idx--) {
+    FoldRegion region=topLevel[idx];
+    if (region.isValid()) {
+      if (region.getDocument().getLineNumber(region.getEndOffset()) == anchorFoldingPosition.line && region.getEndOffset() <= offset) {
+        LogicalPosition foldStart=offsetToLogicalPosition(region.getStartOffset());
+        LogicalPosition foldEnd=offsetToLogicalPosition(region.getEndOffset());
+        column+=foldStart.column + region.getPlaceholderText().length() - foldEnd.column;
+        offset=region.getStartOffset();
+        anchorFoldingPosition=foldStart;
+      }
+ else {
+        break;
+      }
+    }
+  }
+  if (line < 0) {
+    LOG.error(String.format("Given logical position: %s; matched line: %d; state: %s",logicalPos,line,dumpState()));
+  }
+  VisualPosition softWrapUnawarePosition=new VisualPosition(line,Math.max(0,column));
+  if (softWrapAware) {
+    return mySoftWrapModel.adjustVisualPosition(logicalPos,softWrapUnawarePosition);
+  }
+  return softWrapUnawarePosition;
+}
