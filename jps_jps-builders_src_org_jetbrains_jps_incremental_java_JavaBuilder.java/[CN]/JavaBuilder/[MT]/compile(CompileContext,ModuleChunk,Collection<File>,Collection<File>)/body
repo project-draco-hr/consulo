@@ -1,7 +1,7 @@
 {
   ExitCode exitCode=ExitCode.OK;
   final boolean hasSourcesToCompile=!files.isEmpty() || !forms.isEmpty();
-  if (!hasSourcesToCompile && removedSources.isEmpty()) {
+  if (!hasSourcesToCompile && !context.hasRemovedSources()) {
     return exitCode;
   }
   final ProjectPaths paths=context.getProjectPaths();
@@ -12,17 +12,6 @@
   final Collection<File> platformCp=paths.getPlatformCompilationClasspath(chunk,context.isCompilingTests(),!context.isMake());
   final Map<File,Set<File>> outs=buildOutputDirectoriesMap(context,chunk);
   final List<String> options=getCompilationOptions(context,chunk);
-  final TimestampStorage tsStorage=context.getBuildDataManager().getTimestampStorage(BUILDER_NAME);
-  Set<File> allCompiledFiles=ALL_COMPILED_FILES_KEY.get(context);
-  if (allCompiledFiles == null) {
-    allCompiledFiles=new HashSet<File>();
-    ALL_COMPILED_FILES_KEY.set(context,allCompiledFiles);
-  }
-  Set<File> allAffectedFiles=ALL_AFFECTED_FILES_KEY.get(context);
-  if (allAffectedFiles == null) {
-    allAffectedFiles=new HashSet<File>();
-    ALL_AFFECTED_FILES_KEY.set(context,allAffectedFiles);
-  }
   final DiagnosticSink diagnosticSink=new DiagnosticSink(context);
   final OutputFilesSink outputSink=new OutputFilesSink(context);
   Collection<File> successfulForms=Collections.emptyList();
@@ -58,32 +47,11 @@
     context.setDirty(chunk,false);
     outputSink.writePendingData();
     final Set<File> successfullyCompiled=outputSink.getSuccessfullyCompiled();
-    final Mappings globalMappings=context.getMappings();
-    if (context.isMake()) {
-      DELTA_MAPPINGS_CALLBACK_KEY.set(context,null);
-      allAffectedFiles.addAll(files);
-      allCompiledFiles.addAll(successfullyCompiled);
-      allAffectedFiles.removeAll(successfullyCompiled);
-      final boolean incremental=globalMappings.differentiate(delta,removedSources,successfullyCompiled,allCompiledFiles,allAffectedFiles);
-      if (incremental) {
-        final Set<File> newlyAffectedFiles=new HashSet<File>(allAffectedFiles);
-        newlyAffectedFiles.removeAll(allCompiledFiles);
-        for (        File file : newlyAffectedFiles) {
-          tsStorage.markDirty(file);
-        }
-        if (chunkContainsAffectedFiles(context,chunk,newlyAffectedFiles)) {
-          exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
-        }
-      }
- else {
-        exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
-        context.setDirty(chunk,true);
-      }
+    DELTA_MAPPINGS_CALLBACK_KEY.set(context,null);
+    if (updateMappings(context,delta,chunk,files,successfullyCompiled)) {
+      exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
     }
-    globalMappings.integrate(delta,successfullyCompiled,removedSources);
-    for (    File file : successfullyCompiled) {
-      tsStorage.saveStamp(file);
-    }
+    final TimestampStorage tsStorage=context.getBuildDataManager().getTimestampStorage(BUILDER_NAME);
     for (    File file : successfulForms) {
       tsStorage.saveStamp(file);
     }
