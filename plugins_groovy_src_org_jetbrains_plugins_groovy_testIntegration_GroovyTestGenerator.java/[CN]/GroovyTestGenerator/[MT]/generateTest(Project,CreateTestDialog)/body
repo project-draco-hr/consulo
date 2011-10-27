@@ -1,28 +1,27 @@
 {
-  final PsiClass test=(PsiClass)new JavaTestGenerator().generateTest(project,d);
-  if (test == null)   return null;
   AccessToken accessToken=WriteAction.start();
   try {
-    final PsiFile file=test.getContainingFile();
-    final String name=file.getName();
-    final String newName=FileUtil.getNameWithoutExtension(name) + "." + GroovyFileType.DEFAULT_EXTENSION;
-    final CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(project);
-    try {
-      final PsiElement element=file.setName(newName);
-      final GroovyFile newFile=(GroovyFile)codeStyleManager.reformat(element);
-      GroovyUnusedImportPass.optimizeImports(project,newFile);
-      return newFile.getClasses()[0];
-    }
- catch (    IncorrectOperationException e) {
-      file.delete();
-      ApplicationManager.getApplication().invokeLater(new Runnable(){
-        public void run(){
-          Messages.showErrorDialog(project,CodeInsightBundle.message("intention.error.cannot.create.class.message",d.getClassName()),CodeInsightBundle.message("intention.error.cannot.create.class.title"));
+    final PsiClass test=(PsiClass)PostprocessReformattingAspect.getInstance(project).postponeFormattingInside(new Computable<PsiElement>(){
+      public PsiElement compute(){
+        try {
+          IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+          GrTypeDefinition targetClass=(GrTypeDefinition)CreateClassActionBase.createClassByType(d.getTargetDirectory(),d.getClassName(),PsiManager.getInstance(project),null,NewGroovyClassAction.GROOVY_CLASS);
+          addSuperClass(targetClass,project,d.getSuperClassName());
+          Editor editor=CodeInsightUtil.positionCursor(project,targetClass.getContainingFile(),targetClass.getLBrace());
+          addTestMethods(editor,targetClass,d.getSelectedTestFrameworkDescriptor(),d.getSelectedMethods(),d.shouldGeneratedBefore(),d.shouldGeneratedAfter());
+          return targetClass;
+        }
+ catch (        IncorrectOperationException e1) {
+          showErrorLater(project,d.getClassName());
+          return null;
         }
       }
-);
-      return null;
     }
+);
+    if (test == null)     return null;
+    GrReferenceAdjuster.shortenReferences(test);
+    CodeStyleManager.getInstance(project).reformat(test);
+    return test;
   }
   finally {
     accessToken.finish();
