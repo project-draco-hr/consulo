@@ -1,0 +1,60 @@
+{
+  ExitCode exitCode=ExitCode.OK;
+  final boolean hasSourcesToCompile=!files.isEmpty() || !forms.isEmpty();
+  if (!hasSourcesToCompile && !context.hasRemovedSources()) {
+    return exitCode;
+  }
+  final ProjectPaths paths=context.getProjectPaths();
+  final Mappings delta=new Mappings();
+  DELTA_MAPPINGS_CALLBACK_KEY.set(context,delta.getCallback());
+  final boolean addNotNullAssertions=true;
+  final Collection<File> classpath=paths.getCompilationClasspath(chunk,context.isCompilingTests(),!context.isMake());
+  final Collection<File> platformCp=paths.getPlatformCompilationClasspath(chunk,context.isCompilingTests(),!context.isMake());
+  final Map<File,Set<File>> outs=buildOutputDirectoriesMap(context,chunk);
+  final List<String> options=getCompilationOptions(context,chunk);
+  final DiagnosticSink diagnosticSink=new DiagnosticSink(context);
+  final OutputFilesSink outputSink=new OutputFilesSink(context);
+  Collection<File> successfulForms=Collections.emptyList();
+  try {
+    if (hasSourcesToCompile) {
+      final boolean compiledOk=myJavacCompiler.compile(options,files,classpath,platformCp,outs,context,diagnosticSink,outputSink);
+      final Collection<File> chunkSourcePath=ProjectPaths.getSourcePathsWithDependents(chunk,context.isCompilingTests());
+      final ClassLoader compiledClassesLoader=createInstrumentationClassLoader(classpath,platformCp,chunkSourcePath,outputSink);
+      if (!forms.isEmpty()) {
+        try {
+          context.processMessage(new ProgressMessage("Instrumenting forms [" + chunk.getName() + "]"));
+          successfulForms=instrumentForms(context,chunk,chunkSourcePath,compiledClassesLoader,forms,outputSink);
+        }
+  finally {
+          context.processMessage(new ProgressMessage("Finished instrumenting forms [" + chunk.getName() + "]"));
+        }
+      }
+      if (addNotNullAssertions) {
+        try {
+          context.processMessage(new ProgressMessage("Adding NotNull assertions [" + chunk.getName() + "]"));
+          instrumentNotNull(context,outputSink,compiledClassesLoader);
+        }
+  finally {
+          context.processMessage(new ProgressMessage("Finished adding NotNull assertions [" + chunk.getName() + "]"));
+        }
+      }
+      if (!compiledOk || diagnosticSink.getErrorCount() > 0) {
+        throw new ProjectBuildException("Compilation failed: errors: " + diagnosticSink.getErrorCount() + "; warnings: "+ diagnosticSink.getWarningCount());
+      }
+    }
+  }
+  finally {
+    context.setDirty(chunk,false);
+    outputSink.writePendingData();
+    final Set<File> successfullyCompiled=outputSink.getSuccessfullyCompiled();
+    DELTA_MAPPINGS_CALLBACK_KEY.set(context,null);
+    if (updateMappings(context,delta,chunk,files,successfullyCompiled)) {
+      exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
+    }
+    final TimestampStorage tsStorage=context.getBuildDataManager().getTimestampStorage(BUILDER_NAME);
+    for (    File file : successfulForms) {
+      tsStorage.saveStamp(file);
+    }
+  }
+  return exitCode;
+}
