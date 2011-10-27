@@ -1,11 +1,12 @@
 {
+  final Ref<Boolean> hasMnemonic=Ref.create(false);
   final DefaultPsiElementCellRenderer renderer=new DefaultPsiElementCellRenderer(){
 {
       setFocusBorderEnabled(false);
     }
     @Override public String getElementText(    PsiElement element){
       String customName=itemsMap.get(element).getCustomName();
-      return customName != null ? customName : super.getElementText(element);
+      return (customName != null ? customName : super.getElementText(element));
     }
     @Override protected Icon getIcon(    PsiElement element){
       Icon customIcon=itemsMap.get(element).getCustomIcon();
@@ -28,42 +29,47 @@
       renderer.setIcon(item.getCustomIcon());
       return true;
     }
+    @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean isSelected,    boolean cellHasFocus){
+      final JPanel component=(JPanel)super.getListCellRendererComponent(list,value,index,isSelected,cellHasFocus);
+      if (!hasMnemonic.get())       return component;
+      final JPanel panelWithMnemonic=new JPanel(new BorderLayout());
+      final int mnemonic=getMnemonic(value,itemsMap);
+      final JLabel label=new JLabel(mnemonic != -1 ? mnemonic + "." : "");
+      label.setPreferredSize(new JLabel("8.").getPreferredSize());
+      final JComponent leftRenderer=(JComponent)component.getComponents()[0];
+      component.remove(leftRenderer);
+      panelWithMnemonic.setBackground(leftRenderer.getBackground());
+      label.setBackground(leftRenderer.getBackground());
+      panelWithMnemonic.add(label,BorderLayout.WEST);
+      panelWithMnemonic.add(leftRenderer,BorderLayout.CENTER);
+      component.add(panelWithMnemonic);
+      return component;
+    }
   }
 ;
-  if (false) {
-    final ListPopupImpl popup=new ListPopupImpl(new BaseListPopupStep<Object>(title,Arrays.asList(elements)){
-      @Override public boolean isSpeedSearchEnabled(){
-        return true;
-      }
+  final ListPopupImpl popup=new ListPopupImpl(new BaseListPopupStep<Object>(title,Arrays.asList(elements)){
+    @Override public boolean isSpeedSearchEnabled(){
+      return true;
     }
+    @Override public PopupStep onChosen(    Object selectedValue,    boolean finalChoice){
+      processor.process(selectedValue);
+      return super.onChosen(selectedValue,finalChoice);
+    }
+  }
 ){
-      @Override protected ListCellRenderer getListElementRenderer(){
-        return renderer;
-      }
-    }
-;
-    popup.setMinimumSize(new Dimension(200,-1));
-    return popup;
-  }
-  final JList list=new JBList(elements);
-  list.setCellRenderer(renderer);
-  final Runnable runnable=new Runnable(){
-    public void run(){
-      int[] ids=list.getSelectedIndices();
-      if (ids == null || ids.length == 0)       return;
-      for (      Object element : list.getSelectedValues()) {
-        if (element != null) {
-          processor.process(element);
-        }
-      }
+    @Override protected ListCellRenderer getListElementRenderer(){
+      return renderer;
     }
   }
 ;
-  PopupChooserBuilder builder=new PopupChooserBuilder(list);
-  if (title != null) {
-    builder.setTitle(title);
+  popup.setMinimumSize(new Dimension(200,-1));
+  for (  GotoRelatedItem item : itemsMap.values()) {
+    final int mnemonic=item.getMnemonic();
+    if (mnemonic != -1) {
+      final Action action=createNumberAction(mnemonic,popup,itemsMap,processor);
+      popup.registerAction(mnemonic + "Action",KeyStroke.getKeyStroke(String.valueOf(mnemonic)),action);
+      hasMnemonic.set(true);
+    }
   }
-  renderer.installSpeedSearch(builder,true);
-  builder.setMinSize(new Dimension(200,-1));
-  return builder.setItemChoosenCallback(runnable).createPopup();
+  return popup;
 }
