@@ -1,0 +1,42 @@
+{
+  final PsiModificationTracker tracker=PsiManager.getInstance(project).getModificationTracker();
+  if (myFix instanceof BatchQuickFix) {
+    final ArrayList<PsiElement> collectedElementsToIgnore=new ArrayList<PsiElement>();
+    final Runnable refreshViews=new Runnable(){
+      @Override public void run(){
+        DaemonCodeAnalyzer.getInstance(project).restart();
+        for (        CommonProblemDescriptor descriptor : descriptors) {
+          ignore(ignoredElements,descriptor,getWorkingQuickFix(descriptor.getFixes()));
+        }
+        final RefManager refManager=myTool.getContext().getRefManager();
+        final RefElement[] refElements=new RefElement[collectedElementsToIgnore.size()];
+        for (int i=0, collectedElementsToIgnoreSize=collectedElementsToIgnore.size(); i < collectedElementsToIgnoreSize; i++) {
+          refElements[i]=refManager.getReference(collectedElementsToIgnore.get(i));
+        }
+        removeElements(refElements,project,myTool);
+      }
+    }
+;
+    ((BatchQuickFix)myFix).applyFix(project,descriptors,collectedElementsToIgnore,refreshViews);
+    return;
+  }
+  boolean restart=false;
+  for (  CommonProblemDescriptor descriptor : descriptors) {
+    if (descriptor == null)     continue;
+    final QuickFix[] fixes=descriptor.getFixes();
+    if (fixes != null) {
+      final QuickFix fix=getWorkingQuickFix(fixes);
+      if (fix != null) {
+        final long startCount=tracker.getModificationCount();
+        fix.applyFix(project,descriptor);
+        if (startCount != tracker.getModificationCount()) {
+          restart=true;
+          ignore(ignoredElements,descriptor,fix);
+        }
+      }
+    }
+  }
+  if (restart) {
+    DaemonCodeAnalyzer.getInstance(project).restart();
+  }
+}
