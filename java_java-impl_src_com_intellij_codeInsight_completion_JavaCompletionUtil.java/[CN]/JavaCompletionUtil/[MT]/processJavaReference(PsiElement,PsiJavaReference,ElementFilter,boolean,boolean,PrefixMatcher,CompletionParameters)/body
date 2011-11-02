@@ -1,0 +1,47 @@
+{
+  final THashSet<LookupElement> set=new THashSet<LookupElement>();
+  final Condition<String> nameCondition=matcher == null ? null : new Condition<String>(){
+    public boolean value(    String s){
+      return matcher.prefixMatches(s);
+    }
+  }
+;
+  PsiMethodCallExpression call=PsiTreeUtil.getParentOfType(element,PsiMethodCallExpression.class);
+  boolean checkInitialized=parameters.getInvocationCount() <= 1 && call != null && PsiKeyword.SUPER.equals(call.getMethodExpression().getText());
+  final JavaCompletionProcessor processor=new JavaCompletionProcessor(element,elementFilter,checkAccess,checkInitialized,filterStaticAfterInstance,nameCondition);
+  javaReference.processVariants(processor);
+  final Collection<CompletionElement> plainResults=processor.getResults();
+  final PsiType qualifierType=processor.getQualifierType();
+  PsiType castedQualifierType=addQualifierCastingVariants(javaReference,processor,set,parameters);
+  boolean mayHighlight=qualifierType != null && (castedQualifierType == null || castedQualifierType.equals(qualifierType) || !qualifierType.isAssignableFrom(castedQualifierType));
+  final boolean pkgContext=inSomePackage(element);
+  final Set<PsiMember> mentioned=new THashSet<PsiMember>();
+  for (  CompletionElement completionElement : plainResults) {
+    LookupElement item=createLookupElement(completionElement,qualifierType);
+    if (item != null) {
+      final Object o=item.getObject();
+      if (o instanceof PsiClass && !isSourceLevelAccessible(element,(PsiClass)o,pkgContext)) {
+        continue;
+      }
+      if (o instanceof PsiMember) {
+        if (isInExcludedPackage((PsiMember)o)) {
+          continue;
+        }
+        mentioned.add((PsiMember)o);
+      }
+      set.add(mayHighlight ? highlightIfNeeded(qualifierType,item,o) : item);
+    }
+  }
+  if (javaReference instanceof PsiReferenceExpression && !((PsiReferenceExpression)javaReference).isQualified()) {
+    final StaticMemberProcessor memberProcessor=JavaGlobalMemberNameCompletionContributor.completeStaticMembers(parameters);
+    memberProcessor.processMembersOfRegisteredClasses(matcher,new PairConsumer<PsiMember,PsiClass>(){
+      @Override public void consume(      PsiMember member,      PsiClass psiClass){
+        if (!mentioned.contains(member) && processor.satisfies(member,ResolveState.initial())) {
+          set.add(memberProcessor.createLookupElement(member,psiClass,true));
+        }
+      }
+    }
+);
+  }
+  return set;
+}
