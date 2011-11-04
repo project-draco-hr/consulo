@@ -10,26 +10,38 @@
     return;
   }
   try {
-    final CompilerConfiguration compilerConfiguration=new CompilerConfiguration();
-    compilerConfiguration.setOutput(new PrintWriter(System.err));
-    compilerConfiguration.setWarningLevel(WarningMessage.PARANOIA);
+    final CompilerConfiguration config=new CompilerConfiguration();
+    config.setClasspath("");
+    config.setOutput(new PrintWriter(System.err));
+    config.setWarningLevel(WarningMessage.PARANOIA);
     final List<CompilerMessage> compilerMessages=new ArrayList<CompilerMessage>();
     final List<CompilationUnitPatcher> patchers=new ArrayList<CompilationUnitPatcher>();
     final List<File> srcFiles=new ArrayList<File>();
+    final Map<String,File> class2File=new HashMap<String,File>();
     final String[] finalOutput=new String[1];
-    fillFromArgsFile(argsFile,compilerConfiguration,patchers,compilerMessages,srcFiles,finalOutput);
+    fillFromArgsFile(argsFile,config,patchers,compilerMessages,srcFiles,class2File,finalOutput);
     if (srcFiles.isEmpty())     return;
     if (forStubs) {
       Map<String,Object> options=new HashMap<String,Object>();
-      options.put("stubDir",compilerConfiguration.getTargetDirectory());
+      options.put("stubDir",config.getTargetDirectory());
       options.put("keepStubs",Boolean.TRUE);
-      compilerConfiguration.setJointCompilationOptions(options);
-      compilerConfiguration.setTargetBytecode(CompilerConfiguration.POST_JDK5);
+      config.setJointCompilationOptions(options);
+      config.setTargetBytecode(CompilerConfiguration.POST_JDK5);
     }
     System.out.println(PRESENTABLE_MESSAGE + "Groovyc: loading sources...");
-    final CompilationUnit unit=createCompilationUnit(forStubs,compilerConfiguration,finalOutput[0]);
+    final AstAwareResourceLoader resourceLoader=new AstAwareResourceLoader(class2File);
+    final CompilationUnit unit=createCompilationUnit(forStubs,config,finalOutput[0],buildClassLoaderFor(config,resourceLoader));
+    unit.addPhaseOperation(new CompilationUnit.SourceUnitOperation(){
+      public void call(      SourceUnit source) throws CompilationFailedException {
+        File file=new File(source.getName());
+        for (        ClassNode aClass : source.getAST().getClasses()) {
+          resourceLoader.myClass2File.put(aClass.getName(),file);
+        }
+      }
+    }
+,Phases.CONVERSION);
     addSources(forStubs,srcFiles,unit);
-    runPatchers(patchers,compilerMessages,unit);
+    runPatchers(patchers,compilerMessages,unit,resourceLoader);
     System.out.println(PRESENTABLE_MESSAGE + "Groovyc: compiling...");
     final List compiledFiles=GroovyCompilerWrapper.compile(compilerMessages,forStubs,unit);
     System.out.println(CLEAR_PRESENTABLE);
