@@ -2,33 +2,35 @@
   boolean additionalPassRequired=false;
   final TimestampStorage tsStorage=context.getBuildDataManager().getTimestampStorage(getName());
   final Set<String> removedPaths=getRemovedPaths(context);
-  if (context.isMake()) {
-    final Set<File> allCompiledFiles=getAllCompiledFilesContainer(context);
-    final Set<File> allAffectedFiles=getAllAffectedFilesContainer(context);
-    allAffectedFiles.addAll(filesToCompile);
-    allCompiledFiles.addAll(successfullyCompiled);
-    allAffectedFiles.removeAll(successfullyCompiled);
-    final Mappings globalMappings=context.getMappings();
-    final HashSet<File> affectedBeforeDif=new HashSet<File>(allAffectedFiles);
-    final boolean incremental=globalMappings.differentiate(delta,removedPaths,successfullyCompiled,allCompiledFiles,allAffectedFiles);
-    if (incremental) {
-      final Set<File> newlyAffectedFiles=new HashSet<File>(allAffectedFiles);
-      newlyAffectedFiles.removeAll(affectedBeforeDif);
-      if (!newlyAffectedFiles.isEmpty()) {
-        for (        File file : newlyAffectedFiles) {
-          tsStorage.markDirty(file);
+  final Mappings globalMappings=context.getMappings();
+synchronized (globalMappings) {
+    if (context.isMake()) {
+      final Set<File> allCompiledFiles=getAllCompiledFilesContainer(context);
+      final Set<File> allAffectedFiles=getAllAffectedFilesContainer(context);
+      allAffectedFiles.addAll(filesToCompile);
+      allCompiledFiles.addAll(successfullyCompiled);
+      allAffectedFiles.removeAll(successfullyCompiled);
+      final HashSet<File> affectedBeforeDif=new HashSet<File>(allAffectedFiles);
+      final boolean incremental=globalMappings.differentiate(delta,removedPaths,successfullyCompiled,allCompiledFiles,allAffectedFiles);
+      if (incremental) {
+        final Set<File> newlyAffectedFiles=new HashSet<File>(allAffectedFiles);
+        newlyAffectedFiles.removeAll(affectedBeforeDif);
+        if (!newlyAffectedFiles.isEmpty()) {
+          for (          File file : newlyAffectedFiles) {
+            tsStorage.markDirty(file);
+          }
+          additionalPassRequired=chunkContainsAffectedFiles(context,chunk,newlyAffectedFiles);
         }
-        additionalPassRequired=chunkContainsAffectedFiles(context,chunk,newlyAffectedFiles);
+      }
+ else {
+        additionalPassRequired=true;
+        context.setDirty(chunk,true);
       }
     }
- else {
-      additionalPassRequired=true;
-      context.setDirty(chunk,true);
+    globalMappings.integrate(delta,successfullyCompiled,removedPaths);
+    for (    File file : successfullyCompiled) {
+      tsStorage.saveStamp(file);
     }
-  }
-  context.getMappings().integrate(delta,successfullyCompiled,removedPaths);
-  for (  File file : successfullyCompiled) {
-    tsStorage.saveStamp(file);
   }
   return additionalPassRequired;
 }
