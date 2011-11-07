@@ -1,5 +1,5 @@
 {
-  final ModuleRootManager manager=ModuleRootManager.getInstance(module);
+  ApplicationManager.getApplication().assertIsDispatchThread();
   final File rootFile=new File(path);
   final boolean created;
   if (!rootFile.exists()) {
@@ -10,31 +10,39 @@
     created=false;
   }
   final Project project=module.getProject();
-  ApplicationManager.getApplication().invokeLater(new Runnable(){
-    public void run(){
-      if (project.isDisposed() || module.isDisposed()) {
-        return;
-      }
-      final VirtualFile root;
-      if (created) {
-        root=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(rootFile);
-      }
- else {
-        root=LocalFileSystem.getInstance().findFileByIoFile(rootFile);
-      }
-      if (root != null) {
-        unexcludeRootIfNeccessary(root,manager);
-        for (        VirtualFile existingRoot : manager.getSourceRoots()) {
-          if (existingRoot == root)           return;
-        }
-        ApplicationManager.getApplication().runWriteAction(new Runnable(){
-          public void run(){
-            addSourceRoot(manager,root);
-          }
-        }
-);
-      }
+  Module genModule=module;
+  final AndroidFacet facet=AndroidFacet.getInstance(genModule);
+  if (facet != null && facet.getConfiguration().LIBRARY_PROJECT) {
+    final VirtualFile oldStyleRoot=LocalFileSystem.getInstance().refreshAndFindFileByPath(path);
+    if (oldStyleRoot != null) {
+      removeSourceRoot(module,oldStyleRoot);
+    }
+    genModule=setUpGenModule(module);
+    if (genModule == null) {
+      return;
     }
   }
-,project.getDisposed());
+  if (project.isDisposed() || genModule.isDisposed()) {
+    return;
+  }
+  final VirtualFile root;
+  if (created) {
+    root=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(rootFile);
+  }
+ else {
+    root=LocalFileSystem.getInstance().findFileByIoFile(rootFile);
+  }
+  if (root != null) {
+    final ModuleRootManager manager=ModuleRootManager.getInstance(genModule);
+    unexcludeRootIfNeccessary(root,manager);
+    for (    VirtualFile existingRoot : manager.getSourceRoots()) {
+      if (existingRoot == root)       return;
+    }
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      public void run(){
+        addSourceRoot(manager,root);
+      }
+    }
+);
+  }
 }
