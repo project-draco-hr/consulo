@@ -1,0 +1,73 @@
+{
+  if (checkRebaseInProgress() || isMergeInProgress() || areUnmergedFiles())   return false;
+  if (!checkTrackedBranchesConfigured())   return false;
+  try {
+    for (    VirtualFile root : myRoots) {
+      final GitUpdater updater;
+      if (updateMethod == UpdateMethod.MERGE) {
+        updater=new GitMergeUpdater(myProject,root,myTrackedBranches,myProgressIndicator,myUpdatedFiles);
+      }
+ else       if (updateMethod == UpdateMethod.REBASE) {
+        updater=new GitRebaseUpdater(myProject,root,myTrackedBranches,myProgressIndicator,myUpdatedFiles);
+      }
+ else {
+        updater=GitUpdater.getUpdater(myProject,myTrackedBranches,root,myProgressIndicator,myUpdatedFiles);
+      }
+      if (updater.isUpdateNeeded()) {
+        myUpdaters.put(root,updater);
+      }
+      LOG.info("update| root=" + root + " ,updater="+ updater);
+    }
+  }
+ catch (  VcsException e) {
+    LOG.info(e);
+    notifyError(myProject,"Git update failed",e.getMessage(),true,e);
+    return false;
+  }
+  if (myUpdaters.isEmpty())   return true;
+  for (  Map.Entry<VirtualFile,GitUpdater> entry : myUpdaters.entrySet()) {
+    VirtualFile root=entry.getKey();
+    GitUpdater updater=entry.getValue();
+    if (updater.isSaveNeeded()) {
+      myRootsToSave.add(root);
+      LOG.info("update| root " + root + " needs save");
+    }
+  }
+  try {
+    mySaver.saveLocalChanges(myRootsToSave);
+  }
+ catch (  VcsException e) {
+    LOG.info("Couldn't save local changes",e);
+    notifyError(myProject,"Git update failed","Tried to save uncommitted changes in " + mySaver.getSaverName() + " before update, but failed with an error.<br/>"+ "Update was cancelled.",true,e);
+    return false;
+  }
+  boolean incomplete=false;
+  boolean success=true;
+  VirtualFile currentlyUpdatedRoot=null;
+  try {
+    for (    Map.Entry<VirtualFile,GitUpdater> entry : myUpdaters.entrySet()) {
+      currentlyUpdatedRoot=entry.getKey();
+      GitUpdater updater=entry.getValue();
+      GitUpdateResult res=updater.update();
+      LOG.info("updating root " + currentlyUpdatedRoot + " finished: "+ res);
+      if (res == GitUpdateResult.INCOMPLETE) {
+        incomplete=true;
+      }
+      success&=res.isSuccess();
+    }
+  }
+ catch (  VcsException e) {
+    String rootName=(currentlyUpdatedRoot == null) ? "" : currentlyUpdatedRoot.getName();
+    LOG.info("Error updating changes for root " + currentlyUpdatedRoot,e);
+    notifyImportantError(myProject,"Error updating " + rootName,"Updating " + rootName + " failed with an error: "+ e.getLocalizedMessage());
+  }
+ finally {
+    if (!incomplete) {
+      restoreLocalChanges(context);
+    }
+ else {
+      mySaver.notifyLocalChangesAreNotRestored();
+    }
+  }
+  return success;
+}

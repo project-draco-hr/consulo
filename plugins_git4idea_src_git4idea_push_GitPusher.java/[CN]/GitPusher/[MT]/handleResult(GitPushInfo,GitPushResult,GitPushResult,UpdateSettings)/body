@@ -1,0 +1,36 @@
+{
+  result.mergeFrom(previousResult);
+  if (result.isEmpty()) {
+    GitVcs.NOTIFICATION_GROUP_ID.createNotification("Everything up-to-date",NotificationType.INFORMATION).notify(myProject);
+  }
+ else   if (result.wasError()) {
+    result.createNotification().notify(myProject);
+  }
+ else {
+    Map<GitRepository,GitBranch> rejectedPushesForCurrentBranch=result.getRejectedPushesForCurrentBranch();
+    if (!rejectedPushesForCurrentBranch.isEmpty()) {
+      if (updateSettings == null) {
+        updateSettings=readUpdateSettings();
+        if (!mySettings.autoUpdateIfPushRejected()) {
+          final GitRejectedPushUpdateDialog dialog=new GitRejectedPushUpdateDialog(myProject,rejectedPushesForCurrentBranch.keySet(),updateSettings);
+          final int exitCode=showDialogAndGetExitCode(dialog);
+          updateSettings=new UpdateSettings(dialog.shouldUpdateAll(),getUpdateMethodFromDialogExitCode(exitCode));
+          saveUpdateSettings(updateSettings);
+        }
+      }
+      Set<VirtualFile> roots=getRootsToUpdate(rejectedPushesForCurrentBranch,updateSettings.shouldUpdateAllRoots());
+      boolean pushAgain=false;
+      if (updateSettings.shouldUpdate()) {
+        pushAgain=update(roots,updateSettings.getUpdateMethod());
+      }
+      if (pushAgain) {
+        myProgressIndicator.setText(INDICATOR_TEXT);
+        GitPushInfo newPushInfo=new GitPushInfo(pushInfo.getCommits().retainAll(rejectedPushesForCurrentBranch),pushInfo.getPushSpec());
+        GitPushResult adjustedPushResult=result.remove(rejectedPushesForCurrentBranch);
+        push(newPushInfo,adjustedPushResult,updateSettings);
+        return;
+      }
+    }
+    result.createNotification().notify(myProject);
+  }
+}
