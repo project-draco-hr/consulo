@@ -1,13 +1,19 @@
 {
-  final ReadProcessThread stdoutThread=new ReadProcessThread(createProcessOutReader()){
-    protected void textAvailable(    String s){
-      notifyTextAvailable(s,ProcessOutputTypes.STDOUT);
+  final OutputReader stdoutReader=new OutputReader(createProcessOutReader()){
+    protected void onTextAvailable(    @NotNull String text){
+      notifyTextAvailable(text,ProcessOutputTypes.STDOUT);
+    }
+    @Override protected Future<?> executeOnPooledThread(    Runnable runnable){
+      return BaseOSProcessHandler.this.executeOnPooledThread(runnable);
     }
   }
 ;
-  final ReadProcessThread stderrThread=new ReadProcessThread(createProcessErrReader()){
-    protected void textAvailable(    String s){
-      notifyTextAvailable(s,ProcessOutputTypes.STDERR);
+  final OutputReader stderrReader=new OutputReader(createProcessErrReader()){
+    protected void onTextAvailable(    @NotNull String text){
+      notifyTextAvailable(text,ProcessOutputTypes.STDERR);
+    }
+    @Override protected Future<?> executeOnPooledThread(    Runnable runnable){
+      return BaseOSProcessHandler.this.executeOnPooledThread(runnable);
     }
   }
 ;
@@ -17,22 +23,19 @@
   addProcessListener(new ProcessAdapter(){
     public void startNotified(    final ProcessEvent event){
       try {
-        final Future<?> stdOutReadingFuture=executeOnPooledThread(stdoutThread);
-        final Future<?> stdErrReadingFuture=executeOnPooledThread(stderrThread);
         myWaitFor.setTerminationCallback(new Consumer<Integer>(){
           @Override public void consume(          Integer exitCode){
             try {
-              stderrThread.setProcessTerminated(true);
-              stdoutThread.setProcessTerminated(true);
-              stdErrReadingFuture.get();
-              stdOutReadingFuture.get();
+              stderrReader.stop();
+              stdoutReader.stop();
+              try {
+                stderrReader.waitFor();
+                stdoutReader.waitFor();
+              }
+ catch (              InterruptedException ignore) {
+              }
             }
- catch (            InterruptedException ignored) {
-            }
-catch (            ExecutionException e) {
-              LOG.error(e);
-            }
- finally {
+  finally {
               onOSProcessTerminated(exitCode);
             }
           }
