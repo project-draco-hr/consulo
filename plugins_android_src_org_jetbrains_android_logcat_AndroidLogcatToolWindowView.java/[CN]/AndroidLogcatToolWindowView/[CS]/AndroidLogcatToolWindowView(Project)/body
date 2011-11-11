@@ -15,7 +15,8 @@
     }
   }
 );
-  AndroidLogFilterModel logFilterModel=new AndroidLogFilterModel(AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_LOG_LEVEL){
+  final AndroidLogFilterModel logFilterModel=new AndroidLogFilterModel(AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_LOG_LEVEL){
+    private ConfiguredFilter myConfiguredFilter;
     @Override protected void setCustomFilter(    String filter){
       AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_CUSTOM_FILTER=filter;
     }
@@ -25,11 +26,16 @@
     @Override public String getCustomFilter(){
       return AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_CUSTOM_FILTER;
     }
-    @Override protected void setTagFilter(    String tag){
-      AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_LOG_TAG_FILTER=tag;
+    @Override protected void setConfiguredFilter(    ConfiguredFilter filter){
+      AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_CONFIGURED_FILTER=filter != null ? filter.getName() : "";
+      myConfiguredFilter=filter;
     }
-    @NotNull @Override protected String getTagFilter(){
-      return AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_LOG_TAG_FILTER;
+    @Nullable @Override protected ConfiguredFilter getConfiguredFilter(){
+      if (myConfiguredFilter == null) {
+        final String name=AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_CONFIGURED_FILTER;
+        myConfiguredFilter=compileConfiguredFilter(name);
+      }
+      return myConfiguredFilter;
     }
   }
 ;
@@ -49,12 +55,27 @@
 );
   mySearchComponentWrapper.add(myLogConsole.getSearchComponent());
   JComponent consoleComponent=myLogConsole.getComponent();
-  DefaultActionGroup group=new DefaultActionGroup();
-  group.addAll(myLogConsole.getToolbarActions());
-  group.add(new AndroidEnableDdmsAction(AndroidUtils.DDMS_ICON));
-  group.add(new MyRestartAction());
-  final JComponent tbComp=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,group,false).getComponent();
-  myConsoleWrapper.add(tbComp,BorderLayout.WEST);
+  final DefaultActionGroup group1=new DefaultActionGroup();
+  group1.addAll(myLogConsole.getToolbarActions());
+  group1.add(new AndroidEnableDdmsAction(AndroidUtils.DDMS_ICON));
+  group1.add(new MyRestartAction());
+  final JComponent tbComp1=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,group1,false).getComponent();
+  myConsoleWrapper.add(tbComp1,BorderLayout.EAST);
+  final DefaultActionGroup group2=new DefaultActionGroup();
+  group2.add(new MyAddFilterAction());
+  group2.add(new MyRemoveFilterAction());
+  group2.add(new MyEditFilterAction());
+  final JComponent tbComp2=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,group2,true).getComponent();
+  myFiltersToolbarPanel.add(tbComp2,BorderLayout.CENTER);
+  final String savedConfiguredFilterName=AndroidLogcatFiltersPreferences.getInstance(project).TOOL_WINDOW_CONFIGURED_FILTER;
+  myFiltersList.addListSelectionListener(new ListSelectionListener(){
+    @Override public void valueChanged(    ListSelectionEvent e){
+      final String filterName=(String)myFiltersList.getSelectedValue();
+      final ConfiguredFilter filter=filterName != null ? compileConfiguredFilter(filterName) : null;
+      logFilterModel.updateConfiguredFilter(filter);
+    }
+  }
+);
   myConsoleWrapper.add(consoleComponent,BorderLayout.CENTER);
   Disposer.register(this,myLogConsole);
   myClearLogButton.addActionListener(new ActionListener(){
@@ -70,4 +91,9 @@
   AndroidDebugBridge.addDeviceChangeListener(myDeviceChangeListener);
   updateDevices();
   updateLogConsole();
+  updateConfiguredFilters();
+  myFiltersList.setSelectedValue(savedConfiguredFilterName,true);
+  if (myFiltersList.getSelectedValue() == null && myFiltersList.getItemsCount() > 0) {
+    myFiltersList.setSelectedIndex(0);
+  }
 }
