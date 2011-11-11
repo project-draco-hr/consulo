@@ -1,0 +1,93 @@
+{
+  final Sdk sdk=ModuleRootManager.getInstance(facet.getModule()).getSdk();
+  if (sdk == null || !(sdk.getSdkType() instanceof AndroidSdkType)) {
+    throw new AndroidSdkNotConfiguredException();
+  }
+  final AndroidSdkAdditionalData data=(AndroidSdkAdditionalData)sdk.getSdkAdditionalData();
+  if (data == null) {
+    throw new RenderingException(AndroidBundle.message("sdk.broken.error"));
+  }
+  final AndroidPlatform platform=data.getAndroidPlatform();
+  if (platform == null) {
+    throw new RenderingException(AndroidBundle.message("sdk.broken.error"));
+  }
+  config.setVersionQualifier(new VersionQualifier(target.getVersion().getApiLevel()));
+  final RenderServiceFactory factory=platform.getSdk().getTargetData(target).getRenderServiceFactory(project);
+  if (factory == null) {
+    throw new RenderingException(AndroidBundle.message("android.layout.preview.cannot.load.library.error"));
+  }
+  final ProjectResources projectResources=new ProjectResources();
+  final VirtualFile[] resourceDirs=facet.getLocalResourceManager().getAllResourceDirs();
+  final IAbstractFolder[] resFolders=toAbstractFolders(resourceDirs);
+  loadResources(projectResources,layoutXmlText,layoutXmlFile,resFolders);
+  final int minSdkVersion=getMinSdkVersion(facet);
+  String missingRClassMessage=null;
+  boolean missingRClass=false;
+  final ProjectCallback callback=new ProjectCallback(factory.getLibrary(),facet.getModule(),projectResources);
+  try {
+    callback.loadAndParseRClass();
+  }
+ catch (  ClassNotFoundException e) {
+    LOG.debug(e);
+    missingRClassMessage=e.getMessage();
+    missingRClass=true;
+  }
+  final ResourceResolver resolver=factory.createResourceResolver(facet,config,projectResources,theme.getName(),theme.isProjectTheme());
+  final RenderService renderService=factory.createService(resolver,config,xdpi,ydpi,callback,minSdkVersion);
+  final RenderSession session;
+  try {
+    session=renderService.createRenderSession(layoutXmlText,getAppLabelToShow(facet));
+  }
+ catch (  XmlPullParserException e) {
+    throw new RenderingException(e);
+  }
+  if (session == null) {
+    return false;
+  }
+  final Result result=session.getResult();
+  if (!result.isSuccess()) {
+    final Throwable exception=result.getException();
+    if (exception != null) {
+      throw new RenderingException(exception);
+    }
+    final String message=result.getErrorMessage();
+    if (message != null) {
+      LOG.info(message);
+      throw new RenderingException();
+    }
+    return false;
+  }
+  final String format=FileUtil.getExtension(imgPath);
+  ImageIO.write(session.getImage(),format,new File(imgPath));
+  if (missingRClass && callback.hasLoadedClasses()) {
+    warningBuilder.append(missingRClassMessage != null && missingRClassMessage.length() > 0 ? ("Class not found error: " + missingRClassMessage + ".") : "R class not found.").append(" Try to build project\n");
+  }
+  final Set<String> missingClasses=callback.getMissingClasses();
+  if (missingClasses.size() > 0) {
+    if (missingClasses.size() > 1) {
+      warningBuilder.append("Missing classes:\n");
+      for (      String missingClass : missingClasses) {
+        warningBuilder.append("&nbsp; &nbsp; &nbsp; &nbsp;").append(missingClass).append('\n');
+      }
+    }
+ else {
+      warningBuilder.append("Missing class ").append(missingClasses.iterator().next()).append('\n');
+    }
+  }
+  final Set<String> brokenClasses=callback.getBrokenClasses();
+  if (brokenClasses.size() > 0) {
+    if (brokenClasses.size() > 1) {
+      warningBuilder.append("Unable to initialize:\n");
+      for (      String brokenClass : brokenClasses) {
+        warningBuilder.append("    ").append(brokenClass).append('\n');
+      }
+    }
+ else {
+      warningBuilder.append("Unable to initialize ").append(brokenClasses.iterator().next());
+    }
+  }
+  if (warningBuilder.length() > 0 && warningBuilder.charAt(warningBuilder.length() - 1) == '\n') {
+    warningBuilder.deleteCharAt(warningBuilder.length() - 1);
+  }
+  return true;
+}
