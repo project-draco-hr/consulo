@@ -83,12 +83,72 @@
         if ((it.access & Opcodes.ACC_INTERFACE) > 0 || (m.access & Opcodes.ACC_ABSTRACT) > 0) {
           u.affectSubclasses(it.name,affectedFiles,affectedUsages,dependants,false);
         }
+        if ((m.access & Opcodes.ACC_PRIVATE) == 0) {
+          final Collection<Pair<MethodRepr,ClassRepr>> affectedMethods=u.findAllMethodsBySpecificity(m,it);
+          final MethodRepr.Predicate overrides=MethodRepr.equalByJavaRules(m);
+          final Collection<DependencyContext.S> propagated=u.propagateMethodAccess(m.name,it.name);
+          final Collection<MethodRepr> lessSpecific=it.findMethods(u.lessSpecific(m));
+          for (          MethodRepr mm : lessSpecific) {
+            u.affectMethodUsages(mm,propagated,mm.createUsage(myContext,it.name),affectedUsages,dependants);
+          }
+          for (          Pair<MethodRepr,ClassRepr> p : affectedMethods) {
+            final MethodRepr mm=p.first;
+            final ClassRepr cc=p.second;
+            if (cc == myMockClass) {
+            }
+ else {
+              if (overrides.satisfy(mm)) {
+                final Option<Boolean> subtypeOf=u.isSubtypeOf(mm.type,m.type);
+                if (weakerAccess(mm.access,m.access) || ((m.access & Opcodes.ACC_STATIC) > 0 && (mm.access & Opcodes.ACC_STATIC) == 0) || ((m.access & Opcodes.ACC_STATIC) == 0 && (mm.access & Opcodes.ACC_STATIC) > 0)|| ((m.access & Opcodes.ACC_FINAL) > 0)|| !m.exceptions.equals(mm.exceptions)|| (subtypeOf.isNone() || !subtypeOf.value())|| !empty(mm.signature)|| !empty(m.signature)) {
+                  final DependencyContext.S file=myClassToSourceFile.get(cc.name);
+                  if (file != null) {
+                    affectedFiles.add(new File(myContext.getValue(file)));
+                  }
+                }
+              }
+ else {
+                final Collection<DependencyContext.S> yetPropagated=self.propagateMethodAccess(mm.name,cc.name);
+                final Collection<DependencyContext.S> deps=myClassToClassDependency.get(cc.name);
+                if (deps != null) {
+                  dependants.addAll(deps);
+                }
+                u.affectMethodUsages(mm,yetPropagated,mm.createUsage(myContext,cc.name),affectedUsages,dependants);
+              }
+            }
+          }
+          final Collection<DependencyContext.S> subClasses=getAllSubclasses(it.name);
+          if (subClasses != null) {
+            for (            final DependencyContext.S subClass : subClasses) {
+              final ClassRepr r=u.reprByName(subClass);
+              final DependencyContext.S sourceFileName=myClassToSourceFile.get(subClass);
+              if (r != null && sourceFileName != null) {
+                final DependencyContext.S outerClass=r.outerClassName;
+                if (u.methodVisible(outerClass,m)) {
+                  affectedFiles.add(new File(myContext.getValue(sourceFileName)));
+                }
+              }
+            }
+          }
+        }
       }
       for (      MethodRepr m : diff.methods().removed()) {
         final Collection<Pair<MethodRepr,ClassRepr>> overridenMethods=u.findOverridenMethods(m,it);
         final Collection<DependencyContext.S> propagated=u.propagateMethodAccess(m.name,it.name);
         if (overridenMethods.size() == 0) {
           u.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),affectedUsages,dependants);
+        }
+ else {
+          boolean clear=true;
+          loop:           for (          Pair<MethodRepr,ClassRepr> overriden : overridenMethods) {
+            final MethodRepr mm=overriden.first;
+            if (mm == myMockMethod || !mm.type.equals(m.type) || !empty(mm.signature) || !empty(m.signature)) {
+              clear=false;
+              break loop;
+            }
+          }
+          if (!clear) {
+            u.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),affectedUsages,dependants);
+          }
         }
         if ((m.access & Opcodes.ACC_ABSTRACT) == 0) {
           for (          DependencyContext.S p : propagated) {
@@ -99,11 +159,16 @@
               boolean allAbstract=true;
               boolean visited=false;
               for (              Pair<MethodRepr,ClassRepr> pp : overridenInS) {
-                if (pp.second.name.equals(it.name)) {
+                final ClassRepr cc=pp.second;
+                if (cc == myMockClass) {
+                  visited=true;
+                  continue;
+                }
+                if (cc.name.equals(it.name)) {
                   continue;
                 }
                 visited=true;
-                allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((pp.second.access & Opcodes.ACC_INTERFACE) > 0);
+                allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((cc.access & Opcodes.ACC_INTERFACE) > 0);
                 if (!allAbstract) {
                   break;
                 }
@@ -172,7 +237,7 @@
         final boolean fPublic=(f.access & Opcodes.ACC_PUBLIC) > 0;
         final boolean fPLocal=!fPrivate && !fProtected && !fPublic;
         if (!fPrivate) {
-          final Collection<DependencyContext.S> subClasses=myClassToSubclasses.get(it.name);
+          final Collection<DependencyContext.S> subClasses=getAllSubclasses(it.name);
           if (subClasses != null) {
             for (            final DependencyContext.S subClass : subClasses) {
               final ClassRepr r=u.reprByName(subClass);
@@ -183,7 +248,7 @@
                 }
  else {
                   final DependencyContext.S outerClass=r.outerClassName;
-                  if (u.fieldVisible(outerClass,f)) {
+                  if (!empty(outerClass) && u.fieldVisible(outerClass,f)) {
                     affectedFiles.add(new File(myContext.getValue(sourceFileName)));
                   }
                 }
@@ -204,7 +269,7 @@
           final boolean ffPrivate=(ff.access & Opcodes.ACC_PRIVATE) > 0;
           final boolean ffProtected=(ff.access & Opcodes.ACC_PROTECTED) > 0;
           final boolean ffPublic=(ff.access & Opcodes.ACC_PUBLIC) > 0;
-          final boolean ffPLocal=!ffPrivate && !ffProtected && !ffPublic;
+          final boolean ffPLocal=isPackageLocal(ff.access);
           if (!ffPrivate) {
             final Collection<DependencyContext.S> propagated=o.propagateFieldAccess(ff.name,cc.name);
             final Set<UsageRepr.Usage> localUsages=new HashSet<UsageRepr.Usage>();
@@ -298,9 +363,9 @@
           dependentFiles.add(file);
         }
       }
-      dependentFiles.removeAll(compiledFiles);
       filewise:       for (      DependencyContext.S depFile : dependentFiles) {
-        if (affectedFiles.contains(new File(myContext.getValue(depFile)))) {
+        final File theFile=new File(myContext.getValue(depFile));
+        if (affectedFiles.contains(theFile) || compiledFiles.contains(theFile)) {
           continue filewise;
         }
         final UsageRepr.Cluster depCluster=mySourceFileToUsages.get(depFile);
@@ -312,14 +377,14 @@
             for (            UsageRepr.Usage usage : usages) {
               final Util.UsageConstraint constraint=usageConstraints.get(usage);
               if (constraint == null) {
-                affectedFiles.add(new File(myContext.getValue(depFile)));
+                affectedFiles.add(theFile);
                 continue filewise;
               }
  else {
                 final Set<DependencyContext.S> residenceClasses=depCluster.getResidence(usage);
                 for (                DependencyContext.S residentName : residenceClasses) {
                   if (constraint.checkResidence(residentName)) {
-                    affectedFiles.add(new File(myContext.getValue(depFile)));
+                    affectedFiles.add(theFile);
                     continue filewise;
                   }
                 }
@@ -331,7 +396,7 @@
             for (            UsageRepr.Usage usage : annotationUsages) {
               for (              UsageRepr.AnnotationUsage query : annotationQuery) {
                 if (query.satisfies(usage)) {
-                  affectedFiles.add(new File(myContext.getValue(depFile)));
+                  affectedFiles.add(theFile);
                   continue filewise;
                 }
               }
