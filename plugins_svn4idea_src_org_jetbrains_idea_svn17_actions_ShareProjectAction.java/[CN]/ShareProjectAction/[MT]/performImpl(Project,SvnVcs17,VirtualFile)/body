@@ -1,0 +1,80 @@
+{
+  final ShareDialog shareDialog=new ShareDialog(project,file.getName());
+  shareDialog.show();
+  final String parent=shareDialog.getSelectedURL();
+  if (shareDialog.isOK() && parent != null) {
+    final Ref<Boolean> actionStarted=new Ref<Boolean>(Boolean.TRUE);
+    final SVNException[] error=new SVNException[1];
+    final ShareDialog.ShareTarget shareTarget=shareDialog.getShareTarget();
+    final ProgressManager progressManager=ProgressManager.getInstance();
+    if (ShareDialog.ShareTarget.useSelected.equals(shareTarget)) {
+      final boolean folderEmpty=checkRemoteFolder(project,activeVcs,parent,progressManager);
+      if (!folderEmpty) {
+        final int promptAnswer=Messages.showYesNoDialog(project,"Remote folder \"" + parent + "\" is not empty.\nDo you want to continue sharing?","Share directory",Messages.getWarningIcon());
+        if (DialogWrapper.OK_EXIT_CODE != promptAnswer)         return false;
+      }
+    }
+    ExclusiveBackgroundVcsAction.run(project,new Runnable(){
+      public void run(){
+        progressManager.runProcessWithProgressSynchronously(new Runnable(){
+          public void run(){
+            try {
+              final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+              final File path=new File(file.getPath());
+              if (!SvnCheckoutProvider.promptForWCFormatAndSelect(path,project)) {
+                actionStarted.set(Boolean.FALSE);
+                return;
+              }
+              final SVNURL parenUrl=SVNURL.parseURIEncoded(parent);
+              final SVNURL checkoutUrl;
+              final SVNRevision revision;
+              if (ShareDialog.ShareTarget.useSelected.equals(shareTarget)) {
+                checkoutUrl=parenUrl;
+                revision=SVNRevision.HEAD;
+              }
+ else               if (ShareDialog.ShareTarget.useProjectName.equals(shareTarget)) {
+                final Pair<SVNRevision,SVNURL> pair=createRemoteFolder(activeVcs,parenUrl,file.getName());
+                revision=pair.getFirst();
+                checkoutUrl=pair.getSecond();
+              }
+ else {
+                final Pair<SVNRevision,SVNURL> pair=createRemoteFolder(activeVcs,parenUrl,file.getName());
+                final Pair<SVNRevision,SVNURL> trunkPair=createRemoteFolder(activeVcs,pair.getSecond(),"trunk");
+                checkoutUrl=trunkPair.getSecond();
+                revision=trunkPair.getFirst();
+                if (shareDialog.createStandardStructure()) {
+                  createRemoteFolder(activeVcs,pair.getSecond(),"branches");
+                  createRemoteFolder(activeVcs,pair.getSecond(),"tags");
+                }
+              }
+              if (indicator != null) {
+                indicator.checkCanceled();
+                indicator.setText(SvnBundle.message("share.directory.checkout.back.progress.text",checkoutUrl.toString()));
+              }
+              activeVcs.createUpdateClient().doCheckout(checkoutUrl,path,SVNRevision.UNDEFINED,revision,true);
+              SvnWorkingCopyFormatHolder.setPresetFormat(null);
+              addRecursively(activeVcs,file);
+            }
+ catch (            SVNException e) {
+              error[0]=e;
+            }
+ finally {
+              activeVcs.invokeRefreshSvnRoots(true);
+              SvnWorkingCopyFormatHolder.setPresetFormat(null);
+            }
+          }
+        }
+,SvnBundle.message("share.directory.title"),true,project);
+      }
+    }
+);
+    if (Boolean.TRUE.equals(actionStarted.get())) {
+      if (error[0] != null) {
+        throw new VcsException(error[0].getMessage());
+      }
+      Messages.showInfoMessage(project,SvnBundle.message("share.directory.info.message",file.getName()),SvnBundle.message("share.directory.title"));
+    }
+    return true;
+  }
+  return false;
+}

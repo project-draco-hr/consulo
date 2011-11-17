@@ -1,0 +1,46 @@
+{
+  final SvnRepositoryLocation svnLocation=(SvnRepositoryLocation)location;
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  if (progress != null) {
+    progress.setText(SvnBundle.message("progress.text.changes.collecting.changes"));
+    progress.setText2(SvnBundle.message("progress.text2.changes.establishing.connection",location));
+  }
+  final String repositoryRoot;
+  SVNRepository repository=null;
+  try {
+    repository=myVcs.createRepository(svnLocation.getURL());
+    repositoryRoot=repository.getRepositoryRoot(true).toString();
+  }
+ catch (  SVNException e) {
+    throw new VcsException(e);
+  }
+ finally {
+    if (repository != null) {
+      repository.closeSession();
+    }
+  }
+  final MergeTrackerProxy proxy=new MergeTrackerProxy(new Consumer<TreeStructureNode<SVNLogEntry>>(){
+    public void consume(    TreeStructureNode<SVNLogEntry> node){
+      finalConsumer.consume(new SvnChangeList(myVcs,svnLocation,node.getMe(),repositoryRoot),node);
+    }
+  }
+);
+  final SvnMergeSourceTracker mergeSourceTracker=new SvnMergeSourceTracker(new ThrowableConsumer<Pair<SVNLogEntry,Integer>,SVNException>(){
+    public void consume(    Pair<SVNLogEntry,Integer> svnLogEntryIntegerPair) throws SVNException {
+      proxy.consume(svnLogEntryIntegerPair);
+    }
+  }
+);
+  getCommittedChangesImpl(settings,svnLocation.getURL(),new String[]{""},maxCount,new Consumer<SVNLogEntry>(){
+    public void consume(    final SVNLogEntry svnLogEntry){
+      try {
+        mergeSourceTracker.consume(svnLogEntry);
+      }
+ catch (      SVNException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+,true,false);
+  proxy.finish();
+}

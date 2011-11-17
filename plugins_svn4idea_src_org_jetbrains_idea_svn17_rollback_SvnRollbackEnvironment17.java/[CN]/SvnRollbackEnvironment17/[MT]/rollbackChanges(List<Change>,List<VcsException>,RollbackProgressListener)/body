@@ -1,0 +1,43 @@
+{
+  listener.indeterminate();
+  final SvnChangeProvider changeProvider=(SvnChangeProvider)mySvnVcs.getChangeProvider();
+  final UnversionedFilesGroupCollector collector=new UnversionedFilesGroupCollector();
+  final ChangesChecker checker=new ChangesChecker(changeProvider,collector);
+  checker.gather(changes);
+  exceptions.addAll(checker.getExceptions());
+  final SVNWCClient client=mySvnVcs.createWCClient();
+  client.setEventHandler(new ISVNEventHandler(){
+    public void handleEvent(    SVNEvent event,    double progress){
+      if (event.getAction() == SVNEventAction.REVERT) {
+        final File file=event.getFile();
+        if (file != null) {
+          listener.accept(file);
+        }
+      }
+      if (event.getAction() == SVNEventAction.FAILED_REVERT) {
+        exceptions.add(new VcsException("Revert failed"));
+      }
+    }
+    public void checkCancelled(){
+      listener.checkCanceled();
+    }
+  }
+);
+  final Reverter reverter=new Reverter(client,exceptions);
+  reverter.revert(checker.getForAdds(),true);
+  reverter.revert(checker.getForDeletes(),true);
+  final List<File> edits=checker.getForEdits();
+  reverter.revert(edits.toArray(new File[edits.size()]),false);
+  final List<Trinity<File,File,File>> fromTo=collector.getFromTo();
+  for (  Trinity<File,File,File> trinity : fromTo) {
+    if (trinity.getFirst().exists()) {
+      trinity.getSecond().renameTo(trinity.getThird());
+    }
+  }
+  final List<Pair<File,File>> toBeDeleted=collector.getToBeDeleted();
+  for (  Pair<File,File> pair : toBeDeleted) {
+    if (pair.getFirst().exists()) {
+      FileUtil.delete(pair.getSecond());
+    }
+  }
+}
