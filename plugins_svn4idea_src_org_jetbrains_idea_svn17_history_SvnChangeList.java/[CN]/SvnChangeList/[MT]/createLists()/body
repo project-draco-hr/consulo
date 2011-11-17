@@ -1,0 +1,68 @@
+{
+  myListsHolder=new ChangesListCreationHelper();
+  final Map<String,ExternallyRenamedChange> copiedAddedChanges=new HashMap<String,ExternallyRenamedChange>();
+  for (  String path : myAddedPaths) {
+    final Change addedChange;
+    if (myCopiedAddedPaths.containsKey(path)) {
+      if (myDeletedPaths.contains(myCopiedAddedPaths.get(path))) {
+        addedChange=new ExternallyRenamedChange(myListsHolder.createRevisionLazily(myCopiedAddedPaths.get(path),true),myListsHolder.createRevisionLazily(path,false),myCopiedAddedPaths.get(path));
+        addedChange.getMoveRelativePath(myVcs.getProject());
+        ((ExternallyRenamedChange)addedChange).setCopied(false);
+      }
+ else {
+        addedChange=new ExternallyRenamedChange(null,myListsHolder.createRevisionLazily(path,false),myCopiedAddedPaths.get(path));
+      }
+      copiedAddedChanges.put(myCopiedAddedPaths.get(path),(ExternallyRenamedChange)addedChange);
+    }
+ else {
+      addedChange=new Change(null,myListsHolder.createRevisionLazily(path,false));
+    }
+    myListsHolder.add(path,addedChange);
+  }
+  for (  String path : myDeletedPaths) {
+    final Change deletedChange;
+    if (copiedAddedChanges.containsKey(path)) {
+      final ExternallyRenamedChange addedChange=copiedAddedChanges.get(path);
+      final FilePath source=addedChange.getAfterRevision().getFile();
+      deletedChange=new ExternallyRenamedChange(myListsHolder.createDeletedItemRevision(path,true),null,source.getPresentableUrl());
+      ((ExternallyRenamedChange)deletedChange).setCopied(false);
+      ((ExternallyRenamedChange)deletedChange).setRenamedOrMovedTarget(source);
+    }
+ else {
+      deletedChange=new Change(myListsHolder.createDeletedItemRevision(path,true),null);
+    }
+    myListsHolder.add(path,deletedChange);
+  }
+  for (  String path : myChangedPaths) {
+    boolean moveAndChange=false;
+    final boolean replaced=myReplacedPaths.contains(path);
+    for (    String addedPath : myAddedPaths) {
+      String copyFromPath=myCopiedAddedPaths.get(addedPath);
+      if ((copyFromPath != null) && (SVNPathUtil.isAncestor(addedPath,path))) {
+        if (addedPath.length() < path.length()) {
+          final String relative=SVNPathUtil.getRelativePath(addedPath,path);
+          copyFromPath=SVNPathUtil.append(copyFromPath,relative);
+        }
+        final ExternallyRenamedChange renamedChange=new ExternallyRenamedChange(myListsHolder.createRevisionLazily(copyFromPath,true),myListsHolder.createRevisionLazily(path,false),copyFromPath);
+        moveAndChange=true;
+        renamedChange.getMoveRelativePath(myVcs.getProject());
+        renamedChange.setIsReplaced(replaced);
+        final ExternallyRenamedChange addedChange=copiedAddedChanges.get(myCopiedAddedPaths.get(addedPath));
+        if ((addedChange != null) && (addedChange.isCopied())) {
+          renamedChange.setCopied(true);
+        }
+ else {
+          renamedChange.setCopied(false);
+        }
+        myListsHolder.add(path,renamedChange);
+        break;
+      }
+    }
+    if (!moveAndChange) {
+      final ExternallyRenamedChange renamedChange=new ExternallyRenamedChange(myListsHolder.createRevisionLazily(path,true),myListsHolder.createRevisionLazily(path,false),null);
+      renamedChange.setIsReplaced(replaced);
+      renamedChange.setCopied(false);
+      myListsHolder.add(path,renamedChange);
+    }
+  }
+}

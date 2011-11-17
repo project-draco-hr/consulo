@@ -1,0 +1,107 @@
+{
+  final ListSelectionListener selectionListener=new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      final List objects=myRevisionsList.getSelectedObjects();
+      myRepositoryChangesBrowser.setChangesToDisplay(Collections.<Change>emptyList());
+      myAlreadyMerged.clear();
+      if (objects != null && (!objects.isEmpty())) {
+        final List<CommittedChangeList> lists=ObjectsConvertor.convert(objects,new Convertor<Object,CommittedChangeList>(){
+          public CommittedChangeList convert(          Object o){
+            if (o instanceof CommittedChangeList) {
+              final CommittedChangeList cl=(CommittedChangeList)o;
+              final Collection<String> notMerged=myMergeChecker.getNotMergedPaths(cl.getNumber());
+              final SvnChangeList svnList=(SvnChangeList)cl;
+              final Collection<String> forCheck=new HashSet<String>();
+              forCheck.addAll(svnList.getAddedPaths());
+              forCheck.addAll(svnList.getChangedPaths());
+              forCheck.addAll(svnList.getDeletedPaths());
+              for (              String path : forCheck) {
+                if ((notMerged != null) && (!notMerged.isEmpty()) && !notMerged.contains(path)) {
+                  myAlreadyMerged.add(((SvnChangeList)cl).getByPath(path));
+                }
+              }
+              return cl;
+            }
+            return null;
+          }
+        }
+,ObjectsConvertor.NOT_NULL);
+        final List<Change> changes=CommittedChangesTreeBrowser.collectChanges(lists,false);
+        myRepositoryChangesBrowser.setChangesToDisplay(changes);
+      }
+      mySplitter.doLayout();
+      myRepositoryChangesBrowser.repaint();
+    }
+  }
+;
+  final MyListCellRenderer listCellRenderer=new MyListCellRenderer();
+  myRevisionsList=new TableView<CommittedChangeList>(){
+    @Override public TableCellRenderer getCellRenderer(    int row,    int column){
+      return listCellRenderer;
+    }
+    @Override public void valueChanged(    ListSelectionEvent e){
+      super.valueChanged(e);
+      selectionListener.valueChanged(e);
+    }
+  }
+;
+  myRevisionsList.getExpandableItemsHandler().setEnabled(false);
+  new TableViewSpeedSearch(myRevisionsList){
+    @Override protected String getElementText(    Object element){
+      if (element instanceof CommittedChangeList) {
+        return ((CommittedChangeList)element).getComment();
+      }
+      return null;
+    }
+  }
+;
+  final ListTableModel<CommittedChangeList> flatModel=new ListTableModel<CommittedChangeList>(FAKE_COLUMN);
+  myRevisionsList.setModel(flatModel);
+  myRevisionsList.setTableHeader(null);
+  myRevisionsList.setShowGrid(false);
+  final AbstractBaseTagMouseListener mouseListener=new AbstractBaseTagMouseListener(){
+    @Override protected Object getTagAt(    MouseEvent e){
+      Object tag=null;
+      JTable table=(JTable)e.getSource();
+      int row=table.rowAtPoint(e.getPoint());
+      int column=table.columnAtPoint(e.getPoint());
+      if (row == -1 || column == -1)       return null;
+      listCellRenderer.customizeCellRenderer(table,table.getValueAt(row,column),table.isRowSelected(row),false,row,column);
+      final ColoredTreeCellRenderer renderer=listCellRenderer.myRenderer;
+      final Rectangle rc=table.getCellRect(row,column,false);
+      int index=renderer.findFragmentAt(e.getPoint().x - rc.x);
+      if (index >= 0) {
+        tag=renderer.getFragmentTag(index);
+      }
+      return tag;
+    }
+  }
+;
+  mouseListener.install(myRevisionsList);
+  final PagedListWithActions.InnerComponentManager<CommittedChangeList> listsManager=new PagedListWithActions.InnerComponentManager<CommittedChangeList>(){
+    public Component getComponent(){
+      return myRevisionsList;
+    }
+    public void setData(    List<CommittedChangeList> committedChangeLists){
+      flatModel.setItems(committedChangeLists);
+      flatModel.fireTableDataChanged();
+    }
+    public void refresh(){
+      myRevisionsList.revalidate();
+      myRevisionsList.repaint();
+    }
+  }
+;
+  final PagedListWithActions<CommittedChangeList> byRevisions=new PagedListWithActions<CommittedChangeList>(myListsEngine,listsManager,new MySelectAll(),new MyUnselectAll());
+  mySplitter=new Splitter(false,0.7f);
+  mySplitter.setFirstComponent(byRevisions.getComponent());
+  flatModel.setItems(myListsEngine.getCurrent());
+  flatModel.fireTableDataChanged();
+  myRepositoryChangesBrowser=new RepositoryChangesBrowser(myProject,Collections.<CommittedChangeList>emptyList(),Collections.<Change>emptyList(),null);
+  myRepositoryChangesBrowser.getDiffAction().registerCustomShortcutSet(CommonShortcuts.getDiff(),myRevisionsList);
+  setChangesDecorator();
+  mySplitter.setSecondComponent(myRepositoryChangesBrowser);
+  mySplitter.setDividerWidth(2);
+  addRevisionListListeners();
+  myPanel.add(mySplitter,BorderLayout.CENTER);
+}
