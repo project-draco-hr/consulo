@@ -1,0 +1,43 @@
+{
+  Collection<GradleProjectStructureChange> result=calculateProjectChanges(gradleProject,intellijProject,knownChanges);
+  final Map<String,Module> intellijModulesByName=new HashMap<String,Module>();
+  for (  Module module : ModuleManager.getInstance(intellijProject).getModules()) {
+    intellijModulesByName.put(module.getName(),module);
+  }
+  Set<? extends GradleModule> gradleModules=new HashSet<GradleModule>(gradleProject.getModules());
+  final Ref<Module> gradleModuleToMap=new Ref<Module>();
+  final Ref<Module> intellijModule=new Ref<Module>();
+  GradleProjectStructureChangeVisitor visitor=new GradleProjectStructureChangeVisitorAdapter(){
+    @Override public void visit(    @NotNull GradleRenameChange change){
+      if (gradleModuleToMap.get().getName().equals(change.getGradleValue()) && change.getEntity() == GradleRenameChange.Entity.MODULE) {
+        intellijModule.set(intellijModulesByName.get(change.getIntellijValue()));
+      }
+    }
+  }
+;
+  for (Iterator<? extends GradleModule> i=gradleModules.iterator(); i.hasNext(); ) {
+    GradleModule gradleModule=i.next();
+    Module module=intellijModulesByName.get(gradleModule.getName());
+    if (module == null) {
+      for (      GradleProjectStructureChange change : knownChanges) {
+        change.invite(visitor);
+        if ((module=intellijModule.get()) != null) {
+          break;
+        }
+      }
+    }
+    if (module != null) {
+      i.remove();
+      intellijModulesByName.remove(module.getName());
+      result.addAll(myModuleChangesCalculator.calculateDiff(gradleModule,module,knownChanges));
+    }
+  }
+  for (  GradleModule module : gradleModules) {
+    result.add(new GradleModulePresenceChange(module,null));
+  }
+  for (  Module module : intellijModulesByName.values()) {
+    result.add(new GradleModulePresenceChange(null,module));
+  }
+  result.removeAll(knownChanges);
+  return result;
+}
