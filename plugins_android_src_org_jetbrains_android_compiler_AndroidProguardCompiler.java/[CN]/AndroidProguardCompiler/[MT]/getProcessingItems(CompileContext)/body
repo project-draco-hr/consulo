@@ -1,0 +1,61 @@
+{
+  return ApplicationManager.getApplication().runReadAction(new Computable<ProcessingItem[]>(){
+    @Override public ProcessingItem[] compute(){
+      final Module[] modules=ModuleManager.getInstance(context.getProject()).getModules();
+      final List<ProcessingItem> items=new ArrayList<ProcessingItem>();
+      for (      final Module module : modules) {
+        final AndroidFacet facet=AndroidFacet.getInstance(module);
+        if (facet == null || facet.getConfiguration().LIBRARY_PROJECT) {
+          continue;
+        }
+        if (!AndroidCompileUtil.isReleaseBuild(context)) {
+          continue;
+        }
+        final VirtualFile proguardConfigFile=AndroidCompileUtil.getProguardConfigFile(facet);
+        if (proguardConfigFile == null) {
+          continue;
+        }
+        final CompilerModuleExtension extension=CompilerModuleExtension.getInstance(module);
+        if (extension == null) {
+          LOG.error("Cannot find compiler module extension for module " + module.getName());
+          continue;
+        }
+        final VirtualFile classFilesDir=extension.getCompilerOutputPath();
+        if (classFilesDir == null) {
+          context.addMessage(CompilerMessageCategory.INFORMATION,"Output directory is not specified for module " + module.getName(),null,-1,-1);
+          continue;
+        }
+        final VirtualFile mainContentRoot=AndroidRootUtil.getMainContentRoot(facet);
+        if (mainContentRoot == null) {
+          context.addMessage(CompilerMessageCategory.ERROR,"Cannot find main content root for module " + module.getName(),null,-1,-1);
+          continue;
+        }
+        final AndroidPlatform platform=facet.getConfiguration().getAndroidPlatform();
+        if (platform == null) {
+          context.addMessage(CompilerMessageCategory.ERROR,AndroidBundle.message("android.compilation.error.specify.platform",module.getName()),null,-1,-1);
+          continue;
+        }
+        final String logsDirOsPath=FileUtil.toSystemDependentName(mainContentRoot.getPath() + '/' + DIRECTORY_FOR_LOGS_NAME);
+        final File logsDir=new File(logsDirOsPath);
+        if (!logsDir.exists()) {
+          if (!logsDir.mkdirs()) {
+            context.addMessage(CompilerMessageCategory.ERROR,"Cannot find directory " + logsDirOsPath,null,-1,-1);
+            continue;
+          }
+        }
+        final List<VirtualFile> externalJars=AndroidRootUtil.getExternalLibraries(module);
+        final Set<VirtualFile> classFilesDirs=new HashSet<VirtualFile>();
+        AndroidDexCompiler.addModuleOutputDir(classFilesDirs,classFilesDir);
+        for (        VirtualFile file : AndroidRootUtil.getDependentModules(module,classFilesDir)) {
+          AndroidDexCompiler.addModuleOutputDir(classFilesDirs,file);
+        }
+        final String sdkPath=FileUtil.toSystemDependentName(platform.getSdk().getLocation());
+        final VirtualFile outputDir=AndroidDexCompiler.getOutputDirectoryForDex(module);
+        final String outputJarOsPath=FileUtil.toSystemDependentName(outputDir.getPath() + '/' + PROGUARD_OUTPUT_JAR_NAME);
+        items.add(new MyProcessingItem(module,sdkPath,platform.getTarget(),proguardConfigFile,outputJarOsPath,classFilesDir,classFilesDirs.toArray(new VirtualFile[classFilesDirs.size()]),externalJars.toArray(new VirtualFile[externalJars.size()]),logsDirOsPath));
+      }
+      return items.toArray(new ProcessingItem[items.size()]);
+    }
+  }
+);
+}
