@@ -1,65 +1,31 @@
 {
-  @NonNls List<Pair<String,String>> params=new ArrayList<Pair<String,String>>();
-  params.add(Pair.create("username",userName));
-  params.add(Pair.create("pwd",password));
-  params.add(Pair.create("_title",MessageFormat.format(THREAD_SUBJECT,error.getLastAction() == null ? error.getExceptionClass() : error.getLastAction() + ", " + error.getExceptionClass())));
-  ApplicationInfoEx appInfo=(ApplicationInfoEx)ApplicationManager.getApplication().getComponent(ApplicationInfo.class);
-  params.add(Pair.create("_build",appInfo.getBuild().asString()));
-  params.add(Pair.create("_description",(compilationTimestamp != null ? ("Build time: " + compilationTimestamp + "\n") : "") + error.getDescription() + "\n\n"+ error.getStackTrace()));
-  String jdkVersion=SystemProperties.getJavaVersion();
-  String jdkVendor=SystemProperties.getJavaVmVendor();
-  if (jdkVendor.contains(SUN)) {
-    if (jdkVersion.equals(JDK_1_4_2))     jdkVersion="10";
- else     if (jdkVersion.equals(JDK_1_4_1))     jdkVersion="7";
- else     if (jdkVersion.equals(JDK_1_4_0_02))     jdkVersion="9";
- else     if (jdkVersion.equals(JDK_1_4_0_01))     jdkVersion="8";
- else     if (jdkVersion.equals(JDK_1_4_0))     jdkVersion="6";
- else     if (jdkVersion.equals(JDK_1_3_1_01))     jdkVersion="5";
- else     if (jdkVersion.equals(JDK_1_3_1))     jdkVersion="4";
- else     if (jdkVersion.equals(JDK_1_3_0))     jdkVersion="3";
- else     if (jdkVersion.equals(JDK_1_2_2))     jdkVersion="2";
- else     jdkVersion="1";
-  }
- else   jdkVersion="1";
-  params.add(Pair.create("_jdk",jdkVersion));
-  String os=error.getOs();
-  if (os == null)   os="";
-  if (os.contains(WINDOWS_XP))   os="4";
- else   if (os.contains(WINDOWS_2000) || os.contains(WINDOWS_NT))   os="3";
- else   if (os.contains(WINDOWS_95) || os.contains(WINDOWS_98) || os.contains(WINDOWS_ME))   os="2";
- else   if (os.contains(SOLARIS))   os="7";
- else   if (os.contains(MAC_OS_X))   os="6";
- else   if (os.contains(LINUX))   os="5";
- else   os="1";
-  params.add(Pair.create("_os",os));
-  params.add(Pair.create("_product",ApplicationNamesInfo.getInstance().getProductName()));
-  for (  Attachment attachment : error.getAttachments()) {
-    params.add(Pair.create("_attachment_name",attachment.getName()));
-    params.add(Pair.create("_attachment_value",attachment.getEncodedBytes()));
-  }
+  @NonNls List<Pair<String,String>> params=createParametersFor(login,password,error,compilationTimestamp,(ApplicationInfoEx)ApplicationInfo.getInstance(),ApplicationNamesInfo.getInstance());
   HttpURLConnection connection=post(NEW_THREAD_URL,params);
-  int response=connection.getResponseCode();
-switch (response) {
-case HttpURLConnection.HTTP_OK:
-    break;
-case HttpURLConnection.HTTP_BAD_REQUEST:
-case HttpURLConnection.HTTP_NOT_FOUND:
-  throw new NoSuchEAPUserException(userName);
-default :
-throw new InternalEAPException(DiagnosticBundle.message("error.http.result.code",response));
-}
-ByteArrayOutputStream baos=new ByteArrayOutputStream();
-InputStream is=connection.getInputStream();
-int c;
-while ((c=is.read()) != -1) {
-baos.write(c);
-}
-int threadId;
-try {
-threadId=Integer.valueOf(baos.toString().trim()).intValue();
-}
- catch (NumberFormatException ex) {
-throw new InternalEAPException(DiagnosticBundle.message("error.itn.returns.wrong.data"));
-}
-return threadId;
+  int responseCode=connection.getResponseCode();
+  if (responseCode != HttpURLConnection.HTTP_OK) {
+    throw new InternalEAPException(DiagnosticBundle.message("error.http.result.code",responseCode));
+  }
+  String reply;
+  InputStream is=new BufferedInputStream(connection.getInputStream());
+  try {
+    reply=readFrom(is);
+  }
+  finally {
+    is.close();
+  }
+  if ("unauthorized".equals(reply)) {
+    throw new NoSuchEAPUserException(login);
+  }
+  if (reply.startsWith("update ")) {
+    throw new UpdateAvailableException(reply.substring(7));
+  }
+  if (reply.startsWith("message ")) {
+    throw new InternalEAPException(reply.substring(8));
+  }
+  try {
+    return Integer.valueOf(reply.trim()).intValue();
+  }
+ catch (  NumberFormatException ex) {
+    throw new InternalEAPException(DiagnosticBundle.message("error.itn.returns.wrong.data"));
+  }
 }
