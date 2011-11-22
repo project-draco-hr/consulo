@@ -1,0 +1,60 @@
+{
+  final MavenId artifactMavenId=artifact.getMavenId();
+  final String genModuleName=AndroidMavenUtil.getModuleNameForExtApklibArtifact(artifactMavenId);
+  final String genExternalApklibsDirPath=AndroidMavenUtil.computePathForGenExternalApklibsDir(artifactMavenId,mavenProject,mavenTree.getProjects());
+  final String targetDirPath=genExternalApklibsDirPath != null ? genExternalApklibsDirPath + '/' + AndroidMavenUtil.getMavenIdStringForFileName(artifactMavenId) : null;
+  if (targetDirPath == null) {
+    return null;
+  }
+  final File targetDir=new File(targetDirPath);
+  if (targetDir.exists()) {
+    if (!FileUtil.delete(targetDir)) {
+      LOG.error("Cannot delete old " + targetDirPath);
+      return null;
+    }
+  }
+  if (!targetDir.mkdirs()) {
+    LOG.error("Cannot create directory " + targetDirPath);
+    return null;
+  }
+  final File artifactFile=artifact.getFile();
+  final AndroidExternalApklibDependenciesManager adm=AndroidExternalApklibDependenciesManager.getInstance(project);
+  adm.setArtifactFilePath(artifactMavenId,FileUtil.toSystemIndependentName(artifactFile.getPath()));
+  if (artifactFile.exists()) {
+    try {
+      ZipUtil.extract(artifactFile,targetDir,null);
+    }
+ catch (    IOException e) {
+      LOG.error(e);
+      return null;
+    }
+  }
+ else {
+    LOG.info("Cannot find file " + artifactFile.getPath());
+  }
+  final VirtualFile vApklibDir=LocalFileSystem.getInstance().refreshAndFindFileByPath(targetDirPath);
+  if (vApklibDir == null) {
+    LOG.error("Cannot find file " + targetDirPath + " in VFS");
+    return null;
+  }
+  if (apklibModule == null) {
+    final String genModuleFilePath=genExternalApklibsDirPath + '/' + genModuleName+ ModuleFileType.DOT_DEFAULT_EXTENSION;
+    apklibModule=moduleModel.newModule(genModuleFilePath,StdModuleTypes.JAVA);
+  }
+  final ModifiableRootModel apklibModuleModel=modelsProvider.getRootModel(apklibModule);
+  final ContentEntry contentEntry=apklibModuleModel.addContentEntry(vApklibDir);
+  final VirtualFile sourceRoot=vApklibDir.findChild(AndroidMavenUtil.APK_LIB_ARTIFACT_SOURCE_ROOT);
+  if (sourceRoot != null) {
+    contentEntry.addSourceFolder(sourceRoot,false);
+  }
+ else {
+    LOG.info("Cannot find " + AndroidMavenUtil.APK_LIB_ARTIFACT_SOURCE_ROOT + " directory in "+ vApklibDir.getPath());
+  }
+  final AndroidFacet facet=AndroidUtils.addAndroidFacet(apklibModuleModel,vApklibDir,true);
+  final AndroidFacetConfiguration configuration=facet.getConfiguration();
+  configuration.RES_FOLDER_RELATIVE_PATH='/' + AndroidMavenUtil.APK_LIB_ARTIFACT_RES_DIR;
+  configuration.LIBS_FOLDER_RELATIVE_PATH='/' + AndroidMavenUtil.APK_LIB_ARTIFACT_NATIVE_LIBS_DIR;
+  configuration.MANIFEST_FILE_RELATIVE_PATH='/' + AndroidMavenUtil.APK_LIB_ARTIFACT_MANIFEST_FILE;
+  importSdkAndDependenciesForApklibArtifact(project,rootModelAdapter,apklibModuleModel,modelsProvider,mavenTree,artifact,mavenProject2ModuleName);
+  return apklibModule;
+}

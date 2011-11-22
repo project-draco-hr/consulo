@@ -9,15 +9,30 @@
       return false;
     }
   }
+  errorBean.setDescription(description);
+  errorBean.setMessage(event.getMessage());
+  if (previousExceptionThreadId != 0) {
+    errorBean.setPreviousException(previousExceptionThreadId);
+  }
+  Throwable t=event.getThrowable();
+  if (t != null) {
+    final PluginId pluginId=IdeErrorsDialog.findPluginId(t);
+    if (pluginId != null) {
+      final IdeaPluginDescriptor ideaPluginDescriptor=PluginManager.getPlugin(pluginId);
+      if (ideaPluginDescriptor != null && !ideaPluginDescriptor.isBundled()) {
+        errorBean.setPluginName(ideaPluginDescriptor.getName());
+        errorBean.setPluginVersion(ideaPluginDescriptor.getVersion());
+      }
+    }
+  }
+  if (event.getData() instanceof LogMessageEx) {
+    errorBean.setAttachments(((LogMessageEx)event.getData()).getAttachments());
+  }
   @NonNls String login=errorReportConfigurable.ITN_LOGIN;
   @NonNls String password=errorReportConfigurable.getPlainItnPassword();
   if (login.trim().length() == 0 && password.trim().length() == 0) {
     login="idea_anonymous";
     password="guest";
-  }
-  errorBean.setDescription(buildDescription(event,description));
-  if (event.getData() instanceof LogMessageEx) {
-    errorBean.setAttachments(((LogMessageEx)event.getData()).getAttachments());
   }
   ErrorReportSender.sendError(project,login,password,errorBean,new Consumer<Integer>(){
     @SuppressWarnings({"AssignmentToStaticFieldFromInstanceMethod"}) @Override public void consume(    Integer threadId){
@@ -63,7 +78,13 @@
  else {
             msg=DiagnosticBundle.message("error.report.sending.failure");
           }
-          if (Messages.showYesNoDialog(parentComponent,msg,ReportMessages.ERROR_REPORT,Messages.getErrorIcon()) != 0) {
+          if (e instanceof UpdateAvailableException) {
+            ApplicationInfoEx appInfo=(ApplicationInfoEx)ApplicationManager.getApplication().getComponent(ApplicationInfo.class);
+            String message=DiagnosticBundle.message(appInfo.isEAP() ? "error.report.new.eap.build.message" : "error.report.new.build.message",e.getMessage());
+            Messages.showMessageDialog(parentComponent,message,CommonBundle.getWarningTitle(),Messages.getWarningIcon());
+            callback.consume(new SubmittedReportInfo(null,"0",SubmittedReportInfo.SubmissionStatus.FAILED));
+          }
+ else           if (Messages.showYesNoDialog(parentComponent,msg,ReportMessages.ERROR_REPORT,Messages.getErrorIcon()) != 0) {
             callback.consume(new SubmittedReportInfo(null,"0",SubmittedReportInfo.SubmissionStatus.FAILED));
           }
  else {
