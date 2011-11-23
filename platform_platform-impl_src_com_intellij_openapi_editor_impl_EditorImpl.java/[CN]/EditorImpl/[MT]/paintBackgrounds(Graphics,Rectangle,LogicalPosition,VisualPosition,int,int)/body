@@ -18,85 +18,90 @@
   int start=clipStartOffset;
   int end=clipEndOffset;
   getSoftWrapModel().registerSoftWrapsIfNecessary();
-  IterationState iterationState=new IterationState(this,start,end,isPaintSelection());
   LineIterator lIterator=createLineIterator();
   lIterator.start(start);
   if (lIterator.atEnd()) {
     return;
   }
-  TextAttributes attributes=iterationState.getMergedAttributes();
-  Color backColor=getBackgroundColor(attributes);
-  int fontType=attributes.getFontType();
-  CharSequence text=myDocument.getCharsNoThreadCheck();
-  int lastLineIndex=Math.max(0,myDocument.getLineCount() - 1);
-  TIntHashSet softWrapsToSkip=new TIntHashSet();
-  SoftWrap softWrap=getSoftWrapModel().getSoftWrap(start);
-  if (softWrap != null) {
-    softWrapsToSkip.add(softWrap.getStart());
-    Color color=null;
-    if (backColor != null && !backColor.equals(defaultBackground)) {
-      color=backColor;
+  IterationState iterationState=new IterationState(this,start,end,isPaintSelection());
+  try {
+    TextAttributes attributes=iterationState.getMergedAttributes();
+    Color backColor=getBackgroundColor(attributes);
+    int fontType=attributes.getFontType();
+    CharSequence text=myDocument.getCharsNoThreadCheck();
+    int lastLineIndex=Math.max(0,myDocument.getLineCount() - 1);
+    TIntHashSet softWrapsToSkip=new TIntHashSet();
+    SoftWrap softWrap=getSoftWrapModel().getSoftWrap(start);
+    if (softWrap != null) {
+      softWrapsToSkip.add(softWrap.getStart());
+      Color color=null;
+      if (backColor != null && !backColor.equals(defaultBackground)) {
+        color=backColor;
+      }
+      if (color == null && position.y == getCaretModel().getVisualPosition().line * getLineHeight()) {
+        color=getColorsScheme().getColor(EditorColors.CARET_ROW_COLOR);
+      }
+      if (color != null) {
+        drawBackground(g,color,softWrap.getIndentInPixels(),position,defaultBackground,clip);
+      }
+      position.x=softWrap.getIndentInPixels();
     }
-    if (color == null && position.y == getCaretModel().getVisualPosition().line * getLineHeight()) {
-      color=getColorsScheme().getColor(EditorColors.CARET_ROW_COLOR);
-    }
-    if (color != null) {
-      drawBackground(g,color,softWrap.getIndentInPixels(),position,defaultBackground,clip);
-    }
-    position.x=softWrap.getIndentInPixels();
-  }
-  boolean[] caretRowPainted=new boolean[1];
-  while (!iterationState.atEnd() && !lIterator.atEnd()) {
-    int hEnd=iterationState.getEndOffset();
-    int lEnd=lIterator.getEnd();
-    if (hEnd >= lEnd) {
-      FoldRegion collapsedFolderAt=myFoldingModel.getCollapsedRegionAtOffset(start);
-      if (collapsedFolderAt == null) {
-        position.x=drawSoftWrapAwareBackground(g,backColor,text,start,lEnd - lIterator.getSeparatorLength(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
-        if (lIterator.getLineNumber() < lastLineIndex) {
-          if (backColor != null && !backColor.equals(defaultBackground)) {
-            g.setColor(backColor);
-            g.fillRect(position.x,position.y,clip.x + clip.width - position.x,lineHeight);
+    boolean[] caretRowPainted=new boolean[1];
+    while (!iterationState.atEnd() && !lIterator.atEnd()) {
+      int hEnd=iterationState.getEndOffset();
+      int lEnd=lIterator.getEnd();
+      if (hEnd >= lEnd) {
+        FoldRegion collapsedFolderAt=myFoldingModel.getCollapsedRegionAtOffset(start);
+        if (collapsedFolderAt == null) {
+          position.x=drawSoftWrapAwareBackground(g,backColor,text,start,lEnd - lIterator.getSeparatorLength(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
+          if (lIterator.getLineNumber() < lastLineIndex) {
+            if (backColor != null && !backColor.equals(defaultBackground)) {
+              g.setColor(backColor);
+              g.fillRect(position.x,position.y,clip.x + clip.width - position.x,lineHeight);
+            }
+          }
+ else {
+            paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground,caretRowPainted);
+            break;
+          }
+          position.x=0;
+          if (position.y > clip.y + clip.height)           break;
+          position.y+=lineHeight;
+          start=lEnd;
+        }
+        lIterator.advance();
+      }
+ else {
+        FoldRegion collapsedFolderAt=iterationState.getCurrentFold();
+        if (collapsedFolderAt != null) {
+          softWrap=mySoftWrapModel.getSoftWrap(collapsedFolderAt.getStartOffset());
+          if (softWrap != null) {
+            position.x=drawSoftWrapAwareBackground(g,backColor,text,collapsedFolderAt.getStartOffset(),collapsedFolderAt.getStartOffset(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
+          }
+          position.x=drawBackground(g,backColor,collapsedFolderAt.getPlaceholderText(),position,fontType,defaultBackground,clip);
+        }
+ else {
+          if (hEnd > lEnd - lIterator.getSeparatorLength()) {
+            position.x=drawSoftWrapAwareBackground(g,backColor,text,start,lEnd - lIterator.getSeparatorLength(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
+          }
+ else {
+            position.x=drawSoftWrapAwareBackground(g,backColor,text,start,hEnd,position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
           }
         }
- else {
-          paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground,caretRowPainted);
-          break;
-        }
-        position.x=0;
-        if (position.y > clip.y + clip.height)         break;
-        position.y+=lineHeight;
-        start=lEnd;
+        iterationState.advance();
+        attributes=iterationState.getMergedAttributes();
+        backColor=getBackgroundColor(attributes);
+        fontType=attributes.getFontType();
+        start=iterationState.getStartOffset();
       }
-      lIterator.advance();
     }
- else {
-      FoldRegion collapsedFolderAt=iterationState.getCurrentFold();
-      if (collapsedFolderAt != null) {
-        softWrap=mySoftWrapModel.getSoftWrap(collapsedFolderAt.getStartOffset());
-        if (softWrap != null) {
-          position.x=drawSoftWrapAwareBackground(g,backColor,text,collapsedFolderAt.getStartOffset(),collapsedFolderAt.getStartOffset(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
-        }
-        position.x=drawBackground(g,backColor,collapsedFolderAt.getPlaceholderText(),position,fontType,defaultBackground,clip);
-      }
- else {
-        if (hEnd > lEnd - lIterator.getSeparatorLength()) {
-          position.x=drawSoftWrapAwareBackground(g,backColor,text,start,lEnd - lIterator.getSeparatorLength(),position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
-        }
- else {
-          position.x=drawSoftWrapAwareBackground(g,backColor,text,start,hEnd,position,fontType,defaultBackground,clip,softWrapsToSkip,caretRowPainted);
-        }
-      }
-      iterationState.advance();
-      attributes=iterationState.getMergedAttributes();
-      backColor=getBackgroundColor(attributes);
-      fontType=attributes.getFontType();
-      start=iterationState.getStartOffset();
+    flushBackground(g,clip);
+    if (lIterator.getLineNumber() >= lastLineIndex && position.y <= clip.y + clip.height) {
+      paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground,caretRowPainted);
     }
   }
-  flushBackground(g,clip);
-  if (lIterator.getLineNumber() >= lastLineIndex && position.y <= clip.y + clip.height) {
-    paintAfterFileEndBackground(iterationState,g,position,clip,lineHeight,defaultBackground,caretRowPainted);
+  finally {
+    iterationState.dispose();
   }
   if (mySoftWrapsChanged) {
     mySoftWrapsChanged=false;

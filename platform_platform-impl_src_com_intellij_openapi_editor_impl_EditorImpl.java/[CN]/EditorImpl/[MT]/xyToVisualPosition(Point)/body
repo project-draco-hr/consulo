@@ -9,10 +9,7 @@
   int offset=logicalPositionToOffset(logicalPosition);
   if (offset >= textLength)   return new VisualPosition(line,EditorUtil.columnsNumber(p.x,EditorUtil.getSpaceWidth(Font.PLAIN,this)));
   boolean activeSoftWrapProcessed=logicalPosition.softWrapLinesOnCurrentLogicalLine <= 0;
-  int column=0;
-  int prevX=0;
   CharSequence text=myDocument.getCharsNoThreadCheck();
-  char c=' ';
   LogicalPosition endLogicalPosition=visualToLogicalPosition(new VisualPosition(line + 1,0));
   int endOffset=logicalPositionToOffset(endLogicalPosition);
   if (offset > endOffset) {
@@ -20,111 +17,119 @@
     return new VisualPosition(line,EditorUtil.columnsNumber(p.x,EditorUtil.getSpaceWidth(Font.PLAIN,this)));
   }
   IterationState state=new IterationState(this,offset,endOffset,false);
-  int fontType=state.getMergedAttributes().getFontType();
-  int spaceSize=EditorUtil.getSpaceWidth(fontType,this);
-  int x=0;
-  int charWidth;
-  boolean onSoftWrapDrawing=false;
-  outer:   while (true) {
-    charWidth=-1;
-    if (offset >= textLength) {
-      break;
-    }
-    if (offset >= state.getEndOffset()) {
-      state.advance();
-      fontType=state.getMergedAttributes().getFontType();
-    }
-    SoftWrap softWrap=mySoftWrapModel.getSoftWrap(offset);
-    if (softWrap != null) {
-      if (activeSoftWrapProcessed) {
-        prevX=x;
-        charWidth=getSoftWrapModel().getMinDrawingWidthInPixels(SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED);
-        x+=charWidth;
-        if (x >= px) {
-          onSoftWrapDrawing=true;
-        }
- else {
-          column++;
-        }
-        break outer;
+  try {
+    int fontType=state.getMergedAttributes().getFontType();
+    int spaceSize=EditorUtil.getSpaceWidth(fontType,this);
+    int x=0;
+    int charWidth;
+    boolean onSoftWrapDrawing=false;
+    char c=' ';
+    int prevX=0;
+    int column=0;
+    outer:     while (true) {
+      charWidth=-1;
+      if (offset >= textLength) {
+        break;
       }
- else {
-        CharSequence softWrapText=softWrap.getText();
-        for (int i=1; i < softWrapText.length(); i++) {
-          c=softWrapText.charAt(i);
+      if (offset >= state.getEndOffset()) {
+        state.advance();
+        fontType=state.getMergedAttributes().getFontType();
+      }
+      SoftWrap softWrap=mySoftWrapModel.getSoftWrap(offset);
+      if (softWrap != null) {
+        if (activeSoftWrapProcessed) {
           prevX=x;
-          charWidth=charToVisibleWidth(c,fontType,x);
+          charWidth=getSoftWrapModel().getMinDrawingWidthInPixels(SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED);
           x+=charWidth;
+          if (x >= px) {
+            onSoftWrapDrawing=true;
+          }
+ else {
+            column++;
+          }
+          break outer;
+        }
+ else {
+          CharSequence softWrapText=softWrap.getText();
+          for (int i=1; i < softWrapText.length(); i++) {
+            c=softWrapText.charAt(i);
+            prevX=x;
+            charWidth=charToVisibleWidth(c,fontType,x);
+            x+=charWidth;
+            if (x >= px) {
+              break outer;
+            }
+            column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
+          }
+          prevX=x;
+          charWidth=mySoftWrapModel.getMinDrawingWidthInPixels(SoftWrapDrawingType.AFTER_SOFT_WRAP);
+          x+=charWidth;
+          if (x >= px) {
+            onSoftWrapDrawing=true;
+            break outer;
+          }
+          column++;
+          activeSoftWrapProcessed=true;
+        }
+      }
+      FoldRegion region=state.getCurrentFold();
+      if (region != null) {
+        char[] placeholder=region.getPlaceholderText().toCharArray();
+        for (        char aPlaceholder : placeholder) {
+          c=aPlaceholder;
+          x+=EditorUtil.charWidth(c,fontType,this);
           if (x >= px) {
             break outer;
           }
-          column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
+          column++;
         }
+        offset=region.getEndOffset();
+      }
+ else {
         prevX=x;
-        charWidth=mySoftWrapModel.getMinDrawingWidthInPixels(SoftWrapDrawingType.AFTER_SOFT_WRAP);
+        c=text.charAt(offset);
+        charWidth=charToVisibleWidth(c,fontType,x);
+        if (charWidth == 0) {
+          break;
+        }
         x+=charWidth;
         if (x >= px) {
-          onSoftWrapDrawing=true;
-          break outer;
+          break;
         }
-        column++;
-        activeSoftWrapProcessed=true;
+        column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
+        offset++;
       }
     }
-    FoldRegion region=state.getCurrentFold();
-    if (region != null) {
-      char[] placeholder=region.getPlaceholderText().toCharArray();
-      for (      char aPlaceholder : placeholder) {
-        c=aPlaceholder;
-        x+=EditorUtil.charWidth(c,fontType,this);
-        if (x >= px) {
-          break outer;
-        }
-        column++;
+    if (charWidth < 0) {
+      charWidth=EditorUtil.charWidth(c,fontType,this);
+    }
+    if (charWidth < 0) {
+      charWidth=spaceSize;
+    }
+    if (x >= px && c == '\t' && !onSoftWrapDrawing) {
+      if (mySettings.isCaretInsideTabs()) {
+        column+=(px - prevX) / spaceSize;
+        if ((px - prevX) % spaceSize > spaceSize / 2)         column++;
       }
-      offset=region.getEndOffset();
+ else       if ((x - px) * 2 < x - prevX) {
+        column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
+      }
     }
  else {
-      prevX=x;
-      c=text.charAt(offset);
-      charWidth=charToVisibleWidth(c,fontType,x);
-      if (charWidth == 0) {
-        break;
-      }
-      x+=charWidth;
       if (x >= px) {
-        break;
+        if ((x - px) * 2 < charWidth)         column++;
       }
-      column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
-      offset++;
-    }
-  }
-  if (charWidth < 0) {
-    charWidth=EditorUtil.charWidth(c,fontType,this);
-  }
-  if (charWidth < 0) {
-    charWidth=spaceSize;
-  }
-  if (x >= px && c == '\t' && !onSoftWrapDrawing) {
-    if (mySettings.isCaretInsideTabs()) {
-      column+=(px - prevX) / spaceSize;
-      if ((px - prevX) % spaceSize > spaceSize / 2)       column++;
-    }
- else     if ((x - px) * 2 < x - prevX) {
-      column+=EditorUtil.columnsNumber(c,x,prevX,spaceSize);
-    }
-  }
  else {
-    if (x >= px) {
-      if ((x - px) * 2 < charWidth)       column++;
-    }
- else {
-      int diff=px - x;
-      column+=diff / spaceSize;
-      if (diff % spaceSize * 2 >= spaceSize) {
-        column++;
+        int diff=px - x;
+        column+=diff / spaceSize;
+        if (diff % spaceSize * 2 >= spaceSize) {
+          column++;
+        }
       }
     }
+    return new VisualPosition(line,column);
   }
-  return new VisualPosition(line,column);
+  finally {
+    state.dispose();
+  }
 }
