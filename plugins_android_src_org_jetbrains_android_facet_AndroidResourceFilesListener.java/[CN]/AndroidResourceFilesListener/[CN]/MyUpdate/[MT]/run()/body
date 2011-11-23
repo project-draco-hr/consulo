@@ -4,46 +4,23 @@
   }
   final GeneratingCompiler compilerToRun=ApplicationManager.getApplication().runReadAction(new Computable<GeneratingCompiler>(){
     @Nullable public GeneratingCompiler compute(){
-      if (myFacet.isDisposed())       return null;
-      Module myModule=myFacet.getModule();
-      Project project=myModule.getProject();
-      if (project.isDisposed())       return null;
-      VirtualFile file=myEvent.getFile();
-      Module module=ModuleUtil.findModuleForFile(file,project);
-      if (module == myModule) {
-        VirtualFile parent=myEvent.getParent();
-        if (parent != null) {
-          parent=parent.getParent();
-          if (AndroidAptCompiler.isToCompileModule(module,myFacet.getConfiguration()) && (myFacet.getConfiguration().REGENERATE_R_JAVA && parent == AndroidRootUtil.getResourceDir(module) || AndroidRootUtil.getManifestFile(module) == file)) {
-            Manifest manifest=myFacet.getManifest();
-            String aPackage=manifest != null ? manifest.getPackage().getValue() : null;
-            if (myCachedPackage != null && !myCachedPackage.equals(aPackage)) {
-              String aptGenDirPath=myFacet.getAptGenSourceRootPath();
-              AndroidCompileUtil.removeDuplicatingClasses(myModule,myCachedPackage,AndroidUtils.R_CLASS_NAME,null,aptGenDirPath);
-            }
-            myCachedPackage=aPackage;
-            myFacet.getLocalResourceManager().invalidateAttributeDefinitions();
-            return new AndroidAptCompiler();
-          }
-          if (myFacet.getConfiguration().REGENERATE_JAVA_BY_AIDL && file.getFileType() == AndroidIdlFileType.ourFileType) {
-            VirtualFile sourceRoot=findSourceRoot(myModule,file);
-            if (sourceRoot != null && AndroidRootUtil.getAidlGenDir(module,myFacet) != sourceRoot) {
-              return new AndroidIdlCompiler(project);
-            }
-          }
-          if (file.getFileType() == AndroidRenderscriptFileType.INSTANCE) {
-            final VirtualFile sourceRoot=findSourceRoot(myModule,file);
-            if (sourceRoot != null && AndroidRootUtil.getRenderscriptGenDir(myModule) != sourceRoot) {
-              return new AndroidRenderscriptCompiler();
-            }
-          }
-        }
-      }
-      return null;
+      return computeCompilerToRun();
     }
   }
 );
-  if (compilerToRun != null) {
-    AndroidCompileUtil.generate(myFacet.getModule(),compilerToRun,true);
+  if (compilerToRun == null) {
+    return;
   }
+  if (compilerToRun instanceof AndroidAptCompiler) {
+    final HashSet<ResourceEntry> resourceSet=new HashSet<ResourceEntry>();
+    DumbService.getInstance(myFacet.getModule().getProject()).waitForSmartMode();
+    AndroidCompileUtil.collectAllResources(myFacet,resourceSet);
+synchronized (RESOURCES_SET_LOCK) {
+      if (resourceSet.equals(myResourceSet)) {
+        return;
+      }
+      myResourceSet=resourceSet;
+    }
+  }
+  AndroidCompileUtil.generate(myFacet.getModule(),compilerToRun,true);
 }
