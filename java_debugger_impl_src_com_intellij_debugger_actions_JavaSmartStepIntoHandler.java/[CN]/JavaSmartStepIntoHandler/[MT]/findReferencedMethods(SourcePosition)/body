@@ -1,0 +1,57 @@
+{
+  final int line=position.getLine();
+  if (line < 0) {
+    return Collections.emptyList();
+  }
+  final PsiFile file=position.getFile();
+  final VirtualFile vFile=file.getVirtualFile();
+  if (vFile == null) {
+    return Collections.emptyList();
+  }
+  final Document doc=FileDocumentManager.getInstance().getDocument(vFile);
+  if (doc == null)   return Collections.emptyList();
+  if (line >= doc.getLineCount()) {
+    return Collections.emptyList();
+  }
+  final int startOffset=doc.getLineStartOffset(line);
+  final TextRange lineRange=new TextRange(startOffset,doc.getLineEndOffset(line));
+  final int offset=CharArrayUtil.shiftForward(doc.getCharsSequence(),startOffset," \t");
+  PsiElement element=file.findElementAt(offset);
+  if (element != null && !(element instanceof PsiCompiledElement)) {
+    do {
+      final PsiElement parent=element.getParent();
+      if (parent == null || (parent.getTextOffset() < lineRange.getStartOffset())) {
+        break;
+      }
+      element=parent;
+    }
+ while (true);
+    final List<PsiMethod> methods=new OrderedSet<PsiMethod>(TObjectHashingStrategy.CANONICAL);
+    final PsiElementVisitor methodCollector=new JavaRecursiveElementWalkingVisitor(){
+      @Override public void visitAnonymousClass(      PsiAnonymousClass aClass){
+      }
+      @Override public void visitStatement(      PsiStatement statement){
+        if (lineRange.intersects(statement.getTextRange())) {
+          super.visitStatement(statement);
+        }
+      }
+      @Override public void visitCallExpression(      final PsiCallExpression expression){
+        final PsiMethod psiMethod=expression.resolveMethod();
+        if (psiMethod != null) {
+          methods.add(psiMethod);
+        }
+        super.visitCallExpression(expression);
+      }
+    }
+;
+    element.accept(methodCollector);
+    for (PsiElement sibling=element.getNextSibling(); sibling != null; sibling=sibling.getNextSibling()) {
+      if (!lineRange.intersects(sibling.getTextRange())) {
+        break;
+      }
+      sibling.accept(methodCollector);
+    }
+    return methods;
+  }
+  return Collections.emptyList();
+}
