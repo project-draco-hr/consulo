@@ -5,15 +5,54 @@
     }
     protected CvsHandler getCvsHandler(    CvsContext context){
       final Project project=context.getProject();
-      return CommandCvsHandler.createCheckoutHandler(myImportDetails.getCvsRoot(),new String[]{myImportDetails.getModuleName()},myImportDetails.getWorkingDirectory(),true,makeNewFilesReadOnly,project == null ? null : VcsConfiguration.getInstance(project).getCheckoutOption());
+      return CommandCvsHandler.createCheckoutHandler(myImportDetails.getCvsRoot(),new String[]{myImportDetails.getModuleName()},myImportDetails.getBaseImportDirectory(),true,makeNewFilesReadOnly,project == null ? null : VcsConfiguration.getInstance(project).getCheckoutOption());
     }
     protected void onActionPerformed(    CvsContext context,    CvsTabbedWindow tabbedWindow,    boolean successfully,    CvsHandler handler){
       super.onActionPerformed(context,tabbedWindow,successfully,handler);
-      Project project=context.getProject();
+      final Project project=context.getProject();
       if (successfully) {
         if (project != null) {
+          final VirtualFile importedRoot=CvsVfsUtil.findFileByIoFile(myImportDetails.getBaseImportDirectory());
+          updateDirectoryMappings(project,importedRoot);
         }
       }
+    }
+    /** 
+ * Basically copied from GitInit/HgInit
+ */
+    private void updateDirectoryMappings(    Project project,    VirtualFile mapRoot){
+      if (project == null || project.isDefault()) {
+        return;
+      }
+      final VirtualFile projectBaseDir=project.getBaseDir();
+      if (projectBaseDir == null || !VfsUtil.isAncestor(projectBaseDir,mapRoot,false)) {
+        return;
+      }
+      mapRoot.refresh(false,false);
+      final String path=mapRoot.equals(projectBaseDir) ? "" : mapRoot.getPath();
+      final ProjectLevelVcsManager vcsManager=ProjectLevelVcsManager.getInstance(project);
+      final List<VcsDirectoryMapping> vcsDirectoryMappings=new ArrayList<VcsDirectoryMapping>(vcsManager.getDirectoryMappings());
+      VcsDirectoryMapping mapping=new VcsDirectoryMapping(path,CvsVcs2.getInstance(project).getName());
+      for (int i=0; i < vcsDirectoryMappings.size(); i++) {
+        final VcsDirectoryMapping m=vcsDirectoryMappings.get(i);
+        if (!m.getDirectory().equals(path)) {
+          continue;
+        }
+        if (m.getVcs().length() == 0) {
+          vcsDirectoryMappings.set(i,mapping);
+          mapping=null;
+          break;
+        }
+ else         if (m.getVcs().equals(mapping.getVcs())) {
+          mapping=null;
+          break;
+        }
+      }
+      if (mapping != null) {
+        vcsDirectoryMappings.add(mapping);
+      }
+      vcsManager.setDirectoryMappings(vcsDirectoryMappings);
+      vcsManager.updateActiveVcss();
     }
   }
 ;

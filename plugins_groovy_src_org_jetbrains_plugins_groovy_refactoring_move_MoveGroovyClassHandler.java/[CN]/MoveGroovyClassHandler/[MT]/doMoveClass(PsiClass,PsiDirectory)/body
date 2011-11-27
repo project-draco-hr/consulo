@@ -1,2 +1,72 @@
 {
+  if (!aClass.getLanguage().equals(GroovyFileType.GROOVY_LANGUAGE))   return null;
+  PsiFile file=aClass.getContainingFile();
+  if (!(file instanceof GroovyFile))   return null;
+  final PsiPackage newPackage=JavaDirectoryService.getInstance().getPackage(moveDestination);
+  LOG.assertTrue(newPackage != null);
+  PsiClass newClass=null;
+  final String newPackageName=newPackage.getQualifiedName();
+  if (aClass instanceof GroovyScriptClass) {
+    final PsiClass[] classes=((GroovyFile)file).getClasses();
+    if (classes.length == 1) {
+      if (!moveDestination.equals(file.getContainingDirectory())) {
+        MoveFilesOrDirectoriesUtil.doMoveFile(file,moveDestination);
+        ((PsiClassOwner)file).setPackageName(newPackageName);
+      }
+      return ((GroovyFile)file).getScriptClass();
+    }
+    correctSelfReferences(aClass,newPackage);
+    final GroovyFile newFile=generateNewScript((GroovyFile)file,newPackage);
+    for (    PsiElement child : file.getChildren()) {
+      if (!(child instanceof GrTopStatement || child instanceof PsiComment))       continue;
+      if (child instanceof PsiClass || child instanceof GrImportStatement || child instanceof GrPackageDefinition)       continue;
+      if (child instanceof GrDocComment) {
+        final GrDocCommentOwner owner=GrDocCommentUtil.findDocOwner((GrDocComment)child);
+        if (owner instanceof PsiClass)         continue;
+      }
+      child.delete();
+    }
+    if (!moveDestination.equals(file.getContainingDirectory())) {
+      moveDestination.add(newFile);
+    }
+    newClass=newFile.getClasses()[0];
+    correctOldClassReferences(newClass,aClass);
+  }
+ else {
+    if (!moveDestination.equals(file.getContainingDirectory()) && moveDestination.findFile(file.getName()) != null) {
+      correctSelfReferences(aClass,newPackage);
+      PsiFile newFile=moveDestination.findFile(file.getName());
+      final FileASTNode fileNode=newFile.getNode();
+      fileNode.addChild(Factory.createSingleLeafElement(GroovyTokenTypes.mNLS,"\n\n",0,2,null,aClass.getManager()));
+      final PsiDocComment docComment=aClass.getDocComment();
+      if (docComment != null) {
+        newFile.add(docComment);
+        fileNode.addChild(Factory.createSingleLeafElement(GroovyTokenTypes.mNLS,"\n",0,1,null,aClass.getManager()));
+      }
+      newClass=(GrTypeDefinition)newFile.add(aClass);
+      correctOldClassReferences(newClass,aClass);
+      aClass.delete();
+    }
+ else     if (((GroovyFile)file).getClasses().length > 1) {
+      correctSelfReferences(aClass,newPackage);
+      final PsiFile fromTemplate=GroovyTemplatesFactory.createFromTemplate(moveDestination,aClass.getName(),aClass.getName() + NewGroovyActionBase.GROOVY_EXTENSION,"GroovyClass.groovy");
+      final PsiClass created=((GroovyFile)fromTemplate).getClasses()[0];
+      PsiDocComment docComment=aClass.getDocComment();
+      if (docComment != null) {
+        final PsiDocComment createdDocComment=created.getDocComment();
+        if (createdDocComment != null) {
+          createdDocComment.replace(docComment);
+        }
+ else {
+          created.getContainingFile().addBefore(docComment,created);
+        }
+        docComment.delete();
+      }
+      newClass=(PsiClass)created.replace(aClass);
+      setPackageDefinition((GroovyFile)file,(GroovyFile)newClass.getContainingFile(),newPackageName);
+      correctOldClassReferences(newClass,aClass);
+      aClass.delete();
+    }
+  }
+  return newClass;
 }
