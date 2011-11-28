@@ -3,19 +3,32 @@
   ExcludedEntriesConfiguration configuration=((CompilerConfigurationImpl)CompilerConfiguration.getInstance(project)).getExcludedEntriesConfiguration();
   Set<ExcludeEntryDescription> addedEntries=new HashSet<ExcludeEntryDescription>();
   for (  Module module : ModuleManager.getInstance(project).getModules()) {
-    AndroidFacet facet=AndroidFacet.getInstance(module);
+    final AndroidFacet facet=AndroidFacet.getInstance(module);
     if (facet == null) {
       continue;
     }
+    final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+    ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+      @Override public void run(){
+        AndroidCompileUtil.createGenModulesAndSourceRoots(facet);
+      }
+    }
+,indicator != null ? indicator.getModalityState() : ModalityState.NON_MODAL);
+    if (context.isRebuild()) {
+      clearGenRootsAndResCache(facet,context);
+    }
     final AndroidPlatform platform=facet.getConfiguration().getAndroidPlatform();
     final int platformToolsRevision=platform != null ? platform.getSdk().getPlatformToolsRevision() : -1;
+    LOG.info("Platform-tools revision for module {0} is " + module.getName());
     if (platformToolsRevision >= 0 && platformToolsRevision <= 7) {
       if (facet.getConfiguration().LIBRARY_PROJECT) {
+        LOG.info("Excluded sources of module " + module.getName());
         excludeAllSourceRoots(module,configuration,addedEntries);
       }
     }
   }
   if (addedEntries.size() > 0) {
+    LOG.info("Files excluded by Android: " + addedEntries.size());
     CompilerManager.getInstance(project).addCompilationStatusListener(new MyCompilationStatusListener(project,addedEntries),project);
   }
   return true;
