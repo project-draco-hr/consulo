@@ -1,23 +1,37 @@
 {
   final Project project=getEventProject(e);
   final VirtualFile[] files=getFiles(e);
-  ApplicationManager.getApplication().runWriteAction(new Runnable(){
-    public void run(){
-      for (      VirtualFile f : files) {
-        f.refresh(false,true);
+  if (project == null || files == null || files.length == 0)   return;
+  final AccessToken token=WriteAction.start(getClass());
+  try {
+    for (    VirtualFile file : files) {
+      final VirtualFileSystem fs=file.getFileSystem();
+      if (fs instanceof LocalFileSystem && file instanceof NewVirtualFile) {
+        ((NewVirtualFile)file).markDirtyRecursively();
       }
     }
   }
-);
-  VcsDirtyScopeManager dirtyScopeManager=VcsDirtyScopeManager.getInstance(project);
-  for (  VirtualFile f : files) {
-    if (f.isDirectory()) {
-      dirtyScopeManager.dirDirtyRecursively(f);
-    }
+  finally {
+    token.finish();
+  }
+  final Runnable postRefreshAction=new Runnable(){
+    @Override public void run(){
+      final VcsDirtyScopeManager dirtyScopeManager=VcsDirtyScopeManager.getInstance(project);
+      for (      VirtualFile f : files) {
+        if (f.isDirectory()) {
+          dirtyScopeManager.dirDirtyRecursively(f);
+        }
  else {
-      dirtyScopeManager.fileDirty(f);
+          dirtyScopeManager.fileDirty(f);
+        }
+      }
+      final StatusBar statusBar=WindowManager.getInstance().getStatusBar(project);
+      if (statusBar != null) {
+        final String message=IdeBundle.message("action.sync.completed.successfully",getMessage(files));
+        statusBar.setInfo(message);
+      }
     }
   }
-  String message=IdeBundle.message("action.sync.completed.successfully",getMessage(files));
-  WindowManager.getInstance().getStatusBar(project).setInfo(message);
+;
+  RefreshQueue.getInstance().refresh(true,true,postRefreshAction,files);
 }
