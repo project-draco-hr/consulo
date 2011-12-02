@@ -1,21 +1,22 @@
 {
-  final FilePath filePath=VcsContextFactory.SERVICE.getInstance().createFilePathOn(file);
+  final File ioFile=new File(file.getPath());
+  final FilePath filePath=VcsContextFactory.SERVICE.getInstance().createFilePathOn(ioFile);
   final VirtualFile vcsRoot=ProjectLevelVcsManager.getInstance(myProject).getVcsRootFor(filePath);
   final CvsRepositoryLocation cvsLocation=getLocationFor(filePath);
   if (cvsLocation == null)   return null;
-  final String rootModule=CvsUtil.getModuleName(vcsRoot);
+  final String module=CvsUtil.getModuleName(vcsRoot);
   final CvsEnvironment connectionSettings=cvsLocation.getEnvironment();
   if (connectionSettings.isOffline()) {
     return null;
   }
-  final CvsChangeListsBuilder builder=new CvsChangeListsBuilder(rootModule,connectionSettings,myProject,vcsRoot);
-  final CvsChangeList[] result=new CvsChangeList[1];
+  final CvsChangeListsBuilder builder=new CvsChangeListsBuilder(module,connectionSettings,myProject,vcsRoot);
+  final Ref<CvsChangeList> result=new Ref<CvsChangeList>();
   final LoadHistoryOperation operation=new LoadHistoryOperation(connectionSettings,new Consumer<LogInformationWrapper>(){
     public void consume(    LogInformationWrapper wrapper){
       final List<Revision> revisions=wrapper.getRevisions();
       if (revisions.isEmpty())       return;
       final RevisionWrapper revision=new RevisionWrapper(wrapper.getFile(),revisions.get(0),null);
-      result[0]=builder.addRevision(revision);
+      result.set(builder.addRevision(revision));
     }
   }
 ,cvsLocation.getModuleName(),number.asString());
@@ -26,20 +27,20 @@
  else   if (executionResult.hasErrors()) {
     throw executionResult.composeError();
   }
-  if (result[0] == null) {
+  if (result.isNull()) {
     return null;
   }
-  final Date commitDate=result[0].getCommitDate();
+  final Date commitDate=result.get().getCommitDate();
   final CvsEnvironment rootConnectionSettings=CvsEntriesManager.getInstance().getCvsConnectionSettingsFor(vcsRoot);
   final long t=commitDate.getTime();
   final Date dateFrom=new Date(t - CvsChangeList.SUITABLE_DIFF);
   final Date dateTo=new Date(t + CvsChangeList.SUITABLE_DIFF);
-  final LoadHistoryOperation operation2=new LoadHistoryOperation(rootConnectionSettings,rootModule,dateFrom,dateTo,new Consumer<LogInformationWrapper>(){
+  final LoadHistoryOperation operation2=new LoadHistoryOperation(rootConnectionSettings,module,dateFrom,dateTo,new Consumer<LogInformationWrapper>(){
     @Override public void consume(    LogInformationWrapper wrapper){
       final List<RevisionWrapper> wrappers=builder.revisionWrappersFromLog(wrapper);
       if (wrappers != null) {
         for (        RevisionWrapper revisionWrapper : wrappers) {
-          if (result[0].containsFileRevision(revisionWrapper)) {
+          if (result.get().containsFileRevision(revisionWrapper)) {
             continue;
           }
           builder.addRevision(revisionWrapper);
@@ -52,5 +53,5 @@
   if (cvsResult.hasErrors()) {
     throw cvsResult.composeError();
   }
-  return new Pair<CvsChangeList,FilePath>(result[0],filePath);
+  return new Pair<CvsChangeList,FilePath>(result.get(),filePath);
 }
