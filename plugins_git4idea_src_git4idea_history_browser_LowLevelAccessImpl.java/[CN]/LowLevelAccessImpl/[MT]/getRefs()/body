@@ -1,51 +1,28 @@
 {
-  final SymbolicRefs refs=new SymbolicRefs();
+  final CachedRefs refs=new CachedRefs();
   final GitRepository repositoryForRoot=GitRepositoryManager.getInstance(myProject).getRepositoryForRoot(myRoot);
+  final GitBranchesCollection branches;
   if (repositoryForRoot != null) {
-    final GitBranchesCollection branches=repositoryForRoot.getBranches();
-    final Collection<GitBranch> localBranches=branches.getLocalBranches();
-    for (    GitBranch localBranch : localBranches) {
-      refs.addLocal(localBranch.getName());
-    }
-    final Collection<GitBranch> remoteBranches=branches.getRemoteBranches();
-    for (    GitBranch remoteBranch : remoteBranches) {
-      String name=remoteBranch.getName();
-      name=name.startsWith("remotes/") ? name.substring("remotes/".length()) : name;
-      refs.addRemote(name);
-      final GitBranch current=branches.getCurrentBranch();
-      refs.setCurrent(current);
-      if (current != null) {
-        GitBranch tracked=current.tracked(myProject,myRoot);
-        String fullName=tracked == null ? null : tracked.getFullName();
-        fullName=fullName != null && fullName.startsWith(GitBranch.REFS_REMOTES_PREFIX) ? fullName.substring(GitBranch.REFS_REMOTES_PREFIX.length()) : fullName;
-        refs.setTrackedRemote(fullName);
-      }
-      refs.setUsername(GitConfigUtil.getValue(myProject,myRoot,GitConfigUtil.USER_NAME));
-    }
+    branches=repositoryForRoot.getBranches();
   }
  else {
-    final List<GitBranch> allBranches=new ArrayList<GitBranch>();
-    final GitBranch current=GitBranch.list(myProject,myRoot,true,true,allBranches,null);
-    for (    GitBranch branch : allBranches) {
-      if (branch.isRemote()) {
-        String name=branch.getName();
-        name=name.startsWith("remotes/") ? name.substring("remotes/".length()) : name;
-        refs.addRemote(name);
-      }
- else {
-        refs.addLocal(branch.getName());
-      }
+    final File child=new File(myRoot.getPath(),".git");
+    if (!child.exists()) {
+      throw new VcsException("No git repository in " + myRoot.getPath());
     }
-    refs.setCurrent(current);
-    if (current != null) {
-      GitBranch tracked=current.tracked(myProject,myRoot);
-      String fullName=tracked == null ? null : tracked.getFullName();
-      fullName=fullName != null && fullName.startsWith(GitBranch.REFS_REMOTES_PREFIX) ? fullName.substring(GitBranch.REFS_REMOTES_PREFIX.length()) : fullName;
-      refs.setTrackedRemote(fullName);
-    }
-    refs.setUsername(GitConfigUtil.getValue(myProject,myRoot,GitConfigUtil.USER_NAME));
+    final GitRepositoryReader reader=new GitRepositoryReader(child);
+    branches=reader.readBranches();
   }
+  refs.setCollection(branches);
+  final GitBranch current=branches.getCurrentBranch();
+  if (current != null) {
+    GitBranch tracked=current.tracked(myProject,myRoot);
+    String fullName=tracked == null ? null : tracked.getFullName();
+    fullName=fullName != null && fullName.startsWith(GitBranch.REFS_REMOTES_PREFIX) ? fullName.substring(GitBranch.REFS_REMOTES_PREFIX.length()) : fullName;
+    refs.setTrackedRemoteName(fullName);
+  }
+  refs.setUsername(GitConfigUtil.getValue(myProject,myRoot,GitConfigUtil.USER_NAME));
   final VcsRevisionNumber head=GitHistoryUtils.getCurrentRevision(myProject,new FilePathImpl(myRoot),"HEAD",true);
-  refs.setHead(AbstractHash.create(head.asString()));
+  refs.setHeadHash(AbstractHash.create(head.asString()));
   return refs;
 }
