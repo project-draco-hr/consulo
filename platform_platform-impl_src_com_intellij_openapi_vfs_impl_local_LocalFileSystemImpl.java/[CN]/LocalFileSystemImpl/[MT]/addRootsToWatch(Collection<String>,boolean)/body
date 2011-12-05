@@ -1,30 +1,36 @@
 {
   if (!FileWatcher.getInstance().isOperational())   return Collections.emptySet();
-  Set<WatchRequest> result=new HashSet<WatchRequest>();
-  Set<VirtualFile> filesToSynchronize=new HashSet<VirtualFile>();
-  WRITE_LOCK.lock();
-  try {
-    for (    String rootPath : rootPaths) {
-      LOG.assertTrue(rootPath != null);
-      if (rootPath.length() > 0) {
-        final WatchRequestImpl request=new WatchRequestImpl(rootPath,toWatchRecursively);
-        final VirtualFile existingFile=findFileByPathIfCached(rootPath);
-        if (existingFile != null) {
-          if (!isAlreadyWatched(request)) {
-            filesToSynchronize.add(existingFile);
+  final Set<WatchRequest> result=new HashSet<WatchRequest>();
+  final Set<VirtualFile> filesToSynchronize=new HashSet<VirtualFile>();
+  Application application=ApplicationManager.getApplication();
+  application.runReadAction(new Runnable(){
+    public void run(){
+      WRITE_LOCK.lock();
+      try {
+        for (        String rootPath : rootPaths) {
+          LOG.assertTrue(rootPath != null);
+          if (rootPath.length() > 0) {
+            final WatchRequestImpl request=new WatchRequestImpl(rootPath,toWatchRecursively);
+            final VirtualFile existingFile=findFileByPathIfCached(rootPath);
+            if (existingFile != null) {
+              if (!isAlreadyWatched(request)) {
+                filesToSynchronize.add(existingFile);
+              }
+            }
+            result.add(request);
+            myRootsToWatch.add(request);
           }
         }
-        result.add(request);
-        myRootsToWatch.add(request);
+        myCachedNormalizedRequests=null;
+        setUpFileWatcher();
+      }
+  finally {
+        WRITE_LOCK.unlock();
       }
     }
-    myCachedNormalizedRequests=null;
-    setUpFileWatcher();
   }
-  finally {
-    WRITE_LOCK.unlock();
-  }
-  if (!ApplicationManager.getApplication().isUnitTestMode() && !filesToSynchronize.isEmpty()) {
+);
+  if (!application.isUnitTestMode() && !filesToSynchronize.isEmpty()) {
     for (    VirtualFile file : filesToSynchronize) {
       if (file instanceof NewVirtualFile && file.getFileSystem() instanceof LocalFileSystem) {
         ((NewVirtualFile)file).markDirtyRecursively();
