@@ -1,0 +1,71 @@
+{
+  List<String> words=StringUtil.getWordsIn(text);
+  if (words.isEmpty())   return true;
+  Collections.sort(words,new Comparator<String>(){
+    @Override public int compare(    String o1,    String o2){
+      return o2.length() - o1.length();
+    }
+  }
+);
+  final Set<VirtualFile> fileSet;
+  CacheManager cacheManager=CacheManager.SERVICE.getInstance(myManager.getProject());
+  if (words.size() > 1) {
+    fileSet=new THashSet<VirtualFile>();
+    Set<VirtualFile> copy=new THashSet<VirtualFile>();
+    for (int i=0; i < words.size() - 1; i++) {
+      if (progress != null) {
+        progress.checkCanceled();
+      }
+ else {
+        ProgressManager.checkCanceled();
+      }
+      final String word=words.get(i);
+      final int finalI=i;
+      cacheManager.collectVirtualFilesWithWord(new CommonProcessors.CollectProcessor<VirtualFile>(i != 0 ? copy : fileSet){
+        @Override protected boolean accept(        VirtualFile virtualFile){
+          return finalI == 0 || fileSet.contains(virtualFile);
+        }
+      }
+,word,searchContext,scope,caseSensitively);
+      if (i != 0) {
+        fileSet.retainAll(copy);
+      }
+      copy.clear();
+      if (fileSet.isEmpty())       break;
+    }
+    if (fileSet.isEmpty())     return true;
+  }
+ else {
+    fileSet=null;
+  }
+  final String lastWord=words.get(words.size() - 1);
+  if (processor instanceof CommonProcessors.CollectProcessor) {
+    final CommonProcessors.CollectProcessor collectProcessor=(CommonProcessors.CollectProcessor)processor;
+    return cacheManager.collectVirtualFilesWithWord(new CommonProcessors.CollectProcessor<VirtualFile>(collectProcessor.getResults()){
+      @Override public boolean process(      VirtualFile virtualFile){
+        if (fileSet == null || fileSet.contains(virtualFile))         return collectProcessor.process(virtualFile);
+        return true;
+      }
+    }
+,lastWord,searchContext,scope,caseSensitively);
+  }
+ else {
+    THashSet<VirtualFile> files=new THashSet<VirtualFile>();
+    cacheManager.collectVirtualFilesWithWord(new CommonProcessors.CollectProcessor<VirtualFile>(files){
+      @Override protected boolean accept(      VirtualFile virtualFile){
+        return fileSet == null || fileSet.contains(virtualFile);
+      }
+    }
+,lastWord,searchContext,scope,caseSensitively);
+    ReadActionProcessor<VirtualFile> readActionProcessor=new ReadActionProcessor<VirtualFile>(){
+      @Override public boolean processInReadAction(      VirtualFile virtualFile){
+        return processor.process(virtualFile);
+      }
+    }
+;
+    for (    VirtualFile file : files) {
+      if (!readActionProcessor.process(file))       return false;
+    }
+    return true;
+  }
+}
