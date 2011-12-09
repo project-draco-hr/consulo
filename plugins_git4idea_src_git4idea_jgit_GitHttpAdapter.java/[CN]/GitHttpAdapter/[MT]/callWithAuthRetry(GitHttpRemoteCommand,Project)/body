@@ -1,0 +1,65 @@
+{
+  ProxySelector defaultProxySelector=ProxySelector.getDefault();
+  if (GitHttpProxySupport.shouldUseProxy()) {
+    ProxySelector.setDefault(GitHttpProxySupport.newProxySelector());
+    GitHttpProxySupport.init();
+  }
+  boolean httpTransportErrorFixTried=false;
+  boolean noRemoteWithoutGitErrorFixTried=false;
+  String url=command.getUrl();
+  GitHttpCredentialsProvider provider=command.getCredentialsProvider();
+  try {
+    for (int i=0; i < 3; i++) {
+      try {
+        AuthData authData=getUsernameAndPassword(provider.getProject(),provider.getUrl());
+        if (authData != null) {
+          provider.fillAuthDataIfNotFilled(authData.getLogin(),authData.getPassword());
+        }
+        if (i == 0) {
+          provider.setAlwaysShowDialog(false);
+        }
+ else {
+          provider.setAlwaysShowDialog(true);
+        }
+        command.run();
+        rememberPassword(provider);
+        return GeneralResult.SUCCESS;
+      }
+ catch (      JGitInternalException e) {
+        if (authError(e)) {
+          if (provider.wasCancelled()) {
+            return GeneralResult.CANCELLED;
+          }
+          command.cleanup();
+        }
+ else         if (!httpTransportErrorFixTried && isTransportExceptionForHttp(e,url)) {
+          url=url.replaceFirst("http","https");
+          command.setUrl(url);
+          provider.setUrl(url);
+          httpTransportErrorFixTried=true;
+          i--;
+          command.cleanup();
+        }
+ else         if (!noRemoteWithoutGitErrorFixTried && isNoRemoteWithoutDotGitError(e,url)) {
+          url+=".git";
+          command.setUrl(url);
+          provider.setUrl(url);
+          noRemoteWithoutGitErrorFixTried=true;
+          i--;
+          command.cleanup();
+        }
+ else         if (smartHttpPushNotSupported(e)) {
+          throw new SmartPushNotSupportedException(e.getCause().getMessage());
+        }
+ else {
+          throw e;
+        }
+      }
+    }
+    return GeneralResult.NOT_AUTHORIZED;
+  }
+  finally {
+    log(command,project);
+    ProxySelector.setDefault(defaultProxySelector);
+  }
+}
