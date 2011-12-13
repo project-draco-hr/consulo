@@ -1,12 +1,26 @@
 {
   if ((testCaseClass.getModifiers() & Modifier.PUBLIC) == 0)   return null;
-  try {
-    Method suiteMethod=testCaseClass.getMethod("suite",ArrayUtil.EMPTY_CLASS_ARRAY);
-    return (Test)suiteMethod.invoke(null,ArrayUtil.EMPTY_CLASS_ARRAY);
+  Method suiteMethod=safeFindMethod(testCaseClass,"suite");
+  if (suiteMethod != null && !isPerformanceTestsRun()) {
+    try {
+      return (Test)suiteMethod.invoke(null,ArrayUtil.EMPTY_CLASS_ARRAY);
+    }
+ catch (    Exception e) {
+      System.err.println("Failed to execute suite ()");
+      e.printStackTrace();
+    }
   }
- catch (  NoSuchMethodException e) {
+ else {
     if (TestRunnerUtil.isJUnit4TestClass(testCaseClass)) {
-      return new JUnit4TestAdapter(testCaseClass);
+      JUnit4TestAdapter adapter=new JUnit4TestAdapter(testCaseClass);
+      if (!hasPerformance(testCaseClass.getSimpleName()) || !isPerformanceTestsRun()) {
+        try {
+          adapter.filter(isPerformanceTestsRun() ? PERFORMANCE_ONLY : NO_PERFORMANCE);
+        }
+ catch (        NoTestsRemainException e1) {
+        }
+      }
+      return adapter;
     }
     return new TestSuite(testCaseClass){
       @Override public void addTest(      Test test){
@@ -14,26 +28,18 @@
           super.addTest(test);
         }
  else {
+          if (isPerformanceTestsRun() ^ (hasPerformance(((TestCase)test).getName()) || hasPerformance(testCaseClass.getSimpleName())))           return;
           Method method=findTestMethod((TestCase)test);
           if (method == null || !TestCaseLoader.isBombed(method)) {
             super.addTest(test);
           }
         }
       }
-      private Method findTestMethod(      final TestCase testCase){
-        try {
-          return testCase.getClass().getMethod(testCase.getName());
-        }
- catch (        NoSuchMethodException e1) {
-          return null;
-        }
+      @Nullable private Method findTestMethod(      final TestCase testCase){
+        return safeFindMethod(testCase.getClass(),testCase.getName());
       }
     }
 ;
-  }
-catch (  Exception e) {
-    System.err.println("Failed to execute suite ()");
-    e.printStackTrace();
   }
   return null;
 }
