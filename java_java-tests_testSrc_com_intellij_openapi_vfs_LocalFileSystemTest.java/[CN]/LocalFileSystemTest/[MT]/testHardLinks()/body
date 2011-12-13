@@ -1,20 +1,29 @@
 {
-  if (SystemInfo.isWindows) {
-    File dir=FileUtil.createTempDirectory("hardlinks","");
-    File oldfile=new File(dir,"oldfile");
-    assertTrue(oldfile.createNewFile());
-    File newfile=new File(dir,"newfile");
-    Process process=Runtime.getRuntime().exec(new String[]{"fsutil","hardlink","create",'"' + newfile.getPath() + '"','"' + oldfile.getPath() + '"'});
-    InputStream stream=process.getInputStream();
-    System.out.println(new String(FileUtil.loadBytes(stream)));
-    process.waitFor();
-    VirtualFile file=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(oldfile);
+  if (!SystemInfo.isWindows && !SystemInfo.isUnix)   return;
+  final boolean safeWrite=GeneralSettings.getInstance().isUseSafeWrite();
+  final File dir=FileUtil.createTempDirectory("hardlinks","");
+  try {
+    GeneralSettings.getInstance().setUseSafeWrite(false);
+    final File targetFile=new File(dir,"targetFile");
+    assertTrue(targetFile.createNewFile());
+    final File hardLinkFile=new File(dir,"hardLinkFile");
+    if (SystemInfo.isWindows) {
+      assertEquals("target=" + targetFile + " link="+ hardLinkFile,0,ExecUtil.execAndGetResult("fsutil","hardlink","create",hardLinkFile.getPath(),targetFile.getPath()));
+    }
+ else     if (SystemInfo.isUnix) {
+      assertEquals("target=" + targetFile + " link="+ hardLinkFile,0,ExecUtil.execAndGetResult("ln",targetFile.getPath(),hardLinkFile.getPath()));
+    }
+    final VirtualFile file=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(targetFile);
     assertNotNull(file);
     file.setBinaryContent("hello".getBytes(),0,0,new SafeWriteRequestor(){
     }
 );
-    VirtualFile check=LocalFileSystem.getInstance().findFileByIoFile(newfile);
+    final VirtualFile check=LocalFileSystem.getInstance().findFileByIoFile(hardLinkFile);
     assertNotNull(check);
     assertEquals("hello",VfsUtil.loadText(check));
+  }
+  finally {
+    GeneralSettings.getInstance().setUseSafeWrite(safeWrite);
+    FileUtil.delete(dir);
   }
 }
