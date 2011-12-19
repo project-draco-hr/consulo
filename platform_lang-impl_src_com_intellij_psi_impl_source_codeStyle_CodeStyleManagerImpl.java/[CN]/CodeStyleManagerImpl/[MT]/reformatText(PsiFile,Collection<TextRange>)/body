@@ -1,0 +1,72 @@
+{
+  if (ranges.isEmpty()) {
+    return;
+  }
+  ApplicationManager.getApplication().assertWriteAccessAllowed();
+  PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
+  CheckUtil.checkWritable(file);
+  if (!SourceTreeToPsiMap.hasTreeElement(file)) {
+    return;
+  }
+  ASTNode treeElement=SourceTreeToPsiMap.psiElementToTree(file);
+  transformAllChildren(treeElement);
+  final CodeFormatterFacade codeFormatter=new CodeFormatterFacade(getSettings());
+  LOG.assertTrue(file.isValid());
+  Editor editor=PsiUtilBase.findEditor(file);
+  int visualColumnToRestore=-1;
+  if (editor != null) {
+    Document document=editor.getDocument();
+    int caretOffset=editor.getCaretModel().getOffset();
+    caretOffset=Math.max(Math.min(caretOffset,document.getTextLength() - 1),0);
+    CharSequence text=document.getCharsSequence();
+    int caretLine=document.getLineNumber(caretOffset);
+    int lineStartOffset=document.getLineStartOffset(caretLine);
+    int lineEndOffset=document.getLineEndOffset(caretLine);
+    boolean fixCaretPosition=true;
+    for (int i=lineStartOffset; i < lineEndOffset; i++) {
+      char c=text.charAt(i);
+      if (c != ' ' && c != '\t' && c != '\n') {
+        fixCaretPosition=false;
+        break;
+      }
+    }
+    if (fixCaretPosition) {
+      visualColumnToRestore=editor.getCaretModel().getVisualPosition().column;
+    }
+  }
+  final SmartPointerManager smartPointerManager=SmartPointerManager.getInstance(getProject());
+  List<RangeFormatInfo> infos=new ArrayList<RangeFormatInfo>();
+  for (  TextRange range : ranges) {
+    final PsiElement start=findElementInTreeWithFormatterEnabled(file,range.getStartOffset());
+    final PsiElement end=findElementInTreeWithFormatterEnabled(file,range.getEndOffset());
+    if (start != null && !start.isValid()) {
+      LOG.error("start=" + start + "; file="+ file);
+    }
+    if (end != null && !end.isValid()) {
+      LOG.error("end=" + start + "; end="+ file);
+    }
+    boolean formatFromStart=range.getStartOffset() == 0;
+    boolean formatToEnd=range.getEndOffset() == file.getTextLength();
+    infos.add(new RangeFormatInfo(start == null ? null : smartPointerManager.createSmartPsiElementPointer(start),end == null ? null : smartPointerManager.createSmartPsiElementPointer(end),formatFromStart,formatToEnd));
+  }
+  FormatTextRanges formatRanges=new FormatTextRanges();
+  for (  TextRange range : ranges) {
+    formatRanges.add(range,true);
+  }
+  codeFormatter.processText(file,formatRanges,true);
+  for (  RangeFormatInfo info : infos) {
+    final PsiElement startElement=info.startPointer == null ? null : info.startPointer.getElement();
+    final PsiElement endElement=info.endPointer == null ? null : info.endPointer.getElement();
+    if ((startElement != null || info.fromStart) && (endElement != null || info.toEnd)) {
+      postProcessText(file,new TextRange(info.fromStart ? 0 : startElement.getTextRange().getStartOffset(),info.toEnd ? file.getTextLength() : endElement.getTextRange().getEndOffset()));
+    }
+  }
+  if (visualColumnToRestore < 0) {
+    return;
+  }
+  CaretModel caretModel=editor.getCaretModel();
+  VisualPosition position=caretModel.getVisualPosition();
+  if (visualColumnToRestore != position.column) {
+    caretModel.moveToVisualPosition(new VisualPosition(position.line,visualColumnToRestore));
+  }
+}
