@@ -15,7 +15,8 @@
     Disposer.dispose(myModuleStructureComponent);
     myModuleStructureComponent=null;
   }
-  myPanel.removeAll();
+  final ContentManager contentManager=myToolWindow.getContentManager();
+  contentManager.removeAllContents(true);
   if (!isStructureViewShowing()) {
     return;
   }
@@ -26,19 +27,16 @@
       file=selectedFiles[0];
     }
   }
+  String[] names=new String[]{""};
+  JComponent focusedComponent=null;
   if (file != null && file.isValid()) {
     if (file.isDirectory()) {
       if (ProjectRootsUtil.isModuleContentRoot(file,myProject)) {
         Module module=ModuleUtil.findModuleForFile(file,myProject);
         if (module != null) {
           myModuleStructureComponent=new ModuleStructureComponent(module);
-          myPanel.add(myModuleStructureComponent,BorderLayout.CENTER);
-          if (hadFocus) {
-            JComponent focusedComponent=IdeFocusTraversalPolicy.getPreferredFocusedComponent(myModuleStructureComponent);
-            if (focusedComponent != null) {
-              IdeFocusManager.getInstance(myProject).requestFocus(focusedComponent,true);
-            }
-          }
+          focusedComponent=hadFocus ? IdeFocusTraversalPolicy.getPreferredFocusedComponent(myModuleStructureComponent) : null;
+          createSinglePanel(myModuleStructureComponent.getComponent());
         }
       }
     }
@@ -56,13 +54,21 @@
           if (myStructureView instanceof StructureView.Scrollable) {
             ((StructureView.Scrollable)myStructureView).setReferenceSizeWhileInitializing(referenceSize);
           }
-          myPanel.add(myStructureView.getComponent(),BorderLayout.CENTER);
-          if (hadFocus) {
-            JComponent focusedComponent=IdeFocusTraversalPolicy.getPreferredFocusedComponent(myStructureView.getComponent());
-            if (focusedComponent != null) {
-              IdeFocusManager.getInstance(myProject).requestFocus(focusedComponent,true);
+          final StructureViewComposite.StructureViewDescriptor[] views;
+          if (myStructureView instanceof StructureViewComposite) {
+            final StructureViewComposite composite=(StructureViewComposite)myStructureView;
+            views=composite.getStructureViews();
+            myPanels=new JPanel[views.length];
+            names=new String[views.length];
+            for (int i=0; i < myPanels.length; i++) {
+              myPanels[i]=createContentPanel(views[i].structureView.getComponent());
+              names[i]=views[i].title;
             }
           }
+ else {
+            createSinglePanel(myStructureView.getComponent());
+          }
+          focusedComponent=hadFocus ? IdeFocusTraversalPolicy.getPreferredFocusedComponent(myStructureView.getComponent()) : null;
           myStructureView.restoreState();
           myStructureView.centerSelectedRow();
         }
@@ -73,10 +79,18 @@
     }
   }
   if (myModuleStructureComponent == null && myStructureView == null) {
-    myPanel.add(new JLabel(IdeBundle.message("message.nothing.to.show.in.structure.view"),SwingConstants.CENTER),BorderLayout.CENTER);
+    createSinglePanel(new JLabel(IdeBundle.message("message.nothing.to.show.in.structure.view"),SwingConstants.CENTER));
   }
-  myPanel.validate();
-  myPanel.repaint();
+  for (int i=0; i < myPanels.length; i++) {
+    final Content content=ContentFactory.SERVICE.getInstance().createContent(myPanels[i],names[i],false);
+    contentManager.addContent(content);
+    if (i == 0 && myStructureView != null) {
+      Disposer.register(content,myStructureView);
+    }
+  }
+  if (hadFocus && focusedComponent != null) {
+    IdeFocusManager.getInstance(myProject).requestFocus(focusedComponent,true);
+  }
   if (myPendingSelection != null) {
     Runnable selection=myPendingSelection;
     myPendingSelection=null;
