@@ -1,0 +1,52 @@
+{
+  Set<VirtualFile> parents=new HashSet<VirtualFile>();
+  final VirtualFile[] roots=ProjectRootManager.getInstance(myProject).getContentSourceRoots();
+  for (  VirtualFile root : roots) {
+    VirtualFile parent=root;
+    while (parent != null && !parents.contains(parent)) {
+      parents.add(parent);
+      parent=parent.getParent();
+    }
+  }
+  Map<String,String> outputPathContainingSourceRoots=new HashMap<String,String>();
+  final List<File> files=new ArrayList<File>();
+  for (  Artifact artifact : myArtifactPopupItem.getArtifacts(myProject)) {
+    String outputPath=artifact.getOutputFilePath();
+    if (outputPath != null) {
+      files.add(new File(FileUtil.toSystemDependentName(outputPath)));
+      final VirtualFile outputFile=LocalFileSystem.getInstance().findFileByPath(outputPath);
+      if (parents.contains(outputFile)) {
+        outputPathContainingSourceRoots.put(artifact.getName(),outputPath);
+      }
+    }
+  }
+  if (!outputPathContainingSourceRoots.isEmpty()) {
+    final String message;
+    if (outputPathContainingSourceRoots.size() == 1 && outputPathContainingSourceRoots.values().size() == 1) {
+      final String name=ContainerUtil.getFirstItem(outputPathContainingSourceRoots.keySet());
+      final String output=outputPathContainingSourceRoots.get(name);
+      message="The output directory '" + output + "' of '"+ name+ "' artifact contains source roots of the project. Do you want to continue and clear it?";
+    }
+ else {
+      StringBuilder info=new StringBuilder();
+      for (      String name : outputPathContainingSourceRoots.keySet()) {
+        info.append(" '").append(name).append("' artifact ('").append(outputPathContainingSourceRoots.get(name)).append("')\n");
+      }
+      message="The output directories of the following artifacts contains source roots:\n" + info + "Do you want to continue and clear these directories?";
+    }
+    final int answer=Messages.showYesNoDialog(myProject,message,"Clean Artifacts",null);
+    if (answer != 0) {
+      return;
+    }
+  }
+  new Task.Backgroundable(myProject,"Cleaning artifacts...",true){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      for (      File file : files) {
+        indicator.checkCanceled();
+        FileUtil.delete(file);
+      }
+      LocalFileSystem.getInstance().refreshIoFiles(files,true,true,null);
+    }
+  }
+.queue();
+}
