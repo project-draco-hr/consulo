@@ -1,32 +1,31 @@
 {
-  List<VFileEvent> filtered=new ArrayList<VFileEvent>(events.size());
-  List<VFileDeleteEvent> deletionList=new ArrayList<VFileDeleteEvent>();
-  for (  VFileEvent event : events) {
-    if (event.isValid()) {
-      if (event instanceof VFileDeleteEvent) {
-        deletionList.add((VFileDeleteEvent)event);
-      }
- else {
-        filtered.add(event);
-      }
+  final List<EventWrapper> deletionEvents=Lists.newArrayList();
+  for (int i=0, size=events.size(); i < size; i++) {
+    final VFileEvent event=events.get(i);
+    if (event instanceof VFileDeleteEvent && event.isValid()) {
+      deletionEvents.add(new EventWrapper((VFileDeleteEvent)event,i));
     }
   }
-  ContainerUtil.quickSort(deletionList,DEPTH_COMPARATOR);
-  List<VirtualFile> filesToBeDeleted=new ArrayList<VirtualFile>();
-  for (  VFileDeleteEvent event : deletionList) {
-    boolean ok=true;
-    VirtualFile candidate=event.getFile();
-    for (    VirtualFile file : filesToBeDeleted) {
+  ContainerUtil.quickSort(deletionEvents,DEPTH_COMPARATOR);
+  final TIntHashSet invalidIDs=new TIntHashSet(deletionEvents.size());
+  final List<VirtualFile> dirsToBeDeleted=new ArrayList<VirtualFile>();
+  nextEvent:   for (  EventWrapper wrapper : deletionEvents) {
+    final VirtualFile candidate=wrapper.event.getFile();
+    for (    VirtualFile file : dirsToBeDeleted) {
       if (VfsUtilCore.isAncestor(file,candidate,false)) {
-        ok=false;
-        break;
+        invalidIDs.add(wrapper.id);
+        continue nextEvent;
       }
     }
-    if (ok) {
+    if (candidate.isDirectory()) {
+      dirsToBeDeleted.add(candidate);
+    }
+  }
+  final List<VFileEvent> filtered=Lists.newArrayListWithCapacity(events.size() - invalidIDs.size());
+  for (int i=0, size=events.size(); i < size; i++) {
+    final VFileEvent event=events.get(i);
+    if (event.isValid() && !(event instanceof VFileDeleteEvent && invalidIDs.contains(i))) {
       filtered.add(event);
-      if (candidate.isDirectory()) {
-        filesToBeDeleted.add(candidate);
-      }
     }
   }
   return filtered;
