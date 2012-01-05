@@ -6,5 +6,63 @@
     return;
   }
   final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)grandParent;
-  replaceExpression(methodCallExpression,replacementText);
+  final PsiReferenceExpression methodExpression=methodCallExpression.getMethodExpression();
+  final PsiExpression qualifier=methodExpression.getQualifierExpression();
+  final PsiElementFactory factory=JavaPsiFacade.getElementFactory(project);
+  final PsiExpressionList argumentList=methodCallExpression.getArgumentList();
+  final PsiExpression[] arguments=argumentList.getExpressions();
+  if (arguments.length != 1) {
+    return;
+  }
+  final PsiExpression argument=arguments[0];
+  if (qualifier == null) {
+    return;
+  }
+  final String collectionText=qualifier.getText();
+  final PsiType type=argument.getType();
+  if (type == null) {
+    return;
+  }
+  final PsiType componentType=type.getDeepComponentType();
+  final String typeText=componentType.getCanonicalText();
+  if (!(qualifier instanceof PsiMethodCallExpression)) {
+    @NonNls final String replacementText="new " + typeText + '['+ collectionText+ ".size()]";
+    final String newExpressionText=getElementText(methodCallExpression,argument,replacementText);
+    if (newExpressionText == null) {
+      return;
+    }
+    replaceExpression(methodCallExpression,newExpressionText);
+    return;
+  }
+  final PsiStatement statement=PsiTreeUtil.getParentOfType(methodCallExpression,PsiStatement.class);
+  if (statement == null) {
+    return;
+  }
+  final StringBuilder replacementText=new StringBuilder();
+  replacementText.append("{\n");
+  final CodeStyleSettings codeStyleSettings=CodeStyleSettingsManager.getSettings(project);
+  if (codeStyleSettings.GENERATE_FINAL_LOCALS) {
+    replacementText.append("final ");
+  }
+  final PsiType qualifierType=qualifier.getType();
+  if (qualifierType == null) {
+    return;
+  }
+  replacementText.append(qualifierType.getCanonicalText()).append(" var =").append(qualifier.getText());
+  replacementText.append(";\nvar.toArray(new ").append(typeText).append("[var.size()]);\n}\n");
+  final PsiBlockStatement newStatement=(PsiBlockStatement)factory.createStatementFromText(replacementText.toString(),methodCallExpression);
+  final PsiElement statementParent=statement.getParent();
+  if (statementParent instanceof PsiLoopStatement || statementParent instanceof PsiIfStatement) {
+    final PsiBlockStatement blockStatement=(PsiBlockStatement)statement.replace(newStatement);
+    final PsiCodeBlock codeBlock=blockStatement.getCodeBlock();
+    final PsiStatement[] statements=codeBlock.getStatements();
+    showRenameTemplate((PsiDeclarationStatement)statements[0],(PsiExpressionStatement)statements[1],statementParent);
+  }
+ else {
+    final PsiCodeBlock codeBlock=newStatement.getCodeBlock();
+    final PsiStatement[] statements=codeBlock.getStatements();
+    final PsiDeclarationStatement declarationStatement=(PsiDeclarationStatement)statementParent.addBefore(statements[0],statement);
+    final PsiExpressionStatement expressionStatement=(PsiExpressionStatement)statement.replace(statements[1]);
+    showRenameTemplate(declarationStatement,expressionStatement,statementParent);
+  }
 }
