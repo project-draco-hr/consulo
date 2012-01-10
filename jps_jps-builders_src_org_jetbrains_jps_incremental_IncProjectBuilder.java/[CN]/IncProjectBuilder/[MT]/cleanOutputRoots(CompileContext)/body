@@ -1,65 +1,52 @@
 {
-  final CompileScope scope=context.getScope();
-  final Collection<Module> allProjectModules=scope.getProject().getModules().values();
-  final Collection<Module> modulesToClean=new HashSet<Module>(scope.getAffectedModules());
-  final Set<Module> allModules=new HashSet<Module>(allProjectModules);
-  allModules.removeAll(modulesToClean);
-  if (allModules.isEmpty()) {
-    context.getBuildDataManager().clean();
-    try {
-      context.getMappings().clean();
+  try {
+    context.getDataManager().clean();
+  }
+ catch (  IOException e) {
+    throw new ProjectBuildException("Error cleaning compiler storages",e);
+  }
+  final Collection<Module> modulesToClean=context.getProject().getModules().values();
+  final Set<File> toDelete=new HashSet<File>();
+  final Set<File> allSourceRoots=new HashSet<File>();
+  for (  Module module : modulesToClean) {
+    final File out=context.getProjectPaths().getModuleOutputDir(module,false);
+    if (out != null) {
+      toDelete.add(out);
     }
- catch (    IOException e) {
-      throw new ProjectBuildException(e);
+    final File testOut=context.getProjectPaths().getModuleOutputDir(module,true);
+    if (testOut != null) {
+      toDelete.add(testOut);
+    }
+    final List<RootDescriptor> moduleRoots=context.getModuleRoots(module);
+    for (    RootDescriptor d : moduleRoots) {
+      allSourceRoots.add(d.root);
     }
   }
-  if (!modulesToClean.isEmpty()) {
-    final Set<File> toDelete=new HashSet<File>();
-    final Set<File> allSourceRoots=new HashSet<File>();
-    for (    Module module : modulesToClean) {
-      final File out=context.getProjectPaths().getModuleOutputDir(module,false);
-      if (out != null) {
-        toDelete.add(out);
-      }
-      final File testOut=context.getProjectPaths().getModuleOutputDir(module,true);
-      if (testOut != null) {
-        toDelete.add(testOut);
-      }
+  for (  File outputRoot : toDelete) {
+    boolean okToDelete=true;
+    if (PathUtil.isUnder(allSourceRoots,outputRoot)) {
+      okToDelete=false;
     }
-    for (    Module module : allProjectModules) {
-      for (      Object root : module.getSourceRoots()) {
-        allSourceRoots.add(new File((String)root));
-      }
-      for (      Object root : module.getTestRoots()) {
-        allSourceRoots.add(new File((String)root));
-      }
-    }
-    for (    File outputRoot : toDelete) {
-      boolean okToDelete=true;
-      if (PathUtil.isUnder(allSourceRoots,outputRoot)) {
-        okToDelete=false;
-      }
  else {
-        final Set<File> _outRoot=Collections.singleton(outputRoot);
-        for (        File srcRoot : allSourceRoots) {
-          if (PathUtil.isUnder(_outRoot,srcRoot)) {
-            okToDelete=false;
-            break;
-          }
+      final Set<File> _outRoot=Collections.singleton(outputRoot);
+      for (      File srcRoot : allSourceRoots) {
+        if (PathUtil.isUnder(_outRoot,srcRoot)) {
+          okToDelete=false;
+          break;
         }
       }
-      if (okToDelete) {
-        context.processMessage(new ProgressMessage("Cleaning " + outputRoot.getPath()));
-        final File[] children=outputRoot.listFiles();
-        if (children != null) {
-          for (          File child : children) {
-            FileUtil.delete(child);
-          }
+    }
+    if (okToDelete) {
+      context.processMessage(new ProgressMessage("Cleaning " + outputRoot.getPath()));
+      final File[] children=outputRoot.listFiles();
+      if (children != null) {
+        for (        File child : children) {
+          FileUtil.delete(child);
         }
       }
+    }
  else {
-        context.processMessage(new CompilerMessage(JPS_SERVER_NAME,BuildMessage.Kind.WARNING,"Output path " + outputRoot.getPath() + " intersects with a source root. The output cannot be cleaned."));
-      }
+      context.processMessage(new CompilerMessage(JPS_SERVER_NAME,BuildMessage.Kind.WARNING,"Output path " + outputRoot.getPath() + " intersects with a source root. The output cannot be cleaned."));
     }
   }
 }
