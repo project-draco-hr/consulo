@@ -1,0 +1,34 @@
+{
+  final CachedValue<PsiMethod[]> data=clazz.getUserData(CACHED_DELEGATED_METHODS);
+  if (data != null) {
+    ContainerUtil.addAll(collector,data.getValue());
+    return null;
+  }
+  final Set<PsiClass> myProcessed=new HashSet<PsiClass>();
+  myProcessed.addAll(processed);
+  Set<PsiClass> alreadyVisited=null;
+  final List<PsiMethod> result=new ArrayList<PsiMethod>();
+  for (  PsiClassType superType : clazz.getSuperTypes()) {
+    alreadyVisited=processClassInner(superType,superClassSubsitutor,true,result,classToDelegateTo,processed,alreadyVisited);
+  }
+  if (clazz instanceof GrTypeDefinition) {
+    for (    GrField field : ((GrTypeDefinition)clazz).getFields()) {
+      final PsiAnnotation delegate=PsiImplUtil.getAnnotation(field,GroovyCommonClassNames.GROOVY_LANG_DELEGATE);
+      if (delegate == null)       continue;
+      final PsiType type=field.getDeclaredType();
+      if (!(type instanceof PsiClassType))       continue;
+      alreadyVisited=processClassInner((PsiClassType)type,superClassSubsitutor,shouldDelegateDeprecated(delegate),result,classToDelegateTo,processed,alreadyVisited);
+    }
+  }
+  collector.addAll(result);
+  if (alreadyVisited == null || !ContainerUtil.intersects(myProcessed,alreadyVisited)) {
+    final CachedValue<PsiMethod[]> value=CachedValuesManager.getManager(clazz.getProject()).createCachedValue(new CachedValueProvider<PsiMethod[]>(){
+      @Override public Result<PsiMethod[]> compute(){
+        return Result.create(result.toArray(new PsiMethod[result.size()]),PsiModificationTracker.JAVA_STRUCTURE_MODIFICATION_COUNT);
+      }
+    }
+);
+    clazz.putUserData(CACHED_DELEGATED_METHODS,value);
+  }
+  return alreadyVisited;
+}
