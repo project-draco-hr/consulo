@@ -1,28 +1,17 @@
 {
   final String projectName=getProjectName(projectPath);
   BuildType buildType=params.buildType;
-  Project project;
+  ProjectDescriptor descriptor;
 synchronized (myConfigurationLock) {
-    project=myProjects.get(projectPath);
-    if (project == null) {
-      project=loadProject(projectPath,params);
-      myProjects.put(projectPath,project);
+    descriptor=myProjects.get(projectPath);
+    if (descriptor == null) {
+      final Project project=loadProject(projectPath,params);
+      final FSState fsState=new FSState();
+      descriptor=new ProjectDescriptor(projectName,project,fsState,new ProjectTimestamps(projectName));
+      myProjects.put(projectPath,descriptor);
     }
   }
-  Mappings mappings=null;
-  final File mappingsRoot=Paths.getMappingsStorageRoot(projectName);
-  try {
-    mappings=new Mappings(mappingsRoot);
-  }
- catch (  FileNotFoundException e) {
-    mappings=new Mappings(mappingsRoot);
-  }
-catch (  IOException e) {
-    FileUtil.delete(mappingsRoot);
-    msgHandler.processMessage(new CompilerMessage(IncProjectBuilder.JPS_SERVER_NAME,BuildMessage.Kind.WARNING,"Problems reading dependency information, rebuild required: " + e.getMessage()));
-    mappings=new Mappings(mappingsRoot);
-    buildType=BuildType.REBUILD;
-  }
+  final Project project=descriptor.project;
   try {
     final List<Module> toCompile=new ArrayList<Module>();
     if (modules != null && modules.size() > 0) {
@@ -36,25 +25,25 @@ catch (  IOException e) {
       toCompile.addAll(project.getModules().values());
     }
     final CompileScope compileScope=new CompileScope(project,toCompile);
-    final IncProjectBuilder builder=new IncProjectBuilder(projectName,project,mappings,BuilderRegistry.getInstance());
+    final IncProjectBuilder builder=new IncProjectBuilder(descriptor,BuilderRegistry.getInstance());
     if (msgHandler != null) {
       builder.addMessageHandler(msgHandler);
     }
 switch (buildType) {
-case REBUILD:
-      builder.build(compileScope,false);
+case PROJECT_REBUILD:
+      builder.build(compileScope,false,true);
     break;
+case FORCED_COMPILATION:
+  builder.build(compileScope,false,false);
+break;
 case MAKE:
-  builder.build(compileScope,true);
+builder.build(compileScope,true,false);
 break;
 case CLEAN:
 break;
 }
 }
   finally {
-if (mappings != null) {
-mappings.close();
-}
 clearZipIndexCache();
 }
 }

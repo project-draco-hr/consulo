@@ -1,52 +1,46 @@
 {
   try {
-    final TimestampStorage tsStorage=context.getBuildDataManager().getTimestampStorage(BUILDER_NAME);
-    final Set<File> filesToCompile=new LinkedHashSet<File>();
+    final Map<File,Module> filesToCompile=new HashMap<File,Module>();
     final List<File> formsToCompile=new ArrayList<File>();
-    final List<File> upToDateForms=new ArrayList<File>();
-    final Set<String> srcRoots=new HashSet<String>();
-    final boolean wholeModuleRebuildRequired=context.isDirty(chunk);
-    context.processFiles(chunk,new FileProcessor(){
+    context.processFilesToRecompile(chunk,new FileProcessor(){
       public boolean apply(      Module module,      File file,      String sourceRoot) throws Exception {
         if (JAVA_SOURCES_FILTER.accept(file)) {
-          srcRoots.add(sourceRoot);
-          if (wholeModuleRebuildRequired || isFileDirty(file,context,tsStorage)) {
-            filesToCompile.add(file);
-          }
+          filesToCompile.put(file,module);
         }
  else         if (FORM_SOURCES_FILTER.accept(file)) {
-          if (wholeModuleRebuildRequired || isFileDirty(file,context,tsStorage)) {
-            formsToCompile.add(file);
-          }
- else {
-            upToDateForms.add(file);
-          }
+          formsToCompile.add(file);
         }
         return true;
       }
     }
 );
     for (    File form : formsToCompile) {
-      for (      String root : srcRoots) {
-        final File boundSource=getBoundSource(root,form);
-        if (boundSource != null) {
-          filesToCompile.add(boundSource);
-          break;
+      final RootDescriptor descriptor=context.getModuleAndRoot(form);
+      if (descriptor != null) {
+        for (        RootDescriptor rd : context.getModuleRoots(descriptor.module)) {
+          final File boundSource=getBoundSource(rd.root,form);
+          if (boundSource != null) {
+            filesToCompile.put(boundSource,rd.module);
+            break;
+          }
         }
       }
     }
-    for (    File form : upToDateForms) {
-      for (      String root : srcRoots) {
-        final File boundSource=getBoundSource(root,form);
-        if (boundSource != null && filesToCompile.contains(boundSource)) {
-          formsToCompile.add(form);
-          break;
+    final SourceToFormMapping sourceToFormMap=context.getDataManager().getSourceToFormMap();
+    for (    File srcFile : filesToCompile.keySet()) {
+      final String srcPath=srcFile.getPath();
+      final String formPath=sourceToFormMap.getState(srcPath);
+      if (formPath != null) {
+        final File formFile=new File(formPath);
+        if (formFile.exists()) {
+          context.markDirty(formFile);
+          formsToCompile.add(formFile);
         }
+        sourceToFormMap.remove(srcPath);
       }
     }
-    upToDateForms.clear();
-    deleteCorrespondingClasses(context,filesToCompile);
-    return compile(context,chunk,filesToCompile,formsToCompile);
+    deleteCorrespondingOutputFiles(context,filesToCompile);
+    return compile(context,chunk,filesToCompile.keySet(),formsToCompile);
   }
  catch (  ProjectBuildException e) {
     throw e;
