@@ -1,18 +1,39 @@
 {
   try {
+    context.ensureFSStateInitialized(chunk);
     if (context.isMake()) {
-      final OutputToSourceMapping storage=context.getBuildDataManager().getOutputToSourceStorage();
-      final HashSet<String> allChunkRemovedSources=new HashSet<String>();
+      final Set<String> allChunkRemovedSources=new HashSet<String>();
+      final SourceToFormMapping sourceToFormMap=context.getDataManager().getSourceToFormMap();
       for (      Module module : chunk.getModules()) {
-        final File moduleOutput=context.getProjectPaths().getModuleOutputDir(module,context.isCompilingTests());
-        if (moduleOutput != null && moduleOutput.exists()) {
-          deleteOutputsOfRemovedSources(moduleOutput,storage,allChunkRemovedSources);
+        final Collection<String> deletedPaths=myProjectDescriptor.fsState.getDeletedPaths(module,context.isCompilingTests());
+        allChunkRemovedSources.addAll(deletedPaths);
+        final String moduleName=module.getName().toLowerCase(Locale.US);
+        final SourceToOutputMapping sourceToOutputStorage=context.getDataManager().getSourceToOutputMap(moduleName,context.isCompilingTests());
+        for (        String deletedSource : deletedPaths) {
+          final Collection<String> outputs=sourceToOutputStorage.getState(deletedSource);
+          if (outputs != null) {
+            for (            String output : outputs) {
+              FileUtil.delete(new File(output));
+            }
+            sourceToOutputStorage.remove(deletedSource);
+          }
+          final String formPath=sourceToFormMap.getState(deletedSource);
+          if (formPath != null) {
+            final File formFile=new File(formPath);
+            if (formFile.exists()) {
+              context.markDirty(formFile);
+            }
+            sourceToFormMap.remove(deletedSource);
+          }
         }
       }
       Paths.CHUNK_REMOVED_SOURCES_KEY.set(context,allChunkRemovedSources);
+      for (      Module module : chunk.getModules()) {
+        myProjectDescriptor.fsState.clearDeletedPaths(module,context.isCompilingTests());
+      }
     }
     for (    BuilderCategory category : BuilderCategory.values()) {
-      runBuilders(context,chunk,myBuilderRegistry.getBuilders(category));
+      runBuilders(context,chunk,category);
     }
   }
  catch (  ProjectBuildException e) {
@@ -22,12 +43,23 @@ catch (  Exception e) {
     throw new ProjectBuildException(e);
   }
  finally {
-    for (    BuilderCategory category : BuilderCategory.values()) {
-      for (      Builder builder : myBuilderRegistry.getBuilders(category)) {
-        builder.cleanupResources(context,chunk);
+    try {
+      for (      BuilderCategory category : BuilderCategory.values()) {
+        for (        Builder builder : myBuilderRegistry.getBuilders(category)) {
+          builder.cleanupResources(context,chunk);
+        }
       }
     }
-    context.onChunkBuildComplete(chunk);
-    Paths.CHUNK_REMOVED_SOURCES_KEY.set(context,null);
+  finally {
+      try {
+        context.onChunkBuildComplete(chunk);
+      }
+ catch (      Exception e) {
+        throw new ProjectBuildException(e);
+      }
+ finally {
+        Paths.CHUNK_REMOVED_SOURCES_KEY.set(context,null);
+      }
+    }
   }
 }
