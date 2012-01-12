@@ -1,0 +1,72 @@
+{
+  PsiMethod method=null;
+  if (owner instanceof PsiParameter) {
+    PsiParameter parameter=(PsiParameter)owner;
+    PsiElement scope=parameter.getDeclarationScope();
+    if (!(scope instanceof PsiMethod))     return null;
+    PsiElement nav=scope.getNavigationElement();
+    if (!(nav instanceof PsiMethod))     return null;
+    method=(PsiMethod)nav;
+    if (method.isConstructor()) {
+      PsiAnnotation annotation=AnnotationUtil.findAnnotation(method,"java.beans.ConstructorProperties");
+      if (annotation == null)       return null;
+      PsiAnnotationMemberValue value=annotation.findAttributeValue("value");
+      if (!(value instanceof PsiArrayInitializerMemberValue))       return null;
+      PsiAnnotationMemberValue[] initializers=((PsiArrayInitializerMemberValue)value).getInitializers();
+      PsiElement parent=parameter.getParent();
+      if (!(parent instanceof PsiParameterList))       return null;
+      int index=((PsiParameterList)parent).getParameterIndex(parameter);
+      if (index >= initializers.length)       return null;
+      PsiAnnotationMemberValue initializer=initializers[index];
+      if (!(initializer instanceof PsiLiteralExpression))       return null;
+      Object val=((PsiLiteralExpression)initializer).getValue();
+      if (!(val instanceof String))       return null;
+      PsiMethod setter=PropertyUtil.findPropertySetter(method.getContainingClass(),(String)val,false,false);
+      if (setter == null)       return null;
+      method=(PsiMethod)setter.getNavigationElement();
+    }
+  }
+ else   if (owner instanceof PsiMethod) {
+    PsiElement nav=owner.getNavigationElement();
+    if (!(nav instanceof PsiMethod))     return null;
+    method=(PsiMethod)nav;
+  }
+  if (method == null)   return null;
+  PsiClass aClass=method.getContainingClass();
+  if (aClass == null)   return null;
+  if (PropertyUtil.isSimplePropertyGetter(method)) {
+    List<PsiMethod> setters=PropertyUtil.getSetters(aClass,PropertyUtil.getPropertyNameByGetter(method));
+    if (setters.size() != 1)     return null;
+    method=setters.get(0);
+  }
+  if (!PropertyUtil.isSimplePropertySetter(method))   return null;
+  PsiDocComment doc=method.getDocComment();
+  if (doc == null)   return null;
+  PsiDocTag beaninfo=doc.findTagByName("beaninfo");
+  if (beaninfo == null)   return null;
+  String data=StringUtil.join(beaninfo.getDataElements(),new Function<PsiElement,String>(){
+    @Override public String fun(    PsiElement element){
+      return element.getText();
+    }
+  }
+,"\n");
+  int enumIndex=StringUtil.indexOfSubstringEnd(data,"enum:");
+  if (enumIndex == -1)   return null;
+  data=data.substring(enumIndex);
+  int colon=data.indexOf(":");
+  int last=colon == -1 ? data.length() : data.substring(0,colon).lastIndexOf("\n");
+  data=data.substring(0,last);
+  List<PsiAnnotationMemberValue> values=new ArrayList<PsiAnnotationMemberValue>();
+  for (  String line : StringUtil.splitByLines(data)) {
+    List<String> words=StringUtil.split(line," ",true,true);
+    if (words.size() != 2)     continue;
+    String ref=words.get(1);
+    PsiExpression constRef=JavaPsiFacade.getElementFactory(aClass.getProject()).createExpressionFromText(ref,aClass);
+    if (!(constRef instanceof PsiReferenceExpression))     continue;
+    PsiReferenceExpression expr=(PsiReferenceExpression)constRef;
+    values.add(expr);
+  }
+  if (values.isEmpty())   return null;
+  PsiAnnotationMemberValue[] array=values.toArray(new PsiAnnotationMemberValue[values.size()]);
+  return new AllowedValues(array,false);
+}
