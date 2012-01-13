@@ -1,0 +1,46 @@
+{
+  final PsiElementFactory elementFactory=JavaPsiFacade.getInstance(project).getElementFactory();
+  PsiJavaCodeReferenceElement ref=elementFactory.createClassReferenceElement(psiClass);
+  try {
+    if (psiClass.isInterface()) {
+      ref=(PsiJavaCodeReferenceElement)targetClass.getImplementsList().add(ref);
+    }
+ else {
+      ref=(PsiJavaCodeReferenceElement)targetClass.getExtendsList().add(ref);
+    }
+    if (psiClass.hasTypeParameters() || includeClassName) {
+      final Editor editor=CodeInsightUtil.positionCursor(project,targetClass.getContainingFile(),targetClass.getLBrace());
+      final TemplateBuilderImpl templateBuilder=editor != null && !ApplicationManager.getApplication().isUnitTestMode() ? (TemplateBuilderImpl)TemplateBuilderFactory.getInstance().createTemplateBuilder(targetClass) : null;
+      if (includeClassName && templateBuilder != null) {
+        templateBuilder.replaceElement(targetClass.getNameIdentifier(),targetClass.getName());
+      }
+      if (oldTypeParameterList != null) {
+        for (        PsiTypeParameter parameter : oldTypeParameterList.getTypeParameters()) {
+          final PsiElement param=ref.getParameterList().add(elementFactory.createTypeElement(elementFactory.createType(parameter)));
+          if (templateBuilder != null) {
+            templateBuilder.replaceElement(param,param.getText());
+          }
+        }
+      }
+      replaceTypeParamsList(targetClass,oldTypeParameterList);
+      if (templateBuilder != null) {
+        templateBuilder.setEndVariableBefore(ref);
+        final Template template=templateBuilder.buildTemplate();
+        template.addEndVariable();
+        final PsiFile containingFile=targetClass.getContainingFile();
+        PsiDocumentManager.getInstance(project).doPostponedOperationsAndUnblockDocument(editor.getDocument());
+        final TextRange textRange=targetClass.getTextRange();
+        editor.getDocument().deleteString(textRange.getStartOffset(),textRange.getEndOffset());
+        CreateFromUsageBaseFix.startTemplate(editor,template,project,new TemplateEditingAdapter(){
+          @Override public void templateFinished(          Template template,          boolean brokenOff){
+            chooseAndImplement(psiClass,project,((PsiClassOwner)containingFile).getClasses()[0],editor);
+          }
+        }
+,getTitle(psiClass));
+      }
+    }
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+}
