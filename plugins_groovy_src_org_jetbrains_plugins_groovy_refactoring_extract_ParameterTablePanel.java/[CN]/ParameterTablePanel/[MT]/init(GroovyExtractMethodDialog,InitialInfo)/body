@@ -1,0 +1,135 @@
+{
+  setBorder(IdeBorderFactory.createTitledBorder(GroovyRefactoringBundle.message("parameters.border.title"),false,false,true));
+  myDialog=dialog;
+  myParameterInfos=helper.getParameterInfos();
+  myTableModel=new MyTableModel();
+  myTable=new JBTable(myTableModel);
+  DefaultCellEditor defaultEditor=(DefaultCellEditor)myTable.getDefaultEditor(Object.class);
+  defaultEditor.setClickCountToStart(1);
+  myTable.setTableHeader(null);
+  myTable.getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setCellRenderer(new CheckBoxTableCellRenderer());
+  myTable.getColumnModel().getColumn(MyTableModel.CHECKMARK_COLUMN).setMaxWidth(new JCheckBox().getPreferredSize().width);
+  myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_NAME_COLUMN).setCellRenderer(new DefaultTableCellRenderer(){
+    public Component getTableCellRendererComponent(    JTable table,    Object value,    boolean isSelected,    boolean hasFocus,    int row,    int column){
+      super.getTableCellRendererComponent(table,value,isSelected,hasFocus,row,column);
+      ParameterInfo info=myParameterInfos[row];
+      setText(info.getName());
+      return this;
+    }
+  }
+);
+  Project project=helper.getProject();
+  PsiManager manager=PsiManager.getInstance(project);
+  GlobalSearchScope scope=GlobalSearchScope.allScope(project);
+  myParameterTypeSelectors=new TypeSelector[myParameterInfos.length];
+  for (int i=0; i < myParameterTypeSelectors.length; i++) {
+    PsiType type=myParameterInfos[i].getType();
+    myParameterTypeSelectors[i]=new TypeSelector(type != null ? type : PsiType.getJavaLangObject(manager,scope),project);
+  }
+  myTypeRendererCombo=new JComboBox(myParameterInfos);
+  myTypeRendererCombo.setOpaque(true);
+  myTypeRendererCombo.setBorder(null);
+  myTypeRendererCombo.setRenderer(new ListCellRendererWrapper<ParameterInfo>(myTypeRendererCombo.getRenderer()){
+    @Override public void customize(    JList list,    ParameterInfo info,    int index,    boolean selected,    boolean hasFocus){
+      PsiType type=info.getType();
+      PsiPrimitiveType unboxed=PsiPrimitiveType.getUnboxedType(type);
+      type=unboxed != null ? unboxed : type;
+      setText(type != null ? type.getPresentableText() : "");
+    }
+  }
+);
+  myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN).setCellEditor(new AbstractTableCellEditor(){
+    TypeSelector myCurrentSelector;
+    public Object getCellEditorValue(){
+      return myCurrentSelector.getSelectedType();
+    }
+    public Component getTableCellEditorComponent(    final JTable table,    final Object value,    final boolean isSelected,    final int row,    final int column){
+      myCurrentSelector=myParameterTypeSelectors[row];
+      return myCurrentSelector.getComponent();
+    }
+  }
+);
+  myTable.getColumnModel().getColumn(MyTableModel.PARAMETER_TYPE_COLUMN).setCellRenderer(new DefaultTableCellRenderer(){
+    public Component getTableCellRendererComponent(    JTable table,    Object value,    boolean isSelected,    boolean hasFocus,    int row,    int column){
+      if (myParameterTypeSelectors[row].getComponent() instanceof JComboBox) {
+        myTypeRendererCombo.setSelectedIndex(row);
+        return myTypeRendererCombo;
+      }
+      super.getTableCellRendererComponent(table,value,isSelected,hasFocus,row,column);
+      ParameterInfo info=myParameterInfos[row];
+      PsiType type=info.getType();
+      PsiPrimitiveType unboxed=PsiPrimitiveType.getUnboxedType(type);
+      type=unboxed != null ? unboxed : type;
+      setText(type != null ? type.getPresentableText() : "");
+      return this;
+    }
+  }
+);
+  myTable.setPreferredScrollableViewportSize(new Dimension(250,myTable.getRowHeight() * 5));
+  myTable.setShowGrid(false);
+  myTable.setIntercellSpacing(new Dimension(0,0));
+  @NonNls final InputMap inputMap=myTable.getInputMap();
+  inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,0),"enable_disable");
+  @NonNls final ActionMap actionMap=myTable.getActionMap();
+  actionMap.put("enable_disable",new AbstractAction(){
+    public void actionPerformed(    ActionEvent e){
+      if (myTable.isEditing())       return;
+      int[] rows=myTable.getSelectedRows();
+      if (rows.length > 0) {
+        boolean valueToBeSet=false;
+        for (        int row : rows) {
+          if (!myParameterInfos[row].passAsParameter()) {
+            valueToBeSet=true;
+            break;
+          }
+        }
+        for (        int row : rows) {
+          myParameterInfos[row].setPassAsParameter(valueToBeSet);
+        }
+        myTableModel.fireTableRowsUpdated(rows[0],rows[rows.length - 1]);
+        TableUtil.selectRows(myTable,rows);
+      }
+    }
+  }
+);
+  inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_F2,0),"edit_parameter_name");
+  actionMap.put("edit_parameter_name",new AbstractAction(){
+    public void actionPerformed(    ActionEvent e){
+      if (!myTable.isEditing()) {
+        int row=myTable.getSelectedRow();
+        if (row >= 0 && row < myTableModel.getRowCount()) {
+          TableUtil.editCellAt(myTable,row,MyTableModel.PARAMETER_NAME_COLUMN);
+        }
+      }
+    }
+  }
+);
+  inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,0),"invokeImpl");
+  actionMap.put("invokeImpl",new AbstractAction(){
+    public void actionPerformed(    ActionEvent e){
+      TableCellEditor editor=myTable.getCellEditor();
+      if (editor != null) {
+        editor.stopCellEditing();
+      }
+ else {
+        doEnterAction();
+      }
+    }
+  }
+);
+  actionMap.put("doCancel",new AbstractAction(){
+    public void actionPerformed(    ActionEvent e){
+      TableCellEditor editor=myTable.getCellEditor();
+      if (editor != null) {
+        editor.stopCellEditing();
+      }
+ else {
+        doCancelAction();
+      }
+    }
+  }
+);
+  JPanel listPanel=ToolbarDecorator.createDecorator(myTable).disableAddAction().disableRemoveAction().createPanel();
+  add(listPanel,BorderLayout.CENTER);
+}
