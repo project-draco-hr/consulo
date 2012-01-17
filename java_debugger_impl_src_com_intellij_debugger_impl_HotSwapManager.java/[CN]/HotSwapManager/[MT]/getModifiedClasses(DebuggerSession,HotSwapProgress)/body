@@ -1,43 +1,20 @@
 {
   DebuggerManagerThreadImpl.assertIsManagerThread();
-  final long timeStamp=getTimeStamp(session);
-  final HashMap<String,HotSwapFile> modifiedClasses=new HashMap<String,HotSwapFile>();
+  final List<File> outputRoots=new ArrayList<File>();
   ApplicationManager.getApplication().runReadAction(new Runnable(){
     public void run(){
-      final List<VirtualFile> allClasses=OrderEnumerator.orderEntries(myProject).withoutSdk().getPathsList().getRootDirs();
-      final VirtualFile[] allDirs=VfsUtil.toVirtualFileArray(allClasses);
-      final FileTypeManager fileTypeManager=FileTypeManager.getInstance();
-      CompilerPathsEx.visitFiles(allDirs,new CompilerPathsEx.FileVisitor(){
-        protected void acceptDirectory(        final VirtualFile file,        final String fileRoot,        final String filePath){
-          if (progress.isCancelled()) {
-            return;
-          }
-          progress.setText(DebuggerBundle.message("progress.hotswap.scanning.path",filePath));
-          if (file.getFileSystem() instanceof JarFileSystem && FileTypes.ARCHIVE.equals(file.getFileType())) {
-            if (file.getTimeStamp() > timeStamp) {
-              super.acceptDirectory(file,fileRoot,filePath);
-            }
-          }
- else {
-            super.acceptDirectory(file,fileRoot,filePath);
-          }
-        }
-        protected void acceptFile(        VirtualFile file,        String fileRoot,        String filePath){
-          if (progress.isCancelled()) {
-            return;
-          }
-          if (file.getTimeStamp() > timeStamp && StdFileTypes.CLASS.equals(file.getFileType())) {
-            if (SystemInfo.isFileSystemCaseSensitive ? filePath.endsWith(CLASS_EXTENSION) : StringUtil.endsWithIgnoreCase(filePath,CLASS_EXTENSION)) {
-              progress.setText(DebuggerBundle.message("progress.hotswap.scanning.path",filePath));
-              final String qualifiedName=filePath.substring(fileRoot.length() + 1,filePath.length() - CLASS_EXTENSION.length()).replace('/','.');
-              modifiedClasses.put(qualifiedName,new HotSwapFile(file));
-            }
-          }
-        }
+      final List<VirtualFile> allClasses=OrderEnumerator.orderEntries(myProject).withoutSdk().withoutLibraries().getPathsList().getRootDirs();
+      for (      VirtualFile dir : VfsUtil.toVirtualFileArray(allClasses)) {
+        outputRoots.add(new File(dir.getPath()));
       }
-);
     }
   }
 );
+  final long timeStamp=getTimeStamp(session);
+  final Map<String,HotSwapFile> modifiedClasses=new HashMap<String,HotSwapFile>();
+  for (  File root : outputRoots) {
+    final String rootPath=FileUtil.toCanonicalPath(root.getPath());
+    collectModifiedClasses(root,rootPath,rootPath + "/",modifiedClasses,progress,timeStamp);
+  }
   return modifiedClasses;
 }

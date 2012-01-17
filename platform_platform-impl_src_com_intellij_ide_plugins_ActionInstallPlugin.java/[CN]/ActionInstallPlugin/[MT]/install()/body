@@ -1,7 +1,7 @@
 {
   IdeaPluginDescriptor[] selection=getPluginTable().getSelectedObjects();
   if (userConfirm(selection)) {
-    ArrayList<PluginNode> list=new ArrayList<PluginNode>();
+    final ArrayList<PluginNode> list=new ArrayList<PluginNode>();
     for (    IdeaPluginDescriptor descr : selection) {
       PluginNode pluginNode=null;
       if (descr instanceof PluginNode) {
@@ -18,26 +18,38 @@
       }
     }
     try {
-      if (PluginManagerMain.downloadPlugins(list,host.getPluginsModel().view)) {
-        for (        PluginNode pluginNode : list) {
-          final String idString=pluginNode.getPluginId().getIdString();
-          final PluginManagerUISettings pluginManagerUISettings=PluginManagerUISettings.getInstance();
-          if (!pluginManagerUISettings.myInstalledPlugins.contains(idString)) {
-            pluginManagerUISettings.myInstalledPlugins.add(idString);
+      final Runnable onInstallRunnable=new Runnable(){
+        @Override public void run(){
+          installedPluginsToModel(list);
+          installed.setRequireShutdown(true);
+          if (!installed.isDisposed()) {
+            getPluginTable().updateUI();
+            final InstalledPluginsTableModel pluginsModel=(InstalledPluginsTableModel)installed.getPluginsModel();
+            final Set<IdeaPluginDescriptor> disabled=new HashSet<IdeaPluginDescriptor>();
+            for (            PluginNode node : list) {
+              final PluginId pluginId=node.getPluginId();
+              if (pluginsModel.isDisabled(pluginId)) {
+                disabled.add(node);
+              }
+            }
+            if (!disabled.isEmpty()) {
+              String message="Updated plugin" + (disabled.size() > 1 ? "s are " : " is ") + "disabled. Would you like to enable "+ (disabled.size() > 1 ? "them" : "it")+ "?";
+              if (Messages.showOkCancelDialog(host.pluginTable,message,CommonBundle.getWarningTitle(),Messages.getQuestionIcon()) == DialogWrapper.OK_EXIT_CODE) {
+                pluginsModel.enableRows(disabled.toArray(new IdeaPluginDescriptor[disabled.size()]),true);
+              }
+            }
           }
-          pluginManagerUISettings.myOutdatedPlugins.remove(idString);
+ else {
+            notifyPluginsWereInstalled();
+          }
         }
-        final InstalledPluginsTableModel installedPluginsModel=(InstalledPluginsTableModel)installed.getPluginsModel();
-        for (        PluginNode node : list) {
-          installedPluginsModel.appendOrUpdateDescriptor(node);
-        }
-        installed.setRequireShutdown(true);
       }
+;
+      PluginManagerMain.downloadPlugins(list,host.getPluginsModel().view,onInstallRunnable);
     }
  catch (    IOException e1) {
       PluginManagerMain.LOG.error(e1);
       IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"),IdeBundle.message("error.plugin.download.failed"));
     }
-    getPluginTable().updateUI();
   }
 }

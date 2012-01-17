@@ -1,0 +1,44 @@
+{
+  JpsRemoteProto.Message lastMessage=null;
+  try {
+    if (error != null) {
+      Throwable cause=error.getCause();
+      if (cause == null) {
+        cause=error;
+      }
+      final ByteArrayOutputStream out=new ByteArrayOutputStream();
+      cause.printStackTrace(new PrintStream(out));
+      final StringBuilder messageText=new StringBuilder();
+      messageText.append("JPS Internal error: (").append(cause.getClass().getName()).append(") ").append(cause.getMessage());
+      final String trace=out.toString();
+      if (!trace.isEmpty()) {
+        messageText.append("\n").append(trace);
+      }
+      lastMessage=ProtoUtil.toMessage(mySessionId,ProtoUtil.createFailure(messageText.toString(),cause));
+    }
+ else {
+      JpsRemoteProto.Message.Response.BuildEvent.Status status=JpsRemoteProto.Message.Response.BuildEvent.Status.SUCCESS;
+      if (myCanceled) {
+        status=JpsRemoteProto.Message.Response.BuildEvent.Status.CANCELED;
+      }
+ else       if (hadBuildErrors) {
+        status=JpsRemoteProto.Message.Response.BuildEvent.Status.ERRORS;
+      }
+ else       if (!markedUptodateFiles) {
+        status=JpsRemoteProto.Message.Response.BuildEvent.Status.UP_TO_DATE;
+      }
+      lastMessage=ProtoUtil.toMessage(mySessionId,ProtoUtil.createBuildCompletedEvent("build completed",status));
+    }
+  }
+ catch (  Throwable e) {
+    lastMessage=ProtoUtil.toMessage(mySessionId,ProtoUtil.createFailure(e.getMessage(),e));
+  }
+ finally {
+    Channels.write(myChannelContext.getChannel(),lastMessage).addListener(new ChannelFutureListener(){
+      public void operationComplete(      ChannelFuture future) throws Exception {
+        myBuildsInProgress.remove(myProjectPath);
+      }
+    }
+);
+  }
+}

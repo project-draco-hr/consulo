@@ -1,32 +1,56 @@
 {
-  final JComponent panel=createCenterPanel();
+  final ActionCallback treeHasBuilt=new ActionCallback();
+  IdeFocusManager.getInstance(myProject).typeAheadUntil(treeHasBuilt);
+  JComponent panel=createCenterPanel();
   new MnemonicHelper().register(panel);
+  boolean shouldSetWidth=DimensionService.getInstance().getSize(getDimensionServiceKey(),myProject) == null;
   myPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(panel,null).setTitle(myTitle).setResizable(true).setFocusable(true).setMovable(true).setCancelKeyEnabled(false).setDimensionServiceKey(null,getDimensionServiceKey(),false).createPopup();
-  Disposer.register(myPopup,myDisposable);
   Disposer.register(myPopup,this);
-  Disposer.register(myPopup,myAbstractTreeBuilder);
-  myPopup.showInCenterOf(myEditor.getContentComponent());
+  Disposer.register(myPopup,new Disposable(){
+    @Override public void dispose(){
+      if (!treeHasBuilt.isDone()) {
+        treeHasBuilt.setRejected();
+      }
+    }
+  }
+);
+  myPopup.showCenteredInCurrentWindow(myProject);
+  ((AbstractPopup)myPopup).setShowHints(true);
+  if (shouldSetWidth) {
+    myPopup.setSize(new Dimension(myPreferredWidth + 10,myPopup.getSize().height));
+  }
   myAbstractTreeBuilder.expandAll(new Runnable(){
     @Override public void run(){
       IdeFocusManager.getInstance(myProject).requestFocus(myTree,true);
       myAbstractTreeBuilder.queueUpdate().doWhenDone(new Runnable(){
         @Override public void run(){
-          myAbstractTreeBuilder.expandAll(null);
+          selectPsiElement(getCurrentElement(getPsiFile(myProject)));
+          treeHasBuilt.setDone();
         }
       }
 );
     }
   }
 );
-  final Alarm alarm=new Alarm(myPopup);
+  final Alarm alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD,myPopup);
   alarm.addRequest(new Runnable(){
     String filter="";
     @Override public void run(){
+      alarm.cancelAllRequests();
       String prefix=mySpeedSearch.getEnteredPrefix();
+      myTree.getEmptyText().setText(StringUtil.isEmpty(prefix) ? "Nothing to show" : "Can't find '" + prefix + "'");
       if (prefix == null)       prefix="";
       if (!filter.equals(prefix)) {
         filter=prefix;
-        myAbstractTreeBuilder.refilter();
+        myAbstractTreeBuilder.refilter(null,false,false).doWhenProcessed(new Runnable(){
+          @Override public void run(){
+            myTree.repaint();
+            if (mySpeedSearch.isPopupActive()) {
+              mySpeedSearch.refreshSelection();
+            }
+          }
+        }
+);
       }
       alarm.addRequest(this,300);
     }

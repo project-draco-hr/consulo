@@ -1,0 +1,81 @@
+{
+  Collection<String> moduleNames=Collections.emptyList();
+  if (modules != null && modules.size() > 0) {
+    moduleNames=new ArrayList<String>(modules.size());
+    for (    Module module : modules) {
+      moduleNames.add(module.getName());
+    }
+  }
+  final JpsServerManager jpsServerManager=JpsServerManager.getInstance();
+  return jpsServerManager.submitCompilationTask(myProject.getLocation(),compileContext.isRebuild(),compileContext.isMake(),moduleNames,paths,new JpsServerResponseHandlerAdapter(){
+    public void handleCompileMessage(    JpsRemoteProto.Message.Response.CompileMessage compilerMessage){
+      final JpsRemoteProto.Message.Response.CompileMessage.Kind kind=compilerMessage.getKind();
+      if (kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.PROGRESS) {
+        final ProgressIndicator indicator=compileContext.getProgressIndicator();
+        indicator.setText(compilerMessage.getText());
+        if (compilerMessage.hasDone()) {
+          indicator.setFraction(compilerMessage.getDone());
+        }
+      }
+ else {
+        final CompilerMessageCategory category=kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.ERROR ? CompilerMessageCategory.ERROR : kind == JpsRemoteProto.Message.Response.CompileMessage.Kind.WARNING ? CompilerMessageCategory.WARNING : CompilerMessageCategory.INFORMATION;
+        Navigatable navigatable=null;
+        String sourceFilePath=compilerMessage.hasSourceFilePath() ? compilerMessage.getSourceFilePath() : null;
+        if (sourceFilePath != null) {
+          sourceFilePath=FileUtil.toSystemIndependentName(sourceFilePath);
+        }
+        final long offset=compilerMessage.hasProblemLocationOffset() ? compilerMessage.getProblemLocationOffset() : -1L;
+        if (sourceFilePath != null && offset >= 0L) {
+          final VirtualFile file=LocalFileSystem.getInstance().findFileByPath(sourceFilePath);
+          if (file != null) {
+            navigatable=new OpenFileDescriptor(myProject,file,(int)offset);
+          }
+        }
+        final String srcUrl=sourceFilePath != null ? VirtualFileManager.constructUrl(LocalFileSystem.PROTOCOL,sourceFilePath) : null;
+        compileContext.addMessage(category,compilerMessage.getText(),srcUrl,(int)compilerMessage.getLine(),(int)compilerMessage.getColumn(),navigatable);
+      }
+    }
+    @Override public boolean handleBuildEvent(    JpsRemoteProto.Message.Response.BuildEvent event){
+      final JpsRemoteProto.Message.Response.BuildEvent.Type eventType=event.getEventType();
+switch (eventType) {
+case BUILD_STARTED:
+        compileContext.getProgressIndicator().setText("Compilation started");
+      break;
+case BUILD_COMPLETED:
+    ExitStatus status=ExitStatus.SUCCESS;
+  if (event.hasCompletionStatus()) {
+    final JpsRemoteProto.Message.Response.BuildEvent.Status completionStatus=event.getCompletionStatus();
+switch (completionStatus) {
+case CANCELED:
+      status=ExitStatus.CANCELLED;
+    break;
+case ERRORS:
+  status=ExitStatus.ERRORS;
+break;
+case SUCCESS:
+status=ExitStatus.SUCCESS;
+break;
+case UP_TO_DATE:
+status=ExitStatus.UP_TO_DATE;
+break;
+}
+}
+compileContext.putUserData(COMPILE_SERVER_BUILD_STATUS,status);
+break;
+}
+return eventType == JpsRemoteProto.Message.Response.BuildEvent.Type.BUILD_COMPLETED;
+}
+public void handleFailure(JpsRemoteProto.Message.Failure failure){
+compileContext.addMessage(CompilerMessageCategory.ERROR,failure.getDescription(),null,-1,-1);
+final String trace=failure.getStacktrace();
+if (trace != null) {
+LOG.info(trace);
+System.out.println(trace);
+}
+}
+public void sessionTerminated(){
+notifyCompilationCompleted(compileContext,callback,COMPILE_SERVER_BUILD_STATUS.get(compileContext,ExitStatus.SUCCESS));
+}
+}
+);
+}
