@@ -1,0 +1,72 @@
+{
+  PsiFile file=getPsiManager().findFile(createFile());
+  assertTrue(file.isPhysical());
+  final Document document=getPsiDocumentManager().getDocument(file);
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  getPsiDocumentManager().performWhenAllCommitted(new Runnable(){
+    @Override public void run(){
+      assertTrue(getPsiDocumentManager().isCommitted(document));
+      semaphore.up();
+    }
+  }
+);
+  waitAndPump(semaphore);
+  assertTrue(getPsiDocumentManager().isCommitted(document));
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      document.insertString(0,"class X {}");
+    }
+  }
+);
+  semaphore.down();
+  getPsiDocumentManager().performWhenAllCommitted(new Runnable(){
+    @Override public void run(){
+      assertTrue(getPsiDocumentManager().isCommitted(document));
+      semaphore.up();
+    }
+  }
+);
+  waitAndPump(semaphore);
+  assertTrue(getPsiDocumentManager().isCommitted(document));
+  final AtomicInteger count=new AtomicInteger();
+  final Runnable action=new Runnable(){
+    @Override public void run(){
+      count.incrementAndGet();
+    }
+  }
+;
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      document.insertString(0,"/**/");
+      boolean executed=getPsiDocumentManager().cancelAndRunWhenAllCommitted("xxx",action);
+      assertFalse(executed);
+      executed=getPsiDocumentManager().cancelAndRunWhenAllCommitted("xxx",action);
+      assertFalse(executed);
+      assertEquals(0,count.get());
+    }
+  }
+);
+  while (!getPsiDocumentManager().isCommitted(document)) {
+    UIUtil.dispatchAllInvocationEvents();
+  }
+  assertTrue(getPsiDocumentManager().isCommitted(document));
+  assertEquals(1,count.get());
+  count.set(0);
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      document.insertString(0,"/**/");
+      boolean executed=getPsiDocumentManager().performWhenAllCommitted(action);
+      assertFalse(executed);
+      executed=getPsiDocumentManager().performWhenAllCommitted(action);
+      assertFalse(executed);
+      assertEquals(0,count.get());
+    }
+  }
+);
+  while (!getPsiDocumentManager().isCommitted(document)) {
+    UIUtil.dispatchAllInvocationEvents();
+  }
+  assertTrue(getPsiDocumentManager().isCommitted(document));
+  assertEquals(2,count.get());
+}
