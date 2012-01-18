@@ -1,0 +1,51 @@
+{
+  DebuggerManagerThreadImpl.assertIsManagerThread();
+  final long timeStamp=getTimeStamp(session);
+  final Map<String,HotSwapFile> modifiedClasses=new HashMap<String,HotSwapFile>();
+  if (scanWithVFS) {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        final List<VirtualFile> allDirs=OrderEnumerator.orderEntries(myProject).withoutSdk().withoutLibraries().getPathsList().getRootDirs();
+        CompilerPathsEx.visitFiles(allDirs,new CompilerPathsEx.FileVisitor(){
+          protected void acceptDirectory(          final VirtualFile file,          final String fileRoot,          final String filePath){
+            if (!progress.isCancelled()) {
+              progress.setText(DebuggerBundle.message("progress.hotswap.scanning.path",filePath));
+              super.acceptDirectory(file,fileRoot,filePath);
+            }
+          }
+          protected void acceptFile(          VirtualFile file,          String fileRoot,          String filePath){
+            if (progress.isCancelled()) {
+              return;
+            }
+            if (file.getTimeStamp() > timeStamp && StdFileTypes.CLASS.equals(file.getFileType())) {
+              if (SystemInfo.isFileSystemCaseSensitive ? filePath.endsWith(CLASS_EXTENSION) : StringUtil.endsWithIgnoreCase(filePath,CLASS_EXTENSION)) {
+                progress.setText(DebuggerBundle.message("progress.hotswap.scanning.path",filePath));
+                final String qualifiedName=filePath.substring(fileRoot.length() + 1,filePath.length() - CLASS_EXTENSION.length()).replace('/','.');
+                modifiedClasses.put(qualifiedName,new HotSwapFile(new File(filePath)));
+              }
+            }
+          }
+        }
+);
+      }
+    }
+);
+  }
+ else {
+    final List<File> outputRoots=new ArrayList<File>();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        final List<VirtualFile> allDirs=OrderEnumerator.orderEntries(myProject).withoutSdk().withoutLibraries().getPathsList().getRootDirs();
+        for (        VirtualFile dir : allDirs) {
+          outputRoots.add(new File(dir.getPath()));
+        }
+      }
+    }
+);
+    for (    File root : outputRoots) {
+      final String rootPath=FileUtil.toCanonicalPath(root.getPath());
+      collectModifiedClasses(root,rootPath,rootPath + "/",modifiedClasses,progress,timeStamp);
+    }
+  }
+  return modifiedClasses;
+}
