@@ -1,28 +1,51 @@
 {
   final FileIndexFacade index=FileIndexFacade.getInstance(myManager.getProject());
   final MultiMap<VirtualFile,RequestWithProcessor> result=createMultiMap();
-  for (  Set<IdIndexEntry> key : singles.keySet()) {
+  for (  final Set<IdIndexEntry> key : singles.keySet()) {
     if (key.isEmpty()) {
       continue;
     }
     final Collection<RequestWithProcessor> data=singles.get(key);
-    GlobalSearchScope commonScope=uniteScopes(data);
-    MultiMap<VirtualFile,RequestWithProcessor> intersection=null;
-    boolean first=true;
-    for (    IdIndexEntry entry : key) {
-      final MultiMap<VirtualFile,RequestWithProcessor> local=findFilesWithIndexEntry(entry,index,data,commonScope,progress);
-      if (first) {
-        intersection=local;
-        first=false;
-      }
- else {
-        intersection.keySet().retainAll(local.keySet());
-        for (        VirtualFile file : intersection.keySet()) {
-          intersection.get(file).retainAll(local.get(file));
-        }
+    final GlobalSearchScope commonScope=uniteScopes(data);
+    if (key.size() == 1) {
+      result.putAllValues(findFilesWithIndexEntry(key.iterator().next(),index,data,commonScope,progress));
+      continue;
+    }
+    final Collection<VirtualFile> fileSet=ApplicationManager.getApplication().runReadAction(new Computable<Collection<VirtualFile>>(){
+      @Override public Collection<VirtualFile> compute(){
+        final CommonProcessors.CollectProcessor<VirtualFile> processor=new CommonProcessors.CollectProcessor<VirtualFile>();
+        FileBasedIndex.getInstance().processFilesContainingAllKeys(IdIndex.NAME,key,commonScope,null,processor);
+        return processor.getResults();
       }
     }
-    result.putAllValues(intersection);
+);
+    for (    final VirtualFile file : fileSet) {
+      if (progress != null) {
+        progress.checkCanceled();
+      }
+      for (      final IdIndexEntry entry : key) {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          @Override public void run(){
+            FileBasedIndex.getInstance().processValues(IdIndex.NAME,entry,file,new FileBasedIndex.ValueProcessor<Integer>(){
+              @Override public boolean process(              VirtualFile file,              Integer value){
+                if (IndexCacheManagerImpl.shouldBeFound(commonScope,file,index)) {
+                  int mask=value.intValue();
+                  for (                  RequestWithProcessor single : data) {
+                    final PsiSearchRequest request=single.request;
+                    if ((mask & request.searchContext) != 0 && ((GlobalSearchScope)request.searchScope).contains(file)) {
+                      result.putValue(file,single);
+                    }
+                  }
+                }
+                return true;
+              }
+            }
+,commonScope);
+          }
+        }
+);
+      }
+    }
   }
   return result;
 }
