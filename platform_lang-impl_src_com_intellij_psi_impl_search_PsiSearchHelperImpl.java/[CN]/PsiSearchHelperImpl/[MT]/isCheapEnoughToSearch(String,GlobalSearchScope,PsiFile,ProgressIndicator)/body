@@ -1,14 +1,34 @@
 {
+  final ArrayList<IdIndexEntry> keys=getWordEntries(name,true);
+  if (keys.isEmpty())   return SearchCostResult.ZERO_OCCURRENCES;
+  final TIntHashSet set=ApplicationManager.getApplication().runReadAction(new NullableComputable<TIntHashSet>(){
+    @Override public TIntHashSet compute(){
+      return FileBasedIndex.getInstance().collectFileIdsContainingAllKeys(IdIndex.NAME,keys,scope,null);
+    }
+  }
+);
+  if (set == null || set.size() > 1000) {
+    return SearchCostResult.TOO_MANY_OCCURRENCES;
+  }
   final AtomicInteger count=new AtomicInteger();
-  if (!processFilesWithText(scope,UsageSearchContext.ANY,true,name,new CommonProcessors.CollectProcessor<VirtualFile>(Collections.<VirtualFile>emptyList()){
+  final FileIndexFacade index=FileIndexFacade.getInstance(myManager.getProject());
+  final Processor<VirtualFile> processor=new Processor<VirtualFile>(){
     private final VirtualFile fileToIgnoreOccurencesInVirtualFile=fileToIgnoreOccurencesIn != null ? fileToIgnoreOccurencesIn.getVirtualFile() : null;
     @Override public boolean process(    VirtualFile file){
       if (file == fileToIgnoreOccurencesInVirtualFile)       return true;
-      int value=count.incrementAndGet();
+      if (!IndexCacheManagerImpl.shouldBeFound(scope,file,index))       return true;
+      final int value=count.incrementAndGet();
       return value < 10;
     }
   }
-,progress)) {
+;
+  final boolean cheap=ApplicationManager.getApplication().runReadAction(new NullableComputable<Boolean>(){
+    @Override public Boolean compute(){
+      return FileBasedIndex.processVirtualFiles(set,scope,processor);
+    }
+  }
+);
+  if (!cheap) {
     return SearchCostResult.TOO_MANY_OCCURRENCES;
   }
   return count.get() == 0 ? SearchCostResult.ZERO_OCCURRENCES : SearchCostResult.FEW_OCCURRENCES;
