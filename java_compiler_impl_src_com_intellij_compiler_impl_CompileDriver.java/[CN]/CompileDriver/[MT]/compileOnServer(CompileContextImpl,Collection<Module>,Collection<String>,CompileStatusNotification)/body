@@ -7,6 +7,7 @@
     }
   }
   final JpsServerManager jpsServerManager=JpsServerManager.getInstance();
+  final MessageBus messageBus=myProject.getMessageBus();
   return jpsServerManager.submitCompilationTask(myProject.getLocation(),compileContext.isRebuild(),compileContext.isMake(),moduleNames,paths,new JpsServerResponseHandlerAdapter(){
     public void handleCompileMessage(    JpsRemoteProto.Message.Response.CompileMessage compilerMessage){
       final JpsRemoteProto.Message.Response.CompileMessage.Kind kind=compilerMessage.getKind();
@@ -41,16 +42,25 @@ switch (eventType) {
 case BUILD_STARTED:
         compileContext.getProgressIndicator().setText("Compilation started");
       break;
+case FILES_GENERATED:
+    final List<JpsRemoteProto.Message.Response.BuildEvent.GeneratedFile> generated=event.getGeneratedFilesList();
+  final CompilationStatusListener publisher=messageBus.syncPublisher(CompilerTopics.COMPILATION_STATUS);
+for (JpsRemoteProto.Message.Response.BuildEvent.GeneratedFile generatedFile : generated) {
+  final String root=FileUtil.toSystemIndependentName(generatedFile.getOutputRoot());
+  final String relativePath=FileUtil.toSystemIndependentName(generatedFile.getRelativePath());
+  publisher.fileGenerated(root,relativePath);
+}
+break;
 case BUILD_COMPLETED:
-    ExitStatus status=ExitStatus.SUCCESS;
-  if (event.hasCompletionStatus()) {
-    final JpsRemoteProto.Message.Response.BuildEvent.Status completionStatus=event.getCompletionStatus();
+ExitStatus status=ExitStatus.SUCCESS;
+if (event.hasCompletionStatus()) {
+final JpsRemoteProto.Message.Response.BuildEvent.Status completionStatus=event.getCompletionStatus();
 switch (completionStatus) {
 case CANCELED:
-      status=ExitStatus.CANCELLED;
-    break;
+status=ExitStatus.CANCELLED;
+break;
 case ERRORS:
-  status=ExitStatus.ERRORS;
+status=ExitStatus.ERRORS;
 break;
 case SUCCESS:
 status=ExitStatus.SUCCESS;
