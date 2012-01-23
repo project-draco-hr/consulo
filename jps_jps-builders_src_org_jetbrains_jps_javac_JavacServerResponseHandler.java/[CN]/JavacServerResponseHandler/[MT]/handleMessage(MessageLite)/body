@@ -1,3 +1,55 @@
 {
-  return false;
+  final JavacRemoteProto.Message msg=(JavacRemoteProto.Message)message;
+  final JavacRemoteProto.Message.Type messageType=msg.getMessageType();
+  if (messageType == JavacRemoteProto.Message.Type.RESPONSE) {
+    final JavacRemoteProto.Message.Response response=msg.getResponse();
+    final JavacRemoteProto.Message.Response.Type responseType=response.getResponseType();
+    if (responseType == JavacRemoteProto.Message.Response.Type.BUILD_MESSAGE) {
+      final JavacRemoteProto.Message.Response.CompileMessage compileMessage=response.getCompileMessage();
+      final JavacRemoteProto.Message.Response.CompileMessage.Kind messageKind=compileMessage.getKind();
+      if (messageKind == JavacRemoteProto.Message.Response.CompileMessage.Kind.STD_OUT) {
+        myDiagnosticSink.outputLineAvailable(compileMessage.getText());
+      }
+ else {
+        final String sourceUri=compileMessage.getSourceUri();
+        final JavaFileObject srcFileObject=sourceUri != null ? new DummyJavaFileObject(URI.create(sourceUri)) : null;
+        myDiagnosticSink.report(new DummyDiagnostic(convertKind(messageKind),srcFileObject,compileMessage));
+      }
+      return false;
+    }
+    if (responseType == JavacRemoteProto.Message.Response.Type.OUTPUT_OBJECT) {
+      final JavacRemoteProto.Message.Response.OutputObject outputObject=response.getOutputObject();
+      final JavacRemoteProto.Message.Response.OutputObject.Kind kind=outputObject.getKind();
+      final String outputRoot=outputObject.getOutputRoot();
+      final File outputRootFile=outputRoot != null ? new File(outputRoot) : null;
+      final OutputFileObject.Content fileObjectContent;
+      final ByteString content=outputObject.getContent();
+      if (content != null) {
+        final byte[] bytes=content.toByteArray();
+        fileObjectContent=new OutputFileObject.Content(bytes,0,bytes.length);
+      }
+ else {
+        fileObjectContent=null;
+      }
+      final String sourceUri=outputObject.getSourceUri();
+      final URI srcUri=sourceUri != null ? URI.create(sourceUri) : null;
+      final OutputFileObject fileObject=new OutputFileObject(null,outputRootFile,outputObject.getRelativePath(),new File(outputObject.getFilePath()),convertKind(kind),outputObject.getClassName(),srcUri,fileObjectContent);
+      myOutputSink.save(fileObject);
+      return false;
+    }
+    if (responseType == JavacRemoteProto.Message.Response.Type.BUILD_COMPLETED) {
+      myTerminatedSuccessfully=response.getCompletionStatus();
+      return true;
+    }
+    if (responseType == JavacRemoteProto.Message.Response.Type.REQUEST_ACK) {
+      return true;
+    }
+    throw new Exception("Unsupported response type: " + responseType.name());
+  }
+  if (messageType == JavacRemoteProto.Message.Type.FAILURE) {
+    final JavacRemoteProto.Message.Failure failure=msg.getFailure();
+    myDiagnosticSink.report(new PlainMessageDiagnostic(Diagnostic.Kind.ERROR,failure.getStacktrace()));
+    return true;
+  }
+  throw new Exception("Unsupported message type: " + messageType.name());
 }
