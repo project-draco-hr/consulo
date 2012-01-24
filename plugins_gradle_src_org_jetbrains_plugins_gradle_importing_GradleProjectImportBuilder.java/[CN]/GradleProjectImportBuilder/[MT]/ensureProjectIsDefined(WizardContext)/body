@@ -7,43 +7,32 @@
   }
   final Ref<String> errorReason=new Ref<String>();
   try {
-    Project project=getProject(wizardContext);
+    final Project project=getProject(wizardContext);
     ProgressManager.getInstance().run(new Task.Modal(project,GradleBundle.message("gradle.import.progress.text"),true){
       @SuppressWarnings("ThrowableResultOfMethodCallIgnored") @Override public void run(      @NotNull final ProgressIndicator indicator){
-        indicator.setIndeterminate(true);
-        GradleApiFacadeManager manager=ServiceManager.getService(GradleApiFacadeManager.class);
-        GradleTaskNotificationListener gradleProgressListener=new GradleTaskNotificationListenerAdapter(){
-          @Override public void onStatusChange(          @NotNull GradleTaskNotificationEvent event){
-            indicator.setText2(event.getDescription());
-          }
+        GradleResolveProjectTask task=new GradleResolveProjectTask(project,myProjectFile.getAbsolutePath(),false);
+        task.execute(indicator);
+        myGradleProject=task.getProject();
+        if (myGradleProject != null) {
+          return;
         }
-;
-        GradleTaskId taskId=GradleTaskId.create(GradleTaskType.RESOLVE_PROJECT);
-        myProgressManager.addNotificationListener(taskId,gradleProgressListener);
-        try {
-          GradleProjectResolver resolver=manager.getFacade().getResolver();
-          myGradleProject=resolver.resolveProjectInfo(taskId,myProjectFile.getAbsolutePath(),false);
+        final Throwable error=task.getError();
+        if (error == null) {
+          return;
         }
- catch (        ProcessCanceledException e) {
+        Throwable unwrapped=RemoteUtil.unwrap(error);
+        String reason=unwrapped.getLocalizedMessage();
+        if (!StringUtil.isEmpty(reason)) {
+          errorReason.set(reason);
         }
-catch (        Exception e) {
-          Throwable unwrapped=RemoteUtil.unwrap(e);
-          String reason=unwrapped.getLocalizedMessage();
-          if (!StringUtil.isEmpty(reason)) {
-            errorReason.set(reason);
-          }
-          if (unwrapped.getClass() == NoClassDefFoundError.class) {
-            errorReason.set(GradleBundle.message("gradle.import.text.incomplete.tooling.api"));
-          }
- else           if (unwrapped.getClass() == GradleApiException.class) {
-            GradleLog.LOG.warn("Can't resolve gradle project. Reason: gradle api threw an exception:\n" + ((GradleApiException)unwrapped).getOriginalReason());
-          }
+        if (unwrapped.getClass() == NoClassDefFoundError.class) {
+          errorReason.set(GradleBundle.message("gradle.import.text.incomplete.tooling.api"));
+        }
+ else         if (unwrapped.getClass() == GradleApiException.class) {
+          GradleLog.LOG.warn("Can't resolve gradle project. Reason: gradle api threw an exception:\n" + ((GradleApiException)unwrapped).getOriginalReason());
+        }
  else {
-            GradleLog.LOG.warn("Can't resolve gradle project",e);
-          }
-        }
- finally {
-          myProgressManager.removeNotificationListener(gradleProgressListener);
+          GradleLog.LOG.warn("Can't resolve gradle project",unwrapped);
         }
       }
     }
