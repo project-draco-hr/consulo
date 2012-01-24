@@ -1,0 +1,47 @@
+{
+  processHandler.addProcessListener(new ProcessAdapter(){
+    public void onTextAvailable(    ProcessEvent event,    Key outputType){
+      final String text=event.getText();
+      if (text != null && text.length() > 0) {
+        System.out.print("JAVAC_SERVER [" + outputType.toString() + "]: "+ text);
+      }
+    }
+  }
+);
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  final Ref<String> serverStartMessage=new Ref<String>(null);
+  processHandler.addProcessListener(new ProcessAdapter(){
+    public void processTerminated(    ProcessEvent event){
+      try {
+        processHandler.removeProcessListener(this);
+      }
+  finally {
+        semaphore.up();
+      }
+    }
+    public void onTextAvailable(    ProcessEvent event,    Key outputType){
+      if (outputType == ProcessOutputTypes.STDERR) {
+        try {
+          final String text=event.getText();
+          if (text != null) {
+            if (text.contains(JavacServer.SERVER_SUCCESS_START_MESSAGE) || text.contains(JavacServer.SERVER_ERROR_START_MESSAGE)) {
+              processHandler.removeProcessListener(this);
+              serverStartMessage.set(text);
+            }
+          }
+        }
+  finally {
+          semaphore.up();
+        }
+      }
+    }
+  }
+);
+  processHandler.startNotify();
+  semaphore.waitFor();
+  final String startupMsg=serverStartMessage.get();
+  if (startupMsg == null || !startupMsg.contains(JavacServer.SERVER_SUCCESS_START_MESSAGE)) {
+    throw new Exception("Server startup failed: " + startupMsg);
+  }
+}
