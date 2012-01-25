@@ -21,22 +21,33 @@
   GrClosureSignature signature=GrClosureSignatureUtil.createSignature(callExpression);
   if (signature == null)   signature=GrClosureSignatureUtil.createSignature(data.getMethodToSearchFor(),PsiSubstitutor.EMPTY);
   final GrClosureSignatureUtil.ArgInfo<PsiElement>[] actualArgs=GrClosureSignatureUtil.mapParametersToArguments(signature,argList,callExpression,callExpression.getClosureArguments(),true);
+  final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(data.getProject());
   if (method != null && IntroduceParameterUtil.isMethodInUsages(data,method,usages)) {
-    argList.addAfter(GroovyPsiElementFactory.getInstance(data.getProject()).createExpressionFromText(data.getParameterName()),anchor);
+    argList.addAfter(factory.createExpressionFromText(data.getParameterName()),anchor);
   }
  else {
-    PsiElement initializer=ExpressionConverter.getExpression(data.getParameterInitializer().getExpression(),GroovyFileType.GROOVY_LANGUAGE,data.getProject());
+    final PsiElement _expr=data.getParameterInitializer().getExpression();
+    PsiElement initializer=ExpressionConverter.getExpression(_expr,GroovyFileType.GROOVY_LANGUAGE,data.getProject());
     LOG.assertTrue(initializer instanceof GrExpression);
-    GrExpression newArg=(GrExpression)argList.addAfter(initializer,anchor);
+    GrExpression newArg=addClosureToCall(initializer,argList);
+    if (newArg == null) {
+      newArg=(GrExpression)argList.addAfter(initializer,anchor);
+    }
     final PsiMethod methodToReplaceIn=data.getMethodToReplaceIn();
     new OldReferencesResolver(callExpression,newArg,methodToReplaceIn,data.getReplaceFieldsWithGetters(),initializer,signature,actualArgs,methodToReplaceIn.getParameterList().getParameters()).resolve();
     ChangeContextUtil.clearContextInfo(initializer);
+    GrReferenceAdjuster.shortenReferences(newArg);
   }
   if (actualArgs == null) {
     removeParamsFromUnresolvedCall(callExpression,data);
   }
  else {
     removeParametersFromCall(actualArgs,data.getParametersToRemove());
+  }
+  if (argList.getAllArguments().length == 0 && hasClosureArgs(argList)) {
+    final GrArgumentList emptyArgList=((GrMethodCallExpression)factory.createExpressionFromText("foo{}")).getArgumentList();
+    LOG.assertTrue(emptyArgList != null);
+    argList.replace(emptyArgList);
   }
   return false;
 }
