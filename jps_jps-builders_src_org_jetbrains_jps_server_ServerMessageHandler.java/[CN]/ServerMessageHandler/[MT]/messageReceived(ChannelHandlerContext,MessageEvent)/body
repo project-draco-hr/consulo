@@ -24,10 +24,16 @@ break;
 case CANCEL_BUILD_COMMAND:
 final JpsRemoteProto.Message.Request.CancelBuildCommand cancelCommand=request.getCancelBuildCommand();
 final UUID targetSessionId=ProtoUtil.fromProtoUUID(cancelCommand.getTargetSessionId());
-for (CompilationTask task : myBuildsInProgress.values()) {
+synchronized (myBuildsInProgress) {
+for (Iterator<Pair<RunnableFuture,CompilationTask>> it=myBuildsInProgress.iterator(); it.hasNext(); ) {
+final Pair<RunnableFuture,CompilationTask> pair=it.next();
+final CompilationTask task=pair.second;
 if (task.getSessionId().equals(targetSessionId)) {
+it.remove();
 task.cancel();
+pair.first.cancel(true);
 break;
+}
 }
 }
 reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandCompletedEvent(null));
@@ -49,16 +55,25 @@ break;
 case SHUTDOWN_COMMAND:
 myBuildsExecutor.submit(new Runnable(){
 public void run(){
-for (Map.Entry<String,CompilationTask> entry : myBuildsInProgress.entrySet()) {
-final CompilationTask task=entry.getValue();
-task.cancel();
+final List<RunnableFuture> futures=new ArrayList<RunnableFuture>();
+synchronized (myBuildsInProgress) {
+for (Iterator<Pair<RunnableFuture,CompilationTask>> it=myBuildsInProgress.iterator(); it.hasNext(); ) {
+final Pair<RunnableFuture,CompilationTask> pair=it.next();
+it.remove();
+pair.second.cancel();
+final RunnableFuture future=pair.first;
+futures.add(future);
+future.cancel(true);
+}
 }
 facade.clearCahedState();
-while (!myBuildsInProgress.isEmpty()) {
+for (RunnableFuture future : futures) {
 try {
-Thread.sleep(100L);
+future.get();
 }
  catch (InterruptedException ignored) {
+}
+catch (ExecutionException ignored) {
 }
 }
 myServer.stop();
