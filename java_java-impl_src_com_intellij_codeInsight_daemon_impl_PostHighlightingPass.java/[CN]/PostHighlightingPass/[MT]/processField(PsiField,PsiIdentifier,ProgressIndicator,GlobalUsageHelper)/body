@@ -1,0 +1,48 @@
+{
+  if (field.hasModifierProperty(PsiModifier.PRIVATE)) {
+    if (!myRefCountHolder.isReferenced(field) && !isImplicitUsage(field,progress)) {
+      if (HighlightUtil.isSerializationImplicitlyUsedField(field)) {
+        return null;
+      }
+      String message=JavaErrorMessages.message("private.field.is.not.used",identifier.getText());
+      HighlightInfo highlightInfo=suggestionsToMakeFieldUsed(field,identifier,message);
+      if (!field.hasInitializer()) {
+        QuickFixAction.registerQuickFixAction(highlightInfo,HighlightMethodUtil.getFixRange(field),new CreateConstructorParameterFromFieldFix(field),null);
+      }
+      return highlightInfo;
+    }
+    final boolean readReferenced=myRefCountHolder.isReferencedForRead(field);
+    if (!readReferenced && !isImplicitRead(field,progress)) {
+      String message=JavaErrorMessages.message("private.field.is.not.used.for.reading",identifier.getText());
+      return suggestionsToMakeFieldUsed(field,identifier,message);
+    }
+    if (field.hasInitializer()) {
+      return null;
+    }
+    final boolean writeReferenced=myRefCountHolder.isReferencedForWrite(field);
+    if (!writeReferenced && !isImplicitWrite(field,progress)) {
+      String message=JavaErrorMessages.message("private.field.is.not.assigned",identifier.getText());
+      final HighlightInfo info=createUnusedSymbolInfo(identifier,message,HighlightInfoType.UNUSED_SYMBOL);
+      QuickFixAction.registerQuickFixAction(info,new CreateGetterOrSetterFix(false,true,field),myUnusedSymbolKey);
+      QuickFixAction.registerQuickFixAction(info,HighlightMethodUtil.getFixRange(field),new CreateConstructorParameterFromFieldFix(field),null);
+      SpecialAnnotationsUtil.createAddToSpecialAnnotationFixes(field,new Processor<String>(){
+        @Override public boolean process(        final String annoName){
+          QuickFixAction.registerQuickFixAction(info,UnusedSymbolLocalInspection.createQuickFix(annoName,"fields",field.getProject()));
+          return true;
+        }
+      }
+);
+      return info;
+    }
+  }
+ else   if (isImplicitUsage(field,progress)) {
+    return null;
+  }
+ else   if (!myRefCountHolder.isReferenced(field) && weAreSureThereAreNoUsages(field,progress,helper)) {
+    if (field instanceof PsiEnumConstant && isEnumValuesMethodUsed(field,progress,helper)) {
+      return null;
+    }
+    return formatUnusedSymbolHighlightInfo("field.is.not.used",field,"fields",myDeadCodeKey,myDeadCodeInfoType);
+  }
+  return null;
+}
