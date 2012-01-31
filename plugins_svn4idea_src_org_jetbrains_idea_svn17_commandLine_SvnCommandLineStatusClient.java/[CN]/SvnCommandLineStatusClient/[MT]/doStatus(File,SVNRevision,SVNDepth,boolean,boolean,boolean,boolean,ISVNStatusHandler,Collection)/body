@@ -1,0 +1,73 @@
+{
+  final File base=path.isDirectory() ? path : path.getParentFile();
+  final SVNInfo infoBase=myInfoClient.doInfo(base,revision);
+  final SvnSimpleCommand command=new SvnSimpleCommand(myProject,base,SvnCommandName.st);
+  if (depth != null) {
+    command.addParameters("--depth",depth.getName());
+  }
+  if (remote) {
+    command.addParameters("-u");
+  }
+  if (reportAll) {
+    command.addParameters("-v");
+  }
+  if (includeIgnored) {
+    command.addParameters("--no-ignore");
+  }
+  if (!collectParentExternals) {
+    command.addParameters("--ignore-externals");
+  }
+  changelistsToCommand(changeLists,command);
+  command.addParameters("--xml");
+  final String[] changelistName=new String[1];
+  final SvnStatusHandler[] svnHandl=new SvnStatusHandler[1];
+  svnHandl[0]=new SvnStatusHandler(new SvnStatusHandler.DataCallback(){
+    @Override public void switchPath(){
+      final PortableStatus pending=svnHandl[0].getPending();
+      pending.setChangelistName(changelistName[0]);
+      try {
+        final String append=SVNPathUtil.append(infoBase.getURL().toString(),FileUtil.toSystemIndependentName(pending.getPath()));
+        pending.setURL(SVNURL.parseURIEncoded(append));
+        handler.handleStatus(pending);
+      }
+ catch (      SVNException e) {
+        throw new SvnExceptionWrapper(e);
+      }
+    }
+    @Override public void switchChangeList(    String newList){
+      changelistName[0]=newList;
+    }
+  }
+,base,new Convertor<File,SVNInfo>(){
+    @Override public SVNInfo convert(    File o){
+      try {
+        return myInfoClient.doInfo(o,revision);
+      }
+ catch (      SVNException e) {
+        throw new SvnExceptionWrapper(e);
+      }
+    }
+  }
+);
+  try {
+    final String result=command.run();
+    SAXParser parser=SAXParserFactory.newInstance().newSAXParser();
+    parser.parse(new StringBufferInputStream(result),svnHandl[0]);
+  }
+ catch (  SvnExceptionWrapper e) {
+    throw (SVNException)e.getCause();
+  }
+catch (  IOException e) {
+    throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR),e);
+  }
+catch (  ParserConfigurationException e) {
+    throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR),e);
+  }
+catch (  SAXException e) {
+    throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR),e);
+  }
+catch (  VcsException e) {
+    throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR),e);
+  }
+  return 0;
+}
