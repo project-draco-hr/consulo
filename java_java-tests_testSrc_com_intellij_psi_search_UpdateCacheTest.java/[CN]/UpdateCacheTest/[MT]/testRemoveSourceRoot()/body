@@ -1,0 +1,38 @@
+{
+  final ModuleRootManager rootManager=ModuleRootManager.getInstance(myModule);
+  final VirtualFile root=rootManager.getContentRoots()[0];
+  PsiSearchHelper.SERVICE.getInstance(myProject).findFilesWithTodoItems();
+  new WriteCommandAction.Simple(getProject()){
+    @Override protected void run() throws Throwable {
+      VirtualFile newFile=root.createChildData(null,"New.java");
+      VfsUtil.saveText(newFile,"class A{ Exception e;} //todo");
+    }
+  }
+.execute().throwException();
+  PsiDocumentManager.getInstance(myProject).commitAllDocuments();
+  PsiSearchHelper.SERVICE.getInstance(myProject).findFilesWithTodoItems();
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    public void run(){
+      VirtualFile[] sourceRoots=rootManager.getSourceRoots();
+      LOG.assertTrue(sourceRoots.length == 1);
+      final ModifiableRootModel rootModel=ModuleRootManager.getInstance(myModule).getModifiableModel();
+      final ContentEntry[] content1=rootModel.getContentEntries();
+      contentLoop:       for (      ContentEntry contentEntry : content1) {
+        if (root.equals(contentEntry.getFile())) {
+          final SourceFolder[] sourceFolders=contentEntry.getSourceFolders();
+          for (          SourceFolder sourceFolder : sourceFolders) {
+            if (sourceRoots[0].equals(sourceFolder.getFile())) {
+              contentEntry.removeSourceFolder(sourceFolder);
+              break contentLoop;
+            }
+          }
+        }
+      }
+      rootModel.commit();
+    }
+  }
+);
+  PsiClass exceptionClass=myJavaFacade.findClass("java.lang.Exception",GlobalSearchScope.allScope(getProject()));
+  assertNotNull(exceptionClass);
+  checkTodos(new String[]{"2.java","New.java"});
+}

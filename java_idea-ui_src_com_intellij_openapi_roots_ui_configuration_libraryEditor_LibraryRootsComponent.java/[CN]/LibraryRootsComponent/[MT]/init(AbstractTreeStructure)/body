@@ -4,25 +4,57 @@
   myTree.setShowsRootHandles(true);
   new LibraryRootsTreeSpeedSearch(myTree);
   myTree.setCellRenderer(new LibraryTreeRenderer());
-  final MyTreeSelectionListener treeSelectionListener=new MyTreeSelectionListener();
-  myTree.getSelectionModel().addTreeSelectionListener(treeSelectionListener);
   myTreeBuilder=new LibraryTableTreeBuilder(myTree,(DefaultTreeModel)myTree.getModel(),treeStructure);
   myTreePanel.setLayout(new BorderLayout());
-  myTreePanel.add(ScrollPaneFactory.createScrollPane(myTree),BorderLayout.CENTER);
-  final JPanel buttonsPanel=new JPanel(new VerticalFlowLayout(VerticalFlowLayout.TOP,0,5,true,false));
+  ToolbarDecorator toolbarDecorator=ToolbarDecorator.createDecorator(myTree).disableUpDownActions().disableAddAction().setRemoveActionName(ProjectBundle.message("library.detach.action")).setRemoveAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      final Object[] selectedElements=getSelectedElements();
+      if (selectedElements.length == 0) {
+        return;
+      }
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          for (          Object selectedElement : selectedElements) {
+            if (selectedElement instanceof ItemElement) {
+              final ItemElement itemElement=(ItemElement)selectedElement;
+              getLibraryEditor().removeRoot(itemElement.getUrl(),itemElement.getRootType());
+            }
+          }
+        }
+      }
+);
+      librariesChanged(true);
+    }
+  }
+);
   final List<? extends RootDetector> detectors=myDescriptor.getRootDetectors();
-  if (!detectors.isEmpty()) {
-    JButton button=new JButton(ProjectBundle.message("button.text.attach.files"));
-    button.addActionListener(new AttachFilesListener(detectors));
-    buttonsPanel.add(button);
+  toolbarDecorator.setAddAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      final AnAction[] children=getActions();
+      if (children.length == 0)       return;
+      final DefaultActionGroup actions=new DefaultActionGroup(children);
+      JBPopupFactory.getInstance().createActionGroupPopup(null,actions,DataManager.getInstance().getDataContext(button.getContextComponent()),JBPopupFactory.ActionSelectionAid.SPEEDSEARCH,true).show(button.getPreferredPopupPoint());
+    }
+    private AnAction[] getActions(){
+      List<AnAction> actions=new ArrayList<AnAction>();
+      if (!detectors.isEmpty()) {
+        actions.add(new AttachFilesAction(detectors,ProjectBundle.message("button.text.attach.files")));
+      }
+      for (      AttachRootButtonDescriptor descriptor : myDescriptor.createAttachButtons()) {
+        actions.add(new AttachItemAction(descriptor,descriptor.getButtonText()));
+      }
+      return actions.toArray(new AnAction[actions.size()]);
+    }
   }
-  for (  AttachRootButtonDescriptor descriptor : myDescriptor.createAttachButtons()) {
-    JButton button=new JButton(descriptor.getButtonText());
-    button.addActionListener(new AttachItemAction(descriptor));
-    buttonsPanel.add(button);
+);
+  myTreePanel.add(toolbarDecorator.createPanel(),BorderLayout.CENTER);
+  ToolbarDecorator.findRemoveButton(myTreePanel).addCustomUpdater(new AnActionButtonUpdater(){
+    @Override public boolean isEnabled(    AnActionEvent e){
+      final Object[] selectedElements=getSelectedElements();
+      final Class<?> elementsClass=getElementsClass(selectedElements);
+      return elementsClass != null && !elementsClass.isAssignableFrom(OrderRootTypeElement.class);
+    }
   }
-  myAttachButtonsPanel.add(buttonsPanel,BorderLayout.CENTER);
-  myRemoveButton.addActionListener(new RemoveAction());
-  treeSelectionListener.updateButtons();
+);
   Disposer.register(this,myTreeBuilder);
 }

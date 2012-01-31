@@ -1,0 +1,41 @@
+{
+  final TempDirTestFixture tdf=IdeaTestFixtureFactory.getFixtureFactory().createTempDirTestFixture();
+  tdf.setUp();
+  try {
+    new WriteCommandAction(getProject()){
+      @Override protected void run(      Result result) throws Throwable {
+        final ModifiableModuleModel moduleModel=ModuleManager.getInstance(getProject()).getModifiableModel();
+        moduleModel.newModule("independent/independent.iml",StdModuleTypes.JAVA);
+        moduleModel.commit();
+        tdf.createFile("plugin.xml","<document>\n" + "  <action class=\"com.Foo\" />\n" + "  <action class=\"com.Foo.Bar\" />\n"+ "  <action class=\"com.Foo$Bar\" />\n"+ "</document>");
+        PsiTestUtil.addContentRoot(ModuleManager.getInstance(getProject()).findModuleByName("independent"),tdf.getFile(""));
+      }
+    }
+.execute();
+    GlobalSearchScope scope=GlobalSearchScope.allScope(getProject());
+    PsiClass foo=myJavaFacade.findClass("com.Foo",scope);
+    PsiClass bar=myJavaFacade.findClass("com.Foo.Bar",scope);
+    final int[] count={0};
+    Processor<UsageInfo> processor=new Processor<UsageInfo>(){
+      @Override public boolean process(      UsageInfo usageInfo){
+        int navigationOffset=usageInfo.getNavigationOffset();
+        assertTrue(navigationOffset > 0);
+        String textAfter=usageInfo.getFile().getText().substring(navigationOffset);
+        assertTrue(textAfter,textAfter.startsWith("Foo") || textAfter.startsWith("Bar") || textAfter.startsWith("com.Foo.Bar"));
+        count[0]++;
+        return true;
+      }
+    }
+;
+    JavaFindUsagesHandler handler=new JavaFindUsagesHandler(bar,JavaFindUsagesHandlerFactory.getInstance(getProject()));
+    count[0]=0;
+    handler.processUsagesInText(foo,processor,scope);
+    assertEquals(3,count[0]);
+    count[0]=0;
+    handler.processUsagesInText(bar,processor,scope);
+    assertEquals(2,count[0]);
+  }
+  finally {
+    tdf.tearDown();
+  }
+}
