@@ -1,53 +1,28 @@
 {
-  String content=notification.getContent();
-  String mainText=notification.getTitle();
-  boolean showMore=false;
-  if (StringUtil.isNotEmpty(content)) {
-    if (content.startsWith("<p>")) {
-      content=content.substring("<p>".length());
-    }
-    if (content.startsWith("<") && !content.startsWith("<a ")) {
-      showMore=true;
-    }
-    if (StringUtil.isNotEmpty(mainText)) {
-      mainText+=": ";
-    }
-    mainText+=content;
+  DocumentImpl document=new DocumentImpl(true);
+  AtomicBoolean showMore=new AtomicBoolean(false);
+  Map<RangeMarker,HyperlinkInfo> links=new LinkedHashMap<RangeMarker,HyperlinkInfo>();
+  List<RangeMarker> lineSeparators=new ArrayList<RangeMarker>();
+  boolean hasHtml=parseHtmlContent(notification,document,showMore,links,lineSeparators);
+  removeJavaNewLines(document,lineSeparators,hasHtml);
+  insertNewLineSubstitutors(document,showMore,lineSeparators);
+  String title=notification.getTitle();
+  if (StringUtil.isNotEmpty(title)) {
+    document.insertString(0,document.getTextLength() > 0 ? title + ": " : title);
   }
-  mainText=StringUtil.replace(mainText,"&nbsp;"," ");
-  int nlIndex=eolIndex(mainText);
-  if (nlIndex >= 0) {
-    mainText=mainText.substring(0,nlIndex);
-    showMore=true;
-  }
-  List<Pair<TextRange,HyperlinkInfo>> links=new ArrayList<Pair<TextRange,HyperlinkInfo>>();
-  String message="";
-  while (true) {
-    Matcher tagMatcher=TAG_PATTERN.matcher(mainText);
-    if (!tagMatcher.find()) {
-      message+=mainText;
-      break;
+  String status=document.getText();
+  ArrayList<Pair<TextRange,HyperlinkInfo>> list=new ArrayList<Pair<TextRange,HyperlinkInfo>>();
+  for (  RangeMarker marker : links.keySet()) {
+    if (!marker.isValid()) {
+      showMore.set(true);
+      continue;
     }
-    message+=mainText.substring(0,tagMatcher.start());
-    Matcher aMatcher=A_PATTERN.matcher(tagMatcher.group());
-    if (aMatcher.matches()) {
-      final String href=aMatcher.group(2);
-      int linkEnd=mainText.indexOf(A_CLOSING,tagMatcher.end());
-      if (linkEnd > 0) {
-        String linkText=mainText.substring(tagMatcher.end(),linkEnd).replaceAll(TAG_PATTERN.pattern(),"");
-        links.add(new Pair<TextRange,HyperlinkInfo>(TextRange.from(message.length(),linkText.length()),new NotificationHyperlinkInfo(notification,href)));
-        message+=linkText;
-        mainText=mainText.substring(linkEnd + A_CLOSING.length());
-        continue;
-      }
-    }
-    mainText=mainText.substring(tagMatcher.end());
+    list.add(Pair.create(new TextRange(marker.getStartOffset(),marker.getEndOffset()),links.get(marker)));
   }
-  message=StringUtil.unescapeXml(StringUtil.convertLineSeparators(message));
-  String status=message;
-  if (showMore) {
-    message+=" more ";
-    links.add(new Pair<TextRange,HyperlinkInfo>(TextRange.from(message.length() - 5,4),new ShowBalloon(notification)));
+  if (showMore.get()) {
+    String sb="show balloon";
+    appendText(document," (" + sb + ")");
+    list.add(new Pair<TextRange,HyperlinkInfo>(TextRange.from(document.getTextLength() - 1 - sb.length(),sb.length()),new ShowBalloon(notification)));
   }
-  return new LogEntry(message,status,links);
+  return new LogEntry(document.getText(),status,list);
 }
