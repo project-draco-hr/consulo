@@ -1,0 +1,34 @@
+{
+  for (int i=0; i < copiedFragment.getLineCount(); i++) {
+    final int lineStartOffset=copiedFragment.getLineStartOffset(i);
+    final int lineEndOffset=copiedFragment.getLineEndOffset(i);
+    final ExceptionWorker worker=new ExceptionWorker(myScope.getProject(),myScope);
+    Result result=null;
+    AccessToken token=ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      String text=copiedFragment.getText(new TextRange(lineStartOffset,lineEndOffset));
+      worker.execute(text,lineEndOffset);
+      result=worker.getResult();
+      if (result == null)       continue;
+      int offset=result.hyperlinkInfo instanceof OpenFileHyperlinkInfo ? ((OpenFileHyperlinkInfo)result.hyperlinkInfo).getDescriptor().getOffset() : -1;
+      PsiFile psiFile=worker.getFile();
+      if (offset <= 0 || psiFile == null)       continue;
+      PsiElement element=psiFile.findElementAt(offset);
+      PsiTryStatement parent=PsiTreeUtil.getParentOfType(element,PsiTryStatement.class,true,PsiClass.class);
+      PsiCodeBlock tryBlock=parent != null ? parent.getTryBlock() : null;
+      if (tryBlock == null || !tryBlock.getTextRange().contains(offset))       continue;
+    }
+  finally {
+      token.finish();
+    }
+    Trinity<TextRange,TextRange,TextRange> info=worker.getInfo();
+    int off=startOffset + lineStartOffset;
+    final TextAttributes attributes=result.highlightAttributes;
+    consumer.consume(new AdditionalHighlight(off + info.first.getStartOffset(),off + info.second.getEndOffset()){
+      @Override public TextAttributes getTextAttributes(      @Nullable TextAttributes source){
+        return new TextAttributes(null,null,attributes.getEffectColor(),EffectType.LINE_UNDERSCORE,Font.PLAIN);
+      }
+    }
+);
+  }
+}
