@@ -1,0 +1,52 @@
+{
+  final BuildDataManager dataManager=context.getDataManager();
+  try {
+    final ArtifactSourceFilesState state=dataManager.getArtifactsBuildData().getOrCreateState(artifact,context.getProject(),context.getRootsIndex());
+    state.initState();
+    final Set<String> deletedFiles=state.getDeletedFiles();
+    final Set<String> changedFiles=state.getChangedFiles();
+    if (deletedFiles.isEmpty() && changedFiles.isEmpty()) {
+      return;
+    }
+    context.processMessage(new ProgressMessage("Building artifact '" + artifact.getName() + "'..."));
+    final ArtifactSourceToOutputMapping mapping=state.getOrCreateMapping();
+    final Set<String> deletedJars=deleteOutdatedFiles(deletedFiles,context,mapping);
+    final ArtifactInstructionsBuilder instructions=state.getOrCreateInstructions();
+    final Set<JarInfo> changedJars=new THashSet<JarInfo>();
+    for (    String deletedJar : deletedJars) {
+      ContainerUtil.addIfNotNull(instructions.getJarInfo(deletedJar),changedJars);
+    }
+    Map<String,String[]> updatedMappings=new HashMap<String,String[]>();
+    for (    final String filePath : changedFiles) {
+      final List<String> outputs=new SmartList<String>();
+      instructions.processContainingRoots(filePath,new ArtifactRootProcessor(){
+        @Override public void process(        ArtifactSourceRoot root,        Collection<DestinationInfo> destinations) throws Exception {
+          for (          DestinationInfo destination : destinations) {
+            if (destination instanceof ExplodedDestinationInfo) {
+              copyFromRoot(root,filePath,destination.getOutputPath(),outputs);
+            }
+ else {
+              outputs.add(destination.getOutputFilePath());
+              changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+            }
+          }
+        }
+      }
+);
+      updatedMappings.put(filePath,ArrayUtil.toStringArray(outputs));
+    }
+    JarsBuilder builder=new JarsBuilder(changedJars,null,context);
+    final boolean processed=builder.buildJars(new THashSet<String>());
+    if (!processed) {
+      return;
+    }
+    state.updateTimestamps(deletedFiles,changedFiles);
+    for (    Map.Entry<String,String[]> entry : updatedMappings.entrySet()) {
+      mapping.appendData(entry.getKey(),entry.getValue());
+    }
+    context.processMessage(UptoDateFilesSavedEvent.INSTANCE);
+  }
+ catch (  Exception e) {
+    throw new ProjectBuildException(e);
+  }
+}
