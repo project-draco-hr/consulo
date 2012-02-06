@@ -13,7 +13,7 @@
   }
   myTreeStructure=new SmartTreeStructure(project,myTreeModel){
     public void rebuildTree(){
-      if (!myPopup.isDisposed()) {
+      if (ApplicationManager.getApplication().isUnitTestMode() || !myPopup.isDisposed()) {
         super.rebuildTree();
       }
     }
@@ -48,105 +48,10 @@
 );
   myTree.setRootVisible(false);
   myTree.setShowsRootHandles(true);
-  mySpeedSearch=new TreeSpeedSearch(myTree,TreeSpeedSearch.NODE_DESCRIPTOR_TOSTRING,true){
-    @Override protected Point getComponentLocationOnScreen(){
-      return myPopup.getContent().getLocationOnScreen();
-    }
-    @Override protected Rectangle getComponentVisibleRect(){
-      return myPopup.getContent().getVisibleRect();
-    }
-    @Override protected Object findElement(    String s){
-      List<ObjectWithWeight> elements=new ArrayList<ObjectWithWeight>();
-      s=s.trim();
-      final ListIterator<Object> it=getElementIterator(0);
-      while (it.hasNext()) {
-        final ObjectWithWeight o=new ObjectWithWeight(it.next(),s,getComparator());
-        if (!o.weights.isEmpty()) {
-          elements.add(o);
-        }
-      }
-      ObjectWithWeight cur=null;
-      ArrayList<ObjectWithWeight> current=new ArrayList<ObjectWithWeight>();
-      for (      ObjectWithWeight element : elements) {
-        if (cur == null) {
-          cur=element;
-          current.add(cur);
-          continue;
-        }
-        final int i=element.compareWith(cur);
-        if (i == 0) {
-          current.add(element);
-        }
- else         if (i < 0) {
-          cur=element;
-          current.clear();
-          current.add(cur);
-        }
-      }
-      return current.isEmpty() ? null : findClosestTo(myInitialPsiElement,current);
-    }
-    private Object findClosestTo(    PsiElement path,    ArrayList<ObjectWithWeight> paths){
-      if (path == null || myInitialPsiElement == null) {
-        return paths.get(0).node;
-      }
-      final Set<PsiElement> parents=getAllParents(myInitialPsiElement);
-      Object cur=paths.get(0).node;
-      int max=-1;
-      for (      ObjectWithWeight p : paths) {
-        final Object last=((TreePath)p.node).getLastPathComponent();
-        final List<PsiElement> elements=new ArrayList<PsiElement>();
-        final Object object=((DefaultMutableTreeNode)last).getUserObject();
-        if (object instanceof FilteringTreeStructure.FilteringNode) {
-          FilteringTreeStructure.FilteringNode node=(FilteringTreeStructure.FilteringNode)object;
-          while (node != null) {
-            elements.add(getPsi(node));
-            node=node.getParentNode();
-          }
-          final int size=ContainerUtil.intersection(parents,elements).size();
-          if (size > max) {
-            max=size;
-            cur=p.node;
-          }
- else           if (size == max && size == parents.size()) {
-            cur=p.node;
-          }
-        }
-      }
-      return cur;
-    }
-class ObjectWithWeight {
-      final Object node;
-      final List<TextRange> weights=new ArrayList<TextRange>();
-      ObjectWithWeight(      Object element,      String pattern,      SpeedSearchComparator comparator){
-        this.node=element;
-        final String text=getElementText(element);
-        if (text != null) {
-          final Iterable<TextRange> ranges=comparator.matchingFragments(pattern,text);
-          if (ranges != null) {
-            for (            TextRange range : ranges) {
-              weights.add(range);
-            }
-          }
-        }
-        Collections.sort(weights,TEXT_RANGE_COMPARATOR);
-      }
-      int compareWith(      ObjectWithWeight obj){
-        final List<TextRange> w=obj.weights;
-        for (int i=0; i < weights.size(); i++) {
-          if (i >= w.size())           return 1;
-          final int result=TEXT_RANGE_COMPARATOR.compare(weights.get(i),w.get(i));
-          if (result != 0) {
-            return result;
-          }
-        }
-        return 0;
-      }
-    }
-  }
-;
+  mySpeedSearch=new MyTreeSpeedSearch();
   mySpeedSearch.setComparator(new SpeedSearchComparator(false,true));
   final FileStructurePopupFilter filter=new FileStructurePopupFilter();
-  myFilteringStructure=new FilteringTreeStructure(filter,myTreeStructure,false);
+  myFilteringStructure=new FilteringTreeStructure(filter,myTreeStructure,ApplicationManager.getApplication().isUnitTestMode());
   myAbstractTreeBuilder=new FilteringTreeBuilder(myTree,filter,myFilteringStructure,null){
     @Override protected boolean validateNode(    Object child){
       return StructureViewComponent.isValid(child);
@@ -158,6 +63,7 @@ class ObjectWithWeight {
     }
   }
 ;
-  myAbstractTreeBuilder.getUi().getUpdater().setDelay(1);
+  myAbstractTreeBuilder.getUi().getUpdater().setPassThroughMode(true);
+  myInitialPsiElement=getCurrentElement(getPsiFile(myProject));
   Disposer.register(this,myAbstractTreeBuilder);
 }

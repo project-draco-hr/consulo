@@ -1,0 +1,72 @@
+{
+  final InspectionProfile profile=InspectionProjectProfileManager.getInstance(myProject).getInspectionProfile();
+  final boolean deadCodeEnabled=profile.isToolEnabled(HighlightDisplayKey.find(GroovyUnusedDeclarationInspection.SHORT_NAME),myFile);
+  ProjectFileIndex fileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+  VirtualFile virtualFile=myFile.getViewProvider().getVirtualFile();
+  if (!fileIndex.isInContent(virtualFile)) {
+    return;
+  }
+  final UnusedDeclarationInspection deadCodeInspection=(UnusedDeclarationInspection)profile.getInspectionTool(UnusedDeclarationInspection.SHORT_NAME,myFile);
+  final GlobalUsageHelper usageHelper=new GlobalUsageHelper(){
+    public boolean isCurrentFileAlreadyChecked(){
+      return false;
+    }
+    public boolean isLocallyUsed(    @NotNull PsiNamedElement member){
+      return false;
+    }
+    @Override public boolean shouldCheckUsages(    @NotNull PsiMember member){
+      return deadCodeInspection == null || !deadCodeInspection.isEntryPoint(member);
+    }
+  }
+;
+  final List<HighlightInfo> unusedDeclarations=new ArrayList<HighlightInfo>();
+  final Set<GrImportStatement> unusedImports=new HashSet<GrImportStatement>(GroovyImportOptimizer.getValidImportStatements(myFile));
+  myFile.accept(new PsiRecursiveElementWalkingVisitor(){
+    @Override public void visitElement(    PsiElement element){
+      if (element instanceof GrReferenceElement) {
+        for (        GroovyResolveResult result : ((GrReferenceElement)element).multiResolve(true)) {
+          GroovyPsiElement context=result.getCurrentFileResolveContext();
+          if (context instanceof GrImportStatement) {
+            GrImportStatement importStatement=(GrImportStatement)context;
+            unusedImports.remove(importStatement);
+          }
+        }
+      }
+      if (deadCodeEnabled && element instanceof GrNamedElement && !PostHighlightingPass.isImplicitUsage((GrNamedElement)element,progress)) {
+        PsiElement nameId=((GrNamedElement)element).getNameIdentifierGroovy();
+        if (nameId.getNode().getElementType() == GroovyTokenTypes.mIDENT) {
+          String name=((GrNamedElement)element).getName();
+          if (element instanceof GrTypeDefinition && !PostHighlightingPass.isClassUsed((GrTypeDefinition)element,progress,usageHelper)) {
+            unusedDeclarations.add(PostHighlightingPass.createUnusedSymbolInfo(nameId,"Class " + name + " is unused",HighlightInfoType.UNUSED_SYMBOL));
+          }
+ else           if (element instanceof GrMethod) {
+            GrMethod method=(GrMethod)element;
+            if (!GroovyCompletionUtil.OPERATOR_METHOD_NAMES.contains(method.getName()) && !PostHighlightingPass.isMethodReferenced(method,progress,usageHelper)) {
+              unusedDeclarations.add(PostHighlightingPass.createUnusedSymbolInfo(nameId,(method.isConstructor() ? "Constructor" : "Method") + " " + name+ " is unused",HighlightInfoType.UNUSED_SYMBOL));
+            }
+          }
+ else           if (element instanceof GrField && PostHighlightingPass.isFieldUnused((GrField)element,progress,usageHelper)) {
+            unusedDeclarations.add(PostHighlightingPass.createUnusedSymbolInfo(nameId,"Property " + name + " is unused",HighlightInfoType.UNUSED_SYMBOL));
+          }
+        }
+      }
+      super.visitElement(element);
+    }
+  }
+);
+  myUnusedImports=unusedImports;
+  myUnusedDeclarations=unusedDeclarations;
+  if (!unusedImports.isEmpty() && CodeInsightSettings.getInstance().OPTIMIZE_IMPORTS_ON_THE_FLY) {
+    final VirtualFile vfile=myFile.getVirtualFile();
+    if (vfile != null && ProjectRootManager.getInstance(myFile.getProject()).getFileIndex().isInSource(vfile)) {
+      final GrImportStatement[] imports=myFile.getImportStatements();
+      if (imports.length > 0) {
+        final int offset=myEditor.getCaretModel().getOffset();
+        if (imports[0].getTextRange().getStartOffset() <= offset && offset <= imports[imports.length - 1].getTextRange().getEndOffset()) {
+          return;
+        }
+      }
+      myOptimizeRunnable=new GroovyImportOptimizer().processFile(myFile);
+    }
+  }
+}

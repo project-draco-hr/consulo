@@ -48,7 +48,6 @@
       IdeFocusManager.getInstance(myProject).requestFocus(myTree,true);
       myAbstractTreeBuilder.queueUpdate().doWhenDone(new Runnable(){
         @Override public void run(){
-          myInitialPsiElement=getCurrentElement(getPsiFile(myProject));
           selectPsiElement(myInitialPsiElement);
           treeHasBuilt.setDone();
         }
@@ -57,25 +56,33 @@
     }
   }
 );
-  final Alarm alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD,myPopup);
-  alarm.addRequest(new Runnable(){
-    String filter="";
-    @Override public void run(){
-      alarm.cancelAllRequests();
-      String prefix=mySpeedSearch.getEnteredPrefix();
-      myTree.getEmptyText().setText(StringUtil.isEmpty(prefix) ? "Nothing to show" : "Can't find '" + prefix + "'");
-      if (prefix == null)       prefix="";
-      if (!filter.equals(prefix)) {
-        filter=prefix;
-        myAbstractTreeBuilder.refilter(null,false,false).doWhenProcessed(new Runnable(){
-          @Override public void run(){
-            myTree.repaint();
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    final Alarm alarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD,myPopup);
+    alarm.addRequest(new Runnable(){
+      String filter="";
+      @Override public void run(){
+        alarm.cancelAllRequests();
+        String prefix=mySpeedSearch.getEnteredPrefix();
+        myTree.getEmptyText().setText(StringUtil.isEmpty(prefix) ? "Nothing to show" : "Can't find '" + prefix + "'");
+        if (prefix == null)         prefix="";
+        if (!filter.equals(prefix)) {
+          filter=prefix;
+          final AccessToken token=ApplicationManager.getApplication().acquireReadActionLock();
+          try {
+            myAbstractTreeBuilder.refilter(null,false,false).doWhenProcessed(new Runnable(){
+              @Override public void run(){
+                myTree.repaint();
+              }
+            }
+);
+          }
+  finally {
+            token.finish();
           }
         }
-);
+        alarm.addRequest(this,300);
       }
-      alarm.addRequest(this,300);
     }
-  }
 ,300);
+  }
 }

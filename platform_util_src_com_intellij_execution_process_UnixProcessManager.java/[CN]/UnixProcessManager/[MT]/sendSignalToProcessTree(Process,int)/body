@@ -1,61 +1,41 @@
 {
   checkCLib();
-  int our_pid=C_LIB.getpid();
-  int process_pid=getProcessPid(process);
-  try {
-    String[] psCmd=getPSCmd(false);
-    Process p=Runtime.getRuntime().exec(psCmd);
-    ProcessInfo processInfo=new ProcessInfo();
-    @SuppressWarnings({"IOResourceOpenedButNotSafelyClosed"}) BufferedReader stdInput=new BufferedReader(new InputStreamReader(p.getInputStream()));
-    BufferedReader stdError=new BufferedReader(new InputStreamReader(p.getErrorStream()));
-    List<Integer> childrenPids=new ArrayList<Integer>();
-    boolean result;
-    try {
-      String s;
-      stdInput.readLine();
-      int foundPid=0;
-      while ((s=stdInput.readLine()) != null) {
-        StringTokenizer st=new StringTokenizer(s," ");
-        int parent_pid=Integer.parseInt(st.nextToken());
-        int pid=Integer.parseInt(st.nextToken());
-        processInfo.register(pid,parent_pid);
-        if (parent_pid == process_pid) {
-          childrenPids.add(pid);
+  final int our_pid=C_LIB.getpid();
+  final int process_pid=getProcessPid(process);
+  final Ref<Integer> foundPid=new Ref<Integer>();
+  final ProcessInfo processInfo=new ProcessInfo();
+  final List<Integer> childrenPids=new ArrayList<Integer>();
+  processPSOutput(new Processor<String>(){
+    @Override public boolean process(    String s){
+      StringTokenizer st=new StringTokenizer(s," ");
+      int parent_pid=Integer.parseInt(st.nextToken());
+      int pid=Integer.parseInt(st.nextToken());
+      processInfo.register(pid,parent_pid);
+      if (parent_pid == process_pid) {
+        childrenPids.add(pid);
+      }
+      if (pid == process_pid) {
+        if (parent_pid == our_pid) {
+          foundPid.set(pid);
         }
-        if (pid == process_pid) {
-          if (parent_pid == our_pid) {
-            foundPid=pid;
-          }
  else {
-            throw new IllegalStateException("process is not our child");
-          }
+          throw new IllegalStateException("process is not our child");
         }
       }
-      if (foundPid != 0) {
-        processInfo.killProcTree(foundPid,signal);
-        result=true;
-      }
+      return false;
+    }
+  }
+,getPSCmd(false));
+  boolean result;
+  if (!foundPid.isNull()) {
+    processInfo.killProcTree(foundPid.get(),signal);
+    result=true;
+  }
  else {
-        for (        Integer pid : childrenPids) {
-          processInfo.killProcTree(pid,signal);
-        }
-        result=false;
-      }
-      StringBuffer errorStr=new StringBuffer();
-      while ((s=stdError.readLine()) != null) {
-        errorStr.append(s).append("\n");
-      }
-      if (errorStr.length() > 0) {
-        throw new IllegalStateException("error:" + errorStr.toString());
-      }
+    for (    Integer pid : childrenPids) {
+      processInfo.killProcTree(pid,signal);
     }
-  finally {
-      stdInput.close();
-      stdError.close();
-    }
-    return result;
+    result=false;
   }
- catch (  IOException e) {
-    throw new IllegalStateException(e);
-  }
+  return result;
 }
