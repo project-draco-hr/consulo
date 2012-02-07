@@ -41,11 +41,11 @@
       }
       final String[] libPackages=getLibPackages(module,packageName);
       final Map<String,String> genFilePath2Package=new HashMap<String,String>();
-      final String packageDir=sourceRootPath + '/' + packageName.replace('.','/')+ '/';
+      final String packageDir=packageName.replace('.','/') + '/';
       genFilePath2Package.put(packageDir + AndroidCommonUtils.MANIFEST_JAVA_FILE_NAME,packageName);
       genFilePath2Package.put(packageDir + AndroidCommonUtils.R_JAVA_FILENAME,packageName);
       for (      String libPackage : libPackages) {
-        final String libPackageDir=sourceRootPath + '/' + libPackage.replace('.','/')+ '/';
+        final String libPackageDir=libPackage.replace('.','/') + '/';
         genFilePath2Package.put(libPackageDir + AndroidCommonUtils.MANIFEST_JAVA_FILE_NAME,packageName);
         genFilePath2Package.put(libPackageDir + AndroidCommonUtils.R_JAVA_FILENAME,packageName);
       }
@@ -58,9 +58,10 @@
     return;
   }
   final Set<VirtualFile> filesToCheck=new HashSet<VirtualFile>();
-  for (  String genFilePath : item.myGenFile2package.keySet()) {
-    if (new File(genFilePath).exists()) {
-      final VirtualFile genFile=LocalFileSystem.getInstance().findFileByPath(genFilePath);
+  for (  String genFileRelPath : item.myGenFileRelPath2package.keySet()) {
+    final String genFileFullPath=item.myOutputDirOsPath + '/' + genFileRelPath;
+    if (new File(genFileFullPath).exists()) {
+      final VirtualFile genFile=LocalFileSystem.getInstance().findFileByPath(genFileFullPath);
       if (genFile != null) {
         filesToCheck.add(genFile);
       }
@@ -69,11 +70,45 @@
   if (!ensureFilesWritable(module.getProject(),filesToCheck)) {
     return;
   }
+  File tempOutDir=null;
   try {
-    final Map<CompilerMessageCategory,List<String>> messages=AndroidCompileUtil.toCompilerMessageCategoryKeys(AndroidApt.compile(item.myTarget,item.myPlatformToolsRevision,item.myManifestFileOsPath,item.myPackage,item.myOutputDirOsPath,item.myResDirOsPaths,item.myLibPackages,item.myLibrary));
-    AndroidCompileUtil.addMessages(context,messages);
-    for (    Map.Entry<String,String> entry : item.myGenFile2package.entrySet()) {
-      final String path=entry.getKey();
+    tempOutDir=FileUtil.createTempDirectory("android_apt_autogeneration","tmp");
+    final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(item.myTarget,item.myPlatformToolsRevision,item.myManifestFileOsPath,item.myPackage,tempOutDir.getPath(),item.myResDirOsPaths,item.myLibPackages,item.myLibrary);
+    if (messages.get(AndroidCompilerMessageKind.ERROR).size() == 0) {
+      for (      String genFileRelPath : item.myGenFileRelPath2package.keySet()) {
+        final File srcFile=new File(tempOutDir.getPath() + '/' + genFileRelPath);
+        if (srcFile.isFile()) {
+          final File dstFile=new File(item.myOutputDirOsPath + '/' + genFileRelPath);
+          if (dstFile.exists()) {
+            if (!FileUtil.delete(dstFile)) {
+              ApplicationManager.getApplication().runReadAction(new Runnable(){
+                @Override public void run(){
+                  if (module.isDisposed() || module.getProject().isDisposed()) {
+                    return;
+                  }
+                  context.addMessage(CompilerMessageCategory.ERROR,"Cannot delete " + FileUtil.toSystemDependentName(dstFile.getPath()),null,-1,-1);
+                }
+              }
+);
+            }
+          }
+          if (!srcFile.renameTo(dstFile)) {
+            ApplicationManager.getApplication().runReadAction(new Runnable(){
+              @Override public void run(){
+                if (module.isDisposed() || module.getProject().isDisposed()) {
+                  return;
+                }
+                context.addMessage(CompilerMessageCategory.ERROR,"Cannot move " + FileUtil.toSystemDependentName(srcFile.getPath()) + " to "+ FileUtil.toSystemDependentName(dstFile.getPath()),null,-1,-1);
+              }
+            }
+);
+          }
+        }
+      }
+    }
+    AndroidCompileUtil.addMessages(context,AndroidCompileUtil.toCompilerMessageCategoryKeys(messages));
+    for (    Map.Entry<String,String> entry : item.myGenFileRelPath2package.entrySet()) {
+      final String path=item.myOutputDirOsPath + '/' + entry.getKey();
       final String aPackage=entry.getValue();
       removeDuplicateClasses(module,aPackage,new File(path),item.myOutputDirOsPath);
     }
@@ -91,5 +126,10 @@
       }
     }
 );
+  }
+ finally {
+    if (tempOutDir != null) {
+      FileUtil.delete(tempOutDir);
+    }
   }
 }
