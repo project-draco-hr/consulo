@@ -1,0 +1,62 @@
+{
+  if (!(file instanceof GroovyFileBase)) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("only.in.groovy.files"));
+  }
+  SelectionModel selectionModel=editor.getSelectionModel();
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  PsiElement[] elements=getElementsInOffset(file,start,end);
+  if (elements.length == 1 && elements[0] instanceof GrExpression) {
+    selectionModel.setSelection(start,elements[0].getTextRange().getEndOffset());
+  }
+  GrStatement[] statements=getStatementsByElements(elements);
+  if (statements.length == 0) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("selected.block.should.represent.a.statement.set"));
+  }
+  for (  GrStatement statement : statements) {
+    if (isSuperOrThisCall(statement,true,true)) {
+      throw new GrRefactoringError(GroovyRefactoringBundle.message("selected.block.contains.invocation.of.another.class.constructor"));
+    }
+  }
+  GrStatement statement0=statements[0];
+  GrMemberOwner owner=PsiUtil.getMemberOwner(statement0);
+  GrStatementOwner declarationOwner=getDeclarationOwner(statement0);
+  if (owner == null || declarationOwner == null && !ExtractUtil.isSingleExpression(statements)) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("refactoring.is.not.supported.in.the.current.context"));
+  }
+  if (declarationOwner == null && ExtractUtil.isSingleExpression(statements) && statement0 instanceof GrExpression && PsiType.VOID.equals(((GrExpression)statement0).getType())) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("selected.expression.has.void.type"));
+  }
+  Set<GrStatement> allReturnStatements=new HashSet<GrStatement>();
+  GrControlFlowOwner controlFlowOwner=ControlFlowUtils.findControlFlowOwner(statement0);
+  LOG.assertTrue(controlFlowOwner != null);
+  allReturnStatements.addAll(ControlFlowUtils.collectReturns(controlFlowOwner,true));
+  ArrayList<GrStatement> returnStatements=new ArrayList<GrStatement>();
+  for (  GrStatement returnStatement : allReturnStatements) {
+    for (    GrStatement statement : statements) {
+      if (PsiTreeUtil.isAncestor(statement,returnStatement,false)) {
+        returnStatements.add(returnStatement);
+        break;
+      }
+    }
+  }
+  FragmentVariableInfos fragmentVariableInfos=ReachingDefinitionsCollector.obtainVariableFlowInformation(statement0,statements[statements.length - 1]);
+  VariableInfo[] inputInfos=fragmentVariableInfos.getInputVariableNames();
+  VariableInfo[] outputInfos=fragmentVariableInfos.getOutputVariableNames();
+  if (outputInfos.length == 1 && returnStatements.size() > 0) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("multiple.output.values"));
+  }
+  boolean hasInterruptingStatements=false;
+  for (  GrStatement statement : statements) {
+    hasInterruptingStatements=hasWrongBreakStatements(statement) || hasWrongContinueStatements(statement);
+    if (hasInterruptingStatements)     break;
+  }
+  boolean hasReturns=returnStatements.size() > 0;
+  List<GrStatement> returnStatementsCopy=new ArrayList<GrStatement>(returnStatements.size());
+  returnStatementsCopy.addAll(returnStatements);
+  boolean isReturnStatement=isReturnStatement(statements[statements.length - 1],returnStatementsCopy);
+  boolean isLastStatementOfMethod=isLastStatementOfMethodOrClosure(statements);
+  if (hasReturns && !isLastStatementOfMethod && !isReturnStatement || hasInterruptingStatements) {
+    throw new GrRefactoringError(GroovyRefactoringBundle.message("refactoring.is.not.supported.when.return.statement.interrupts.the.execution.flow"));
+  }
+  return new InitialInfo(inputInfos,outputInfos,elements,statements,returnStatements);
+}
