@@ -1,0 +1,54 @@
+{
+  boolean fatalErrorHappened=false;
+  boolean notAlreadyUpToDate=false;
+  while (hasMoreRepositories() && !fatalErrorHappened) {
+    final GitRepository repository=next();
+    VirtualFile root=repository.getRoot();
+    GitMessageWithFilesDetector localChangesOverwrittenByMerge=new GitMessageWithFilesDetector(LOCAL_CHANGES_OVERWRITTEN_BY_MERGE,root);
+    GitSimpleEventDetector unmergedFiles=new GitSimpleEventDetector(GitSimpleEventDetector.Event.UNMERGED_PREVENTING_MERGE);
+    GitMessageWithFilesDetector untrackedOverwrittenByMerge=new GitMessageWithFilesDetector(UNTRACKED_FILES_OVERWRITTEN_BY,root);
+    GitSimpleEventDetector mergeConflict=new GitSimpleEventDetector(GitSimpleEventDetector.Event.MERGE_CONFLICT);
+    GitSimpleEventDetector alreadyUpToDateDetector=new GitSimpleEventDetector(GitSimpleEventDetector.Event.ALREADY_UP_TO_DATE);
+    GitCommandResult result=Git.merge(repository,myBranchToMerge,localChangesOverwrittenByMerge,unmergedFiles,untrackedOverwrittenByMerge,mergeConflict,alreadyUpToDateDetector);
+    if (result.success()) {
+      refresh(repository);
+      markSuccessful(repository);
+      if (!alreadyUpToDateDetector.hasHappened()) {
+        notAlreadyUpToDate=true;
+      }
+    }
+ else     if (unmergedFiles.hasHappened()) {
+      fatalUnmergedFilesError();
+      fatalErrorHappened=true;
+    }
+ else     if (localChangesOverwrittenByMerge.wasMessageDetected()) {
+      boolean smartMergeSucceeded=proposeSmartMergePerformAndNotify(repository,localChangesOverwrittenByMerge);
+      if (!smartMergeSucceeded) {
+        fatalErrorHappened=true;
+      }
+    }
+ else     if (mergeConflict.hasHappened()) {
+      myConflictedRepositories.put(repository,Boolean.FALSE);
+      refresh(repository);
+      markSuccessful(repository);
+    }
+ else     if (untrackedOverwrittenByMerge.wasMessageDetected()) {
+      fatalUntrackedFilesError(untrackedOverwrittenByMerge.getFiles());
+      fatalErrorHappened=true;
+    }
+ else {
+      fatalError(getCommonErrorTitle(),result.getErrorOutputAsJoinedString());
+      fatalErrorHappened=true;
+    }
+  }
+  boolean allConflictsResolved=resolveConflicts();
+  if (!fatalErrorHappened && allConflictsResolved) {
+    if (notAlreadyUpToDate) {
+      notifySuccess();
+    }
+ else {
+      notifySuccess("Already up-to-date.");
+    }
+  }
+  restoreLocalChanges();
+}
