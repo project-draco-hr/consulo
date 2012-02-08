@@ -3,7 +3,20 @@
   final Map<PsiModifierListOwner,LookupElement> staticMembers=hashMap();
   final PsiElement qualifier=reference.getQualifier();
   final PsiType qualifierType=qualifier instanceof GrExpression ? ((GrExpression)qualifier).getType() : null;
+  LinkedHashSet<LookupElement> result=new LinkedHashSet<LookupElement>();
+  if (reference instanceof GrReferenceExpression && (qualifier instanceof GrExpression || qualifier == null)) {
+    for (    String string : CompleteReferenceExpression.getVariantsWithSameQualifier(matcher,(GrExpression)qualifier,(GrReferenceExpression)reference)) {
+      result.add(GroovyCompletionUtil.getLookupElement(string));
+    }
+    if (parameters.getInvocationCount() < 2 && qualifier != null && qualifierType == null) {
+      if (parameters.getInvocationCount() == 1) {
+        showInfo();
+      }
+      return result;
+    }
+  }
   final ElementFilter classFilter=getClassFilter(position);
+  final List<LookupElement> items=arrayList();
   reference.processVariants(matcher,parameters,new Consumer<Object>(){
     public void consume(    Object element){
       if (element instanceof PsiClass && inheritorsHolder.alreadyProcessed((PsiClass)element)) {
@@ -17,17 +30,14 @@
       }
       LookupElement lookupElement=element instanceof PsiClass ? GroovyCompletionUtil.createClassLookupItem(CompletionUtil.getOriginalOrSelf((PsiClass)element)) : GroovyCompletionUtil.getLookupElement(element);
       Object object=lookupElement.getObject();
-      PsiSubstitutor substitutor=null;
-      GroovyResolveResult resolveResult=null;
       if (object instanceof GroovyResolveResult) {
-        resolveResult=(GroovyResolveResult)object;
-        substitutor=resolveResult.getSubstitutor();
         object=((GroovyResolveResult)object).getElement();
       }
       if (object instanceof PsiMember && JavaCompletionUtil.isInExcludedPackage((PsiMember)object,true)) {
         return;
       }
-      lookupElement=tweakPriority(lookupElement,object,substitutor,resolveResult,qualifierType);
+      int priority=assignPriority(lookupElement,qualifierType);
+      lookupElement=JavaCompletionUtil.highlightIfNeeded(qualifierType,PrioritizedLookupElement.withPriority(lookupElement,priority),object);
       if ((object instanceof PsiMethod || object instanceof PsiField) && ((PsiModifierListOwner)object).hasModifierProperty(PsiModifier.STATIC)) {
         if (lookupElement.getLookupString().equals(((PsiMember)object).getName())) {
           staticMembers.put((PsiModifierListOwner)object,lookupElement);
@@ -37,7 +47,7 @@
       if (object instanceof PsiClass && !classFilter.isAcceptable(object,position)) {
         return;
       }
-      result.consume(JavaCompletionUtil.highlightIfNeeded(qualifierType,lookupElement,object));
+      items.add(lookupElement);
     }
   }
 );
@@ -57,7 +67,15 @@
     }
 );
   }
-  for (  LookupElement element : staticMembers.values()) {
-    result.consume(element);
+  items.addAll(staticMembers.values());
+  for (Iterator<LookupElement> iterator=items.iterator(); iterator.hasNext(); ) {
+    LookupElement element=iterator.next();
+    PrioritizedLookupElement prio=element.as(PrioritizedLookupElement.CLASS_CONDITION_KEY);
+    if (prio == null || prio.getPriority() >= 0) {
+      result.add(element);
+      iterator.remove();
+    }
   }
+  result.addAll(items);
+  return result;
 }
