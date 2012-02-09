@@ -1,0 +1,58 @@
+{
+  boolean rebuildFromScratchRequested=false;
+  float stageCount=myTotalModuleLevelBuilderCount;
+  CHUNK_BUILD_START:   for (  BuilderCategory category : BuilderCategory.values()) {
+    final List<ModuleLevelBuilder> builders=myBuilderRegistry.getBuilders(category);
+    if (builders.isEmpty()) {
+      continue;
+    }
+    final int modulesInChunk=chunk.getModules().size();
+    int buildersPassed=0;
+    boolean nextPassRequired;
+    do {
+      nextPassRequired=false;
+      context.beforeNextCompileRound(chunk);
+      if (!context.isProjectRebuild()) {
+        syncOutputFiles(context,chunk);
+      }
+      for (      ModuleLevelBuilder builder : builders) {
+        final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk);
+        if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
+          throw new ProjectBuildException("Builder " + builder.getDescription() + " requested build stop");
+        }
+        if (myCancelStatus.isCanceled()) {
+          throw new ProjectBuildException(CANCELED_MESSAGE);
+        }
+        if (buildResult == ModuleLevelBuilder.ExitCode.ADDITIONAL_PASS_REQUIRED) {
+          if (!nextPassRequired) {
+            myModulesProcessed-=(buildersPassed * modulesInChunk) / stageCount;
+            stageCount+=builders.size();
+            myModulesProcessed+=(buildersPassed * modulesInChunk) / stageCount;
+          }
+          nextPassRequired=true;
+        }
+ else         if (buildResult == ModuleLevelBuilder.ExitCode.CHUNK_REBUILD_REQUIRED) {
+          if (!rebuildFromScratchRequested && !context.isProjectRebuild()) {
+            rebuildFromScratchRequested=true;
+            try {
+              context.markDirty(chunk);
+              myModulesProcessed-=(buildersPassed * modulesInChunk) / stageCount;
+              break CHUNK_BUILD_START;
+            }
+ catch (            Exception e) {
+              throw new ProjectBuildException(e);
+            }
+          }
+ else {
+            LOG.info("Builder " + builder.getDescription() + " requested second chunk rebuild");
+          }
+        }
+        buildersPassed++;
+        final float fraction=updateFractionBuilderFinished(modulesInChunk / (stageCount));
+        context.setDone(fraction);
+      }
+    }
+ while (nextPassRequired);
+    context.clearContextRoundData();
+  }
+}
