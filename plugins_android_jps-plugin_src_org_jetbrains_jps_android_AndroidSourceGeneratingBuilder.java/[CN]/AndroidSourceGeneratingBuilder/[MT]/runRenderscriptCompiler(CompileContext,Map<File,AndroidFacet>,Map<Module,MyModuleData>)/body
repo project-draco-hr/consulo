@@ -1,0 +1,53 @@
+{
+  context.processMessage(new ProgressMessage("Processing Renderscript files..."));
+  boolean success=true;
+  for (  Map.Entry<File,AndroidFacet> entry : files.entrySet()) {
+    final File file=entry.getKey();
+    final Module module=entry.getValue().getModule();
+    final MyModuleData moduleData=moduleDataMap.get(module);
+    if (!LOG.assertTrue(moduleData != null)) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Internal error"));
+      success=false;
+      continue;
+    }
+    final File outputDirectory=moduleData.getOutputDirectory();
+    final File rsOutputDirectory=new File(outputDirectory,"generated-rs");
+    final File generatedResourcesDir=new File(outputDirectory,"generated-resources");
+    final IAndroidTarget target=moduleData.getAndroidTarget();
+    final String sdkLocation=moduleData.getSdkLocation();
+    final String filePath=file.getPath();
+    File tmpOutputDirectory=null;
+    try {
+      tmpOutputDirectory=FileUtil.createTempDirectory("generated-rs-temp",null);
+      final String depFolderPath=getDependencyFolder(context,file,tmpOutputDirectory);
+      final File rawDir=new File(generatedResourcesDir,"raw");
+      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidRenderscript.execute(sdkLocation,target,filePath,tmpOutputDirectory.getPath(),depFolderPath,rawDir.getPath());
+      addMessages(context,messages,filePath);
+      if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
+        success=false;
+      }
+ else {
+        final List<File> newFiles=new ArrayList<File>();
+        AndroidCommonUtils.moveAllFiles(tmpOutputDirectory,rsOutputDirectory,newFiles);
+        final File bcFile=new File(rawDir,FileUtil.getNameWithoutExtension(file) + ".bc");
+        if (bcFile.exists()) {
+          newFiles.add(bcFile);
+        }
+        final List<String> newFilePaths=Arrays.asList(toPaths(newFiles.toArray(new File[newFiles.size()])));
+        final String moduleName=getCannonicalModuleName(module);
+        final SourceToOutputMapping sourceToOutputMap=context.getDataManager().getSourceToOutputMap(moduleName,false);
+        sourceToOutputMap.update(filePath,newFilePaths);
+      }
+    }
+ catch (    IOException e) {
+      reportExceptionError(context,filePath,e);
+      success=false;
+    }
+ finally {
+      if (tmpOutputDirectory != null) {
+        FileUtil.delete(tmpOutputDirectory);
+      }
+    }
+  }
+  return success;
+}
