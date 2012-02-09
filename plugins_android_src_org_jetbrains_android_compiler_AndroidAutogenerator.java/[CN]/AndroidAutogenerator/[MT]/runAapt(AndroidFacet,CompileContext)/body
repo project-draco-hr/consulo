@@ -1,0 +1,131 @@
+{
+  final Module module=facet.getModule();
+  final AptAutogenerationItem item=ApplicationManager.getApplication().runReadAction(new Computable<AptAutogenerationItem>(){
+    @Nullable @Override public AptAutogenerationItem compute(){
+      if (module.isDisposed() || module.getProject().isDisposed()) {
+        return null;
+      }
+      final AndroidPlatform platform=facet.getConfiguration().getAndroidPlatform();
+      if (platform == null) {
+        context.addMessage(CompilerMessageCategory.ERROR,AndroidBundle.message("android.compilation.error.specify.platform",module.getName()),null,-1,-1);
+        return null;
+      }
+      final IAndroidTarget target=platform.getTarget();
+      final int platformToolsRevision=platform.getSdk().getPlatformToolsRevision();
+      final String[] resPaths=AndroidCompileUtil.collectResourceDirs(facet,false,context);
+      if (resPaths.length == 0) {
+        return null;
+      }
+      final VirtualFile manifestFile=AndroidRootUtil.getManifestFileForCompiler(facet);
+      if (manifestFile == null) {
+        context.addMessage(CompilerMessageCategory.ERROR,AndroidBundle.message("android.compilation.error.manifest.not.found"),null,-1,-1);
+        return null;
+      }
+      final Manifest manifest=AndroidUtils.loadDomElement(module,manifestFile,Manifest.class);
+      if (manifest == null) {
+        context.addMessage(CompilerMessageCategory.ERROR,"Cannot parse file",manifestFile.getUrl(),-1,-1);
+        return null;
+      }
+      String packageName=manifest.getPackage().getValue();
+      if (packageName != null) {
+        packageName=packageName.trim();
+      }
+      if (packageName == null || packageName.length() <= 0) {
+        context.addMessage(CompilerMessageCategory.ERROR,AndroidBundle.message("package.not.found.error"),manifestFile.getUrl(),-1,-1);
+        return null;
+      }
+      final String sourceRootPath=facet.getAptGenSourceRootPath();
+      if (sourceRootPath == null) {
+        context.addMessage(CompilerMessageCategory.ERROR,AndroidBundle.message("android.compilation.error.apt.gen.not.specified",module.getName()),null,-1,-1);
+        return null;
+      }
+      final Map<String,String> genFilePath2Package=new HashMap<String,String>();
+      final String packageDir=packageName.replace('.','/') + '/';
+      genFilePath2Package.put(packageDir + AndroidCommonUtils.MANIFEST_JAVA_FILE_NAME,packageName);
+      genFilePath2Package.put(packageDir + AndroidCommonUtils.R_JAVA_FILENAME,packageName);
+      final String manifestFileOsPath=FileUtil.toSystemDependentName(manifestFile.getPath());
+      return new AptAutogenerationItem(target,platformToolsRevision,manifestFileOsPath,packageName,sourceRootPath,resPaths,facet.getConfiguration().LIBRARY_PROJECT,genFilePath2Package);
+    }
+  }
+);
+  if (item == null) {
+    return;
+  }
+  final Set<VirtualFile> filesToCheck=new HashSet<VirtualFile>();
+  for (  String genFileRelPath : item.myGenFileRelPath2package.keySet()) {
+    final String genFileFullPath=item.myOutputDirOsPath + '/' + genFileRelPath;
+    if (new File(genFileFullPath).exists()) {
+      final VirtualFile genFile=LocalFileSystem.getInstance().findFileByPath(genFileFullPath);
+      if (genFile != null) {
+        filesToCheck.add(genFile);
+      }
+    }
+  }
+  if (!ensureFilesWritable(module.getProject(),filesToCheck)) {
+    return;
+  }
+  File tempOutDir=null;
+  try {
+    tempOutDir=FileUtil.createTempDirectory("android_apt_autogeneration","tmp");
+    final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(item.myTarget,item.myPlatformToolsRevision,item.myManifestFileOsPath,item.myPackage,tempOutDir.getPath(),item.myResDirOsPaths,ArrayUtil.EMPTY_STRING_ARRAY,item.myLibrary);
+    if (messages.get(AndroidCompilerMessageKind.ERROR).size() == 0) {
+      for (      String genFileRelPath : item.myGenFileRelPath2package.keySet()) {
+        final File srcFile=new File(tempOutDir.getPath() + '/' + genFileRelPath);
+        if (srcFile.isFile()) {
+          final File dstFile=new File(item.myOutputDirOsPath + '/' + genFileRelPath);
+          if (dstFile.exists()) {
+            if (!FileUtil.delete(dstFile)) {
+              ApplicationManager.getApplication().runReadAction(new Runnable(){
+                @Override public void run(){
+                  if (module.isDisposed() || module.getProject().isDisposed()) {
+                    return;
+                  }
+                  context.addMessage(CompilerMessageCategory.ERROR,"Cannot delete " + FileUtil.toSystemDependentName(dstFile.getPath()),null,-1,-1);
+                }
+              }
+);
+            }
+          }
+          FileUtil.rename(srcFile,dstFile);
+        }
+      }
+    }
+    AndroidCompileUtil.addMessages(context,AndroidCompileUtil.toCompilerMessageCategoryKeys(messages));
+    for (    Map.Entry<String,String> entry : item.myGenFileRelPath2package.entrySet()) {
+      final String path=item.myOutputDirOsPath + '/' + entry.getKey();
+      final String aPackage=entry.getValue();
+      final File file=new File(path);
+      CompilerUtil.refreshIOFile(file);
+      removeAllFilesWithSameName(module,file,item.myOutputDirOsPath);
+      removeDuplicateClasses(module,aPackage,file,item.myOutputDirOsPath);
+    }
+    final VirtualFile genSourceRoot=LocalFileSystem.getInstance().findFileByPath(item.myOutputDirOsPath);
+    if (genSourceRoot != null) {
+      genSourceRoot.refresh(false,true);
+    }
+    if (messages.get(AndroidCompilerMessageKind.ERROR).size() == 0) {
+      facet.clearAutogeneratedFiles(AndroidAutogeneratorMode.AAPT);
+      for (      String relPath : item.myGenFileRelPath2package.keySet()) {
+        final VirtualFile genFile=LocalFileSystem.getInstance().findFileByPath(item.myOutputDirOsPath + '/' + relPath);
+        if (genFile != null && genFile.exists()) {
+          facet.markFileAutogenerated(AndroidAutogeneratorMode.AAPT,genFile);
+        }
+      }
+    }
+  }
+ catch (  final IOException e) {
+    LOG.info(e);
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        if (module.getProject().isDisposed())         return;
+        context.addMessage(CompilerMessageCategory.ERROR,"I/O error: " + e.getMessage(),null,-1,-1);
+      }
+    }
+);
+  }
+ finally {
+    if (tempOutDir != null) {
+      FileUtil.delete(tempOutDir);
+    }
+  }
+}

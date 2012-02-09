@@ -1,0 +1,156 @@
+{
+  boolean hasMore=visibleNodes.remove(UsageViewImpl.NULL_NODE);
+  final Project project=handler.getProject();
+  if (visibleNodes.isEmpty()) {
+    if (usages.isEmpty()) {
+      String text=UsageViewBundle.message("no.usages.found.in",searchScopePresentableName(options,project));
+      showHint(text,editor,popupPosition,handler,maxUsages);
+      return null;
+    }
+ else {
+    }
+  }
+  if (visibleNodes.size() == 1 && usages.size() == 1) {
+    Usage usage=visibleNodes.iterator().next().getUsage();
+    navigateAndHint(usage,UsageViewBundle.message("show.usages.only.usage",searchScopePresentableName(options,project)),handler,popupPosition,maxUsages);
+    return null;
+  }
+  if (visibleNodes.size() == 1 && usages.size() >= 1) {
+    Usage usage=visibleNodes.iterator().next().getUsage();
+    if (areAllUsagesInThisLine(usage,usages)) {
+      String hint=UsageViewBundle.message("all.usages.are.in.this.line",usages.size(),searchScopePresentableName(options,project));
+      navigateAndHint(usage,hint,handler,popupPosition,maxUsages);
+      return null;
+    }
+  }
+  if (hasMore) {
+    usages.add(NullUsage.INSTANCE);
+    visibleNodes.add(UsageViewImpl.NULL_NODE);
+  }
+  List<UsageNode> outNodes=new ArrayList<UsageNode>();
+  addUsageNodes(usageView.getRoot(),usageView,outNodes);
+  int filtered=filtered(usages,usageView);
+  final JTable table=new MyTable();
+  TableScrollingUtil.installActions(table);
+  final Vector<Object> data=new Vector<Object>();
+  setModel(table,visibleNodes,usageView,data,filtered);
+  final Runnable navigateRunnable=new Runnable(){
+    @Override public void run(){
+      int[] selected=table.getSelectedRows();
+      for (      int i : selected) {
+        Object value=table.getValueAt(i,0);
+        if (value instanceof UsageNode) {
+          Usage usage=((UsageNode)value).getUsage();
+          if (usage == NullUsage.INSTANCE) {
+            appendMoreUsages(editor,popupPosition,handler,maxUsages);
+            return;
+          }
+          navigateAndHint(usage,null,handler,popupPosition,maxUsages);
+        }
+      }
+    }
+  }
+;
+  SpeedSearchBase<JTable> speedSearch=new SpeedSearchBase<JTable>(table){
+    @Override protected int getSelectedIndex(){
+      return table.getSelectedRow();
+    }
+    @Override protected int convertIndexToModel(    int viewIndex){
+      return table.convertRowIndexToModel(viewIndex);
+    }
+    @Override protected Object[] getAllElements(){
+      return ArrayUtil.toObjectArray(data);
+    }
+    @Override protected String getElementText(    Object element){
+      if (!(element instanceof UsageNode))       return element.toString();
+      UsageNode node=(UsageNode)element;
+      GroupNode group=(GroupNode)node.getParent();
+      Usage usage=node.getUsage();
+      if (usage == NullUsage.INSTANCE)       return "";
+      return usage.getPresentation().getPlainText() + group.toString();
+    }
+    @Override protected void selectElement(    Object element,    String selectedText){
+      int i=data.indexOf(element);
+      if (i == -1)       return;
+      final int viewRow=table.convertRowIndexToView(i);
+      table.getSelectionModel().setSelectionInterval(viewRow,viewRow);
+    }
+  }
+;
+  speedSearch.setComparator(new SpeedSearchComparator(false));
+  PopupChooserBuilder builder=new PopupChooserBuilder(table);
+  if (title != null) {
+    String s;
+    if (hasMore) {
+      s="<html><body><b>Some</b> " + title + " "+ "<b>(Only "+ (visibleNodes.size() - 1)+ " usages shown)</b></body></html>";
+    }
+ else {
+      s=title + " (" + UsageViewBundle.message("usages.n",usages.size())+ " found)";
+    }
+    builder.setTitle(s);
+  }
+  builder.setMovable(true).setResizable(true);
+  builder.setItemChoosenCallback(navigateRunnable);
+  final JBPopup[] popup=new JBPopup[1];
+  ActionListener editSettings=new ActionListener(){
+    @Override public void actionPerformed(    ActionEvent e){
+      popup[0].cancel();
+      SwingUtilities.invokeLater(new Runnable(){
+        @Override public void run(){
+          showDialogAndFindUsages(handler,popupPosition,editor,maxUsages);
+        }
+      }
+);
+    }
+  }
+;
+  KeyboardShortcut shortcut=getSettingsShortcut();
+  if (shortcut != null) {
+    builder.registerKeyboardAction(shortcut.getFirstKeyStroke(),editSettings);
+  }
+  InplaceButton button=createSettingsButton(handler,popupPosition,editor,maxUsages,new Runnable(){
+    @Override public void run(){
+      popup[0].cancel();
+    }
+  }
+);
+  builder.setCommandButton(button);
+  DefaultActionGroup toolbar=new DefaultActionGroup();
+  usageView.addFilteringActions(toolbar);
+  toolbar.add(UsageGroupingRuleProviderImpl.createGroupByFileStructureAction(usageView));
+  toolbar.add(new AnAction("Open Find Usages Toolwindow","Show all usages in a separate toolwindow",IconLoader.getIcon("/general/toolWindowFind.png")){
+{
+      AnAction action=ActionManager.getInstance().getAction(IdeActions.ACTION_FIND_USAGES);
+      setShortcutSet(action.getShortcutSet());
+    }
+    @Override public void actionPerformed(    AnActionEvent e){
+      hideHints();
+      popup[0].cancel();
+      FindUsagesManager findUsagesManager=((FindManagerImpl)FindManager.getInstance(project)).getFindUsagesManager();
+      FindUsagesManager.SearchData data=new FindUsagesManager.SearchData();
+      data.myOptions=handler.getFindUsagesOptions();
+      SmartPsiElementPointer<PsiElement> pointer=SmartPointerManager.getInstance(project).createSmartPsiElementPointer(handler.getPsiElement());
+      data.myElements=new SmartPsiElementPointer[]{pointer};
+      findUsagesManager.rerunAndRecallFromHistory(data);
+    }
+  }
+);
+  ActionToolbar actionToolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.USAGE_VIEW_TOOLBAR,toolbar,true);
+  actionToolbar.setReservePlaceAutoPopupIcon(false);
+  final JComponent toolBar=actionToolbar.getComponent();
+  toolBar.setOpaque(false);
+  builder.setSettingButton(toolBar);
+  popup[0]=builder.createPopup();
+  for (  AnAction action : toolbar.getChildren(null)) {
+    action.unregisterCustomShortcutSet(usageView.getComponent());
+    action.registerCustomShortcutSet(action.getShortcutSet(),popup[0].getContent());
+  }
+  final MessageBusConnection messageBusConnection=project.getMessageBus().connect(usageView);
+  messageBusConnection.subscribe(UsageFilteringRuleProvider.RULES_CHANGED,new Runnable(){
+    @Override public void run(){
+      rebuildPopup(usageView,usages,table,popup[0]);
+    }
+  }
+);
+  return popup[0];
+}
