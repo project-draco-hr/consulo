@@ -1,0 +1,56 @@
+{
+  ExitCode exitCode=ExitCode.OK;
+  try {
+    final List<File> toCompile=collectChangedFiles(context,chunk);
+    if (toCompile.isEmpty()) {
+      return exitCode;
+    }
+    String moduleOutput=getModuleOutput(context,chunk);
+    String compilerOutput=getCompilerOutput(context,moduleOutput);
+    final Set<String> toCompilePaths=new LinkedHashSet<String>();
+    for (    File file : toCompile) {
+      toCompilePaths.add(FileUtil.toSystemIndependentName(file.getPath()));
+    }
+    Map<String,String> class2Src=buildClassToSourceMap(chunk,context,toCompilePaths,moduleOutput);
+    String ideCharset=chunk.getProject().getProjectCharset();
+    String encoding=!Comparing.equal(CharsetToolkit.getDefaultSystemCharset().name(),ideCharset) ? ideCharset : null;
+    List<String> patchers=Collections.emptyList();
+    final File tempFile=GroovycOSProcessHandler.fillFileWithGroovycParameters(compilerOutput,toCompilePaths,FileUtil.toSystemDependentName(moduleOutput),class2Src,encoding,patchers);
+    final List<String> cmd=ExternalProcessUtil.buildJavaCommandLine(SystemProperties.getJavaHome() + "/bin/java","org.jetbrains.groovy.compiler.rt.GroovycRunner",Collections.<String>emptyList(),new ArrayList<String>(generateClasspath(context,chunk)),Arrays.asList("-Xmx384m"),Arrays.<String>asList(myForStubs ? "stubs" : "groovyc",tempFile.getPath()));
+    List<GroovycOSProcessHandler.OutputItem> successfullyCompiled=Collections.emptyList();
+    try {
+      final Process process=Runtime.getRuntime().exec(ArrayUtil.toStringArray(cmd));
+      GroovycOSProcessHandler handler=GroovycOSProcessHandler.runGroovyc(process,new Consumer<String>(){
+        public void consume(        String s){
+          context.processMessage(new ProgressMessage(s));
+        }
+      }
+);
+      if (myForStubs && handler.shouldRetry()) {
+        if (CHUNK_REBUILD_ORDERED.get(context) != null) {
+          CHUNK_REBUILD_ORDERED.set(context,null);
+        }
+ else {
+          CHUNK_REBUILD_ORDERED.set(context,Boolean.TRUE);
+          exitCode=ExitCode.CHUNK_REBUILD_REQUIRED;
+          return exitCode;
+        }
+      }
+      successfullyCompiled=handler.getSuccessfullyCompiled();
+      for (      CompilerMessage message : handler.getCompilerMessages()) {
+        context.processMessage(message);
+      }
+    }
+  finally {
+      if (!myForStubs) {
+        if (updateDependencies(context,chunk,toCompile,moduleOutput,successfullyCompiled)) {
+          exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
+        }
+      }
+    }
+    return exitCode;
+  }
+ catch (  Exception e) {
+    throw new ProjectBuildException(e);
+  }
+}
