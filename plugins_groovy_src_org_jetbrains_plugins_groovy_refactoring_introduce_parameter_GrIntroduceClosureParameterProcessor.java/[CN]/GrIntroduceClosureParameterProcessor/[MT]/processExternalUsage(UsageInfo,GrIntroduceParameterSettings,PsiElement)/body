@@ -1,0 +1,62 @@
+{
+  final PsiElement element=usage.getElement();
+  GrCall callExpression=GroovyRefactoringUtil.getCallExpressionByMethodReference(element);
+  if (callExpression == null) {
+    final PsiElement parent=element.getParent();
+    if (parent instanceof GrReferenceExpression && element == ((GrReferenceExpression)parent).getQualifier() && "call".equals(((GrReferenceExpression)parent).getReferenceName())) {
+      callExpression=GroovyRefactoringUtil.getCallExpressionByMethodReference(parent);
+    }
+  }
+  if (callExpression == null)   return;
+  if (callExpression instanceof GrMethodCall) {
+    final GrExpression invoked=((GrMethodCall)callExpression).getInvokedExpression();
+    if (invoked instanceof GrReferenceExpression) {
+      final GroovyResolveResult result=((GrReferenceExpression)invoked).advancedResolve();
+      final PsiElement resolved=result.getElement();
+      if (resolved instanceof GrAccessorMethod && !result.isInvokedOnProperty()) {
+        PsiElement actualCallExpression=callExpression.getParent();
+        if (actualCallExpression instanceof GrCall) {
+          callExpression=(GrCall)actualCallExpression;
+        }
+      }
+    }
+  }
+  GrArgumentList argList=callExpression.getArgumentList();
+  LOG.assertTrue(argList != null);
+  GrExpression[] oldArgs=argList.getExpressionArguments();
+  GrClosableBlock toReplaceIn=(GrClosableBlock)settings.getToReplaceIn();
+  GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(settings.getProject());
+  final GrExpression anchor=getAnchorForArgument(oldArgs,toReplaceIn.isVarArgs(),toReplaceIn.getParameterList());
+  GrClosureSignature signature=GrClosureSignatureUtil.createSignature(callExpression);
+  if (signature == null)   signature=GrClosureSignatureUtil.createSignature(toReplaceIn);
+  final GrClosureSignatureUtil.ArgInfo<PsiElement>[] actualArgs=GrClosureSignatureUtil.mapParametersToArguments(signature,argList,callExpression,callExpression.getClosureArguments(),true);
+  if (PsiTreeUtil.isAncestor(toReplaceIn,callExpression,false)) {
+    argList.addAfter(factory.createExpressionFromText(settings.getName()),anchor);
+  }
+ else {
+    PsiElement initializer=ExpressionConverter.getExpression(expression,GroovyFileType.GROOVY_LANGUAGE,settings.getProject());
+    LOG.assertTrue(initializer instanceof GrExpression);
+    GrExpression newArg=GroovyIntroduceParameterUtil.addClosureToCall(initializer,argList);
+    if (newArg == null) {
+      final PsiElement dummy=argList.addAfter(factory.createExpressionFromText("1"),anchor);
+      newArg=((GrExpression)dummy).replaceWithExpression((GrExpression)initializer,true);
+    }
+    new OldReferencesResolver(callExpression,newArg,toReplaceIn,settings.replaceFieldsWithGetters(),initializer,signature,actualArgs,toReplaceIn.getParameters()).resolve();
+    ChangeContextUtil.clearContextInfo(initializer);
+    if (newArg.isValid()) {
+      GrReferenceAdjuster.shortenReferences(newArg);
+      CodeStyleManager.getInstance(settings.getProject()).reformat(newArg);
+    }
+  }
+  if (actualArgs == null) {
+    GroovyIntroduceParameterUtil.removeParamsFromUnresolvedCall(callExpression,toReplaceIn.getParameters(),settings.parametersToRemove());
+  }
+ else {
+    GroovyIntroduceParameterUtil.removeParametersFromCall(actualArgs,settings.parametersToRemove());
+  }
+  if (argList.getAllArguments().length == 0 && hasClosureArgs(argList)) {
+    final GrArgumentList emptyArgList=((GrMethodCallExpression)factory.createExpressionFromText("foo{}")).getArgumentList();
+    LOG.assertTrue(emptyArgList != null);
+    argList.replace(emptyArgList);
+  }
+}

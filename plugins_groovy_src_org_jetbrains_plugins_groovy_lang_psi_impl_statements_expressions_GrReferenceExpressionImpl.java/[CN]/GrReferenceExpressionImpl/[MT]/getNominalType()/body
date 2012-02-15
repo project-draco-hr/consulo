@@ -1,3 +1,97 @@
 {
-  return getNominalTypeImpl();
+  IElementType dotType=getDotTokenType();
+  final GroovyResolveResult resolveResult=advancedResolve();
+  PsiElement resolved=resolveResult.getElement();
+  for (  GrReferenceTypeEnhancer enhancer : GrReferenceTypeEnhancer.EP_NAME.getExtensions()) {
+    PsiType type=enhancer.getReferenceType(this,resolved);
+    if (type != null) {
+      return type;
+    }
+  }
+  if (dotType == mMEMBER_POINTER) {
+    if (resolved instanceof PsiMethod) {
+      return GrClosureType.create((PsiMethod)resolved,resolveResult.getSubstitutor());
+    }
+    return TypesUtil.createTypeByFQClassName(GroovyCommonClassNames.GROOVY_LANG_CLOSURE,this);
+  }
+  PsiType result=null;
+  JavaPsiFacade facade=JavaPsiFacade.getInstance(getProject());
+  if (resolved == null && !"class".equals(getReferenceName())) {
+    resolved=getReference().resolve();
+  }
+  if (resolved instanceof PsiClass) {
+    if (getParent() instanceof GrReferenceExpression) {
+      result=facade.getElementFactory().createType((PsiClass)resolved);
+    }
+ else {
+      result=TypesUtil.createJavaLangClassType(facade.getElementFactory().createType((PsiClass)resolved),getProject(),getResolveScope());
+    }
+  }
+ else   if (resolved instanceof GrVariable) {
+    result=((GrVariable)resolved).getDeclaredType();
+  }
+ else   if (resolved instanceof PsiVariable) {
+    result=((PsiVariable)resolved).getType();
+  }
+ else   if (resolved instanceof PsiMethod) {
+    PsiMethod method=(PsiMethod)resolved;
+    if (PropertyUtil.isSimplePropertySetter(method) && !method.getName().equals(getReferenceName())) {
+      result=method.getParameterList().getParameters()[0].getType();
+    }
+ else {
+      PsiClass containingClass=method.getContainingClass();
+      if (containingClass != null && CommonClassNames.JAVA_LANG_OBJECT.equals(containingClass.getQualifiedName()) && "getClass".equals(method.getName())) {
+        result=TypesUtil.createJavaLangClassType(getQualifierType(),getProject(),getResolveScope());
+      }
+ else {
+        result=PsiUtil.getSmartReturnType(method);
+      }
+    }
+  }
+ else   if (resolved instanceof GrReferenceExpression) {
+    PsiElement parent=resolved.getParent();
+    if (parent instanceof GrAssignmentExpression) {
+      GrAssignmentExpression assignment=(GrAssignmentExpression)parent;
+      if (resolved.equals(assignment.getLValue())) {
+        GrExpression rValue=assignment.getRValue();
+        if (rValue != null) {
+          PsiType rType=rValue.getType();
+          if (rType != null)           result=rType;
+        }
+      }
+    }
+  }
+ else   if (resolved == null) {
+    GrExpression qualifier=getQualifierExpression();
+    if ("class".equals(getReferenceName())) {
+      result=TypesUtil.createJavaLangClassType(getQualifierType(),getProject(),getResolveScope());
+    }
+ else {
+      if (qualifier != null) {
+        PsiType qType=qualifier.getType();
+        if (qType instanceof PsiClassType) {
+          PsiClassType.ClassResolveResult qResult=((PsiClassType)qType).resolveGenerics();
+          PsiClass clazz=qResult.getElement();
+          if (clazz != null) {
+            PsiClass mapClass=facade.findClass(CommonClassNames.JAVA_UTIL_MAP,getResolveScope());
+            if (mapClass != null && mapClass.getTypeParameters().length == 2) {
+              PsiSubstitutor substitutor=TypeConversionUtil.getClassSubstitutor(mapClass,clazz,qResult.getSubstitutor());
+              if (substitutor != null) {
+                result=TypeConversionUtil.erasure(substitutor.substitute(mapClass.getTypeParameters()[1]));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (result != null) {
+    result=TypesUtil.substituteBoxAndNormalizeType(result,resolveResult.getSubstitutor(),this);
+  }
+  if (dotType != mSPREAD_DOT) {
+    return result;
+  }
+ else {
+    return ResolveUtil.getListTypeForSpreadOperator(this,result);
+  }
 }
