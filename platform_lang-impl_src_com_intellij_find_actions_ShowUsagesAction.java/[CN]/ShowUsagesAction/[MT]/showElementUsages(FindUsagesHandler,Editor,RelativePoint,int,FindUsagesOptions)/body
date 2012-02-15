@@ -1,0 +1,55 @@
+{
+  UsageViewPresentation presentation=new UsageViewPresentation();
+  presentation.setDetachedMode(true);
+  final UsageViewSettings usageViewSettings=UsageViewSettings.getInstance();
+  final UsageViewSettings savedGlobalSettings=new UsageViewSettings();
+  savedGlobalSettings.loadState(usageViewSettings);
+  usageViewSettings.loadState(myUsageViewSettings);
+  UsageViewManager manager=UsageViewManager.getInstance(handler.getProject());
+  final UsageViewImpl usageView=(UsageViewImpl)manager.createUsageView(UsageTarget.EMPTY_ARRAY,Usage.EMPTY_ARRAY,presentation,null);
+  Disposer.register(usageView,new Disposable(){
+    @Override public void dispose(){
+      myUsageViewSettings.loadState(usageViewSettings);
+      usageViewSettings.loadState(savedGlobalSettings);
+    }
+  }
+);
+  final List<Usage> usages=new ArrayList<Usage>();
+  final Set<UsageNode> visibleNodes=new LinkedHashSet<UsageNode>();
+  Processor<Usage> collect=new Processor<Usage>(){
+    private final UsageTarget[] myUsageTarget={new PsiElement2UsageTargetAdapter(handler.getPsiElement())};
+    @Override public boolean process(    @NotNull Usage usage){
+synchronized (usages) {
+        if (visibleNodes.size() > maxUsages)         return false;
+        if (UsageViewManager.isSelfUsage(usage,myUsageTarget))         return true;
+        UsageNode node=usageView.doAppendUsage(usage);
+        if (node != null) {
+          if (visibleNodes.size() == maxUsages) {
+            usageView.removeUsage(usage);
+            visibleNodes.add(UsageViewImpl.NULL_NODE);
+            return false;
+          }
+          visibleNodes.add(node);
+        }
+        usages.add(usage);
+      }
+      return true;
+    }
+  }
+;
+  FindUsagesManager findUsagesManager=((FindManagerImpl)FindManager.getInstance(handler.getProject())).getFindUsagesManager();
+  presentation=findUsagesManager.processUsages(handler,collect,options);
+  if (presentation == null) {
+    Disposer.dispose(usageView);
+    return;
+  }
+  final String title=presentation.getTabText();
+  JBPopup popup=createUsagePopup(usages,visibleNodes,title,handler,editor,popupPosition,maxUsages,usageView,options);
+  if (popup == null) {
+    Disposer.dispose(usageView);
+  }
+ else {
+    Disposer.register(popup,usageView);
+    popup.show(popupPosition);
+  }
+}
