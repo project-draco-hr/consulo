@@ -1,34 +1,43 @@
 {
   myModuleDependencies.clear();
   myModules.clear();
-  GradleProjectStructureNode<Project> root=buildNode(getProject(),GradleEntityType.PROJECT,getProject().getName(),myPlatformFacade.getProjectIcon());
+  GradleProjectId projectId=GradleEntityIdMapper.mapEntityToId(getProject());
+  GradleProjectStructureNode<GradleProjectId> root=buildNode(projectId,getProject().getName(),myPlatformFacade.getProjectIcon());
   final Collection<Module> modules=myPlatformFacade.getModules(getProject());
-  RootPolicy<LibraryOrderEntry> policy=new RootPolicy<LibraryOrderEntry>(){
-    @Override public LibraryOrderEntry visitLibraryOrderEntry(    LibraryOrderEntry libraryOrderEntry,    LibraryOrderEntry value){
-      return libraryOrderEntry;
+  final List<GradleProjectStructureNode<?>> dependencies=new ArrayList<GradleProjectStructureNode<?>>();
+  RootPolicy<Object> visitor=new RootPolicy<Object>(){
+    @Override public Object visitModuleOrderEntry(    ModuleOrderEntry moduleOrderEntry,    Object value){
+      GradleModuleDependencyId id=GradleEntityIdMapper.mapEntityToId(moduleOrderEntry);
+      dependencies.add(buildNode(id,moduleOrderEntry.getModuleName(),GradleIcons.MODULE_ICON));
+      return value;
+    }
+    @Override public Object visitLibraryOrderEntry(    LibraryOrderEntry libraryOrderEntry,    Object value){
+      if (libraryOrderEntry.getLibraryName() == null) {
+        return value;
+      }
+      GradleLibraryDependencyId id=GradleEntityIdMapper.mapEntityToId(libraryOrderEntry);
+      dependencies.add(buildNode(id,id.getLibraryName(),GradleIcons.LIB_ICON));
+      return value;
     }
   }
 ;
   for (  Module module : modules) {
-    final GradleProjectStructureNode<String> moduleNode=buildNode(GradleEntityType.MODULE,module.getName(),GradleIcons.MODULE_ICON);
+    dependencies.clear();
+    final GradleModuleId moduleId=GradleEntityIdMapper.mapEntityToId(module);
+    final GradleProjectStructureNode<GradleModuleId> moduleNode=buildNode(moduleId,moduleId.getModuleName(),GradleIcons.MODULE_ICON);
     myModules.put(module.getName(),moduleNode);
-    List<LibraryOrderEntry> libraryDependencies=new ArrayList<LibraryOrderEntry>();
-    for (    OrderEntry orderEntry : myPlatformFacade.getOrderEntries(module)) {
-      final LibraryOrderEntry libraryDependency=orderEntry.accept(policy,null);
-      libraryDependencies.add(libraryDependency);
-    }
-    if (!libraryDependencies.isEmpty()) {
-      GradleProjectStructureNode<String> dependenciesNode=getDependenciesNode(module.getName());
-      for (      LibraryOrderEntry dependency : libraryDependencies) {
-        GradleLibraryDependencyId id=GradleLibraryDependencyId.of(dependency);
-        if (id == null) {
-          continue;
-        }
-        dependenciesNode.add(buildNode(id,GradleEntityType.LIBRARY_DEPENDENCY,id.getLibraryName(),GradleIcons.LIB_ICON));
-      }
-      moduleNode.add(dependenciesNode);
-    }
     root.add(moduleNode);
+    for (    OrderEntry orderEntry : myPlatformFacade.getOrderEntries(module)) {
+      orderEntry.accept(visitor,null);
+    }
+    if (dependencies.isEmpty()) {
+      continue;
+    }
+    GradleProjectStructureNode<String> dependenciesNode=getDependenciesNode(moduleId);
+    for (    GradleProjectStructureNode<?> dependency : dependencies) {
+      dependenciesNode.add(dependency);
+    }
+    moduleNode.add(dependenciesNode);
   }
   setRoot(root);
 }
