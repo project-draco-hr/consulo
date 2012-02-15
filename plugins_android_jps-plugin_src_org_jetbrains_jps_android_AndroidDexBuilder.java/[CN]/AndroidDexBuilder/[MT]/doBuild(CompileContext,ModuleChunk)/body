@@ -1,0 +1,57 @@
+{
+  boolean success=true;
+  for (  Module module : chunk.getModules()) {
+    final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
+    if (facet == null || facet.getLibrary()) {
+      continue;
+    }
+    final Sdk sdk=module.getSdk();
+    if (!(sdk instanceof AndroidSdk)) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Android SDK is not specified for module " + module.getName()));
+      success=false;
+      continue;
+    }
+    final AndroidSdk androidSdk=(AndroidSdk)sdk;
+    final IAndroidTarget target=AndroidJpsUtil.parseAndroidTarget(androidSdk,context,BUILDER_NAME);
+    if (target == null) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Android SDK is invalid or not specified for module " + module.getName()));
+      success=false;
+      continue;
+    }
+    final ProjectPaths projectPaths=context.getProjectPaths();
+    final File dexOutputDir=AndroidJpsUtil.getOutputDirectoryForPackagedFiles(projectPaths,module);
+    if (dexOutputDir == null) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Output directory is not specified for module " + module.getName()));
+      success=false;
+      continue;
+    }
+    final File classesDir=projectPaths.getModuleOutputDir(module,false);
+    if (classesDir == null || !classesDir.isDirectory()) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.INFO,"Dex won't be launched for module " + module.getName() + " because it doesn't contain compiled files"));
+      continue;
+    }
+    final Set<String> fileSet=new HashSet<String>();
+    AndroidJpsUtil.addSubdirectories(classesDir,fileSet);
+    fileSet.addAll(AndroidJpsUtil.getExternalLibraries(projectPaths,module));
+    for (    String filePath : AndroidJpsUtil.getClassdirsOfDependentModules(projectPaths,module)) {
+      if (!classesDir.getPath().equals(filePath)) {
+        fileSet.add(filePath);
+      }
+    }
+    if (facet.isLibrary()) {
+      final File testsClassDir=projectPaths.getModuleOutputDir(module,true);
+      if (testsClassDir != null && testsClassDir.isDirectory()) {
+        AndroidJpsUtil.addSubdirectories(testsClassDir,fileSet);
+      }
+    }
+    final String[] files=new String[fileSet.size()];
+    int i=0;
+    for (    String filePath : fileSet) {
+      files[i++]=FileUtil.toSystemDependentName(filePath);
+    }
+    if (!runDex(androidSdk,target,dexOutputDir.getPath(),files,context)) {
+      success=false;
+    }
+  }
+  return success ? ExitCode.OK : ExitCode.ABORT;
+}
