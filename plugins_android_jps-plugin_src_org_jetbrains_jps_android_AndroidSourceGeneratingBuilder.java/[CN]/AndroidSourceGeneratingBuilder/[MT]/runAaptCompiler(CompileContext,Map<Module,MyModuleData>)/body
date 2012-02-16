@@ -1,0 +1,48 @@
+{
+  context.processMessage(new ProgressMessage("Generating R.java and Manifest.java files"));
+  boolean success=true;
+  for (  Map.Entry<Module,MyModuleData> entry : moduleDataMap.entrySet()) {
+    final Module module=entry.getKey();
+    final MyModuleData moduleData=entry.getValue();
+    final AndroidFacet facet=moduleData.getFacet();
+    final IAndroidTarget target=moduleData.getAndroidTarget();
+    try {
+      final String[] resPaths=collectResourceDirs(facet);
+      if (resPaths.length == 0) {
+        continue;
+      }
+      final File manifestFile=getManifestFileForCompilationPath(facet);
+      if (manifestFile == null || !manifestFile.exists()) {
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"AndroidManifest.xml file not found in the module " + module.getName()));
+        success=false;
+        continue;
+      }
+      final String packageName=parsePackageNameFromManifestFile(manifestFile);
+      if (packageName == null || packageName.length() == 0) {
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Package is not specified in AndroidManifest.xml for module " + module.getName()));
+        success=false;
+        continue;
+      }
+      final Set<String> depLibPackagesSet=getDepLibPackages(module);
+      depLibPackagesSet.remove(packageName);
+      final File outputDirectory=moduleData.getOutputDirectory();
+      final File aptOutputDirectory=new File(outputDirectory,"generated-aapt");
+      if (aptOutputDirectory.exists()) {
+        FileUtil.delete(aptOutputDirectory);
+      }
+      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,aptOutputDirectory.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),facet.getLibrary());
+      AndroidJpsUtil.addMessages(context,messages,null,BUILDER_NAME);
+      if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
+        success=false;
+      }
+ else {
+        JavaBuilder.addTempSourcePathRoot(context,aptOutputDirectory);
+      }
+    }
+ catch (    IOException e) {
+      AndroidJpsUtil.reportExceptionError(context,null,e,BUILDER_NAME);
+      success=false;
+    }
+  }
+  return success;
+}
