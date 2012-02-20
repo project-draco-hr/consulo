@@ -1,28 +1,69 @@
 {
-  if (myText.startsWith("env.")) {
-    return resolveEnvPropety();
+  boolean hasPrefix=false;
+  String unprefixed=myText;
+  if (myText.startsWith("pom.")) {
+    unprefixed=myText.substring("pom.".length());
+    hasPrefix=true;
   }
-  if (BASEDIR_PROPS.contains(myText)) {
-    return resolveBasedir();
+ else   if (myText.startsWith("project.")) {
+    unprefixed=myText.substring("project.".length());
+    hasPrefix=true;
+  }
+  MavenProject mavenProject=myMavenProject;
+  while (unprefixed.startsWith("parent.")) {
+    if (unprefixed.equals("parent.groupId") || unprefixed.equals("parent.artifactId") || unprefixed.equals("parent.version")|| unprefixed.equals("parent.relativePath")) {
+      break;
+    }
+    MavenId parentId=mavenProject.getParentId();
+    if (parentId == null)     return null;
+    mavenProject=myProjectsManager.findProject(parentId);
+    if (mavenProject == null)     return null;
+    unprefixed=unprefixed.substring("parent.".length());
+  }
+  if (unprefixed.equals("basedir") || (hasPrefix && mavenProject == myMavenProject && unprefixed.equals("baseUri"))) {
+    return getBaseDir(mavenProject);
   }
   if (myText.equals(TIMESTAMP_PROP)) {
     return myElement;
   }
-  PsiElement result=resolveSystemPropety();
-  if (result != null)   return result;
+  if (hasPrefix) {
+    MavenDomProjectModel domProjectModel=MavenDomUtil.getMavenDomProjectModel(myProject,mavenProject.getFile());
+    if (domProjectModel != null) {
+      PsiElement res=resolveModelProperty(domProjectModel,"project." + unprefixed,new HashSet<DomElement>());
+      if (res != null) {
+        return res;
+      }
+    }
+  }
   MavenDomProfile profile=DomUtil.findDomElement(myElement,MavenDomProfile.class);
   if (profile != null) {
-    result=MavenDomProjectProcessorUtils.searchPropertyInProfile(myText,profile);
+    PsiElement result=MavenDomProjectProcessorUtils.searchPropertyInProfile(myText,profile);
     if (result != null)     return result;
   }
-  result=MavenDomProjectProcessorUtils.searchProperty(myText,myProjectDom,myProject);
+  PsiElement result=MavenDomProjectProcessorUtils.searchProperty(myText,myProjectDom,myProject);
   if (result != null)   return result;
+  IProperty property=MavenDomUtil.findProperty(myProject,MavenPropertiesVirtualFileSystem.SYSTEM_PROPERTIES_FILE,myText);
+  if (property != null)   return property.getPsiElement();
+  if (myText.startsWith("env.")) {
+    property=MavenDomUtil.findProperty(myProject,MavenPropertiesVirtualFileSystem.ENV_PROPERTIES_FILE,myText.substring("env.".length()));
+    if (property != null)     return property.getPsiElement();
+  }
+  String textWithEnv="env." + myText;
+  property=MavenDomUtil.findProperty(myProject,MavenPropertiesVirtualFileSystem.SYSTEM_PROPERTIES_FILE,textWithEnv);
+  if (property != null)   return property.getPsiElement();
+  property=MavenDomUtil.findProperty(myProject,MavenPropertiesVirtualFileSystem.ENV_PROPERTIES_FILE,textWithEnv);
+  if (property != null)   return property.getPsiElement();
+  if (!hasPrefix) {
+    MavenDomProjectModel domProjectModel=MavenDomUtil.getMavenDomProjectModel(myProject,mavenProject.getFile());
+    if (domProjectModel != null) {
+      PsiElement res=resolveModelProperty(domProjectModel,"project." + unprefixed,new HashSet<DomElement>());
+      if (res != null) {
+        return res;
+      }
+    }
+  }
   if (myText.startsWith("settings.")) {
     return resolveSettingsModelProperty();
   }
-  String modelProperty=myText;
-  if (!modelProperty.startsWith("project.")) {
-    modelProperty=modelProperty.startsWith("pom.") ? "project." + modelProperty.substring("pom.".length()) : "project." + modelProperty;
-  }
-  return resolveModelProperty(myProjectDom,modelProperty,new THashSet<DomElement>());
+  return null;
 }
