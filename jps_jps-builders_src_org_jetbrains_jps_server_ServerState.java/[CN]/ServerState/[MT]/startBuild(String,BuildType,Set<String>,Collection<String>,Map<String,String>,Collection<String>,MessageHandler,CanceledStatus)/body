@@ -1,0 +1,59 @@
+{
+  final String projectName=getProjectName(projectPath);
+  ProjectDescriptor pd;
+synchronized (myConfigurationLock) {
+    pd=myProjects.get(projectPath);
+    if (pd == null) {
+      final Project project=loadProject(projectPath);
+      final FSState fsState=new FSState(false);
+      ProjectTimestamps timestamps=null;
+      BuildDataManager dataManager=null;
+      try {
+        timestamps=new ProjectTimestamps(projectName);
+        dataManager=new BuildDataManager(projectName,myKeepTempCachesInMemory);
+      }
+ catch (      Exception e) {
+        e.printStackTrace(System.err);
+        if (timestamps != null) {
+          timestamps.close();
+        }
+        if (dataManager != null) {
+          dataManager.close();
+        }
+        buildType=BuildType.PROJECT_REBUILD;
+        FileUtil.delete(Paths.getDataStorageRoot(projectName));
+        timestamps=new ProjectTimestamps(projectName);
+        dataManager=new BuildDataManager(projectName,myKeepTempCachesInMemory);
+        msgHandler.processMessage(new CompilerMessage("compile-server",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
+      }
+      pd=new ProjectDescriptor(projectName,project,fsState,timestamps,dataManager);
+      myProjects.put(projectPath,pd);
+    }
+    pd.incUsageCounter();
+  }
+  final Project project=pd.project;
+  try {
+    final CompileScope compileScope=createCompilationScope(buildType,pd,modules,artifacts,paths);
+    final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),builderParams,cs);
+    if (msgHandler != null) {
+      builder.addMessageHandler(msgHandler);
+    }
+switch (buildType) {
+case PROJECT_REBUILD:
+      builder.build(compileScope,false,true);
+    break;
+case FORCED_COMPILATION:
+  builder.build(compileScope,false,false);
+break;
+case MAKE:
+builder.build(compileScope,true,false);
+break;
+case CLEAN:
+break;
+}
+}
+  finally {
+pd.release();
+clearZipIndexCache();
+}
+}
