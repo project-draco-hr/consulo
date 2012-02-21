@@ -1,36 +1,32 @@
 {
-  final PsiParameter[] parameters=constructor.getParameterList().getParameters();
-  PsiExpression[] expressions=new PsiExpression[parameters.length + fields.length];
-  PsiElementFactory factory=JavaPsiFacade.getInstance(file.getProject()).getElementFactory();
+  final PsiParameterList parameterList=constructor.getParameterList();
+  final PsiParameter[] parameters=parameterList.getParameters();
+  ParameterInfoImpl[] newParamInfos=new ParameterInfoImpl[parameters.length + fields.length];
+  final List<PsiVariable> params=new ArrayList<PsiVariable>(Arrays.asList(parameters));
+  Collections.addAll(params,fields);
+  Collections.sort(params,new FieldParameterComparator(parameterList));
   int i=0;
-  for (; i < parameters.length; i++) {
-    PsiParameter parameter=parameters[i];
-    String value=PsiTypesUtil.getDefaultValueOfType(parameter.getType());
-    expressions[i]=factory.createExpressionFromText(value,parameter);
-  }
-  for (  PsiField field : fields) {
-    expressions[i++]=factory.createExpressionFromText(field.getName(),constructor);
-  }
-  if (constructor.isVarArgs()) {
-    ArrayUtil.rotateLeft(expressions,parameters.length - 1,expressions.length - 1);
+  for (  PsiVariable param : params) {
+    final PsiType paramType=param.getType();
+    if (param instanceof PsiParameter) {
+      newParamInfos[i++]=new ParameterInfoImpl(parameterList.getParameterIndex((PsiParameter)param),param.getName(),paramType,param.getName());
+    }
+ else {
+      final String uniqueParameterName=getUniqueParameterName(parameters,param);
+      newParamInfos[i++]=new ParameterInfoImpl(-1,uniqueParameterName,paramType,uniqueParameterName);
+    }
   }
   final SmartPointerManager manager=SmartPointerManager.getInstance(project);
   final SmartPsiElementPointer constructorPointer=manager.createSmartPsiElementPointer(constructor);
-  final ChangeMethodSignatureFromUsageFix addParamFix=new ChangeMethodSignatureFromUsageFix(constructor,expressions,PsiSubstitutor.EMPTY,constructor,true,1){
-    @Override protected boolean allowDelegate(){
-      return true;
-    }
-  }
-;
-  if (addParamFix.isAvailable(project,editor,file)) {
-    addParamFix.invoke(project,editor,file);
-  }
- else   if (addParamFix.isMethodSignatureExists() && !ApplicationManager.getApplication().isUnitTestMode()) {
-    HintManager.getInstance().showErrorHint(editor,"Constructor with corresponding signature already exist");
-  }
+  final PsiMethod fromText=JavaPsiFacade.getElementFactory(project).createMethodFromText(createDummyMethod(constructor,newParamInfos),constructor);
+  final PsiClass containingClass=constructor.getContainingClass();
+  if (containingClass == null)   return false;
+  final int minUsagesNumber=containingClass.findMethodsBySignature(fromText,false).length > 0 ? 0 : 1;
+  final List<ParameterInfoImpl> parameterInfos=ChangeMethodSignatureFromUsageFix.performChange(project,editor,file,constructor,minUsagesNumber,newParamInfos,true,true);
+  final ParameterInfoImpl[] resultParams=parameterInfos != null ? parameterInfos.toArray(new ParameterInfoImpl[parameterInfos.size()]) : newParamInfos;
   return ApplicationManager.getApplication().runWriteAction(new Computable<Boolean>(){
     @Override public Boolean compute(){
-      return doCreate(project,editor,parameters,constructorPointer,addParamFix,fields);
+      return doCreate(project,editor,parameters,constructorPointer,resultParams,fields);
     }
   }
 );
