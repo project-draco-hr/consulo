@@ -1,0 +1,61 @@
+{
+  VirtualFile[] files=model != null ? model.getFiles(OrderRootType.CLASSES) : library.getFiles(OrderRootType.CLASSES);
+  Set<String> jarPaths=new HashSet<String>();
+  VirtualFile frameworkLibrary=null;
+  for (  VirtualFile file : files) {
+    VirtualFile vFile=JarFileSystem.getInstance().getVirtualFileForJar(file);
+    if (vFile != null) {
+      if (vFile.getName().equals(SdkConstants.FN_FRAMEWORK_LIBRARY)) {
+        frameworkLibrary=vFile;
+      }
+      jarPaths.add(vFile.getPath());
+    }
+  }
+  if (frameworkLibrary != null) {
+    VirtualFile sdkDir=frameworkLibrary.getParent();
+    if (sdkDir != null) {
+      VirtualFile platformsDir=sdkDir.getParent();
+      if (platformsDir != null && platformsDir.getName().equals(SdkConstants.FD_PLATFORMS)) {
+        sdkDir=platformsDir.getParent();
+        if (sdkDir == null)         return null;
+      }
+      String sdkPath=sdkDir.getPath();
+      AndroidSdkData sdkData=parsedSdks != null ? parsedSdks.get(sdkPath) : null;
+      if (sdkData == null) {
+        sdkData=AndroidSdkData.parse(sdkPath,new EmptySdkLog());
+        if (sdkData == null)         return null;
+        if (parsedSdks != null) {
+          parsedSdks.put(sdkPath,sdkData);
+        }
+      }
+      IAndroidTarget resultTarget=null;
+      for (      IAndroidTarget target : sdkData.getTargets()) {
+        String targetsFrameworkLibPath=PathUtil.getCanonicalPath(target.getPath(IAndroidTarget.ANDROID_JAR));
+        if (frameworkLibrary.getPath().equals(targetsFrameworkLibPath)) {
+          if (target.isPlatform()) {
+            if (resultTarget == null)             resultTarget=target;
+          }
+ else {
+            boolean ok=true;
+            IAndroidTarget.IOptionalLibrary[] libraries=target.getOptionalLibraries();
+            if (libraries == null) {
+              ok=false;
+            }
+ else {
+              for (              IAndroidTarget.IOptionalLibrary optionalLibrary : libraries) {
+                if (!jarPaths.contains(PathUtil.getCanonicalPath(optionalLibrary.getJarPath()))) {
+                  ok=false;
+                }
+              }
+            }
+            if (ok)             resultTarget=target;
+          }
+        }
+      }
+      if (resultTarget != null) {
+        return new AndroidPlatform(sdkData,resultTarget);
+      }
+    }
+  }
+  return null;
+}

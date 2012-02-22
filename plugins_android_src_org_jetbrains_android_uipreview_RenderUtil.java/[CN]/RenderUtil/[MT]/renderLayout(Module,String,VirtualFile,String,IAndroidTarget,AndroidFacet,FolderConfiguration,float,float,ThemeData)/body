@@ -1,0 +1,86 @@
+{
+  final Project project=module.getProject();
+  final Sdk sdk=ModuleRootManager.getInstance(facet.getModule()).getSdk();
+  if (sdk == null || !(sdk.getSdkType() instanceof AndroidSdkType)) {
+    throw new AndroidSdkNotConfiguredException();
+  }
+  final AndroidSdkAdditionalData data=(AndroidSdkAdditionalData)sdk.getSdkAdditionalData();
+  if (data == null) {
+    throw new AndroidSdkNotConfiguredException();
+  }
+  final AndroidPlatform platform=data.getAndroidPlatform();
+  if (platform == null) {
+    throw new AndroidSdkNotConfiguredException();
+  }
+  config.setVersionQualifier(new VersionQualifier(target.getVersion().getApiLevel()));
+  final RenderServiceFactory factory=platform.getSdkData().getTargetData(target).getRenderServiceFactory(project);
+  if (factory == null) {
+    throw new RenderingException(AndroidBundle.message("android.layout.preview.cannot.load.library.error"));
+  }
+  final ProjectResources projectResources=new ProjectResources();
+  final VirtualFile[] resourceDirs=facet.getLocalResourceManager().getAllResourceDirs();
+  final IAbstractFolder[] resFolders=toAbstractFolders(resourceDirs);
+  loadResources(projectResources,layoutXmlText,layoutXmlFile,resFolders);
+  final int minSdkVersion=getMinSdkVersion(facet);
+  String missingRClassMessage=null;
+  boolean missingRClass=false;
+  boolean incorrectRClassFormat=false;
+  String rClassName=null;
+  final ProjectCallback callback=new ProjectCallback(factory.getLibrary(),facet.getModule(),projectResources);
+  try {
+    callback.loadAndParseRClass();
+  }
+ catch (  ClassNotFoundException e) {
+    LOG.debug(e);
+    missingRClassMessage=e.getMessage();
+    missingRClass=true;
+  }
+catch (  IncompatibleClassFileFormatException e) {
+    LOG.debug(e);
+    incorrectRClassFormat=true;
+    rClassName=e.getClassName();
+  }
+  final RenderResources resolver=factory.createResourceResolver(facet,config,projectResources,theme.getName(),theme.isProjectTheme());
+  final RenderService renderService=factory.createService(resolver,config,xdpi,ydpi,callback,minSdkVersion);
+  final RenderSession session;
+  try {
+    session=renderService.createRenderSession(layoutXmlText,getAppLabelToShow(facet));
+  }
+ catch (  XmlPullParserException e) {
+    throw new RenderingException(e);
+  }
+  if (session == null) {
+    return null;
+  }
+  final List<FixableIssueMessage> warnMessages=new ArrayList<FixableIssueMessage>();
+  if (callback.hasUnsupportedClassVersionProblem() || (incorrectRClassFormat && callback.hasLoadedClasses())) {
+    reportIncorrectClassFormatWarning(callback,rClassName,incorrectRClassFormat,warnMessages);
+  }
+  if (missingRClass && callback.hasLoadedClasses()) {
+    final StringBuilder builder=new StringBuilder();
+    builder.append(missingRClassMessage != null && missingRClassMessage.length() > 0 ? ("Class not found error: " + missingRClassMessage + ".") : "R class not found.").append(" Try to build project");
+    warnMessages.add(new FixableIssueMessage(builder.toString()));
+  }
+  reportMissingClassesWarning(warnMessages,callback.getMissingClasses());
+  reportBrokenClassesWarning(warnMessages,callback.getBrokenClasses());
+  final Result result=session.getResult();
+  if (!result.isSuccess()) {
+    final Throwable exception=result.getException();
+    if (exception != null) {
+      final List<Throwable> exceptionsFromWarnings=getNonNullValues(callback.getBrokenClasses());
+      if (exceptionsFromWarnings.size() > 0 && exception instanceof ClassCastException && (SdkConstants.CLASS_MOCK_VIEW + " cannot be cast to " + SdkConstants.CLASS_VIEWGROUP).equalsIgnoreCase(exception.getMessage())) {
+        throw new RenderingException(exceptionsFromWarnings.toArray(new Throwable[exceptionsFromWarnings.size()]));
+      }
+      throw new RenderingException(exception);
+    }
+    final String message=result.getErrorMessage();
+    if (message != null) {
+      LOG.info(message);
+      throw new RenderingException();
+    }
+    return null;
+  }
+  final String format=FileUtil.getExtension(imgPath);
+  ImageIO.write(session.getImage(),format,new File(imgPath));
+  return new RenderingResult(warnMessages);
+}
