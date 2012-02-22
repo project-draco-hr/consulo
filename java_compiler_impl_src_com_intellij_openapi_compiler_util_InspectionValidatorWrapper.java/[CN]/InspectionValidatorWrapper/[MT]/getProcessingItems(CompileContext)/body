@@ -1,0 +1,38 @@
+{
+  final Project project=context.getProject();
+  if (!ValidationConfiguration.shouldValidate(this,context)) {
+    return ProcessingItem.EMPTY_ARRAY;
+  }
+  final ExcludedEntriesConfiguration excludedEntriesConfiguration=ValidationConfiguration.getExcludedEntriesConfiguration(project);
+  final List<ProcessingItem> items=new ReadAction<List<ProcessingItem>>(){
+    protected void run(    final Result<List<ProcessingItem>> result){
+      final CompileScope compileScope=context.getCompileScope();
+      if (!myValidator.isAvailableOnScope(compileScope))       return;
+      final ArrayList<ProcessingItem> items=new ArrayList<ProcessingItem>();
+      final Processor<VirtualFile> processor=new ReadActionProcessor<VirtualFile>(){
+        @Override public boolean processInReadAction(        VirtualFile file){
+          if (!file.isValid()) {
+            return true;
+          }
+          if (myCompilerManager.isExcludedFromCompilation(file) || excludedEntriesConfiguration.isExcluded(file)) {
+            return true;
+          }
+          final Module module=context.getModuleByFile(file);
+          if (module != null) {
+            final PsiFile psiFile=myPsiManager.findFile(file);
+            if (psiFile != null) {
+              items.add(new MyValidatorProcessingItem(psiFile));
+            }
+          }
+          return true;
+        }
+      }
+;
+      ContainerUtil.process(myValidator.getFilesToProcess(myPsiManager.getProject(),context),processor);
+      result.setResult(items);
+    }
+  }
+.execute().getResultObject();
+  if (items == null)   return ProcessingItem.EMPTY_ARRAY;
+  return items.toArray(new ProcessingItem[items.size()]);
+}

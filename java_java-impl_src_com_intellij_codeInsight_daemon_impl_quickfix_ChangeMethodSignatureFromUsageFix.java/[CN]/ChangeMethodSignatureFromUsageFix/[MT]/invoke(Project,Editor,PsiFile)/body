@@ -2,53 +2,9 @@
   if (!CodeInsightUtilBase.prepareFileForWrite(file))   return;
   final PsiMethod method=SuperMethodWarningUtil.checkSuperMethod(myTargetMethod,RefactoringBundle.message("to.refactor"));
   if (method == null)   return;
-  if (!CodeInsightUtilBase.prepareFileForWrite(method.getContainingFile()))   return;
-  final FindUsagesManager findUsagesManager=((FindManagerImpl)FindManager.getInstance(project)).getFindUsagesManager();
-  final FindUsagesHandler handler=findUsagesManager.getFindUsagesHandler(method,false);
-  if (handler == null)   return;
-  final JavaMethodFindUsagesOptions options=new JavaMethodFindUsagesOptions(project);
-  options.isImplementingMethods=true;
-  options.isOverridingMethods=true;
-  options.isUsages=true;
-  options.isSearchForTextOccurrences=false;
-  final int[] usagesFound=new int[1];
-  Runnable runnable=new Runnable(){
-    @Override public void run(){
-      Processor<UsageInfo> processor=new Processor<UsageInfo>(){
-        @Override public boolean process(        final UsageInfo t){
-          return ++usagesFound[0] < myMinUsagesNumberToShowDialog;
-        }
-      }
-;
-      handler.processElementUsages(method,processor,options);
-    }
-  }
-;
-  String progressTitle=QuickFixBundle.message("searching.for.usages.progress.title");
-  if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(runnable,progressTitle,true,project))   return;
   myNewParametersInfo=getNewParametersInfo(myExpressions,myTargetMethod,mySubstitutor);
-  if (ApplicationManager.getApplication().isUnitTestMode() || usagesFound[0] < myMinUsagesNumberToShowDialog) {
-    ChangeSignatureProcessor processor=new ChangeSignatureProcessor(project,method,false,null,method.getName(),method.getReturnType(),myNewParametersInfo){
-      @Override @NotNull protected UsageInfo[] findUsages(){
-        return myChangeAllUsages ? super.findUsages() : UsageInfo.EMPTY_ARRAY;
-      }
-    }
-;
-    processor.run();
-    ApplicationManager.getApplication().runWriteAction(new Runnable(){
-      @Override public void run(){
-        UndoUtil.markPsiFileForUndo(file);
-      }
-    }
-);
-  }
- else {
-    List<ParameterInfoImpl> parameterInfos=myNewParametersInfo != null ? new ArrayList<ParameterInfoImpl>(Arrays.asList(myNewParametersInfo)) : new ArrayList<ParameterInfoImpl>();
-    final PsiReferenceExpression refExpr=TargetElementUtil.findReferenceExpression(editor);
-    JavaChangeSignatureDialog dialog=new JavaChangeSignatureDialog(project,method,allowDelegate(),refExpr);
-    dialog.setParameterInfos(parameterInfos);
-    dialog.show();
-    List<ParameterInfoImpl> parameters=dialog.getParameters();
-    myNewParametersInfo=parameters.toArray(new ParameterInfoImpl[parameters.size()]);
+  final List<ParameterInfoImpl> parameterInfos=performChange(project,editor,file,method,myMinUsagesNumberToShowDialog,myNewParametersInfo,myChangeAllUsages,false);
+  if (parameterInfos != null) {
+    myNewParametersInfo=parameterInfos.toArray(new ParameterInfoImpl[parameterInfos.size()]);
   }
 }
