@@ -1,0 +1,43 @@
+{
+  SvnVcs vcs=getVCS(dir);
+  if (vcs == null) {
+    return false;
+  }
+  if (isUndo(vcs) && SvnUtil.isAdminDirectory(dir,name)) {
+    return false;
+  }
+  File ioDir=getIOFile(dir);
+  boolean pendingAdd=isPendingAdd(vcs.getProject(),dir);
+  if (!SvnUtil.isSvnVersioned(vcs.getProject(),ioDir) && !pendingAdd) {
+    return false;
+  }
+  SVNWCClient wcClient=vcs.createWCClient();
+  File targetFile=new File(ioDir,name);
+  SVNStatus status=getFileStatus(vcs,targetFile);
+  if (status == null || status.getContentsStatus() == SVNStatusType.STATUS_NONE || status.getContentsStatus() == SVNStatusType.STATUS_UNVERSIONED) {
+    myAddedFiles.putValue(vcs.getProject(),new AddedFileInfo(dir,name,null,recursive));
+    return false;
+  }
+ else   if (SvnVcs.svnStatusIs(status,SVNStatusType.STATUS_MISSING)) {
+    return false;
+  }
+ else   if (SvnVcs.svnStatusIs(status,SVNStatusType.STATUS_DELETED)) {
+    SVNNodeKind kind=status.getKind();
+    if (directory && kind != SVNNodeKind.DIR || !directory && kind != SVNNodeKind.FILE) {
+      return false;
+    }
+    try {
+      if (isUndo(vcs)) {
+        wcClient.doRevert(targetFile,false);
+        return true;
+      }
+      myAddedFiles.putValue(vcs.getProject(),new AddedFileInfo(dir,name,null,recursive));
+      return false;
+    }
+ catch (    SVNException e) {
+      SVNFileUtil.deleteAll(targetFile,true);
+      return false;
+    }
+  }
+  return false;
+}

@@ -1,0 +1,67 @@
+{
+  final Ref<SvnChangeList> result=new Ref<SvnChangeList>();
+  final SvnRevisionNumber number=((SvnRevisionNumber)svnRevision.getRevisionNumber());
+  final SVNRevision targetRevision=((SvnRevisionNumber)svnRevision.getRevisionNumber()).getRevision();
+  final SvnVcs vcs=SvnVcs.getInstance(project);
+  try {
+    final Exception[] ex=new Exception[1];
+    final String url=svnRevision.getURL();
+    final SVNLogEntry[] logEntry=new SVNLogEntry[1];
+    final SvnRepositoryLocation location=new SvnRepositoryLocation(url);
+    final SVNLogClient client=vcs.createLogClient();
+    final SVNURL repositoryUrl;
+    if ((file != null) && file.isInLocalFileSystem()) {
+      final SvnFileUrlMapping urlMapping=vcs.getSvnFileUrlMapping();
+      final RootUrlInfo wcRoot=urlMapping.getWcRootForFilePath(new File(file.getPath()));
+      if (wcRoot == null) {
+        return null;
+      }
+      repositoryUrl=wcRoot.getRepositoryUrlUrl();
+    }
+ else {
+      final SVNInfo svnInfo=vcs.createWCClient().doInfo(SVNURL.parseURIEncoded(url),SVNRevision.HEAD,SVNRevision.HEAD);
+      repositoryUrl=svnInfo.getRepositoryRootURL();
+      if (repositoryUrl == null) {
+        Messages.showErrorDialog(SvnBundle.message("message.text.cannot.load.version",number,"Cannot get repository url"),SvnBundle.message("message.title.error.fetching.affected.paths"));
+        return null;
+      }
+    }
+    final Runnable process=new Runnable(){
+      public void run(){
+        try {
+          ProgressManager.getInstance().getProgressIndicator().setText(SvnBundle.message("progress.text.loading.log"));
+          client.doLog(repositoryUrl,null,targetRevision,targetRevision,targetRevision,false,true,0,new ISVNLogEntryHandler(){
+            public void handleLogEntry(            final SVNLogEntry currentLogEntry) throws SVNException {
+              logEntry[0]=currentLogEntry;
+            }
+          }
+);
+          if (logEntry[0] == null) {
+            throw new VcsException(SvnBundle.message("exception.text.cannot.load.version",number));
+          }
+          ProgressManager.getInstance().getProgressIndicator().setText(SvnBundle.message("progress.text.processing.changes"));
+          result.set(new SvnChangeList(vcs,location,logEntry[0],repositoryUrl.toString()));
+        }
+ catch (        Exception e) {
+          ex[0]=e;
+        }
+      }
+    }
+;
+    if (underProgress) {
+      ProgressManager.getInstance().runProcessWithProgressSynchronously(process,getTitle(targetRevision.getNumber()),false,project);
+    }
+ else {
+      process.run();
+    }
+    if (ex[0] != null)     throw ex[0];
+  }
+ catch (  Exception e1) {
+    final BufferExposingByteArrayOutputStream baos=new BufferExposingByteArrayOutputStream();
+    e1.printStackTrace(new PrintStream(baos));
+    LOG.info("For url: " + svnRevision.getURL() + "Exception: "+ new String(baos.getInternalBuffer(),0,baos.size()));
+    Messages.showErrorDialog(SvnBundle.message("message.text.cannot.load.version",number,e1.getLocalizedMessage()),SvnBundle.message("message.title.error.fetching.affected.paths"));
+    return null;
+  }
+  return result.get();
+}

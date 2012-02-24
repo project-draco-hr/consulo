@@ -1,0 +1,70 @@
+{
+  ApplicationManager.getApplication().saveAll();
+  final List<Pair<SVNException,VirtualFile>> exceptions=new LinkedList<Pair<SVNException,VirtualFile>>();
+  final SvnVcs vcs=SvnVcs.getInstance(myProject);
+  final SVNWCClient wcClient=vcs.createWCClient();
+  final Task.Backgroundable task=new Task.Backgroundable(myProject,SvnBundle.message(myTitleKey),true,BackgroundFromStartOption.getInstance()){
+    public void run(    @NotNull final ProgressIndicator indicator){
+      indicator.setIndeterminate(true);
+      VirtualFile currentRoot;
+      for (      VirtualFile root : myRoots) {
+        currentRoot=root;
+        try {
+          final String path=root.getPath();
+          indicator.setText(SvnBundle.message("action.Subversion.cleanup.progress.text",path));
+          wcClient.setEventHandler(new ISVNEventHandler(){
+            @Override public void handleEvent(            SVNEvent event,            double progress) throws SVNException {
+            }
+            @Override public void checkCancelled() throws SVNCancelException {
+              if (indicator.isCanceled())               throw new SVNCancelException();
+            }
+          }
+);
+          wcClient.doCleanup(new File(path));
+        }
+ catch (        SVNException ex) {
+          exceptions.add(new Pair<SVNException,VirtualFile>(ex,currentRoot));
+        }
+      }
+    }
+    @Override public void onCancel(){
+      onSuccess();
+    }
+    @Override public void onSuccess(){
+      if (myProject.isDisposed()) {
+        return;
+      }
+      final VcsDirtyScopeManager manager=VcsDirtyScopeManager.getInstance(myProject);
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          ApplicationManager.getApplication().runWriteAction(new Runnable(){
+            public void run(){
+              if (myProject.isDisposed()) {
+                return;
+              }
+              for (              final VirtualFile root : myRoots) {
+                root.refresh(false,true);
+              }
+            }
+          }
+);
+        }
+      }
+);
+      for (      final VirtualFile root : myRoots) {
+        manager.fileDirty(root);
+      }
+      if (!exceptions.isEmpty()) {
+        final List<VcsException> vcsExceptions=new LinkedList<VcsException>();
+        for (        Pair<SVNException,VirtualFile> pair : exceptions) {
+          final SVNException exception=pair.first;
+          vcsExceptions.add(new VcsException(SvnBundle.message("action.Subversion.cleanup.error.message",FileUtil.toSystemDependentName(pair.second.getPath()),((exception == null) ? "" : exception.getMessage()))));
+        }
+        final AbstractVcsHelper helper=AbstractVcsHelper.getInstance(myProject);
+        helper.showErrors(vcsExceptions,SvnBundle.message(myTitleKey));
+      }
+    }
+  }
+;
+  ProgressManager.getInstance().run(task);
+}
