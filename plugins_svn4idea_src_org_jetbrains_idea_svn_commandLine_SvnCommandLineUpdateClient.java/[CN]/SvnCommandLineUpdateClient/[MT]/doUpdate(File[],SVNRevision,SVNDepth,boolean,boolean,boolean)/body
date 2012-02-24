@@ -1,0 +1,108 @@
+{
+  final SvnCommandLineInfoClient infoClient=new SvnCommandLineInfoClient(myProject);
+  final SVNInfo info=infoClient.doInfo(paths[0],SVNRevision.UNDEFINED);
+  if (info == null || info.getURL() == null) {
+    throw new SVNException(SVNErrorMessage.create(SVNErrorCode.WC_NOT_WORKING_COPY,paths[0].getPath()));
+  }
+  final long[] result=new long[paths.length];
+  new CommandLineAuthenticator(myProject,new CommandLineAuthenticator.AuthenticationRequiringCommand(){
+    @Override public void run(    File configDir) throws SVNException {
+      final File base=myCommonAncestor == null ? paths[0] : new File(myCommonAncestor.getPath());
+      final SvnLineCommand command=new SvnLineCommand(myProject,base,SvnCommandName.up);
+      if (revision != null && !SVNRevision.UNDEFINED.equals(revision) && !SVNRevision.WORKING.equals(revision)) {
+        command.addParameters("-r",revision.toString());
+      }
+      if (depth != null && !SVNDepth.UNKNOWN.equals(depth)) {
+        command.addParameters("--depth",depth.toString());
+      }
+      if (allowUnversionedObstructions) {
+        command.addParameters("--force");
+      }
+      if (depthIsSticky && depth != null) {
+        command.addParameters("--set-depth",depth.toString());
+      }
+      if (makeParents) {
+        command.addParameters("--parents");
+      }
+      command.addParameters("--accept","postpone");
+      command.addParameters("--config-dir",configDir.getPath());
+      for (      File path : paths) {
+        command.addParameters(path.getPath());
+      }
+      final StringBuffer sbError=new StringBuffer();
+      final Semaphore semaphore=new Semaphore();
+      semaphore.down();
+      final ISVNEventHandler handler=getEventHandler();
+      final UpdateOutputLineConverter converter=new UpdateOutputLineConverter(base);
+      final SVNException[] innerException=new SVNException[1];
+      command.addListener(new LineProcessEventListener(){
+        @Override public void onLineAvailable(        String line,        Key outputType){
+          if (ProcessOutputTypes.STDOUT.equals(outputType)) {
+            final SVNEvent event=converter.convert(line);
+            if (event != null) {
+              checkForUpdateCompleted(event);
+              try {
+                handler.handleEvent(event,0.5);
+              }
+ catch (              SVNException e) {
+                command.cancel();
+                semaphore.up();
+                innerException[0]=e;
+              }
+            }
+          }
+ else           if (ProcessOutputTypes.STDERR.equals(outputType)) {
+            sbError.append(line);
+            if (line.contains(ourAuthenticationRealm)) {
+              command.cancel();
+              semaphore.up();
+            }
+          }
+        }
+        @Override public void processTerminated(        int exitCode){
+          semaphore.up();
+        }
+        @Override public void startFailed(        Throwable exception){
+          semaphore.up();
+        }
+      }
+);
+      try {
+        command.start();
+        semaphore.waitFor();
+        checkForException(sbError);
+      }
+ catch (      SvnExceptionWrapper e) {
+        throw (SVNException)e.getCause();
+      }
+    }
+    @Override public void runWithSvnkitClient(    File configDir,    SvnAuthenticationManager manager) throws SVNException {
+      final SVNUpdateClient client=new SVNUpdateClient(manager,SvnConfiguration.getInstance(myProject).getOptions(myProject));
+      client.doUpdate(paths,revision,depth,allowUnversionedObstructions,depthIsSticky,makeParents);
+    }
+    private void checkForUpdateCompleted(    SVNEvent event){
+      if (SVNEventAction.UPDATE_COMPLETED.equals(event.getAction())) {
+        final long eventRevision=event.getRevision();
+        for (int i=0; i < paths.length; i++) {
+          final File path=paths[i];
+          if (path.equals(event.getFile())) {
+            result[i]=eventRevision;
+            break;
+          }
+        }
+      }
+    }
+    @Override public SVNURL sampleUrl(){
+      return info.getURL();
+    }
+    @Override public void cleanup() throws SVNException {
+      final SvnVcs vcs17=SvnVcs.getInstance(myProject);
+      final SVNWCClient client=vcs17.createWCClient();
+      for (      File path : paths) {
+        client.doCleanup(path);
+      }
+    }
+  }
+).doWithAuthentication();
+  return result;
+}

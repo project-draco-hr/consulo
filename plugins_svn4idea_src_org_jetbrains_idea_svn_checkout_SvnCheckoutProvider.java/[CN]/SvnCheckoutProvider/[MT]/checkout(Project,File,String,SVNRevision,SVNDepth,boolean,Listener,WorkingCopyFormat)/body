@@ -1,0 +1,68 @@
+{
+  final Ref<Boolean> checkoutSuccessful=new Ref<Boolean>();
+  final SVNException[] exception=new SVNException[1];
+  final Task.Backgroundable checkoutBackgroundTask=new Task.Backgroundable(project,SvnBundle.message("message.title.check.out"),true,VcsConfiguration.getInstance(project).getCheckoutOption()){
+    public void run(    @NotNull final ProgressIndicator indicator){
+      SvnWorkingCopyFormatHolder.setPresetFormat(selectedFormat);
+      final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+      final SVNUpdateClient client=SvnVcs.getInstance(project).createUpdateClient();
+      if (!WorkingCopyFormat.ONE_DOT_SEVEN.equals(selectedFormat)) {
+        client.getOperationsFactory().setPrimaryWcGeneration(SvnWcGeneration.V16);
+      }
+      client.setEventHandler(new CheckoutEventHandler(SvnVcs.getInstance(project),false,progressIndicator));
+      client.setIgnoreExternals(ignoreExternals);
+      try {
+        progressIndicator.setText(SvnBundle.message("progress.text.checking.out",target.getAbsolutePath()));
+        client.doCheckout(SVNURL.parseURIEncoded(url),target,SVNRevision.UNDEFINED,revision,depth,true);
+        progressIndicator.checkCanceled();
+        checkoutSuccessful.set(Boolean.TRUE);
+      }
+ catch (      SVNCancelException ignore) {
+      }
+catch (      SVNException e) {
+        exception[0]=e;
+      }
+ finally {
+        client.setIgnoreExternals(false);
+        client.setEventHandler(null);
+        SvnWorkingCopyFormatHolder.setPresetFormat(null);
+      }
+    }
+    public void onCancel(){
+      onSuccess();
+    }
+    public void onSuccess(){
+      if (exception[0] != null) {
+        Messages.showErrorDialog(SvnBundle.message("message.text.cannot.checkout",exception[0].getMessage()),SvnBundle.message("message.title.check.out"));
+      }
+      final VirtualFile vf=RefreshVFsSynchronously.findCreatedFile(target);
+      if (vf != null) {
+        vf.refresh(true,true,new Runnable(){
+          public void run(){
+            SwingUtilities.invokeLater(new Runnable(){
+              @Override public void run(){
+                notifyListener();
+              }
+            }
+);
+          }
+        }
+);
+      }
+ else {
+        notifyListener();
+      }
+    }
+    private void notifyListener(){
+      notifyRootManagerIfUnderProject(project,target);
+      if (listener != null) {
+        if (!checkoutSuccessful.isNull()) {
+          listener.directoryCheckedOut(target,SvnVcs.getKey());
+        }
+        listener.checkoutCompleted();
+      }
+    }
+  }
+;
+  ProgressManager.getInstance().run(checkoutBackgroundTask);
+}
