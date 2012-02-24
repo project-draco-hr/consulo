@@ -1,0 +1,84 @@
+{
+  super(project,true);
+  myMustSelectBeforeOk=true;
+  myProject=project;
+  mySelectedBranchUrl=selectedBranchUrl;
+  myVcs=SvnVcs.getInstance(myProject);
+  mySelectedRepositoryUUID=SvnUtil.getRepositoryUUID(myVcs,currentBranch);
+  setTitle(SvnBundle.message("action.Subversion.integrate.changes.dialog.title"));
+  init();
+  myWorkingCopiesList.setModel(new DefaultListModel());
+  myWorkingCopiesList.addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    final ListSelectionEvent e){
+      setOKActionEnabled((!myMustSelectBeforeOk) || (myWorkingCopiesList.getSelectedIndex() != -1));
+    }
+  }
+);
+  setOKActionEnabled((!myMustSelectBeforeOk) || (myWorkingCopiesList.getSelectedIndex() != -1));
+  final List<WorkingCopyInfo> workingCopyInfoList=new ArrayList<WorkingCopyInfo>();
+  final Set<String> workingCopies=SvnBranchMapperManager.getInstance().get(mySelectedBranchUrl);
+  if (workingCopies != null) {
+    for (    String workingCopy : workingCopies) {
+      workingCopyInfoList.add(new WorkingCopyInfo(workingCopy,underProject(new File(workingCopy))));
+    }
+  }
+  Collections.sort(workingCopyInfoList,WorkingCopyInfoComparator.getInstance());
+  for (  WorkingCopyInfo info : workingCopyInfoList) {
+    ((DefaultListModel)myWorkingCopiesList.getModel()).addElement(info);
+  }
+  if (!workingCopyInfoList.isEmpty()) {
+    myWorkingCopiesList.setSelectedIndex(0);
+  }
+  SvnConfiguration svnConfig=SvnConfiguration.getInstance(myVcs.getProject());
+  myDryRunCheckbox.setSelected(svnConfig.MERGE_DRY_RUN);
+  myIgnoreWhitespacesCheckBox.setSelected(svnConfig.IGNORE_SPACES_IN_MERGE);
+  mySourceInfoLabel.setText(SvnBundle.message("action.Subversion.integrate.changes.branch.info.source.label.text",currentBranch));
+  myTargetInfoLabel.setText(SvnBundle.message("action.Subversion.integrate.changes.branch.info.target.label.text",selectedBranchUrl));
+  final String addText=SvnBundle.message("action.Subversion.integrate.changes.dialog.add.wc.text");
+  final AnAction addAction=new AnAction(addText,addText,PlatformIcons.ADD_ICON){
+{
+      registerCustomShortcutSet(CommonShortcuts.INSERT,myWorkingCopiesList);
+    }
+    public void actionPerformed(    final AnActionEvent e){
+      final VirtualFile vFile=FileChooser.chooseFile(myProject,FileChooserDescriptorFactory.createSingleFolderDescriptor());
+      if (vFile != null) {
+        final File file=new File(vFile.getPath());
+        if (hasDuplicate(file)) {
+          return;
+        }
+        final String repositoryUUID=SvnUtil.getRepositoryUUID(myVcs,file);
+        if ((mySelectedRepositoryUUID != null) && (!mySelectedRepositoryUUID.equals(repositoryUUID))) {
+          if (OK_EXIT_CODE == Messages.showOkCancelDialog((repositoryUUID == null) ? SvnBundle.message("action.Subversion.integrate.changes.message.not.under.control.text") : SvnBundle.message("action.Subversion.integrate.changes.message.another.wc.text"),getTitle(),UIUtil.getWarningIcon())) {
+            onOkToAdd(file);
+          }
+        }
+ else {
+          onOkToAdd(file);
+        }
+      }
+    }
+  }
+;
+  myGroup.add(addAction);
+  final String removeText=SvnBundle.message("action.Subversion.integrate.changes.dialog.remove.wc.text");
+  myGroup.add(new AnAction(removeText,removeText,PlatformIcons.DELETE_ICON){
+{
+      registerCustomShortcutSet(CommonShortcuts.DELETE,myWorkingCopiesList);
+    }
+    public void update(    final AnActionEvent e){
+      final Presentation presentation=e.getPresentation();
+      final int idx=(myWorkingCopiesList == null) ? -1 : myWorkingCopiesList.getSelectedIndex();
+      presentation.setEnabled(idx != -1);
+    }
+    public void actionPerformed(    final AnActionEvent e){
+      final int idx=myWorkingCopiesList.getSelectedIndex();
+      if (idx != -1) {
+        final DefaultListModel model=(DefaultListModel)myWorkingCopiesList.getModel();
+        final WorkingCopyInfo info=(WorkingCopyInfo)model.get(idx);
+        model.removeElementAt(idx);
+        SvnBranchMapperManager.getInstance().remove(mySelectedBranchUrl,new File(info.getLocalPath()));
+      }
+    }
+  }
+);
+}

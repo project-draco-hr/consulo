@@ -1,0 +1,41 @@
+{
+  final Ref<String> errorMessage=new Ref<String>();
+  final SVNCommitClient client=SvnVcs.getInstance(project).createCommitClient();
+  final String targetPath=FileUtil.toSystemIndependentName(target.getAbsolutePath());
+  ExclusiveBackgroundVcsAction.run(project,new Runnable(){
+    public void run(){
+      ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
+        public void run(){
+          ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+          client.setEventHandler(new CheckoutEventHandler(SvnVcs.getInstance(project),true,progressIndicator));
+          try {
+            progressIndicator.setText(SvnBundle.message("progress.text.import",target.getAbsolutePath()));
+            final VirtualFile targetVf=SvnUtil.getVirtualFile(targetPath);
+            if (targetVf == null) {
+              errorMessage.set("Can not find file: " + targetPath);
+            }
+ else             if (project.isDefault() || !PeriodicalTasksCloser.getInstance().safeGetService(project,FileIndexFacade.class).isInContent(targetVf)) {
+              client.doImport(target,url,message,null,!includeIgnored,false,depth);
+            }
+ else {
+              client.setCommitHandler(new MyFilter(LocalFileSystem.getInstance(),new SvnExcludingIgnoredOperation.Filter(project)));
+              client.doImport(target,url,message,null,!includeIgnored,false,depth);
+            }
+          }
+ catch (          SVNException e) {
+            errorMessage.set(e.getMessage());
+          }
+ finally {
+            client.setIgnoreExternals(false);
+            client.setEventHandler(null);
+          }
+        }
+      }
+,SvnBundle.message("message.title.import"),true,project);
+    }
+  }
+);
+  if (!errorMessage.isNull()) {
+    Messages.showErrorDialog(SvnBundle.message("message.text.cannot.import",errorMessage.get()),SvnBundle.message("message.title.import"));
+  }
+}

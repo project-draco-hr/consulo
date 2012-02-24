@@ -1,0 +1,55 @@
+{
+  if (myCopyData == null) {
+    finishWithError(context,"Merge start wasn't found",true);
+    return;
+  }
+  final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  myIsReintegrate=myCopyData.isInvertedSense();
+  if (!myWcInfo.getFormat().supportsMergeInfo())   return;
+  final SvnBranchPointsCalculator.BranchCopyData data=myCopyData.getTrue();
+  final long sourceLatest=data.getTargetRevision();
+  final SvnCommittedChangesProvider committedChangesProvider=(SvnCommittedChangesProvider)myVcs.getCommittedChangesProvider();
+  final ChangeBrowserSettings settings=new ChangeBrowserSettings();
+  settings.CHANGE_AFTER=Long.toString(sourceLatest);
+  settings.USE_CHANGE_AFTER_FILTER=true;
+  String local=SVNPathUtil.getRelativePath(myWcInfo.getRepositoryRoot(),myWcInfo.getRootUrl());
+  final String relativeLocal=(local.startsWith("/") ? local : "/" + local);
+  final LinkedList<Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>> list=new LinkedList<Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>>();
+  try {
+    committedChangesProvider.getCommittedChangesWithMergedRevisons(settings,new SvnRepositoryLocation(mySourceUrl),0,new PairConsumer<SvnChangeList,TreeStructureNode<SVNLogEntry>>(){
+      public void consume(      SvnChangeList svnList,      TreeStructureNode<SVNLogEntry> tree){
+        indicator.checkCanceled();
+        if (sourceLatest >= svnList.getNumber())         return;
+        list.add(new Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>(svnList,tree));
+      }
+    }
+);
+  }
+ catch (  VcsException e) {
+    finishWithError(context,"Checking revisions for merge fault",Collections.singletonList(e));
+  }
+  indicator.setText("Checking merge information...");
+  for (  Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>> pair : list) {
+    final SvnChangeList svnList=pair.getFirst();
+    final SvnMergeInfoCache.MergeCheckResult checkResult=myMergeChecker.checkList(svnList);
+    indicator.setText2("Processing revision " + svnList.getNumber());
+    if (SvnMergeInfoCache.MergeCheckResult.NOT_MERGED.equals(checkResult)) {
+      final List<TreeStructureNode<SVNLogEntry>> children=pair.getSecond().getChildren();
+      boolean localChange=false;
+      for (      TreeStructureNode<SVNLogEntry> child : children) {
+        if (isLocalRevisionMergeIteration(child,relativeLocal,indicator)) {
+          localChange=true;
+          break;
+        }
+      }
+      if (!localChange) {
+        myNotMerged.add(svnList);
+      }
+    }
+  }
+  if (myNotMerged.isEmpty()) {
+    finishWithError(context,"Everything is up-to-date",false);
+    return;
+  }
+  context.next(new ShowRevisionSelector(myCopyData));
+}
