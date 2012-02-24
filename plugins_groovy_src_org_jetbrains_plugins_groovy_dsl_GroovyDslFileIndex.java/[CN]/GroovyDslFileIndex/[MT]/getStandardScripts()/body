@@ -1,7 +1,16 @@
 {
-  if (ourStandardScripts == null) {
-synchronized (SCRIPTS_CACHE) {
-      if (ourStandardScripts == null) {
+  List<Pair<File,GroovyDslExecutor>> result=ourStandardScripts;
+  if (result != null) {
+    return result;
+  }
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  ourPool.execute(new Runnable(){
+    @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod") @Override public void run(){
+      if (ourStandardScripts != null) {
+        return;
+      }
+      try {
         Set<File> scriptFolders=new LinkedHashSet<File>();
         for (        GroovyFrameworkConfigNotification extension : GroovyFrameworkConfigNotification.EP_NAME.getExtensions()) {
           File jarPath=new File(PathUtil.getJarPathForClass(extension.getClass()));
@@ -29,7 +38,25 @@ synchronized (SCRIPTS_CACHE) {
         }
         ourStandardScripts=executors;
       }
+ catch (      OutOfMemoryError e) {
+        stopGdsl=true;
+        throw e;
+      }
+catch (      NoClassDefFoundError e) {
+        stopGdsl=true;
+        throw e;
+      }
+ finally {
+        semaphore.up();
+      }
     }
+  }
+);
+  while (ourStandardScripts == null && !stopGdsl && !semaphore.waitFor(20)) {
+    ProgressManager.checkCanceled();
+  }
+  if (stopGdsl) {
+    return Collections.emptyList();
   }
   return ourStandardScripts;
 }

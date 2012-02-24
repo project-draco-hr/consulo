@@ -1,0 +1,66 @@
+{
+  final Module module=callback.getModule();
+  final Project project=module.getProject();
+  final List<Module> problemModules=getProblemModules(module);
+  final StringBuilder builder=new StringBuilder("Preview can be incorrect: unsupported classes version");
+  final List<Pair<String,Runnable>> quickFixes=new ArrayList<Pair<String,Runnable>>();
+  if (problemModules.size() > 0) {
+    quickFixes.add(new Pair<String,Runnable>("Rebuild project with '-target 1.6'",new Runnable(){
+      @Override public void run(){
+        final JavacSettings settings=JavacSettings.getInstance(project);
+        if (settings.ADDITIONAL_OPTIONS_STRING.length() > 0) {
+          settings.ADDITIONAL_OPTIONS_STRING+=' ';
+        }
+        settings.ADDITIONAL_OPTIONS_STRING+="-target 1.6";
+        CompilerManager.getInstance(project).rebuild(null);
+      }
+    }
+));
+    quickFixes.add(new Pair<String,Runnable>("Change Java SDK to 1.5/1.6",new Runnable(){
+      @Override public void run(){
+        final Set<String> sdkNames=getSdkNamesFromModules(problemModules);
+        if (sdkNames.size() == 1) {
+          final Sdk sdk=ProjectJdkTable.getInstance().findJdk(sdkNames.iterator().next());
+          if (sdk != null && sdk.getSdkType() instanceof AndroidSdkType) {
+            final ProjectStructureConfigurable config=ProjectStructureConfigurable.getInstance(project);
+            if (ShowSettingsUtil.getInstance().editConfigurable(project,config,new Runnable(){
+              public void run(){
+                config.select(sdk,true);
+              }
+            }
+)) {
+              askAndRebuild(project);
+            }
+            return;
+          }
+        }
+        final String moduleToSelect=problemModules.size() > 0 ? problemModules.iterator().next().getName() : null;
+        if (ModulesConfigurator.showDialog(project,moduleToSelect,ClasspathEditor.NAME)) {
+          askAndRebuild(project);
+        }
+      }
+    }
+));
+    final Set<String> classesWithIncorrectFormat=new HashSet<String>(callback.getClassesWithIncorrectFormat());
+    if (incorrectRClassFormat && rClassName != null) {
+      classesWithIncorrectFormat.add(rClassName);
+    }
+    if (classesWithIncorrectFormat.size() > 0) {
+      quickFixes.add(new Pair<String,Runnable>("Details",new Runnable(){
+        @Override public void run(){
+          showClassesWithIncorrectFormat(project,classesWithIncorrectFormat);
+        }
+      }
+));
+    }
+    builder.append("\nFollowing modules are built with incompatible JDK: ");
+    for (Iterator<Module> it=problemModules.iterator(); it.hasNext(); ) {
+      Module problemModule=it.next();
+      builder.append(problemModule.getName());
+      if (it.hasNext()) {
+        builder.append(", ");
+      }
+    }
+  }
+  warnMessages.add(new FixableIssueMessage(builder.toString(),quickFixes));
+}

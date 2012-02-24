@@ -1,0 +1,50 @@
+{
+  if (!CodeInsightUtilBase.prepareFileForWrite(method.getContainingFile()))   return null;
+  final FindUsagesManager findUsagesManager=((FindManagerImpl)FindManager.getInstance(project)).getFindUsagesManager();
+  final FindUsagesHandler handler=findUsagesManager.getFindUsagesHandler(method,false);
+  if (handler == null)   return null;
+  final JavaMethodFindUsagesOptions options=new JavaMethodFindUsagesOptions(project);
+  options.isImplementingMethods=true;
+  options.isOverridingMethods=true;
+  options.isUsages=true;
+  options.isSearchForTextOccurrences=false;
+  final int[] usagesFound=new int[1];
+  Runnable runnable=new Runnable(){
+    @Override public void run(){
+      Processor<UsageInfo> processor=new Processor<UsageInfo>(){
+        @Override public boolean process(        final UsageInfo t){
+          return ++usagesFound[0] < minUsagesNumber;
+        }
+      }
+;
+      handler.processElementUsages(method,processor,options);
+    }
+  }
+;
+  String progressTitle=QuickFixBundle.message("searching.for.usages.progress.title");
+  if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(runnable,progressTitle,true,project))   return null;
+  if (ApplicationManager.getApplication().isUnitTestMode() || usagesFound[0] < minUsagesNumber) {
+    ChangeSignatureProcessor processor=new ChangeSignatureProcessor(project,method,false,null,method.getName(),method.getReturnType(),newParametersInfo){
+      @Override @NotNull protected UsageInfo[] findUsages(){
+        return changeAllUsages ? super.findUsages() : UsageInfo.EMPTY_ARRAY;
+      }
+    }
+;
+    processor.run();
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      @Override public void run(){
+        UndoUtil.markPsiFileForUndo(file);
+      }
+    }
+);
+  }
+ else {
+    List<ParameterInfoImpl> parameterInfos=newParametersInfo != null ? new ArrayList<ParameterInfoImpl>(Arrays.asList(newParametersInfo)) : new ArrayList<ParameterInfoImpl>();
+    final PsiReferenceExpression refExpr=TargetElementUtil.findReferenceExpression(editor);
+    JavaChangeSignatureDialog dialog=new JavaChangeSignatureDialog(project,method,allowDelegation,refExpr);
+    dialog.setParameterInfos(parameterInfos);
+    dialog.show();
+    return dialog.getParameters();
+  }
+  return null;
+}
