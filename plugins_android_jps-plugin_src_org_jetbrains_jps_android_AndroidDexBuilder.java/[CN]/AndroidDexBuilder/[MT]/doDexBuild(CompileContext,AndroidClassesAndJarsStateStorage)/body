@@ -1,0 +1,65 @@
+{
+  boolean success=true;
+  for (  Module module : context.getProject().getModules().values()) {
+    final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
+    if (facet == null || facet.getLibrary()) {
+      continue;
+    }
+    final Pair<AndroidSdk,IAndroidTarget> pair=AndroidJpsUtil.getAndroidPlatform(module,context,BUILDER_NAME);
+    if (pair == null) {
+      success=false;
+      continue;
+    }
+    final AndroidSdk androidSdk=pair.getFirst();
+    final IAndroidTarget target=pair.getSecond();
+    final ProjectPaths projectPaths=context.getProjectPaths();
+    final File dexOutputDir=AndroidJpsUtil.getOutputDirectoryForPackagedFiles(projectPaths,module);
+    if (dexOutputDir == null) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.output.dir.not.specified",module.getName())));
+      success=false;
+      continue;
+    }
+    final File classesDir=projectPaths.getModuleOutputDir(module,false);
+    if (classesDir == null || !classesDir.isDirectory()) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.INFO,AndroidJpsBundle.message("android.jps.warnings.dex.no.compiled.files",module.getName())));
+      continue;
+    }
+    try {
+      final Set<String> fileSet=new HashSet<String>();
+      AndroidJpsUtil.addSubdirectories(classesDir,fileSet);
+      fileSet.addAll(AndroidJpsUtil.getExternalLibraries(projectPaths,module));
+      for (      String filePath : AndroidJpsUtil.getClassdirsOfDependentModules(projectPaths,module)) {
+        if (!classesDir.getPath().equals(filePath)) {
+          fileSet.add(filePath);
+        }
+      }
+      if (facet.isLibrary()) {
+        final File testsClassDir=projectPaths.getModuleOutputDir(module,true);
+        if (testsClassDir != null && testsClassDir.isDirectory()) {
+          AndroidJpsUtil.addSubdirectories(testsClassDir,fileSet);
+        }
+      }
+      final AndroidClassesAndJarsState newState=new AndroidClassesAndJarsState(fileSet);
+      final AndroidClassesAndJarsState oldState=storage.getState(module.getName());
+      if (oldState != null && oldState.equalsTo(newState)) {
+        continue;
+      }
+      final String[] files=new String[fileSet.size()];
+      int i=0;
+      for (      String filePath : fileSet) {
+        files[i++]=FileUtil.toSystemDependentName(filePath);
+      }
+      if (!runDex(androidSdk,target,dexOutputDir.getPath(),files,context)) {
+        success=false;
+      }
+ else {
+        storage.update(module.getName(),newState);
+      }
+    }
+ catch (    IOException e) {
+      AndroidJpsUtil.reportExceptionError(context,null,e,BUILDER_NAME);
+      return false;
+    }
+  }
+  return success;
+}
