@@ -1,0 +1,127 @@
+{
+  final Map<AndroidCompilerMessageKind,List<String>> result=new HashMap<AndroidCompilerMessageKind,List<String>>();
+  result.put(ERROR,new ArrayList<String>());
+  result.put(INFORMATION,new ArrayList<String>());
+  result.put(WARNING,new ArrayList<String>());
+  FileOutputStream fos=null;
+  try {
+    String keyStoreOsPath=customKeystorePath != null && customKeystorePath.length() > 0 ? customKeystorePath : DebugKeyProvider.getDefaultKeyStoreOsPath();
+    DebugKeyProvider provider=createDebugKeyProvider(result,keyStoreOsPath);
+    X509Certificate certificate=signed ? (X509Certificate)provider.getCertificate() : null;
+    if (certificate != null && certificate.getNotAfter().compareTo(new Date()) < 0) {
+      File keyStoreFile=new File(keyStoreOsPath);
+      if (keyStoreFile.exists()) {
+        keyStoreFile.delete();
+      }
+      provider=createDebugKeyProvider(result,keyStoreOsPath);
+      certificate=(X509Certificate)provider.getCertificate();
+    }
+    if (certificate != null && certificate.getNotAfter().compareTo(new Date()) < 0) {
+      String date=DateFormatUtil.formatPrettyDateTime(certificate.getNotAfter());
+      result.get(ERROR).add(("Debug certificate expired on " + date + ". Cannot regenerate it, please delete file \""+ keyStoreOsPath+ "\" manually."));
+      return result;
+    }
+    PrivateKey key=provider.getDebugKey();
+    if (key == null) {
+      result.get(ERROR).add("Cannot create new key or keystore");
+      return result;
+    }
+    if (!new File(apkPath).exists()) {
+      result.get(ERROR).add("File " + apkPath + " not found. Try to rebuild project");
+      return result;
+    }
+    File dexEntryFile=new File(dexPath);
+    if (!dexEntryFile.exists()) {
+      result.get(ERROR).add("File " + dexEntryFile.getPath() + " not found. Try to rebuild project");
+      return result;
+    }
+    for (    String externalJar : externalJars) {
+      if (new File(externalJar).isDirectory()) {
+        result.get(ERROR).add(externalJar + " is directory. Directory libraries are not supported");
+      }
+    }
+    if (result.get(ERROR).size() > 0) {
+      return result;
+    }
+    fos=new FileOutputStream(outputApk);
+    SignedJarBuilder builder=new SignedJarBuilder(fos,key,certificate);
+    FileInputStream fis=new FileInputStream(apkPath);
+    try {
+      builder.writeZip(fis,null);
+    }
+  finally {
+      fis.close();
+    }
+    builder.writeFile(dexEntryFile,AndroidCommonUtils.CLASSES_FILE_NAME);
+    final HashSet<String> added=new HashSet<String>();
+    for (    String sourceRootPath : sourceRoots) {
+      final HashSet<File> sourceFolderResources=new HashSet<File>();
+      final File sourceRoot=new File(sourceRootPath);
+      collectStandardSourceFolderResources(sourceRoot,sourceFolderResources,resourceFilter);
+      writeStandardSourceFolderResources(sourceFolderResources,sourceRoot,builder,added);
+    }
+    Set<String> duplicates=new HashSet<String>();
+    Set<String> entries=new HashSet<String>();
+    for (    String externalJar : externalJars) {
+      collectDuplicateEntries(externalJar,entries,duplicates);
+    }
+    for (    String duplicate : duplicates) {
+      result.get(WARNING).add("Duplicate entry " + duplicate + ". The file won't be added");
+    }
+    MyResourceFilter filter=new MyResourceFilter(duplicates);
+    for (    String externalJar : externalJars) {
+      fis=new FileInputStream(externalJar);
+      try {
+        builder.writeZip(fis,filter);
+      }
+  finally {
+        fis.close();
+      }
+    }
+    final HashSet<String> nativeLibs=new HashSet<String>();
+    for (    String nativeLibsFolderPath : nativeLibsFolders) {
+      final File nativeLibsFolder=new File(nativeLibsFolderPath);
+      final File[] children=nativeLibsFolder.listFiles();
+      if (children != null) {
+        for (        File child : children) {
+          writeNativeLibraries(builder,nativeLibsFolder,child,signed,nativeLibs);
+        }
+      }
+    }
+    builder.close();
+  }
+ catch (  IOException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  CertificateException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  DebugKeyProvider.KeytoolException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  AndroidLocation.AndroidLocationException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  NoSuchAlgorithmException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  UnrecoverableEntryException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  KeyStoreException e) {
+    return addExceptionMessage(e,result);
+  }
+catch (  GeneralSecurityException e) {
+    return addExceptionMessage(e,result);
+  }
+ finally {
+    if (fos != null) {
+      try {
+        fos.close();
+      }
+ catch (      IOException ignored) {
+      }
+    }
+  }
+  return result;
+}
