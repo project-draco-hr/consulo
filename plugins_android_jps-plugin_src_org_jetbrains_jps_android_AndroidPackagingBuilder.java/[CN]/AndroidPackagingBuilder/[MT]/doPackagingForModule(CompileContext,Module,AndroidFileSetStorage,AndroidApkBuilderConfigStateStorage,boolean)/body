@@ -1,0 +1,46 @@
+{
+  final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
+  if (facet == null || facet.isLibrary()) {
+    return true;
+  }
+  final String[] sourceRoots=AndroidJpsUtil.toPaths(AndroidJpsUtil.getSourceRootsForModuleAndDependencies(module));
+  final ProjectPaths paths=context.getProjectPaths();
+  final File outputDir=AndroidJpsUtil.getOutputDirectoryForPackagedFiles(paths,module);
+  if (outputDir == null) {
+    context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.output.dir.not.specified",module.getName())));
+    return false;
+  }
+  final Pair<AndroidSdk,IAndroidTarget> pair=AndroidJpsUtil.getAndroidPlatform(module,context,BUILDER_NAME);
+  if (pair == null) {
+    return false;
+  }
+  final Set<String> externalJarsSet=AndroidJpsUtil.getExternalLibraries(paths,module);
+  final File resPackage=getPackagedResourcesFile(module,outputDir);
+  final File classesDexFile=new File(outputDir.getPath(),AndroidCommonUtils.CLASSES_FILE_NAME);
+  final String sdkPath=pair.getFirst().getSdkPath();
+  final String outputPath=AndroidJpsUtil.getApkPath(facet,outputDir);
+  if (outputPath == null) {
+    context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Cannot compute output path for file " + AndroidJpsUtil.getApkName(module)));
+    return false;
+  }
+  final String customKeyStorePath=FileUtil.toSystemDependentName(facet.getCustomDebugKeyStorePath());
+  final String[] nativeLibDirs=collectNativeLibsFolders(facet);
+  final String resPackagePath=release ? resPackage.getPath() + RELEASE_SUFFIX : resPackage.getPath();
+  final String outputApkPath=release ? outputPath + UNSIGNED_SUFFIX : outputPath;
+  final String classesDexFilePath=classesDexFile.getPath();
+  final String[] externalJars=ArrayUtil.toStringArray(externalJarsSet);
+  final AndroidFileSetState currentFileSetState=buildCurrentApkBuilderState(context.getProject(),resPackagePath,classesDexFilePath,nativeLibDirs,sourceRoots,externalJars,release);
+  final AndroidApkBuilderConfigState currentApkBuilderConfigState=new AndroidApkBuilderConfigState(outputApkPath,customKeyStorePath);
+  final AndroidFileSetState savedApkFileSetState=apkFileSetStorage.getState(module.getName());
+  final AndroidApkBuilderConfigState savedApkBuilderConfigState=apkBuilderConfigStateStorage.getState(module.getName());
+  if (context.isMake() && currentFileSetState.equalsTo(savedApkFileSetState) && currentApkBuilderConfigState.equalsTo(savedApkBuilderConfigState)) {
+    return true;
+  }
+  context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.packaging",AndroidJpsUtil.getApkName(module))));
+  final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApkBuilder.execute(resPackagePath,classesDexFilePath,sourceRoots,externalJars,nativeLibDirs,outputApkPath,release,sdkPath,customKeyStorePath,new MyExcludedSourcesFilter(context.getProject()));
+  AndroidJpsUtil.addMessages(context,messages,BUILDER_NAME);
+  final boolean success=messages.get(AndroidCompilerMessageKind.ERROR).isEmpty();
+  apkFileSetStorage.update(module.getName(),success ? currentFileSetState : null);
+  apkBuilderConfigStateStorage.update(module.getName(),success ? currentApkBuilderConfigState : null);
+  return success;
+}
