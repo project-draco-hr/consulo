@@ -11,9 +11,10 @@
       return null;
     }
     final int port=NetUtils.findAvailableSocketPort();
-    final Process process=launchServer(port);
+    final long serverPingInterval=Registry.intValue("compiler.server.ping.interval",-1) * 1000L;
+    final Process process=launchServer(port,serverPingInterval);
     final OSProcessHandler processHandler=new OSProcessHandler(process,null){
-      protected boolean shouldDestroyProcessRecursively(){
+      @Override protected boolean shouldDestroyProcessRecursively(){
         return true;
       }
     }
@@ -22,7 +23,7 @@
     final Semaphore semaphore=new Semaphore();
     semaphore.down();
     processHandler.addProcessListener(new ProcessAdapter(){
-      public void onTextAvailable(      ProcessEvent event,      Key outputType){
+      @Override public void onTextAvailable(      ProcessEvent event,      Key outputType){
         final String text=event.getText();
         if (!StringUtil.isEmpty(text)) {
           LOG.info("COMPILE_SERVER [" + outputType.toString() + "]: "+ text.trim());
@@ -31,7 +32,7 @@
     }
 );
     processHandler.addProcessListener(new ProcessAdapter(){
-      public void processTerminated(      ProcessEvent event){
+      @Override public void processTerminated(      ProcessEvent event){
         try {
           processHandler.removeProcessListener(this);
         }
@@ -39,7 +40,7 @@
           semaphore.up();
         }
       }
-      public void onTextAvailable(      ProcessEvent event,      Key outputType){
+      @Override public void onTextAvailable(      ProcessEvent event,      Key outputType){
         if (outputType == ProcessOutputTypes.STDERR) {
           try {
             final String text=event.getText();
@@ -66,7 +67,7 @@
     if (!startupMsg.contains(Server.SERVER_SUCCESS_START_MESSAGE)) {
       throw new Exception("Server startup failed: " + startupMsg);
     }
-    CompileServerClient client=new CompileServerClient();
+    CompileServerClient client=new CompileServerClient(serverPingInterval,myAsyncExec);
     boolean connected=false;
     try {
       connected=client.connect(NetUtils.getLocalHostString(),port);
