@@ -43,30 +43,14 @@ facade.setGlobals(libs,pathVars,globalEncoding);
 reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandCompletedEvent(null));
 break;
 case SHUTDOWN_COMMAND:
-myBuildsExecutor.submit(new Runnable(){
+myAsyncExecutor.submit(new Runnable(){
 public void run(){
-final List<RunnableFuture> futures=new ArrayList<RunnableFuture>();
-synchronized (myBuildsInProgress) {
-for (Iterator<Pair<RunnableFuture,CompilationTask>> it=myBuildsInProgress.iterator(); it.hasNext(); ) {
-final Pair<RunnableFuture,CompilationTask> pair=it.next();
-it.remove();
-pair.second.cancel();
-final RunnableFuture future=pair.first;
-futures.add(future);
-future.cancel(true);
-}
-}
-facade.clearCahedState();
-for (RunnableFuture future : futures) {
 try {
-future.get();
+cancelAllBuildsAndClearState();
 }
- catch (InterruptedException ignored) {
-}
-catch (ExecutionException ignored) {
-}
-}
+  finally {
 myServer.stop();
+}
 }
 }
 );
@@ -76,6 +60,8 @@ final JpsRemoteProto.Message.Request.FSEvent fsEvent=request.getFsEvent();
 final String projectId=fsEvent.getProjectId();
 final ProjectDescriptor pd=facade.getProjectDescriptor(projectId);
 if (pd != null) {
+final boolean wasInterrupted=Thread.interrupted();
+try {
 try {
 for (String path : fsEvent.getChangedPathsList()) {
 facade.notifyFileChanged(pd,new File(path));
@@ -86,6 +72,12 @@ facade.notifyFileDeleted(pd,new File(path));
 }
   finally {
 pd.release();
+}
+}
+  finally {
+if (wasInterrupted) {
+Thread.currentThread().interrupt();
+}
 }
 }
 reply=ProtoUtil.toMessage(sessionId,ProtoUtil.createCommandCompletedEvent(null));
