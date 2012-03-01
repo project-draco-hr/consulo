@@ -1,13 +1,29 @@
 {
   Paths.getInstance().setSystemRoot(systemDir);
   final ExecutorService threadPool=Executors.newCachedThreadPool();
+  myScheduler=ConcurrencyUtil.newSingleScheduledThreadExecutor("Client activity checker",Thread.MIN_PRIORITY);
   myBuildsExecutor=Executors.newFixedThreadPool(MAX_SIMULTANEOUS_BUILD_SESSIONS);
   myChannelFactory=new NioServerSocketChannelFactory(threadPool,threadPool,1);
   final ChannelRegistrar channelRegistrar=new ChannelRegistrar();
-  final ServerMessageHandler messageHandler=new ServerMessageHandler(myBuildsExecutor,this);
+  myMessageHandler=new ServerMessageHandler(this,new AsyncTaskExecutor(){
+    @Override public void submit(    final Runnable runnable){
+      myBuildsExecutor.submit(new Runnable(){
+        @Override public void run(){
+          try {
+            runnable.run();
+          }
+  finally {
+            Thread.interrupted();
+          }
+        }
+      }
+);
+    }
+  }
+);
   myPipelineFactory=new ChannelPipelineFactory(){
     public ChannelPipeline getPipeline() throws Exception {
-      return Channels.pipeline(channelRegistrar,new ProtobufVarint32FrameDecoder(),new ProtobufDecoder(JpsRemoteProto.Message.getDefaultInstance()),new ProtobufVarint32LengthFieldPrepender(),new ProtobufEncoder(),messageHandler);
+      return Channels.pipeline(channelRegistrar,new ProtobufVarint32FrameDecoder(),new ProtobufDecoder(JpsRemoteProto.Message.getDefaultInstance()),new ProtobufVarint32LengthFieldPrepender(),new ProtobufEncoder(),myMessageHandler);
     }
   }
 ;
