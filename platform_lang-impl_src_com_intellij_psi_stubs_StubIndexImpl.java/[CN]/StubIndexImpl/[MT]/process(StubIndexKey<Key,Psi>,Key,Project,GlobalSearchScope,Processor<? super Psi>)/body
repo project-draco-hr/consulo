@@ -1,0 +1,100 @@
+{
+  FileBasedIndex.getInstance().ensureUpToDate(StubUpdatingIndex.INDEX_ID,project,scope);
+  final PersistentFS fs=(PersistentFS)ManagingFS.getInstance();
+  final PsiManager psiManager=PsiManager.getInstance(project);
+  final MyIndex<Key> index=(MyIndex<Key>)myIndices.get(indexKey);
+  try {
+    try {
+      FileBasedIndex.disableUpToDateCheckForCurrentThread();
+      index.getReadLock().lock();
+      final ValueContainer<TIntArrayList> container=index.getData(key);
+      final FileBasedIndex.ProjectIndexableFilesFilter projectFilesFilter=FileBasedIndex.getInstance().projectIndexableFiles(project);
+      return container.forEach(new ValueContainer.ContainerAction<TIntArrayList>(){
+        @Override public boolean perform(        final int id,        @NotNull final TIntArrayList value){
+          ProgressManager.checkCanceled();
+          if (projectFilesFilter != null && !projectFilesFilter.contains(id))           return true;
+          final VirtualFile file=IndexInfrastructure.findFileByIdIfCached(fs,id);
+          if (file == null || scope != null && !scope.contains(file)) {
+            return true;
+          }
+          StubTree stubTree=null;
+          final PsiFile _psifile=psiManager.findFile(file);
+          PsiFileWithStubSupport psiFile=null;
+          if (_psifile != null && !(_psifile instanceof PsiPlainTextFile)) {
+            if (_psifile instanceof PsiFileWithStubSupport) {
+              psiFile=(PsiFileWithStubSupport)_psifile;
+              stubTree=psiFile.getStubTree();
+              if (stubTree == null && psiFile instanceof PsiFileImpl) {
+                stubTree=((PsiFileImpl)psiFile).calcStubTree();
+              }
+            }
+          }
+          if (stubTree == null && psiFile == null) {
+            return true;
+          }
+          if (stubTree == null) {
+            stubTree=StubTreeLoader.getInstance().readFromVFile(project,file);
+            if (stubTree == null) {
+              return true;
+            }
+            final List<StubElement<?>> plained=stubTree.getPlainList();
+            for (int i=0; i < value.size(); i++) {
+              final StubElement<?> stub=plained.get(value.get(i));
+              final ASTNode tree=psiFile.findTreeForStub(stubTree,stub);
+              if (tree != null) {
+                if (tree.getElementType() == stubType(stub)) {
+                  Psi psi=(Psi)tree.getPsi();
+                  if (!processor.process(psi))                   return false;
+                }
+ else {
+                  String persistedStubTree=((PsiFileStubImpl)stubTree.getRoot()).printTree();
+                  String stubTreeJustBuilt=((PsiFileStubImpl)((IStubFileElementType)((PsiFileImpl)psiFile).getContentElementType()).getBuilder().buildStubTree(psiFile)).printTree();
+                  StringBuilder builder=new StringBuilder();
+                  builder.append("Oops\n");
+                  builder.append("Recorded stub:-----------------------------------\n");
+                  builder.append(persistedStubTree);
+                  builder.append("\nAST built stub: ------------------------------------\n");
+                  builder.append(stubTreeJustBuilt);
+                  builder.append("\n");
+                  LOG.info(builder.toString());
+                  ApplicationManager.getApplication().invokeLater(new Runnable(){
+                    @Override public void run(){
+                      FileBasedIndex.getInstance().requestReindex(file);
+                    }
+                  }
+,ModalityState.NON_MODAL);
+                }
+              }
+            }
+          }
+ else {
+            final List<StubElement<?>> plained=stubTree.getPlainList();
+            for (int i=0; i < value.size(); i++) {
+              Psi psi=(Psi)plained.get(value.get(i)).getPsi();
+              if (!processor.process(psi))               return false;
+            }
+          }
+          return true;
+        }
+      }
+);
+    }
+  finally {
+      index.getReadLock().unlock();
+      FileBasedIndex.enableUpToDateCheckForCurrentThread();
+    }
+  }
+ catch (  StorageException e) {
+    forceRebuild(e);
+  }
+catch (  RuntimeException e) {
+    final Throwable cause=FileBasedIndex.getCauseToRebuildIndex(e);
+    if (cause != null) {
+      forceRebuild(cause);
+    }
+ else {
+      throw e;
+    }
+  }
+  return true;
+}
