@@ -1,0 +1,40 @@
+{
+  final GitLineHandlerPasswordRequestAware h=new GitLineHandlerPasswordRequestAware(myProject,root,GitCommand.FETCH);
+  if (GitVersionSpecialty.SUPPORTS_FETCH_PRUNE.existsIn(myVcs.getVersion())) {
+    h.addParameters("--prune");
+  }
+  String remoteName=remote.getName();
+  h.addParameters(remoteName);
+  if (branch != null) {
+    branch=getRidOfPrefixIfExists(branch);
+    h.addParameters(REFS_HEADS_PREFIX + branch + ":"+ REFS_REMOTES_PREFIX+ remoteName+ "/"+ branch);
+  }
+  final GitTask fetchTask=new GitTask(myProject,h,"Fetching...");
+  fetchTask.setProgressIndicator(myProgressIndicator);
+  fetchTask.setProgressAnalyzer(new GitStandardProgressAnalyzer());
+  GitFetchPruneDetector pruneDetector=new GitFetchPruneDetector();
+  h.addLineListener(pruneDetector);
+  final AtomicReference<GitFetchResult> result=new AtomicReference<GitFetchResult>();
+  fetchTask.execute(true,false,new GitTaskResultHandlerAdapter(){
+    @Override protected void onSuccess(){
+      result.set(GitFetchResult.success());
+    }
+    @Override protected void onCancel(){
+      LOG.info("Cancelled fetch.");
+      result.set(GitFetchResult.cancel());
+    }
+    @Override protected void onFailure(){
+      LOG.info("Error fetching: " + h.errors());
+      if (!h.hadAuthRequest()) {
+        myErrors.addAll(h.errors());
+      }
+ else {
+        myErrors.add(new VcsException("Authentication failed"));
+      }
+      result.set(GitFetchResult.error(myErrors));
+    }
+  }
+);
+  result.get().addPruneInfo(pruneDetector.getPrunedRefs());
+  return result.get();
+}

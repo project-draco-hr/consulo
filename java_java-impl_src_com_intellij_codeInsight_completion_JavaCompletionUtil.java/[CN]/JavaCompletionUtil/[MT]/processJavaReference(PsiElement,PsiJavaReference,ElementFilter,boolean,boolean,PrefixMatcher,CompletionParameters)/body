@@ -9,16 +9,21 @@
   PsiMethodCallExpression call=PsiTreeUtil.getParentOfType(element,PsiMethodCallExpression.class);
   boolean checkInitialized=parameters.getInvocationCount() <= 1 && call != null && PsiKeyword.SUPER.equals(call.getMethodExpression().getText());
   final JavaCompletionProcessor processor=new JavaCompletionProcessor(element,elementFilter,checkAccess,checkInitialized,filterStaticAfterInstance,nameCondition);
+  final PsiType plainQualifier=processor.getQualifierType();
+  PsiType qualifierType=plainQualifier;
+  PsiType runtimeQualifier=getQualifierCastType(javaReference,parameters);
+  if (runtimeQualifier != null) {
+    javaReference=(PsiReferenceExpression)JavaPsiFacade.getElementFactory(element.getProject()).createExpressionFromText("xxx.xxx",createContextWithXxxVariable(element,runtimeQualifier));
+    qualifierType=runtimeQualifier;
+  }
   javaReference.processVariants(processor);
-  final Collection<CompletionElement> plainResults=processor.getResults();
-  final PsiType qualifierType=processor.getQualifierType();
-  PsiType castedQualifierType=addQualifierCastingVariants(javaReference,processor,set,parameters);
-  boolean mayHighlight=qualifierType != null && (castedQualifierType == null || castedQualifierType.equals(qualifierType) || !qualifierType.isAssignableFrom(castedQualifierType));
+  final PsiTypeLookupItem castItem=runtimeQualifier == null ? null : PsiTypeLookupItem.createLookupItem(runtimeQualifier,(PsiReferenceExpression)javaReference);
   final boolean pkgContext=inSomePackage(element);
   final Set<PsiMember> mentioned=new THashSet<PsiMember>();
-  for (  CompletionElement completionElement : plainResults) {
-    LookupElement item=createLookupElement(completionElement,qualifierType);
+  for (  CompletionElement completionElement : processor.getResults()) {
+    LookupElement item=createLookupElement(completionElement);
     if (item != null) {
+      item.putUserData(QUALIFIER_TYPE_ATTR,qualifierType);
       final Object o=item.getObject();
       if (o instanceof PsiClass && !isSourceLevelAccessible(element,(PsiClass)o,pkgContext)) {
         continue;
@@ -29,7 +34,7 @@
         }
         mentioned.add((PsiMember)o);
       }
-      set.add(mayHighlight ? highlightIfNeeded(qualifierType,item,o) : item);
+      set.add(highlightIfNeeded(qualifierType,castQualifier(item,castItem,plainQualifier),o));
     }
   }
   if (javaReference instanceof PsiReferenceExpression && !((PsiReferenceExpression)javaReference).isQualified()) {
