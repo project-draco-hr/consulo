@@ -1,8 +1,38 @@
 {
-  assertDispatchThread();
   if (!isTypeaheadEnabled())   return;
+  final long currentTime=System.currentTimeMillis();
+  final ActionCallback done;
+  if (!Registry.is("type.ahead.logging.enabled")) {
+    done=callback;
+  }
+ else {
+    final String id=new Exception().getStackTrace()[2].getClassName();
+    final SimpleDateFormat dateFormat=new SimpleDateFormat("dd MMM yyyy HH:ss:SSS",Locale.US);
+    LOG.info(dateFormat.format(System.currentTimeMillis()) + "\tStarted:  " + id);
+    done=new ActionCallback();
+    callback.doWhenDone(new Runnable(){
+      @Override public void run(){
+        done.setDone();
+        LOG.info(dateFormat.format(System.currentTimeMillis()) + "\tDone:     " + id);
+      }
+    }
+);
+    callback.doWhenRejected(new Runnable(){
+      @Override public void run(){
+        done.setRejected();
+        LOG.info(dateFormat.format(System.currentTimeMillis()) + "\tRejected: " + id);
+      }
+    }
+);
+  }
+  assertDispatchThread();
   myTypeAheadRequestors.add(done);
-  done.notify(new ActionCallback.TimedOut(Registry.intValue("actionSystem.commandProcessingTimeout"),"Typeahead request blocked",new Exception(),true).doWhenProcessed(new Runnable(){
+  done.notify(new TimedOutCallback(Registry.intValue("actionSystem.commandProcessingTimeout"),"Typeahead request blocked",new Exception(){
+    @Override public String getMessage(){
+      return "Time: " + (System.currentTimeMillis() - currentTime);
+    }
+  }
+,true).doWhenProcessed(new Runnable(){
     @Override public void run(){
       if (myTypeAheadRequestors.remove(done)) {
         restartIdleAlarm();
