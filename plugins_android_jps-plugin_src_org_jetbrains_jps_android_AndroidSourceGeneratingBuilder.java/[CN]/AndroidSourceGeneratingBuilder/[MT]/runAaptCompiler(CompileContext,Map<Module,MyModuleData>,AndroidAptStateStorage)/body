@@ -22,7 +22,13 @@
         success=false;
         continue;
       }
-      final Set<String> depLibPackagesSet=getDepLibPackages(module);
+      final Map<Module,String> depLibPackageMap=getDepLibPackages(module);
+      final Map<Module,String> packageMap=new HashMap<Module,String>(depLibPackageMap);
+      packageMap.put(module,packageName);
+      if (hasBadCircularDependencies(facet,packageMap)) {
+        continue;
+      }
+      final Set<String> depLibPackagesSet=new HashSet<String>(depLibPackageMap.values());
       depLibPackagesSet.remove(packageName);
       final Set<ResourceEntry> resources=collectResources(resPaths);
       final Set<ResourceEntry> manifestElements=collectManifestElements(manifestFile);
@@ -35,12 +41,14 @@
       }
       final File generatedSourcesDir=AndroidJpsUtil.getGeneratedSourcesStorage(module);
       final File aptOutputDirectory=new File(generatedSourcesDir,AndroidJpsUtil.AAPT_GENERATED_SOURCE_ROOT_NAME);
-      if (aptOutputDirectory.exists()) {
-        final List<File> filesToDelete=collectJavaFilesRecursively(aptOutputDirectory);
-        FileUtil.delete(aptOutputDirectory);
-        for (        File file : filesToDelete) {
-          context.markDeleted(file);
-        }
+      if (!deleteAndMarkRecursively(aptOutputDirectory,context)) {
+        success=false;
+        continue;
+      }
+      if (!aptOutputDirectory.mkdirs()) {
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Cannot create directory " + aptOutputDirectory.getPath()));
+        success=false;
+        continue;
       }
       context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.aapt",module.getName())));
       final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,aptOutputDirectory.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),facet.getLibrary());
