@@ -1,2 +1,79 @@
 {
+  super("Resume build from specified module",null,IconLoader.getIcon("/runConfigurations/rerunFailedTests.png"));
+  myRunner=runner;
+  myExecutor=executor;
+  myEnvironment=environment;
+  final MavenRunConfiguration runConfiguration=(MavenRunConfiguration)environment.getRunProfile();
+  getTemplatePresentation().setEnabled(false);
+  processHandler.addProcessListener(new ProcessAdapter(){
+    @Override public void processTerminated(    ProcessEvent event){
+      if (myState == STATE_WTF)       return;
+      if (event.getExitCode() == 0 && myBuildingProjectIndex != myMavenProjectNames.size()) {
+        log(String.format("Build was success, but not all project was build. Project build order: %s, build index: %d",myMavenProjectNames,myBuildingProjectIndex));
+      }
+      if (event.getExitCode() == 1 && myBuildingProjectIndex > 0) {
+        if (myBuildingProjectIndex == 1 && !hasResumeFromParameter(runConfiguration)) {
+          return;
+        }
+        myResumeFromModuleName=myMavenProjectNames.get(myBuildingProjectIndex - 1);
+        MavenProject mavenProject=findProjectByName(myResumeFromModuleName);
+        if (mavenProject != null) {
+          myResumeModuleId=mavenProject.getMavenId().getGroupId() + ':' + mavenProject.getMavenId().getArtifactId();
+        }
+      }
+    }
+    @Override public void onTextAvailable(    ProcessEvent event,    Key outputType){
+      if (outputType != ProcessOutputTypes.STDOUT)       return;
+      String text=event.getText().trim();
+      if (text.isEmpty())       return;
+switch (myState) {
+case STATE_INITIAL:
+        if (text.equals("[INFO] Reactor build order:")) {
+          myState=STATE_READING_PROJECT_LIST;
+        }
+      break;
+case STATE_READING_PROJECT_LIST:
+    if (text.equals("[INFO] ------------------------------------------------------------------------")) {
+      myState=STATE_WAIT_FOR_BUILD;
+    }
+ else     if (text.startsWith("[INFO]   ")) {
+      String projectName=text.substring("[INFO]   ".length());
+      if (projectName.isEmpty()) {
+        myState=STATE_WTF;
+        log("Empty project name in \"Reactor build order\" section!!! other project names: " + myMavenProjectNames);
+      }
+ else {
+        myMavenProjectNames.add(projectName);
+      }
+    }
+ else {
+      myState=STATE_WTF;
+      log("\"Reactor build order\" doesn't end by \"-----\"!!! it's end by: " + text);
+    }
+  break;
+case STATE_WAIT_FOR_BUILD:
+if (text.startsWith("[INFO] Building ")) {
+  String projectName=text.substring("[INFO] Building ".length());
+  if (myBuildingProjectIndex > myMavenProjectNames.size() || !myMavenProjectNames.get(myBuildingProjectIndex).equals(projectName)) {
+    myState=STATE_WTF;
+    log(String.format("Invalid project building order. Defined order: %s, error index: %d, invalid line: %s",myMavenProjectNames,myBuildingProjectIndex,text));
+    break;
+  }
+  myBuildingProjectIndex++;
+}
+myState=STATE_WAIT_FOR______;
+break;
+case STATE_WAIT_FOR______:
+if (text.equals("[INFO] ------------------------------------------------------------------------")) {
+myState=STATE_WAIT_FOR_BUILD;
+}
+break;
+case STATE_WTF:
+break;
+default :
+throw new IllegalStateException();
+}
+}
+}
+);
 }
