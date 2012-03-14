@@ -1,5 +1,6 @@
 {
   final Ref<GradleProject> gradleProjectRef=new Ref<GradleProject>();
+  final Ref<Library> libraryToPreserve=new Ref<Library>();
   final Runnable setupExternalDependenciesTask=new Runnable(){
     @Override public void run(){
       final GradleProject gradleProject=gradleProjectRef.get();
@@ -9,7 +10,7 @@
       Application application=ApplicationManager.getApplication();
       AccessToken writeLock=application.acquireWriteActionLock(getClass());
       try {
-        doSetupLibraries(moduleMappings,gradleProject,intellijProject);
+        doSetupLibraries(moduleMappings,gradleProject,intellijProject,libraryToPreserve.get());
       }
   finally {
         writeLock.finish();
@@ -17,7 +18,7 @@
     }
   }
 ;
-  Runnable resolveDependenciesTask=new Runnable(){
+  final Runnable resolveDependenciesTask=new Runnable(){
     @Override public void run(){
       ProgressManager.getInstance().run(new Task.Backgroundable(intellijProject,GradleBundle.message("gradle.library.resolve.progress.text"),false){
         @Override public void run(        @NotNull final ProgressIndicator indicator){
@@ -32,5 +33,17 @@
     }
   }
 ;
-  UIUtil.invokeLaterIfNeeded(resolveDependenciesTask);
+  Runnable setupGroovyTask=new Runnable(){
+    @Override public void run(){
+      final GradleSettings settings=GradleSettings.getInstance(intellijProject);
+      final String gradleHome=settings.getGradleHome();
+      if (gradleHome != null) {
+        final GradleGroovyEnabler groovyEnabler=intellijProject.getComponent(GradleGroovyEnabler.class);
+        libraryToPreserve.set(groovyEnabler.setupGroovySdkIfNecessary(gradleHome));
+      }
+      resolveDependenciesTask.run();
+    }
+  }
+;
+  UIUtil.invokeLaterIfNeeded(setupGroovyTask);
 }
