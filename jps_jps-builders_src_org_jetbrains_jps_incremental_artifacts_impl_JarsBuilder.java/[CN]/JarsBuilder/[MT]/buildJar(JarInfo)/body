@@ -1,5 +1,5 @@
 {
-  if (jar.getPackedJars().isEmpty() && jar.getPackedRoots().isEmpty()) {
+  if (jar.getContent().isEmpty()) {
     final String message="Archive '" + jar.getPresentableDestination() + "' has no files so it won't be created";
     myContext.processMessage(new CompilerMessage(IncArtifactBuilder.BUILDER_NAME,BuildMessage.Kind.WARNING,message));
     return;
@@ -9,26 +9,36 @@
   myBuiltJars.put(jar,jarFile);
   FileUtil.createParentDirs(jarFile);
   final JarOutputStream jarOutputStream=new JarOutputStream(new BufferedOutputStream(new FileOutputStream(jarFile)));
+  final String targetJarPath=jar.getDestination().getOutputFilePath();
   try {
     final THashSet<String> writtenPaths=new THashSet<String>();
-    for (    Pair<String,ArtifactSourceRoot> pair : jar.getPackedRoots()) {
-      final ArtifactSourceRoot root=pair.getSecond();
-      final ArtifactBuilderLogger logger=myContext.getLoggingManager().getArtifactBuilderLogger();
-      if (root instanceof FileBasedArtifactSourceRoot) {
-        addFileToJar(jarOutputStream,jarFile,root.getRootFile(),root.getFilter(),pair.getFirst(),writtenPaths);
+    for (    Pair<String,Object> pair : jar.getContent()) {
+      final String relativePath=pair.getFirst();
+      if (pair.getSecond() instanceof ArtifactSourceRoot) {
+        final ArtifactSourceRoot root=(ArtifactSourceRoot)pair.getSecond();
+        final int rootIndex=myInstructions.getRootIndex(root);
+        LOG.assertTrue(rootIndex != -1,root + " not found in instructions");
+        final ArtifactBuilderLogger logger=myContext.getLoggingManager().getArtifactBuilderLogger();
+        if (root instanceof FileBasedArtifactSourceRoot) {
+          addFileToJar(jarOutputStream,jarFile,root.getRootFile(),root.getFilter(),relativePath,targetJarPath,writtenPaths,rootIndex);
+        }
+ else {
+          final String filePath=FileUtil.toSystemIndependentName(root.getRootFile().getAbsolutePath());
+          logger.fileCopied(filePath);
+          mySrcOutMapping.appendData(filePath,Collections.singletonList(targetJarPath));
+          myOutSrcMapping.appendData(targetJarPath,Collections.singletonList(new ArtifactOutputToSourceMapping.SourcePathAndRootIndex(filePath,rootIndex)));
+          extractFileAndAddToJar(jarOutputStream,(JarBasedArtifactSourceRoot)root,relativePath,writtenPaths);
+        }
       }
  else {
-        logger.fileCopied(FileUtil.toSystemIndependentName(root.getRootFile().getAbsolutePath()));
-        extractFileAndAddToJar(jarOutputStream,(JarBasedArtifactSourceRoot)root,pair.getFirst(),writtenPaths);
-      }
-    }
-    for (    Pair<String,JarInfo> nestedJar : jar.getPackedJars()) {
-      File nestedJarFile=myBuiltJars.get(nestedJar.getSecond());
-      if (nestedJarFile != null) {
-        addFileToJar(jarOutputStream,jarFile,nestedJarFile,SourceFileFilter.ALL,nestedJar.getFirst(),writtenPaths);
-      }
+        JarInfo nestedJar=(JarInfo)pair.getSecond();
+        File nestedJarFile=myBuiltJars.get(nestedJar);
+        if (nestedJarFile != null) {
+          addFileToJar(jarOutputStream,jarFile,nestedJarFile,SourceFileFilter.ALL,relativePath,targetJarPath,writtenPaths,-1);
+        }
  else {
-        LOG.debug("nested jar file " + nestedJar.getFirst() + " for "+ jar.getPresentableDestination()+ " not found");
+          LOG.debug("nested jar file " + relativePath + " for "+ jar.getPresentableDestination()+ " not found");
+        }
       }
     }
   }

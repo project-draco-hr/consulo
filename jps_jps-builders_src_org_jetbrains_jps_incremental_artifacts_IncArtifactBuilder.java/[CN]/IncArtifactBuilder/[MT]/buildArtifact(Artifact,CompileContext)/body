@@ -4,50 +4,83 @@
     final ArtifactSourceFilesState state=dataManager.getArtifactsBuildData().getOrCreateState(artifact,context.getProject(),context.getRootsIndex());
     state.initState();
     final Set<String> deletedFiles=state.getDeletedFiles();
-    final Set<String> changedFiles=state.getChangedFiles();
+    final Map<String,IntArrayList> changedFiles=state.getChangedFiles();
     if (deletedFiles.isEmpty() && changedFiles.isEmpty()) {
       return;
     }
     context.processMessage(new ProgressMessage("Building artifact '" + artifact.getName() + "'..."));
-    final ArtifactSourceToOutputMapping mapping=state.getOrCreateMapping();
-    final Set<String> deletedJars=deleteOutdatedFiles(deletedFiles,context,mapping);
+    final ArtifactSourceToOutputMapping srcOutMapping=state.getOrCreateSrcOutMapping();
+    final ArtifactOutputToSourceMapping outSrcMapping=state.getOrCreateOutSrcMapping();
+    final TIntObjectHashMap<Set<String>> filesToProcess=new TIntObjectHashMap<Set<String>>();
+    MultiMap<String,String> filesToDelete=new MultiMap<String,String>();
+    for (    String sourcePath : deletedFiles) {
+      final List<String> outputPaths=srcOutMapping.getState(sourcePath);
+      if (outputPaths != null) {
+        for (        String outputPath : outputPaths) {
+          filesToDelete.putValue(outputPath,sourcePath);
+          final List<ArtifactOutputToSourceMapping.SourcePathAndRootIndex> sources=outSrcMapping.getState(outputPath);
+          if (sources != null) {
+            for (            ArtifactOutputToSourceMapping.SourcePathAndRootIndex source : sources) {
+              addFileToProcess(filesToProcess,source.getRootIndex(),source.getPath());
+            }
+          }
+        }
+      }
+    }
+    Set<String> changedOutputPaths=new THashSet<String>();
+    for (    Map.Entry<String,IntArrayList> entry : changedFiles.entrySet()) {
+      final IntArrayList roots=entry.getValue();
+      final String sourcePath=entry.getKey();
+      for (int i=0; i < roots.size(); i++) {
+        addFileToProcess(filesToProcess,roots.get(i),sourcePath);
+      }
+      final List<String> outputPaths=srcOutMapping.getState(sourcePath);
+      if (outputPaths != null) {
+        changedOutputPaths.addAll(outputPaths);
+        for (        String outputPath : outputPaths) {
+          final List<ArtifactOutputToSourceMapping.SourcePathAndRootIndex> sources=outSrcMapping.getState(outputPath);
+          if (sources != null) {
+            for (            ArtifactOutputToSourceMapping.SourcePathAndRootIndex source : sources) {
+              addFileToProcess(filesToProcess,source.getRootIndex(),source.getPath());
+            }
+          }
+        }
+      }
+    }
+    for (    String sourcePath : changedFiles.keySet()) {
+      srcOutMapping.remove(sourcePath);
+    }
+    for (    String outputPath : changedOutputPaths) {
+      outSrcMapping.remove(outputPath);
+    }
+    deleteOutdatedFiles(filesToDelete,context,srcOutMapping,outSrcMapping);
     final ArtifactInstructionsBuilder instructions=state.getOrCreateInstructions();
     final Set<JarInfo> changedJars=new THashSet<JarInfo>();
-    for (    String deletedJar : deletedJars) {
-      ContainerUtil.addIfNotNull(instructions.getJarInfo(deletedJar),changedJars);
-    }
-    Map<String,String[]> updatedMappings=new HashMap<String,String[]>();
-    for (    final String filePath : changedFiles) {
-      final List<String> outputs=new SmartList<String>();
-      instructions.processContainingRoots(filePath,new ArtifactRootProcessor(){
-        @Override public void process(        ArtifactSourceRoot root,        Collection<DestinationInfo> destinations) throws IOException {
+    instructions.processRoots(new ArtifactRootProcessor(){
+      @Override public void process(      ArtifactSourceRoot root,      int rootIndex,      Collection<DestinationInfo> destinations) throws IOException {
+        final Set<String> sourcePaths=filesToProcess.get(rootIndex);
+        if (sourcePaths == null)         return;
+        for (        String sourcePath : sourcePaths) {
+          if (!root.containsFile(sourcePath))           continue;
           for (          DestinationInfo destination : destinations) {
             if (destination instanceof ExplodedDestinationInfo) {
-              context.getLoggingManager().getArtifactBuilderLogger().fileCopied(filePath);
-              root.copyFromRoot(filePath,destination.getOutputPath(),outputs);
+              root.copyFromRoot(sourcePath,rootIndex,destination.getOutputPath(),context,srcOutMapping,outSrcMapping);
             }
- else {
-              outputs.add(destination.getOutputFilePath() + JarPathUtil.JAR_SEPARATOR);
+ else             if (outSrcMapping.getState(destination.getOutputFilePath()) == null) {
+              outSrcMapping.update(destination.getOutputFilePath(),Collections.<ArtifactOutputToSourceMapping.SourcePathAndRootIndex>emptyList());
               changedJars.add(((JarDestinationInfo)destination).getJarInfo());
             }
           }
         }
       }
-);
-      updatedMappings.put(filePath,ArrayUtil.toStringArray(outputs));
     }
-    JarsBuilder builder=new JarsBuilder(changedJars,null,context);
-    final boolean processed=builder.buildJars(new THashSet<String>());
+);
+    JarsBuilder builder=new JarsBuilder(changedJars,context,srcOutMapping,outSrcMapping,instructions);
+    final boolean processed=builder.buildJars();
     if (!processed) {
       return;
     }
     state.updateTimestamps();
-    for (    String filePath : deletedFiles) {
-      mapping.remove(filePath);
-    }
-    for (    Map.Entry<String,String[]> entry : updatedMappings.entrySet()) {
-      mapping.update(entry.getKey(),entry.getValue());
-    }
     state.markUpToDate();
     context.processMessage(UptoDateFilesSavedEvent.INSTANCE);
   }
