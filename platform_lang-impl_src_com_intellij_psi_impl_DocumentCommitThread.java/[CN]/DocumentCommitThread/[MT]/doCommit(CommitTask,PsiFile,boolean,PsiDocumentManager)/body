@@ -1,0 +1,65 @@
+{
+  Document document=task.document;
+  ((PsiDocumentManagerImpl)documentManager).clearTreeHardRef(document);
+  final TextBlock textBlock=TextBlock.get(file);
+  if (textBlock.isEmpty())   return null;
+  final long startPsiModificationTimeStamp=file.getModificationStamp();
+  final long startDocModificationTimeStamp=document.getModificationStamp();
+  final FileElement myTreeElementBeingReparsedSoItWontBeCollected=((PsiFileImpl)file).calcTreeElement();
+  if (textBlock.isEmpty())   return null;
+  final CharSequence chars=document.getCharsSequence();
+  final Boolean data=document.getUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY);
+  if (data != null) {
+    document.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,null);
+    file.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,data);
+  }
+  final String oldPsiText=ApplicationManagerEx.getApplicationEx().isInternal() && ApplicationManagerEx.getApplicationEx().isUnitTestMode() ? myTreeElementBeingReparsedSoItWontBeCollected.getText() : null;
+  int startOffset;
+  int endOffset;
+  int lengthShift;
+  if (file.getViewProvider().supportsIncrementalReparse(file.getLanguage())) {
+    startOffset=textBlock.getStartOffset();
+    int psiEndOffset=textBlock.getPsiEndOffset();
+    endOffset=psiEndOffset;
+    lengthShift=textBlock.getTextEndOffset() - psiEndOffset;
+  }
+ else {
+    startOffset=0;
+    endOffset=document.getTextLength();
+    lengthShift=document.getTextLength() - myTreeElementBeingReparsedSoItWontBeCollected.getTextLength();
+  }
+  assertBeforeCommit(document,file,textBlock,chars,oldPsiText,myTreeElementBeingReparsedSoItWontBeCollected);
+  BlockSupport blockSupport=BlockSupport.getInstance(file.getProject());
+  final DiffLog diffLog=blockSupport.reparseRange(file,startOffset,endOffset,lengthShift,chars,task.indicator);
+  return new Processor<Document>(){
+    @Override public boolean process(    Document document){
+      ApplicationManager.getApplication().assertWriteAccessAllowed();
+      log("Finishing",task,synchronously,document.getModificationStamp(),startDocModificationTimeStamp);
+      if (document.getModificationStamp() != startDocModificationTimeStamp) {
+        return false;
+      }
+      try {
+        textBlock.performAtomically(new Runnable(){
+          @Override public void run(){
+            CodeStyleManager.getInstance(file.getProject()).performActionWithFormatterDisabled(new Runnable(){
+              @Override public void run(){
+synchronized (PsiLock.LOCK) {
+                  doActualPsiChange(file,diffLog);
+                }
+              }
+            }
+);
+          }
+        }
+);
+        assertAfterCommit(document,file,oldPsiText,myTreeElementBeingReparsedSoItWontBeCollected);
+      }
+  finally {
+        textBlock.clear();
+        SmartPointerManagerImpl.synchronizePointers(file);
+      }
+      return true;
+    }
+  }
+;
+}

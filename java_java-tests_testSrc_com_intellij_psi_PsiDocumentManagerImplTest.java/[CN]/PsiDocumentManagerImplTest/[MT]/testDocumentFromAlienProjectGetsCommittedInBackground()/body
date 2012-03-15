@@ -1,0 +1,40 @@
+{
+  LightVirtualFile virtualFile=createFile();
+  PsiFile file=getPsiManager().findFile(virtualFile);
+  final Document document=getPsiDocumentManager().getDocument(file);
+  File temp=createTempDirectory();
+  final Project alienProject=createProject(new File(temp,"alien.ipr"),DebugUtil.currentStackTrace());
+  boolean succ2=ProjectManagerEx.getInstanceEx().openProject(alienProject);
+  assertTrue(succ2);
+  try {
+    PsiManager alienManager=PsiManager.getInstance(alienProject);
+    final PsiFile alienFile=alienManager.findFile(virtualFile);
+    assertNotNull(alienFile);
+    final PsiDocumentManagerImpl alienDocManager=(PsiDocumentManagerImpl)PsiDocumentManager.getInstance(alienProject);
+    final Document alienDocument=alienDocManager.getDocument(alienFile);
+    assertSame(document,alienDocument);
+    assertEquals(0,alienDocManager.getUncommittedDocuments().length);
+    assertEquals(0,getPsiDocumentManager().getUncommittedDocuments().length);
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      @Override public void run(){
+        document.setText("xxx");
+        assertOrderedEquals(getPsiDocumentManager().getUncommittedDocuments(),document);
+        assertOrderedEquals(alienDocManager.getUncommittedDocuments(),alienDocument);
+      }
+    }
+);
+    assertEquals("xxx",document.getText());
+    assertEquals("xxx",alienDocument.getText());
+    while (!getPsiDocumentManager().isCommitted(document)) {
+      UIUtil.dispatchAllInvocationEvents();
+    }
+    long start=System.currentTimeMillis();
+    while (!alienDocManager.isCommitted(alienDocument) && System.currentTimeMillis() - start < 20000) {
+      UIUtil.dispatchAllInvocationEvents();
+    }
+    assertTrue("Still not committed: " + alienDocument,alienDocManager.isCommitted(alienDocument));
+  }
+  finally {
+    ProjectUtil.closeAndDispose(alienProject);
+  }
+}
