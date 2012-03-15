@@ -1,0 +1,56 @@
+{
+  CharsetDecoder decoder;
+  String encodingName=getEncodingName();
+  try {
+    Charset charset=(this.charset == null) ? Charset.forName(encodingName) : this.charset;
+    decoder=charset.newDecoder();
+    CodingErrorAction action;
+    if (ignoreEncodingErrors) {
+      action=CodingErrorAction.REPLACE;
+    }
+ else {
+      action=CodingErrorAction.REPORT;
+    }
+    decoder.onMalformedInput(action).onUnmappableCharacter(action);
+  }
+ catch (  IllegalCharsetNameException e) {
+    log.error("unsupported.encoding",encodingName);
+    return (CharBuffer)CharBuffer.allocate(1).flip();
+  }
+catch (  UnsupportedCharsetException e) {
+    log.error("unsupported.encoding",encodingName);
+    return (CharBuffer)CharBuffer.allocate(1).flip();
+  }
+  final float factor=decoder.averageCharsPerByte() * 0.8f + decoder.maxCharsPerByte() * 0.2f;
+  CharBuffer dest=CharBuffer.allocate(10 + (int)(inbuf.remaining() * factor));
+  while (true) {
+    CoderResult result=decoder.decode(inbuf,dest,true);
+    dest.flip();
+    if (result.isUnderflow()) {
+      if (dest.limit() == dest.capacity()) {
+        dest=CharBuffer.allocate(dest.capacity() + 1).put(dest);
+        dest.flip();
+      }
+      return dest;
+    }
+ else     if (result.isOverflow()) {
+      int newCapacity=10 + dest.capacity() + (int)(inbuf.remaining() * decoder.maxCharsPerByte());
+      dest=CharBuffer.allocate(newCapacity).put(dest);
+    }
+ else     if (result.isMalformed() || result.isUnmappable()) {
+      if (!getSource().allowEncodingErrors()) {
+        log.error(new JCDiagnostic.SimpleDiagnosticPosition(dest.limit()),"illegal.char.for.encoding",charset == null ? encodingName : charset.name());
+      }
+ else {
+        log.warning(new JCDiagnostic.SimpleDiagnosticPosition(dest.limit()),"illegal.char.for.encoding",charset == null ? encodingName : charset.name());
+      }
+      inbuf.position(inbuf.position() + result.length());
+      dest.position(dest.limit());
+      dest.limit(dest.capacity());
+      dest.put((char)0xfffd);
+    }
+ else {
+      throw new AssertionError(result);
+    }
+  }
+}
