@@ -2,6 +2,7 @@
   ApplicationManager.getApplication().assertIsDispatchThread();
   while (true) {
     final MyInitializeDdmlibTask task=new MyInitializeDdmlibTask(project);
+    AdbErrors.clear();
     Thread t=new Thread(new Runnable(){
       @Override public void run(){
         doInitializeDdmlib();
@@ -14,18 +15,24 @@
     while (!task.isFinished()) {
       ProgressManager.getInstance().run(task);
       boolean finished=task.isFinished();
-      myAdbCrashed=!finished;
       if (task.isCanceled()) {
+        myAdbCrashed=!finished;
         forceInterrupt(t);
         return false;
       }
+      myAdbCrashed=false;
       if (!finished) {
-        int result=Messages.showOkCancelDialog(project,"ADB not responding. Please, kill \"" + SdkConstants.FN_ADB + "\" process manually and click 'Retry'",CommonBundle.getErrorTitle(),"&Retry","&Cancel",Messages.getErrorIcon());
-        if (result == 1) {
+        final String adbErrorString=combine(AdbErrors.getErrors());
+        final int result=Messages.showDialog(project,"ADB not responding. You can wait more, or kill \"" + SdkConstants.FN_ADB + "\" process manually and click 'Restart'"+ (adbErrorString.length() > 0 ? "\nErrors from ADB:\n" + adbErrorString : ""),CommonBundle.getErrorTitle(),new String[]{"&Wait more","&Restart","&Cancel"},0,Messages.getErrorIcon());
+        if (result == 2) {
+          myAdbCrashed=true;
           forceInterrupt(t);
           return false;
         }
-        retryWas=true;
+ else         if (result == 1) {
+          myAdbCrashed=true;
+          retryWas=true;
+        }
       }
     }
     if (!retryWas) {
