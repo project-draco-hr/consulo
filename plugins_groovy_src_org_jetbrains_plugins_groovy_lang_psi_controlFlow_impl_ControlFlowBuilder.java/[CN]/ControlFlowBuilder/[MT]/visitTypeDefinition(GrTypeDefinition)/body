@@ -1,5 +1,45 @@
 {
-  if (typeDefinition instanceof GrAnonymousClassDefinition) {
-    super.visitTypeDefinition(typeDefinition);
+  if (!(typeDefinition instanceof GrAnonymousClassDefinition))   return;
+  final Set<String> vars=new HashSet<String>();
+  typeDefinition.acceptChildren(new GroovyRecursiveElementVisitor(){
+    private void collectVars(    Instruction[] flow){
+      ReadWriteVariableInstruction[] reads=ControlFlowBuilderUtil.getReadsWithoutPriorWrites(flow);
+      for (      ReadWriteVariableInstruction instruction : reads) {
+        vars.add(instruction.getVariableName());
+      }
+    }
+    @Override public void visitField(    GrField field){
+      GrExpression initializer=field.getInitializerGroovy();
+      if (initializer != null) {
+        Instruction[] flow=new ControlFlowBuilder(field.getProject()).buildControlFlow(initializer);
+        collectVars(flow);
+      }
+    }
+    @Override public void visitMethod(    GrMethod method){
+      GrOpenBlock block=method.getBlock();
+      if (block != null) {
+        collectVars(block.getControlFlow());
+      }
+    }
+    @Override public void visitClassInitializer(    GrClassInitializer initializer){
+      GrOpenBlock block=initializer.getBlock();
+      collectVars(block.getControlFlow());
+    }
+    @Override public void visitTypeDefinition(    GrTypeDefinition typeDefinition){
+      typeDefinition.acceptChildren(this);
+    }
   }
+);
+  PsiField[] fields=typeDefinition.getAllFields();
+  for (  PsiField field : fields) {
+    vars.remove(field.getName());
+  }
+  for (  String var : vars) {
+    ReadWriteVariableInstruction i=new ReadWriteVariableInstruction(var,typeDefinition,myInstructionNumber++,READ);
+    addNode(i);
+    checkPending(i);
+  }
+  InstructionImpl i=new InstructionImpl(typeDefinition,myInstructionNumber++);
+  addNode(i);
+  checkPending(i);
 }
