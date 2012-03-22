@@ -9,14 +9,19 @@
   }
   ProgressManager.getInstance().run(new Task.Backgroundable(project,"Maven",false){
     public void run(    @NotNull ProgressIndicator indicator){
-      final Ref<List<Pair<MavenArtifactInfo,MavenRepositoryInfo>>> result=Ref.create(Collections.<Pair<MavenArtifactInfo,MavenRepositoryInfo>>emptyList());
-      final Ref<Boolean> tooManyRef=Ref.create(Boolean.FALSE);
-      try {
+      String[] urls=MavenRepositoryServicesManager.getServiceUrls();
+      boolean tooManyResults=false;
+      final AtomicBoolean proceedFlag=new AtomicBoolean(true);
+      for (int i=0, length=urls.length; i < length; i++) {
+        if (!proceedFlag.get())         break;
         final List<Pair<MavenArtifactInfo,MavenRepositoryInfo>> resultList=new ArrayList<Pair<MavenArtifactInfo,MavenRepositoryInfo>>();
-        for (        String serviceUrl : MavenRepositoryServicesManager.getServiceUrls()) {
+        final Ref<Boolean> tooManyRef=Ref.create(null);
+        try {
+          String serviceUrl=urls[i];
           final List<MavenArtifactInfo> artifacts;
           artifacts=MavenRepositoryServicesManager.findArtifacts(template,serviceUrl);
           if (!artifacts.isEmpty()) {
+            if (!proceedFlag.get())             break;
             final List<MavenRepositoryInfo> repositories=MavenRepositoryServicesManager.getRepositories(serviceUrl);
             final HashMap<String,MavenRepositoryInfo> map=new HashMap<String,MavenRepositoryInfo>();
             for (            MavenRepositoryInfo repository : repositories) {
@@ -24,26 +29,28 @@
             }
             for (            MavenArtifactInfo artifact : artifacts) {
               if (artifact == null) {
-                tooManyRef.set(Boolean.TRUE);
+                tooManyResults=true;
               }
  else {
                 resultList.add(Pair.create(artifact,map.get(artifact.getRepositoryId())));
               }
             }
           }
+          tooManyRef.set(i == length - 1 ? tooManyResults : null);
         }
-        result.set(resultList);
-      }
- catch (      Exception e) {
-        MavenLog.LOG.error(e);
-      }
+ catch (        Exception e) {
+          MavenLog.LOG.error(e);
+        }
  finally {
-        ApplicationManager.getApplication().invokeLater(new Runnable(){
-          public void run(){
-            resultProcessor.process(result.get(),tooManyRef.get());
+          if (!proceedFlag.get())           break;
+          ApplicationManager.getApplication().invokeLater(new Runnable(){
+            public void run(){
+              if (!proceedFlag.get())               return;
+              proceedFlag.set(resultProcessor.process(resultList,tooManyRef.get()));
+            }
           }
-        }
 );
+        }
       }
     }
   }
