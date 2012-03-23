@@ -2,18 +2,28 @@
   ApplicationManager.getApplication().assertIsDispatchThread();
   myMultiCaster.beforeAllDocumentsSaving();
   if (myUnsavedDocuments.isEmpty())   return;
-  Set<Document> failedToSave=new THashSet<Document>();
+  final Map<Document,IOException> failedToSave=new HashMap<Document,IOException>();
   while (true) {
-    final Document[] unsavedDocuments=getUnsavedDocuments();
     int count=0;
-    for (    Document document : unsavedDocuments) {
-      if (failedToSave.contains(document))       continue;
-      saveDocument(document);
-      count++;
-      if (myUnsavedDocuments.contains(document)) {
-        failedToSave.add(document);
+    final AccessToken token=ApplicationManager.getApplication().acquireWriteActionLock(getClass());
+    try {
+      for (      Document document : myUnsavedDocuments) {
+        if (failedToSave.containsKey(document))         continue;
+        try {
+          doSaveDocument(document);
+        }
+ catch (        IOException e) {
+          failedToSave.put(document,e);
+        }
+        count++;
       }
     }
+  finally {
+      token.finish();
+    }
     if (count == 0)     break;
+  }
+  if (!failedToSave.isEmpty()) {
+    handleErrorsOnSave(failedToSave);
   }
 }
