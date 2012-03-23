@@ -36,25 +36,35 @@
   ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
     @Override public void run(){
       final HttpClient client=anonymous ? GithubUtil.getHttpClient(null,null) : GithubUtil.getHttpClient(settings.getLogin(),password);
-      final PostMethod method=new PostMethod("https://gist.github.com/gists");
-      method.addParameters(new NameValuePair[]{new NameValuePair("description",description),new NameValuePair("file_ext[gistfile1]","." + file.getExtension()),new NameValuePair("file_name[gistfile1]",file.getName()),new NameValuePair("file_contents[gistfile1]",text)});
-      if (isPrivate) {
-        method.addParameter("action_button","private");
-      }
+      final PostMethod method=new PostMethod("https://api.github.com/gists");
+      String request=prepareJsonRequest(description,isPrivate,text,file);
+      String response;
       try {
+        method.setRequestEntity(new StringRequestEntity(request,"application/json","UTF-8"));
         client.executeMethod(method);
-        final String responce=method.getResponseBodyAsString();
-        final Matcher matcher=Pattern.compile("href=\"[^\"]*").matcher(responce);
-        matcher.find();
-        url.set(matcher.group().substring(6));
+        response=method.getResponseBodyAsString();
       }
  catch (      IOException e1) {
-        LOG.error("Failed to create gist: " + e1);
+        showError(project,"Failed to create gist",null,null,e1);
         return;
       }
  finally {
         method.releaseConnection();
       }
+      JsonObject jsonResponse;
+      try {
+        jsonResponse=new JsonParser().parse(response).getAsJsonObject();
+      }
+ catch (      JsonSyntaxException jse) {
+        showError(project,"Couldn't parse GitHub response",null,response,jse);
+        return;
+      }
+      JsonElement htmlUrl=jsonResponse.get("html_url");
+      if (htmlUrl == null) {
+        showError(project,"Invalid GitHub response","No html_url property",response,null);
+        return;
+      }
+      url.set(htmlUrl.getAsString());
     }
   }
 ,"Communicating With GitHub",false,project);
@@ -65,6 +75,13 @@
     BrowserUtil.launchBrowser(url.get());
   }
  else {
-    Messages.showInfoMessage(project,"Your gist url: " + url.get(),"Gist Created Successfully");
+    Notificator.getInstance(project).notify(GitVcs.IMPORTANT_ERROR_NOTIFICATION,"Gist Created Successfully","Your gist url: <a href='open'>" + url.get() + "</a>",NotificationType.INFORMATION,new NotificationListener(){
+      @Override public void hyperlinkUpdate(      @NotNull Notification notification,      @NotNull HyperlinkEvent event){
+        if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+          BrowserUtil.launchBrowser(url.get());
+        }
+      }
+    }
+);
   }
 }

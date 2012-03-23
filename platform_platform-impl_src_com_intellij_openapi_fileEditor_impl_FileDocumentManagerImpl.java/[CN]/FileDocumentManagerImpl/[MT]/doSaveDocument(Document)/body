@@ -1,0 +1,37 @@
+{
+  VirtualFile file=getFile(document);
+  if (file == null || !file.isValid() || file instanceof LightVirtualFile || !isFileModified(file)) {
+    myUnsavedDocuments.remove(document);
+    fireUnsavedDocumentsDropped();
+    LOG.assertTrue(!myUnsavedDocuments.contains(document));
+    return;
+  }
+  if (needsRefresh(file)) {
+    file.refresh(false,false);
+    if (!myUnsavedDocuments.contains(document))     return;
+    if (!file.isValid())     return;
+  }
+  for (  FileDocumentSynchronizationVetoer vetoer : Extensions.getExtensions(FileDocumentSynchronizationVetoer.EP_NAME)) {
+    if (!vetoer.maySaveDocument(document)) {
+      return;
+    }
+  }
+  myMultiCaster.beforeDocumentSaving(document);
+  LOG.assertTrue(file.isValid());
+  String text=document.getText();
+  String lineSeparator=getLineSeparator(document,file);
+  if (!lineSeparator.equals("\n")) {
+    text=StringUtil.convertLineSeparators(text,lineSeparator);
+  }
+  Project project=ProjectLocator.getInstance().guessProjectForFile(file);
+  Writer writer=LoadTextUtil.getWriter(project,file,this,text,document.getModificationStamp());
+  try {
+    writer.write(text);
+  }
+  finally {
+    writer.close();
+  }
+  myUnsavedDocuments.remove(document);
+  LOG.assertTrue(!myUnsavedDocuments.contains(document));
+  myTrailingSpacesStripper.clearLineModificationFlags(document);
+}
