@@ -1,0 +1,46 @@
+{
+  try {
+    CodeStyleManager.getInstance(project).reformat(parent);
+  }
+ catch (  IncorrectOperationException e) {
+    LOG.error(e);
+  }
+  int offset=parent.getTextRange().getEndOffset() - 1;
+  editor.getCaretModel().moveToOffset(offset);
+  editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  editor.getSelectionModel().removeSelection();
+  return new Runnable(){
+    public void run(){
+      CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+        public void run(){
+          PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
+          final PsiAnonymousClass aClass=PsiTreeUtil.findElementOfClassAtOffset(file,editor.getCaretModel().getOffset(),PsiAnonymousClass.class,false);
+          if (aClass == null)           return;
+          final Collection<CandidateInfo> candidatesToImplement=OverrideImplementUtil.getMethodsToOverrideImplement(aClass,true);
+          boolean invokeOverride=candidatesToImplement.isEmpty();
+          if (invokeOverride) {
+            chooseAndOverrideMethodsInAdapter(project,editor,aClass);
+          }
+ else {
+            ApplicationManager.getApplication().runWriteAction(new Runnable(){
+              public void run(){
+                try {
+                  List<PsiMethod> methods=OverrideImplementUtil.overrideOrImplementMethodCandidates(aClass,candidatesToImplement,false);
+                  List<PsiGenerationInfo<PsiMethod>> prototypes=OverrideImplementUtil.convert2GenerationInfos(methods);
+                  List<PsiGenerationInfo<PsiMethod>> resultMembers=GenerateMembersUtil.insertMembersBeforeAnchor(aClass,null,prototypes);
+                  resultMembers.get(0).positionCaret(editor,true);
+                }
+ catch (                IncorrectOperationException ioe) {
+                  LOG.error(ioe);
+                }
+              }
+            }
+);
+          }
+        }
+      }
+,CompletionBundle.message("completion.smart.type.generate.anonymous.body"),null,UndoConfirmationPolicy.DEFAULT,editor.getDocument());
+    }
+  }
+;
+}
