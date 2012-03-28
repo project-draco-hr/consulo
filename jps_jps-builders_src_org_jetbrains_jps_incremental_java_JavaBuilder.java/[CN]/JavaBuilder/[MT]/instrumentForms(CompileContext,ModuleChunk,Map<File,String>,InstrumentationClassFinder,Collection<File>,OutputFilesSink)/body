@@ -1,0 +1,79 @@
+{
+  final Map<String,File> class2form=new HashMap<String,File>();
+  final SourceToFormMapping sourceToFormMap=context.getDataManager().getSourceToFormMap();
+  final Map<String,OutputFileObject> compiledClassNames=new HashMap<String,OutputFileObject>();
+  for (  OutputFileObject fileObject : outputSink.getFileObjects()) {
+    compiledClassNames.put(fileObject.getClassName(),fileObject);
+  }
+  final MyNestedFormLoader nestedFormsLoader=new MyNestedFormLoader(chunkSourcePath,ProjectPaths.getOutputPathsWithDependents(chunk,context.isCompilingTests()));
+  for (  File formFile : formsToInstrument) {
+    final LwRootContainer rootContainer;
+    try {
+      rootContainer=Utils.getRootContainer(formFile.toURI().toURL(),new CompiledClassPropertiesProvider(finder.getLoader()));
+    }
+ catch (    AlienFormFileException e) {
+      continue;
+    }
+catch (    Exception e) {
+      throw new ProjectBuildException("Cannot process form file " + formFile.getAbsolutePath(),e);
+    }
+    final String classToBind=rootContainer.getClassToBind();
+    if (classToBind == null) {
+      continue;
+    }
+    final OutputFileObject outputClassFile=findClassFile(compiledClassNames,classToBind);
+    if (outputClassFile == null) {
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.WARNING,"Class to bind does not exist: " + classToBind,formFile.getAbsolutePath()));
+      continue;
+    }
+    final File alreadyProcessedForm=class2form.get(classToBind);
+    if (alreadyProcessedForm != null) {
+      context.processMessage(new CompilerMessage(FORMS_BUILDER_NAME,BuildMessage.Kind.WARNING,formFile.getAbsolutePath() + ": The form is bound to the class " + classToBind+ ".\nAnother form "+ alreadyProcessedForm.getAbsolutePath()+ " is also bound to this class",formFile.getAbsolutePath()));
+      continue;
+    }
+    class2form.put(classToBind,formFile);
+    boolean success=true;
+    try {
+      final OutputFileObject.Content originalContent=outputClassFile.getContent();
+      final ClassReader classReader=new ClassReader(originalContent.getBuffer(),originalContent.getOffset(),originalContent.getLength());
+      final int version=getClassFileVersion(classReader);
+      final InstrumenterClassWriter classWriter=new InstrumenterClassWriter(getAsmClassWriterFlags(version),finder);
+      final AsmCodeGenerator codeGenerator=new AsmCodeGenerator(rootContainer,finder,nestedFormsLoader,false,classWriter);
+      final byte[] patchedBytes=codeGenerator.patchClass(classReader);
+      if (patchedBytes != null) {
+        outputClassFile.updateContent(patchedBytes);
+      }
+      final FormErrorInfo[] warnings=codeGenerator.getWarnings();
+      for (      final FormErrorInfo warning : warnings) {
+        context.processMessage(new CompilerMessage(FORMS_BUILDER_NAME,BuildMessage.Kind.WARNING,warning.getErrorMessage(),formFile.getAbsolutePath()));
+      }
+      final FormErrorInfo[] errors=codeGenerator.getErrors();
+      if (errors.length > 0) {
+        success=false;
+        StringBuilder message=new StringBuilder();
+        for (        final FormErrorInfo error : errors) {
+          if (message.length() > 0) {
+            message.append("\n");
+          }
+          message.append(formFile.getAbsolutePath()).append(": ").append(error.getErrorMessage());
+        }
+        context.processMessage(new CompilerMessage(FORMS_BUILDER_NAME,BuildMessage.Kind.ERROR,message.toString()));
+      }
+ else {
+        final File sourceFile=outputClassFile.getSourceFile();
+        if (sourceFile != null) {
+          sourceToFormMap.update(sourceFile.getPath(),formFile.getPath());
+        }
+      }
+    }
+ catch (    Exception e) {
+      success=false;
+      context.processMessage(new CompilerMessage(FORMS_BUILDER_NAME,BuildMessage.Kind.ERROR,"Forms instrumentation failed" + e.getMessage(),formFile.getAbsolutePath()));
+    }
+ finally {
+      if (!success) {
+        outputSink.markError(outputClassFile);
+      }
+    }
+  }
+}

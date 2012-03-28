@@ -1,0 +1,63 @@
+{
+  log("compiling form " + file.getAbsolutePath(),Project.MSG_VERBOSE);
+  final LwRootContainer rootContainer;
+  try {
+    rootContainer=Utils.getRootContainer(file.toURL(),new CompiledClassPropertiesProvider(classFinder.getLoader()));
+  }
+ catch (  AlienFormFileException e) {
+    return;
+  }
+catch (  Exception e) {
+    fireError("Cannot process form file " + file.getAbsolutePath() + ". Reason: "+ e);
+    return;
+  }
+  final String classToBind=rootContainer.getClassToBind();
+  if (classToBind == null) {
+    return;
+  }
+  String name=classToBind.replace('.','/');
+  File classFile=getClassFile(name);
+  if (classFile == null) {
+    log(file.getAbsolutePath() + ": Class to bind does not exist: " + classToBind,Project.MSG_WARN);
+    return;
+  }
+  final File alreadyProcessedForm=(File)myClass2form.get(classToBind);
+  if (alreadyProcessedForm != null) {
+    fireError(file.getAbsolutePath() + ": " + "The form is bound to the class "+ classToBind+ ".\n"+ "Another form "+ alreadyProcessedForm.getAbsolutePath()+ " is also bound to this class.");
+    return;
+  }
+  myClass2form.put(classToBind,file);
+  associate(file.getAbsolutePath(),name);
+  try {
+    int version;
+    InputStream stream=new FileInputStream(classFile);
+    try {
+      version=getClassFileVersion(new ClassReader(stream));
+    }
+  finally {
+      stream.close();
+    }
+    AntNestedFormLoader formLoader=new AntNestedFormLoader(classFinder,myNestedFormPathList);
+    InstrumenterClassWriter classWriter=new InstrumenterClassWriter(InstrumentationUtil.getAsmClassWriterFlags(version),classFinder);
+    final AsmCodeGenerator codeGenerator=new AsmCodeGenerator(rootContainer,classFinder,formLoader,false,classWriter);
+    codeGenerator.patchFile(classFile);
+    final FormErrorInfo[] warnings=codeGenerator.getWarnings();
+    for (int j=0; j < warnings.length; j++) {
+      log(file.getAbsolutePath() + ": " + warnings[j].getErrorMessage(),Project.MSG_WARN);
+    }
+    final FormErrorInfo[] errors=codeGenerator.getErrors();
+    if (errors.length > 0) {
+      StringBuffer message=new StringBuffer();
+      for (int j=0; j < errors.length; j++) {
+        if (message.length() > 0) {
+          message.append("\n");
+        }
+        message.append(file.getAbsolutePath()).append(": ").append(errors[j].getErrorMessage());
+      }
+      fireError(message.toString());
+    }
+  }
+ catch (  Exception e) {
+    fireError("Forms instrumentation failed for " + file.getAbsolutePath() + ": "+ e.toString());
+  }
+}
