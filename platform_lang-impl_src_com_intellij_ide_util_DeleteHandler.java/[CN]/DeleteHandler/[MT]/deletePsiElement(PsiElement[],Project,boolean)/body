@@ -1,0 +1,122 @@
+{
+  if (elementsToDelete == null || elementsToDelete.length == 0)   return;
+  final PsiElement[] elements=PsiTreeUtil.filterAncestors(elementsToDelete);
+  boolean safeDeleteApplicable=true;
+  for (int i=0; i < elements.length && safeDeleteApplicable; i++) {
+    PsiElement element=elements[i];
+    safeDeleteApplicable=SafeDeleteProcessor.validElement(element);
+  }
+  final boolean dumb=DumbService.getInstance(project).isDumb();
+  if (safeDeleteApplicable && !dumb) {
+    DeleteDialog dialog=new DeleteDialog(project,elements,new DeleteDialog.Callback(){
+      public void run(      final DeleteDialog dialog){
+        if (!CommonRefactoringUtil.checkReadOnlyStatusRecursively(project,Arrays.asList(elements),true))         return;
+        SafeDeleteProcessor.createInstance(project,new Runnable(){
+          public void run(){
+            dialog.close(DialogWrapper.CANCEL_EXIT_CODE);
+          }
+        }
+,elements,dialog.isSearchInComments(),dialog.isSearchInNonJava(),true).run();
+      }
+    }
+);
+    if (needConfirmation) {
+      dialog.show();
+      if (!dialog.isOK())       return;
+    }
+  }
+ else {
+    @SuppressWarnings({"UnresolvedPropertyKey"}) String warningMessage=DeleteUtil.generateWarningMessage(IdeBundle.message("prompt.delete.elements"),elements);
+    boolean anyDirectories=false;
+    String directoryName=null;
+    for (    PsiElement psiElement : elementsToDelete) {
+      if (psiElement instanceof PsiDirectory && !PsiUtilBase.isSymLink((PsiDirectory)psiElement)) {
+        anyDirectories=true;
+        directoryName=((PsiDirectory)psiElement).getName();
+        break;
+      }
+    }
+    if (anyDirectories) {
+      if (elements.length == 1) {
+        warningMessage+=IdeBundle.message("warning.delete.all.files.and.subdirectories",directoryName);
+      }
+ else {
+        warningMessage+=IdeBundle.message("warning.delete.all.files.and.subdirectories.in.the.selected.directory");
+      }
+    }
+    if (safeDeleteApplicable && dumb) {
+      warningMessage+="\n\nWarning:\n  Safe delete is not available while " + ApplicationNamesInfo.getInstance().getFullProductName() + " updates indices,\n  no usages will be checked.";
+    }
+    if (needConfirmation) {
+      int result=Messages.showOkCancelDialog(project,warningMessage,IdeBundle.message("title.delete"),ApplicationBundle.message("button.delete"),CommonBundle.getCancelButtonText(),Messages.getQuestionIcon());
+      if (result != 0)       return;
+    }
+  }
+  final FileTypeManager ftManager=FileTypeManager.getInstance();
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      if (!CommonRefactoringUtil.checkReadOnlyStatusRecursively(project,Arrays.asList(elements),false)) {
+        return;
+      }
+      if (PlatformDataKeys.EDITOR.getData(DataManager.getInstance().getDataContext()) == null) {
+        CommandProcessor.getInstance().markCurrentCommandAsGlobal(project);
+      }
+      for (      final PsiElement elementToDelete : elements) {
+        if (!elementToDelete.isValid())         continue;
+        if (elementToDelete instanceof PsiDirectory) {
+          VirtualFile virtualFile=((PsiDirectory)elementToDelete).getVirtualFile();
+          if (virtualFile.isInLocalFileSystem() && !virtualFile.isSymLink()) {
+            ArrayList<VirtualFile> readOnlyFiles=new ArrayList<VirtualFile>();
+            getReadOnlyVirtualFiles(virtualFile,readOnlyFiles,ftManager);
+            if (!readOnlyFiles.isEmpty()) {
+              int _result=Messages.showYesNoDialog(project,IdeBundle.message("prompt.directory.contains.read.only.files",virtualFile.getPresentableUrl()),IdeBundle.message("title.delete"),Messages.getQuestionIcon());
+              if (_result != 0)               continue;
+              boolean success=true;
+              for (              VirtualFile file : readOnlyFiles) {
+                success=clearReadOnlyFlag(file,project);
+                if (!success)                 break;
+              }
+              if (!success)               continue;
+            }
+          }
+        }
+ else         if (!elementToDelete.isWritable() && !(elementToDelete instanceof PsiFileSystemItem && PsiUtilBase.isSymLink((PsiFileSystemItem)elementToDelete))) {
+          final PsiFile file=elementToDelete.getContainingFile();
+          if (file != null) {
+            final VirtualFile virtualFile=file.getVirtualFile();
+            if (virtualFile.isInLocalFileSystem()) {
+              int _result=MessagesEx.fileIsReadOnly(project,virtualFile).setTitle(IdeBundle.message("title.delete")).appendMessage(IdeBundle.message("prompt.delete.it.anyway")).askYesNo();
+              if (_result != 0)               continue;
+              boolean success=clearReadOnlyFlag(virtualFile,project);
+              if (!success)               continue;
+            }
+          }
+        }
+        try {
+          elementToDelete.checkDelete();
+        }
+ catch (        IncorrectOperationException ex) {
+          Messages.showMessageDialog(project,ex.getMessage(),CommonBundle.getErrorTitle(),Messages.getErrorIcon());
+          continue;
+        }
+        ApplicationManager.getApplication().runWriteAction(new Runnable(){
+          public void run(){
+            try {
+              elementToDelete.delete();
+            }
+ catch (            final IncorrectOperationException ex) {
+              ApplicationManager.getApplication().invokeLater(new Runnable(){
+                public void run(){
+                  Messages.showMessageDialog(project,ex.getMessage(),CommonBundle.getErrorTitle(),Messages.getErrorIcon());
+                }
+              }
+);
+            }
+          }
+        }
+);
+      }
+    }
+  }
+,RefactoringBundle.message("safe.delete.command",RefactoringUIUtil.calculatePsiElementDescriptionList(elements)),null);
+}
