@@ -1,0 +1,84 @@
+{
+  InputStream inputStream=loadVersionInfo(host);
+  if (inputStream == null)   return false;
+  final Document document;
+  try {
+    document=JDOMUtil.loadDocument(inputStream);
+  }
+ catch (  JDOMException e) {
+    return false;
+  }
+  inputStream=loadVersionInfo(host);
+  if (inputStream == null)   return false;
+  final ArrayList<IdeaPluginDescriptor> descriptors=RepositoryHelper.loadPluginsFromDescription(inputStream,indicator);
+  for (  IdeaPluginDescriptor descriptor : descriptors) {
+    ((PluginNode)descriptor).setRepositoryName(host);
+    downloaded.add(PluginDownloader.createDownloader(descriptor));
+  }
+  boolean success=true;
+  for (  Object plugin : document.getRootElement().getChildren("plugin")) {
+    final Element pluginElement=(Element)plugin;
+    final String pluginId=pluginElement.getAttributeValue("id");
+    final String pluginUrl=pluginElement.getAttributeValue("url");
+    final String pluginVersion=pluginElement.getAttributeValue("version");
+    final Element descriptionElement=pluginElement.getChild("description");
+    final String description;
+    if (descriptionElement != null) {
+      description=descriptionElement.getText();
+    }
+ else {
+      description=null;
+    }
+    final List<PluginId> dependsPlugins=new ArrayList<PluginId>();
+    final List depends=pluginElement.getChildren("depends");
+    for (    Object depend : depends) {
+      dependsPlugins.add(PluginId.getId(((Element)depend).getText()));
+    }
+    if (pluginId == null) {
+      LOG.info("plugin id should not be null");
+      success=false;
+      continue;
+    }
+    if (pluginUrl == null) {
+      LOG.info("plugin url should not be null");
+      success=false;
+      continue;
+    }
+    final VirtualFile pluginFile=PluginDownloader.findPluginFile(pluginUrl,host);
+    if (pluginFile == null)     continue;
+    if (collectToUpdate) {
+      final String finalPluginUrl=pluginFile.getUrl();
+      final Runnable updatePluginRunnable=new Runnable(){
+        public void run(){
+          try {
+            final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+            if (progressIndicator != null) {
+              progressIndicator.setText(finalPluginUrl);
+            }
+            final PluginDownloader uploader=new PluginDownloader(pluginId,finalPluginUrl,pluginVersion);
+            if (uploader.prepareToInstall()) {
+              downloaded.add(uploader);
+            }
+          }
+ catch (          IOException e) {
+            LOG.info(e);
+          }
+        }
+      }
+;
+      if (ApplicationManager.getApplication().isDispatchThread()) {
+        ProgressManager.getInstance().runProcessWithProgressSynchronously(updatePluginRunnable,IdeBundle.message("update.uploading.plugin.progress.title"),true,null);
+      }
+ else {
+        updatePluginRunnable.run();
+      }
+    }
+ else {
+      final PluginDownloader downloader=new PluginDownloader(pluginId,pluginUrl,pluginVersion);
+      downloader.setDescription(description);
+      downloader.setDepends(dependsPlugins);
+      downloaded.add(downloader);
+    }
+  }
+  return success;
+}
