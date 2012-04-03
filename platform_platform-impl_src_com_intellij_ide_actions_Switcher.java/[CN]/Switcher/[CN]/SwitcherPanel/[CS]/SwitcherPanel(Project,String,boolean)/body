@@ -1,0 +1,238 @@
+{
+  super(new BorderLayout(0,0));
+  this.project=project;
+  myPinned=pinned;
+  mySpeedSearch=pinned ? new SwitcherSpeedSearch() : null;
+  setFocusable(true);
+  addKeyListener(this);
+  setBorder(new EmptyBorder(0,0,0,0));
+  setBackground(Color.WHITE);
+  pathLabel.setHorizontalAlignment(SwingConstants.LEFT);
+  final Font font=pathLabel.getFont();
+  pathLabel.setFont(font.deriveFont((float)10));
+  descriptions=new JPanel(new BorderLayout()){
+    @Override protected void paintComponent(    Graphics g){
+      super.paintComponent(g);
+      g.setColor(BORDER_COLOR);
+      g.drawLine(0,0,getWidth(),0);
+    }
+  }
+;
+  descriptions.setBorder(BorderFactory.createEmptyBorder(1,4,1,4));
+  descriptions.add(pathLabel,BorderLayout.CENTER);
+  twManager=ToolWindowManager.getInstance(project);
+  final DefaultListModel twModel=new DefaultListModel();
+  for (  String id : twManager.getToolWindowIds()) {
+    final ToolWindow tw=twManager.getToolWindow(id);
+    if (tw.isAvailable()) {
+      ids.put(tw,id);
+    }
+  }
+  final ArrayList<ToolWindow> windows=new ArrayList<ToolWindow>(ids.keySet());
+  twShortcuts=createShortcuts(windows);
+  final Map<ToolWindow,String> map=ContainerUtil.reverseMap(twShortcuts);
+  Collections.sort(windows,new Comparator<ToolWindow>(){
+    @Override public int compare(    ToolWindow o1,    ToolWindow o2){
+      return map.get(o1).compareTo(map.get(o2));
+    }
+  }
+);
+  for (  ToolWindow window : windows) {
+    twModel.addElement(window);
+  }
+  toolWindows=new JBList(twModel);
+  toolWindows.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
+  toolWindows.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  toolWindows.setCellRenderer(new SwitcherToolWindowsListRenderer(mySpeedSearch,ids,map,myPinned){
+    @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean selected,    boolean hasFocus){
+      final JComponent renderer=(JComponent)super.getListCellRendererComponent(list,value,index,selected,hasFocus);
+      if (selected) {
+        return renderer;
+      }
+      final Color bgColor=list == mouseMoveSrc && index == mouseMoveListIndex ? ON_MOUSE_OVER_BG_COLOR : Color.WHITE;
+      UIUtil.changeBackGround(renderer,bgColor);
+      return renderer;
+    }
+  }
+);
+  toolWindows.addKeyListener(this);
+  toolWindows.addMouseListener(this);
+  toolWindows.addMouseMotionListener(this);
+  toolWindows.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      if (!toolWindows.getSelectionModel().isSelectionEmpty()) {
+        files.getSelectionModel().clearSelection();
+      }
+    }
+  }
+);
+  separator=new JPanel(){
+    @Override protected void paintComponent(    Graphics g){
+      super.paintComponent(g);
+      g.setColor(SEPARATOR_COLOR);
+      g.drawLine(0,0,0,getHeight());
+    }
+    @Override public Dimension getMaximumSize(){
+      final Dimension max=super.getMaximumSize();
+      return new Dimension(5,max.height);
+    }
+  }
+;
+  separator.setBackground(Color.WHITE);
+  final FileEditorManagerImpl editorManager=(FileEditorManagerImpl)FileEditorManager.getInstance(project);
+  final ArrayList<FileInfo> filesData=new ArrayList<FileInfo>();
+  final ArrayList<FileInfo> editors=new ArrayList<FileInfo>();
+  for (  Pair<VirtualFile,EditorWindow> pair : editorManager.getSelectionHistory()) {
+    editors.add(new FileInfo(pair.first,pair.second));
+  }
+  if (editors.size() < 2 || isPinnedMode()) {
+    if (isPinnedMode() && editors.size() > 1) {
+      filesData.addAll(editors);
+    }
+    final VirtualFile[] recentFiles=ArrayUtil.reverseArray(EditorHistoryManager.getInstance(project).getFiles());
+    final int maxFiles=Math.max(editors.size(),recentFiles.length);
+    final int len=isPinnedMode() ? maxFiles : Math.min(toolWindows.getModel().getSize(),maxFiles);
+    boolean firstRecentMarked=false;
+    for (int i=0; i < len; i++) {
+      final FileInfo info=new FileInfo(recentFiles[i],null);
+      boolean add=true;
+      if (isPinnedMode()) {
+        for (        FileInfo fileInfo : filesData) {
+          if (fileInfo.first.equals(info.first)) {
+            add=false;
+            break;
+          }
+        }
+      }
+      if (add) {
+        filesData.add(info);
+        if (!firstRecentMarked) {
+          firstRecentMarked=true;
+          info.isSeparator=true;
+        }
+      }
+    }
+    if (editors.size() == 1 && (filesData.isEmpty() || !editors.get(0).getFirst().equals(filesData.get(0).getFirst()))) {
+      filesData.add(0,editors.get(0));
+    }
+  }
+ else {
+    for (int i=0; i < Math.min(MAX_FILES_IN_SWITCHER,editors.size()); i++) {
+      filesData.add(editors.get(i));
+    }
+  }
+  final DefaultListModel filesModel=new DefaultListModel();
+  for (  FileInfo editor : filesData) {
+    filesModel.addElement(editor);
+  }
+  files=new JBList(filesModel);
+  files.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  files.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
+  files.setCellRenderer(new VirtualFilesRenderer(project,mySpeedSearch){
+    @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean selected,    boolean hasFocus){
+      final JComponent renderer=(JComponent)super.getListCellRendererComponent(list,value,index,selected,hasFocus);
+      if (selected) {
+        return renderer;
+      }
+      final Color bgColor=list == mouseMoveSrc && index == mouseMoveListIndex ? ON_MOUSE_OVER_BG_COLOR : Color.WHITE;
+      UIUtil.changeBackGround(renderer,bgColor);
+      return renderer;
+    }
+  }
+);
+  files.addKeyListener(this);
+  files.addMouseListener(this);
+  files.addMouseMotionListener(this);
+  files.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      if (!files.getSelectionModel().isSelectionEmpty()) {
+        toolWindows.getSelectionModel().clearSelection();
+      }
+    }
+  }
+);
+  this.add(toolWindows,BorderLayout.WEST);
+  if (filesModel.size() > 0) {
+    files.setAlignmentY(1f);
+    this.add(files,BorderLayout.EAST);
+    this.add(separator,BorderLayout.CENTER);
+  }
+  this.add(descriptions,BorderLayout.SOUTH);
+  files.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    private String getTitle2Text(    String fullText){
+      int labelWidth=pathLabel.getWidth();
+      if (fullText == null || fullText.length() == 0)       return " ";
+      while (pathLabel.getFontMetrics(pathLabel.getFont()).stringWidth(fullText) > labelWidth) {
+        int sep=fullText.indexOf(File.separatorChar,4);
+        if (sep < 0)         return fullText;
+        fullText="..." + fullText.substring(sep);
+      }
+      return fullText;
+    }
+    public void valueChanged(    final ListSelectionEvent e){
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        public void run(){
+          updatePathLabel();
+        }
+      }
+);
+    }
+    private void updatePathLabel(){
+      final Object[] values=files.getSelectedValues();
+      if (values != null && values.length == 1) {
+        final VirtualFile parent=((FileInfo)values[0]).first.getParent();
+        if (parent != null) {
+          pathLabel.setText(getTitle2Text(parent.getPresentableUrl()));
+        }
+ else {
+          pathLabel.setText(" ");
+        }
+      }
+ else {
+        pathLabel.setText(" ");
+      }
+    }
+  }
+);
+  final ShortcutSet shortcutSet=ActionManager.getInstance().getAction("Switcher").getShortcutSet();
+  final int modifiers=getModifiers(shortcutSet);
+  final boolean isAlt=(modifiers & Event.ALT_MASK) != 0;
+  ALT_KEY=isAlt ? VK_CONTROL : VK_ALT;
+  CTRL_KEY=isAlt ? VK_ALT : VK_CONTROL;
+  final IdeFrameImpl ideFrame=WindowManagerEx.getInstanceEx().getFrame(project);
+  myPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(this,this).setResizable(false).setModalContext(false).setFocusable(true).setRequestFocus(true).setTitle(title).setMovable(false).setCancelKeyEnabled(false).setCancelCallback(new Computable<Boolean>(){
+    public Boolean compute(){
+      SWITCHER=null;
+      return true;
+    }
+  }
+).createPopup();
+  if (isPinnedMode()) {
+    new AnAction(null,null,null){
+      @Override public void actionPerformed(      AnActionEvent e){
+      }
+    }
+.registerCustomShortcutSet(TW_SHORTCUT,this,myPopup);
+    new AnAction(null,null,null){
+      @Override public void actionPerformed(      AnActionEvent e){
+        if (mySpeedSearch != null && mySpeedSearch.isPopupActive()) {
+          mySpeedSearch.hidePopup();
+        }
+ else {
+          myPopup.cancel();
+        }
+      }
+    }
+.registerCustomShortcutSet(CustomShortcutSet.fromString("ESCAPE"),this,myPopup);
+  }
+  Component comp=null;
+  final EditorWindow result=FileEditorManagerEx.getInstanceEx(project).getActiveWindow().getResult();
+  if (result != null) {
+    comp=result.getOwner();
+  }
+  if (comp == null) {
+    comp=ideFrame.getContentPane();
+  }
+  myAlarm=new Alarm(Alarm.ThreadToUse.SWING_THREAD,myPopup);
+  myPopup.showInCenterOf(comp);
+}
