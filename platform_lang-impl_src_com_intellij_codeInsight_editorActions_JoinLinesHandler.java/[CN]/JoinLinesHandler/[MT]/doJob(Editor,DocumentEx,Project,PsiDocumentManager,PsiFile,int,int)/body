@@ -1,0 +1,123 @@
+{
+  int caretRestoreOffset=-1;
+  for (int i=startLine; i < endLine; i++) {
+    if (i >= doc.getLineCount() - 1)     break;
+    int lineEndOffset=doc.getLineEndOffset(startLine);
+    docManager.doPostponedOperationsAndUnblockDocument(doc);
+    docManager.commitDocument(doc);
+    CharSequence text=doc.getCharsSequence();
+    int firstNonSpaceOffsetInNextLine=doc.getLineStartOffset(startLine + 1);
+    while (firstNonSpaceOffsetInNextLine < text.length() - 1 && (text.charAt(firstNonSpaceOffsetInNextLine) == ' ' || text.charAt(firstNonSpaceOffsetInNextLine) == '\t')) {
+      firstNonSpaceOffsetInNextLine++;
+    }
+    PsiElement elementAtNextLineStart=psiFile.findElementAt(firstNonSpaceOffsetInNextLine);
+    boolean isNextLineStartsWithComment=isCommentElement(elementAtNextLineStart);
+    int lastNonSpaceOffsetInStartLine=lineEndOffset;
+    while (lastNonSpaceOffsetInStartLine > 0 && (text.charAt(lastNonSpaceOffsetInStartLine - 1) == ' ' || text.charAt(lastNonSpaceOffsetInStartLine - 1) == '\t')) {
+      lastNonSpaceOffsetInStartLine--;
+    }
+    int elemOffset=lastNonSpaceOffsetInStartLine > doc.getLineStartOffset(startLine) ? lastNonSpaceOffsetInStartLine - 1 : -1;
+    PsiElement elementAtStartLineEnd=elemOffset == -1 ? null : psiFile.findElementAt(elemOffset);
+    boolean isStartLineEndsWithComment=isCommentElement(elementAtStartLineEnd);
+    int rc=-1;
+    int start;
+    int end;
+    TextRange limits=findStartAndEnd(text,lastNonSpaceOffsetInStartLine,firstNonSpaceOffsetInNextLine,doc.getTextLength());
+    start=limits.getStartOffset();
+    end=limits.getEndOffset();
+    for (    JoinLinesHandlerDelegate delegate : Extensions.getExtensions(JoinLinesHandlerDelegate.EP_NAME)) {
+      if (delegate instanceof JoinRawLinesHandlerDelegate) {
+        rc=((JoinRawLinesHandlerDelegate)delegate).tryJoinRawLines(doc,psiFile,start,end);
+        if (rc != CANNOT_JOIN) {
+          caretRestoreOffset=rc;
+          break;
+        }
+      }
+    }
+    if (rc == CANNOT_JOIN) {
+      if (lastNonSpaceOffsetInStartLine == doc.getLineStartOffset(startLine)) {
+        doc.deleteString(doc.getLineStartOffset(startLine),firstNonSpaceOffsetInNextLine);
+        int indent=-1;
+        try {
+          docManager.commitDocument(doc);
+          indent=CodeStyleManager.getInstance(project).adjustLineIndent(psiFile,startLine == 0 ? 0 : doc.getLineStartOffset(startLine));
+        }
+ catch (        IncorrectOperationException e) {
+          LOG.error(e);
+        }
+        if (caretRestoreOffset == CANNOT_JOIN) {
+          caretRestoreOffset=indent;
+        }
+        continue;
+      }
+      doc.deleteString(lineEndOffset,lineEndOffset + doc.getLineSeparatorLength(startLine));
+      text=doc.getCharsSequence();
+      limits=findStartAndEnd(text,lineEndOffset - 1,lineEndOffset,doc.getTextLength());
+      start=limits.getStartOffset();
+      end=limits.getEndOffset();
+      docManager.commitDocument(doc);
+      for (      JoinLinesHandlerDelegate delegate : Extensions.getExtensions(JoinLinesHandlerDelegate.EP_NAME)) {
+        rc=delegate.tryJoinLines(doc,psiFile,start,end);
+        if (rc != CANNOT_JOIN)         break;
+      }
+    }
+    docManager.doPostponedOperationsAndUnblockDocument(doc);
+    if (rc != CANNOT_JOIN) {
+      if (caretRestoreOffset == CANNOT_JOIN)       caretRestoreOffset=rc;
+      continue;
+    }
+    if (caretRestoreOffset == CANNOT_JOIN)     caretRestoreOffset=start == lineEndOffset ? start : start + 1;
+    if (isStartLineEndsWithComment && isNextLineStartsWithComment) {
+      if (text.charAt(end) == '*' && end < text.length() && text.charAt(end + 1) != '/') {
+        end++;
+        while (end < doc.getTextLength() && (text.charAt(end) == ' ' || text.charAt(end) == '\t'))         end++;
+      }
+ else       if (text.charAt(end) == '/') {
+        end+=2;
+        while (end < doc.getTextLength() && (text.charAt(end) == ' ' || text.charAt(end) == '\t'))         end++;
+      }
+      doc.replaceString(start == lineEndOffset ? start : start + 1,end," ");
+      continue;
+    }
+    while (end < doc.getTextLength() && (text.charAt(end) == ' ' || text.charAt(end) == '\t'))     end++;
+    doc.replaceString(start == lineEndOffset ? start : start + 1,end," ");
+    if (start <= doc.getLineStartOffset(startLine)) {
+      try {
+        docManager.commitDocument(doc);
+        CodeStyleManager.getInstance(project).adjustLineIndent(psiFile,doc.getLineStartOffset(startLine));
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+    int prevLineCount=doc.getLineCount();
+    docManager.commitDocument(doc);
+    try {
+      CodeStyleManager.getInstance(project).reformatText(psiFile,start + 1,end);
+    }
+ catch (    IncorrectOperationException e) {
+      LOG.error(e);
+    }
+    if (prevLineCount < doc.getLineCount()) {
+      docManager.doPostponedOperationsAndUnblockDocument(doc);
+      end=doc.getLineEndOffset(startLine) + doc.getLineSeparatorLength(startLine);
+      start=end - doc.getLineSeparatorLength(startLine);
+      int addedLinesCount=doc.getLineCount() - prevLineCount - 1;
+      while (end < doc.getTextLength() && (text.charAt(end) == ' ' || text.charAt(end) == '\t' || text.charAt(end) == '\n' && addedLinesCount > 0)) {
+        if (text.charAt(end) == '\n')         addedLinesCount--;
+        end++;
+      }
+      doc.replaceString(start,end," ");
+    }
+    docManager.commitDocument(doc);
+  }
+  docManager.commitDocument(doc);
+  if (editor.getSelectionModel().hasSelection()) {
+    editor.getCaretModel().moveToOffset(editor.getSelectionModel().getSelectionEnd());
+  }
+ else   if (caretRestoreOffset != CANNOT_JOIN) {
+    editor.getCaretModel().moveToOffset(caretRestoreOffset);
+    editor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    editor.getSelectionModel().removeSelection();
+  }
+}
