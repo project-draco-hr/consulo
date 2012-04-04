@@ -1,0 +1,62 @@
+{
+  GrExpression invoked=getInvokedExpression();
+  PsiType thisType=invoked.getType();
+  if (thisType == null)   return GroovyResolveResult.EMPTY_ARRAY;
+  GrArgumentList argList=getArgumentList();
+  if (argList == null)   return GroovyResolveResult.EMPTY_ARRAY;
+  PsiType[] argTypes=PsiUtil.getArgumentTypes(argList,true,upToArgument);
+  if (argTypes == null)   return GroovyResolveResult.EMPTY_ARRAY;
+  final PsiManager manager=getManager();
+  final GlobalSearchScope resolveScope=getResolveScope();
+  if (argTypes.length == 0) {
+    PsiType arrType=null;
+    if (invoked instanceof GrBuiltinTypeClassExpression) {
+      arrType=((GrBuiltinTypeClassExpression)invoked).getPrimitiveType();
+    }
+    if (invoked instanceof GrReferenceExpression) {
+      final PsiElement resolved=((GrReferenceExpression)invoked).resolve();
+      if (resolved instanceof PsiClass) {
+        String qname=((PsiClass)resolved).getQualifiedName();
+        if (qname != null) {
+          arrType=TypesUtil.createTypeByFQClassName(qname,this);
+        }
+      }
+    }
+    if (arrType != null) {
+      return GroovyResolveResult.EMPTY_ARRAY;
+    }
+  }
+  if (PsiImplUtil.isSimpleArrayAccess(thisType,argTypes,manager,resolveScope)) {
+    return GroovyResolveResult.EMPTY_ARRAY;
+  }
+  GroovyResolveResult[] candidates;
+  final String name;
+  if (PsiUtil.isLValue(this)) {
+    name="putAt";
+    if (!incompleteCode) {
+      argTypes=ArrayUtil.append(argTypes,TypeInferenceHelper.getInitializerFor(this),PsiType.class);
+    }
+  }
+ else {
+    name="getAt";
+  }
+  candidates=ResolveUtil.getMethodCandidates(thisType,name,this,true,incompleteCode,false,argTypes);
+  if (candidates.length == 2) {
+    for (int i=0; i < candidates.length; i++) {
+      GroovyResolveResult candidate=candidates[i];
+      final PsiElement element=candidate.getElement();
+      if (element instanceof GrGdkMethod) {
+        final PsiMethod staticMethod=((GrGdkMethod)element).getStaticMethod();
+        final PsiParameter param=staticMethod.getParameterList().getParameters()[0];
+        if (param.getType().equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
+          return new GroovyResolveResult[]{candidates[1 - i]};
+        }
+      }
+    }
+  }
+  if (candidates.length != 1) {
+    final GrTupleType tupleType=new GrTupleType(argTypes,JavaPsiFacade.getInstance(getProject()),resolveScope);
+    candidates=ResolveUtil.getMethodCandidates(thisType,name,this,tupleType);
+  }
+  return candidates;
+}
