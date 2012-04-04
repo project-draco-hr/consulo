@@ -1,0 +1,63 @@
+{
+  Collection<PsiClassType> unhandledExceptions=null;
+  if (element instanceof PsiCallExpression) {
+    PsiCallExpression expression=(PsiCallExpression)element;
+    unhandledExceptions=getUnhandledExceptions(expression,topElement,includeSelfCalls);
+  }
+ else   if (element instanceof PsiThrowStatement) {
+    PsiThrowStatement statement=(PsiThrowStatement)element;
+    unhandledExceptions=getUnhandledExceptions(statement,topElement);
+  }
+ else   if (element instanceof PsiCodeBlock && element.getParent() instanceof PsiMethod && ((PsiMethod)element.getParent()).isConstructor()&& !firstStatementIsConstructorCall((PsiCodeBlock)element)) {
+    final PsiMethod constructor=(PsiMethod)element.getParent();
+    final PsiClass aClass=constructor.getContainingClass();
+    final PsiClass superClass=aClass == null ? null : aClass.getSuperClass();
+    final PsiMethod[] superConstructors=superClass == null ? PsiMethod.EMPTY_ARRAY : superClass.getConstructors();
+    Set<PsiClassType> unhandled=new HashSet<PsiClassType>();
+    for (    PsiMethod superConstructor : superConstructors) {
+      if (!superConstructor.hasModifierProperty(PsiModifier.PRIVATE) && superConstructor.getParameterList().getParametersCount() == 0) {
+        final PsiClassType[] exceptionTypes=superConstructor.getThrowsList().getReferencedTypes();
+        for (        PsiClassType exceptionType : exceptionTypes) {
+          if (!isUncheckedException(exceptionType) && !isHandled(element,exceptionType,topElement)) {
+            unhandled.add(exceptionType);
+          }
+        }
+        break;
+      }
+    }
+    if (aClass != null) {
+      final PsiClassInitializer[] initializers=aClass.getInitializers();
+      final Set<PsiClassType> thrownByInitializer=new THashSet<PsiClassType>();
+      for (      PsiClassInitializer initializer : initializers) {
+        if (initializer.hasModifierProperty(PsiModifier.STATIC))         continue;
+        thrownByInitializer.clear();
+        collectUnhandledExceptions(initializer.getBody(),initializer,thrownByInitializer,includeSelfCalls);
+        for (        PsiClassType thrown : thrownByInitializer) {
+          if (!isHandled(constructor.getBody(),thrown,topElement)) {
+            unhandled.add(thrown);
+          }
+        }
+      }
+    }
+    unhandledExceptions=unhandled;
+  }
+  if (element instanceof PsiResourceVariable) {
+    final List<PsiClassType> unhandled=getUnhandledCloserExceptions((PsiResourceVariable)element,topElement);
+    if (unhandledExceptions == null) {
+      unhandledExceptions=unhandled;
+    }
+ else {
+      unhandledExceptions.addAll(unhandled);
+    }
+  }
+  if (unhandledExceptions != null) {
+    if (foundExceptions == null) {
+      foundExceptions=new THashSet<PsiClassType>();
+    }
+    foundExceptions.addAll(unhandledExceptions);
+  }
+  for (PsiElement child=element.getFirstChild(); child != null; child=child.getNextSibling()) {
+    foundExceptions=collectUnhandledExceptions(child,topElement,foundExceptions,includeSelfCalls);
+  }
+  return foundExceptions;
+}
