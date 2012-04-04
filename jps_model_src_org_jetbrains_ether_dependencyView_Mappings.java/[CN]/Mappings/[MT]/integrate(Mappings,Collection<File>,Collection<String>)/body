@@ -4,7 +4,7 @@ synchronized (myLock) {
       delta.runPostPasses();
       if (removed != null) {
         for (        String file : removed) {
-          final DependencyContext.S key=myContext.get(file);
+          final int key=myContext.get(file);
           final Set<ClassRepr> classes=(Set<ClassRepr>)mySourceFileToClasses.get(key);
           final Collection<UsageRepr.Cluster> clusters=mySourceFileToUsages.get(key);
           if (classes != null) {
@@ -12,7 +12,7 @@ synchronized (myLock) {
               myClassToSubclasses.remove(cr.name);
               myClassToSourceFile.remove(cr.name);
               myClassToClassDependency.remove(cr.name);
-              for (              DependencyContext.S superSomething : cr.getSupers()) {
+              for (              int superSomething : cr.getSupers()) {
                 myClassToSubclasses.removeFrom(superSomething,cr.name);
               }
               if (clusters != null) {
@@ -21,7 +21,7 @@ synchronized (myLock) {
                   if (usages != null) {
                     for (                    UsageRepr.Usage u : usages) {
                       if (u instanceof UsageRepr.ClassUsage) {
-                        final Set<DependencyContext.S> residents=cluster.getResidence(u);
+                        final TIntHashSet residents=cluster.getResidence(u);
                         if (residents != null && residents.contains(cr.name)) {
                           myClassToClassDependency.removeFrom(((UsageRepr.ClassUsage)u).className,cr.name);
                         }
@@ -38,45 +38,53 @@ synchronized (myLock) {
         }
       }
       if (delta.isDifferentiated()) {
-        for (        DependencyContext.S c : delta.getChangedClasses()) {
-          final Collection<DependencyContext.S> subClasses=delta.myClassToSubclasses.get(c);
-          if (subClasses != null) {
-            myClassToSubclasses.replace(c,subClasses);
-          }
+        delta.getChangedClasses().forEach(new TIntProcedure(){
+          @Override public boolean execute(          int c){
+            final TIntHashSet subClasses=delta.myClassToSubclasses.get(c);
+            if (subClasses != null) {
+              myClassToSubclasses.replace(c,subClasses);
+            }
  else {
-            myClassToSubclasses.remove(c);
-          }
-          final DependencyContext.S sourceFile=delta.myClassToSourceFile.get(c);
-          if (sourceFile != null) {
-            myClassToSourceFile.put(c,sourceFile);
-          }
+              myClassToSubclasses.remove(c);
+            }
+            final int sourceFile=delta.myClassToSourceFile.get(c);
+            if (sourceFile > 0) {
+              myClassToSourceFile.put(c,sourceFile);
+            }
  else {
-            myClassToSourceFile.remove(c);
+              myClassToSourceFile.remove(c);
+            }
+            return true;
           }
         }
-        for (        DependencyContext.S f : delta.getChangedFiles()) {
-          final Collection<ClassRepr> classes=delta.mySourceFileToClasses.get(f);
-          if (classes != null) {
-            mySourceFileToClasses.replace(f,classes);
-          }
+);
+        delta.getChangedFiles().forEach(new TIntProcedure(){
+          @Override public boolean execute(          int f){
+            final Collection<ClassRepr> classes=delta.mySourceFileToClasses.get(f);
+            if (classes != null) {
+              mySourceFileToClasses.replace(f,classes);
+            }
  else {
-            mySourceFileToClasses.remove(f);
-          }
-          final Collection<UsageRepr.Cluster> clusters=delta.mySourceFileToUsages.get(f);
-          if (clusters != null) {
-            mySourceFileToUsages.replace(f,clusters);
-          }
+              mySourceFileToClasses.remove(f);
+            }
+            final Collection<UsageRepr.Cluster> clusters=delta.mySourceFileToUsages.get(f);
+            if (clusters != null) {
+              mySourceFileToUsages.replace(f,clusters);
+            }
  else {
-            mySourceFileToUsages.remove(f);
-          }
-          final Collection<UsageRepr.Usage> usages=delta.mySourceFileToAnnotationUsages.get(f);
-          if (usages != null) {
-            mySourceFileToAnnotationUsages.replace(f,usages);
-          }
+              mySourceFileToUsages.remove(f);
+            }
+            final Collection<UsageRepr.Usage> usages=delta.mySourceFileToAnnotationUsages.get(f);
+            if (usages != null) {
+              mySourceFileToAnnotationUsages.replace(f,usages);
+            }
  else {
-            mySourceFileToAnnotationUsages.remove(f);
+              mySourceFileToAnnotationUsages.remove(f);
+            }
+            return true;
           }
         }
+);
       }
  else {
         myClassToSubclasses.putAll(delta.myClassToSubclasses);
@@ -85,33 +93,34 @@ synchronized (myLock) {
         mySourceFileToUsages.replaceAll(delta.mySourceFileToUsages);
         mySourceFileToAnnotationUsages.replaceAll(delta.mySourceFileToAnnotationUsages);
       }
-      final Collection<DependencyContext.S> compiledSet=new HashSet<DependencyContext.S>(compiled.size());
-      for (      File c : compiled) {
-        compiledSet.add(myContext.get(FileUtil.toSystemIndependentName(c.getAbsolutePath())));
-      }
-      final Collection<DependencyContext.S> changedClasses=delta.getChangedClasses();
-      for (      DependencyContext.S aClass : delta.myClassToClassDependency.keyCollection()) {
-        final Collection<DependencyContext.S> now=delta.myClassToClassDependency.get(aClass);
-        if (delta.isDifferentiated()) {
-          final boolean classChanged=changedClasses.contains(aClass);
-          final HashSet<DependencyContext.S> depClasses=new HashSet<DependencyContext.S>(now);
-          depClasses.retainAll(changedClasses);
-          if (!classChanged && depClasses.isEmpty()) {
-            continue;
+      final int[] compiledClasses=getClassNames(compiled);
+      final int[] changedClassesArray=delta.getChangedClasses().toArray();
+      delta.myClassToClassDependency.forEachEntry(new TIntObjectProcedure<TIntHashSet>(){
+        @Override public boolean execute(        int aClass,        TIntHashSet now){
+          if (delta.isDifferentiated()) {
+            final boolean classChanged=delta.getChangedClasses().contains(aClass);
+            final TIntHashSet depClasses=new TIntHashSet(DEFAULT_SET_CAPACITY,DEFAULT_SET_LOAD_FACTOR);
+            addAll(depClasses,now);
+            depClasses.retainAll(changedClassesArray);
+            if (!classChanged && depClasses.isEmpty()) {
+              return true;
+            }
           }
-        }
-        final Collection<DependencyContext.S> past=myClassToClassDependency.get(aClass);
-        if (past == null) {
-          myClassToClassDependency.put(aClass,now);
-        }
+          final TIntHashSet past=myClassToClassDependency.get(aClass);
+          if (past == null) {
+            myClassToClassDependency.put(aClass,now);
+          }
  else {
-          boolean changed=past.removeAll(compiledSet);
-          changed|=past.addAll(now);
-          if (changed) {
-            myClassToClassDependency.replace(aClass,past);
+            boolean changed=past.removeAll(compiledClasses);
+            changed|=addAll(past,now);
+            if (changed) {
+              myClassToClassDependency.replace(aClass,past);
+            }
           }
+          return true;
         }
       }
+);
     }
   finally {
       delta.close();
