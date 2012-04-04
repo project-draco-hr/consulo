@@ -16,10 +16,27 @@ synchronized (myLock) {
         }
       }
     }
-    for (    DependencyContext.S fileName : delta.mySourceFileToClasses.keyCollection()) {
-      final Set<ClassRepr> classes=(Set<ClassRepr>)delta.mySourceFileToClasses.get(fileName);
+class FileClasses {
+      final int fileName;
+      final Set<ClassRepr> fileClasses;
+      FileClasses(      int fileName,      Collection<ClassRepr> fileClasses){
+        this.fileName=fileName;
+        this.fileClasses=new HashSet<ClassRepr>(fileClasses);
+      }
+    }
+    final List<FileClasses> newClasses=new ArrayList<FileClasses>();
+    delta.mySourceFileToClasses.forEachEntry(new TIntObjectProcedure<Collection<ClassRepr>>(){
+      @Override public boolean execute(      int fileName,      Collection<ClassRepr> classes){
+        newClasses.add(new FileClasses(fileName,classes));
+        return true;
+      }
+    }
+);
+    for (    FileClasses compiledFile : newClasses) {
+      final int fileName=compiledFile.fileName;
+      final Set<ClassRepr> classes=compiledFile.fileClasses;
       final Set<ClassRepr> pastClasses=(Set<ClassRepr>)mySourceFileToClasses.get(fileName);
-      final Set<DependencyContext.S> dependants=new HashSet<DependencyContext.S>();
+      final TIntHashSet dependants=new TIntHashSet(DEFAULT_SET_CAPACITY,DEFAULT_SET_LOAD_FACTOR);
       final Set<UsageRepr.Usage> affectedUsages=new HashSet<UsageRepr.Usage>();
       final Set<UsageRepr.AnnotationUsage> annotationQuery=new HashSet<UsageRepr.AnnotationUsage>();
       final Map<UsageRepr.Usage,Util.UsageConstraint> usageConstraints=new HashMap<UsageRepr.Usage,Util.UsageConstraint>();
@@ -106,7 +123,7 @@ synchronized (myLock) {
           debug("End of annotation-specific analysis");
         }
         debug("Processing added methods: ");
-        for (        MethodRepr m : diff.methods().added()) {
+        for (        final MethodRepr m : diff.methods().added()) {
           debug("Method: ",m.name);
           if (it.isAnnotation()) {
             debug("Class is annotation, skipping method analysis");
@@ -116,8 +133,8 @@ synchronized (myLock) {
             debug("Class is abstract, or is interface, or added method in abstract => affecting all subclasses");
             u.affectSubclasses(it.name,affectedFiles,affectedUsages,dependants,false);
           }
-          Collection<DependencyContext.S> propagated=null;
-          if ((m.access & Opcodes.ACC_PRIVATE) == 0 && !m.name.equals(myInitName)) {
+          TIntHashSet propagated=null;
+          if ((m.access & Opcodes.ACC_PRIVATE) == 0 && m.name != myInitName) {
             final ClassRepr oldIt=getReprByName(it.name);
             if (oldIt != null && self.findOverridenMethods(m,oldIt).size() > 0) {
             }
@@ -156,8 +173,8 @@ synchronized (myLock) {
                   debug("Current method overrides that found");
                   final Option<Boolean> subtypeOf=u.isSubtypeOf(mm.type,m.type);
                   if (weakerAccess(mm.access,m.access) || ((m.access & Opcodes.ACC_STATIC) > 0 && (mm.access & Opcodes.ACC_STATIC) == 0) || ((m.access & Opcodes.ACC_STATIC) == 0 && (mm.access & Opcodes.ACC_STATIC) > 0)|| ((m.access & Opcodes.ACC_FINAL) > 0)|| !m.exceptions.equals(mm.exceptions)|| (subtypeOf.isNone() || !subtypeOf.value())|| !empty(mm.signature)|| !empty(m.signature)) {
-                    final DependencyContext.S file=myClassToSourceFile.get(cc.name);
-                    if (file != null) {
+                    final int file=myClassToSourceFile.get(cc.name);
+                    if (file > 0) {
                       final String f=myContext.getValue(file);
                       debug("Complex condition is satisfied, affecting file ",f);
                       affectedFiles.add(new File(f));
@@ -166,11 +183,11 @@ synchronized (myLock) {
                 }
  else {
                   debug("Current method does not override that found");
-                  final Collection<DependencyContext.S> yetPropagated=self.propagateMethodAccess(mm.name,it.name);
+                  final TIntHashSet yetPropagated=self.propagateMethodAccess(mm.name,it.name);
                   if (inheritorOf.isValue() && inheritorOf.value()) {
-                    final Collection<DependencyContext.S> deps=myClassToClassDependency.get(cc.name);
+                    final TIntHashSet deps=myClassToClassDependency.get(cc.name);
                     if (deps != null) {
-                      dependants.addAll(deps);
+                      addAll(dependants,deps);
                     }
                     u.affectMethodUsages(mm,yetPropagated,mm.createUsage(myContext,cc.name),affectedUsages,dependants);
                   }
@@ -179,29 +196,33 @@ synchronized (myLock) {
                 }
               }
             }
-            final Collection<DependencyContext.S> subClasses=getAllSubclasses(it.name);
+            final TIntHashSet subClasses=getAllSubclasses(it.name);
             if (subClasses != null) {
-              for (              final DependencyContext.S subClass : subClasses) {
-                final ClassRepr r=u.reprByName(subClass);
-                final DependencyContext.S sourceFileName=myClassToSourceFile.get(subClass);
-                if (r != null && sourceFileName != null) {
-                  final DependencyContext.S outerClass=r.outerClassName;
-                  if (u.methodVisible(outerClass,m)) {
-                    final String f=myContext.getValue(sourceFileName);
-                    debug("Affecting file due to local overriding: ",f);
-                    affectedFiles.add(new File(f));
+              subClasses.forEach(new TIntProcedure(){
+                @Override public boolean execute(                int subClass){
+                  final ClassRepr r=u.reprByName(subClass);
+                  final int sourceFileName=myClassToSourceFile.get(subClass);
+                  if (r != null && sourceFileName > 0) {
+                    final int outerClass=r.outerClassName;
+                    if (u.methodVisible(outerClass,m)) {
+                      final String f=myContext.getValue(sourceFileName);
+                      debug("Affecting file due to local overriding: ",f);
+                      affectedFiles.add(new File(f));
+                    }
                   }
+                  return true;
                 }
               }
+);
             }
           }
         }
         debug("End of added methods processing");
         debug("Processing removed methods:");
-        for (        MethodRepr m : diff.methods().removed()) {
+        for (        final MethodRepr m : diff.methods().removed()) {
           debug("Method ",m.name);
           final Collection<Pair<MethodRepr,ClassRepr>> overridenMethods=u.findOverridenMethods(m,it);
-          final Collection<DependencyContext.S> propagated=u.propagateMethodAccess(m.name,it.name);
+          final TIntHashSet propagated=u.propagateMethodAccess(m.name,it.name);
           if (overridenMethods.size() == 0) {
             debug("No overridden methods found, affecting method usages");
             u.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),affectedUsages,dependants);
@@ -222,45 +243,49 @@ synchronized (myLock) {
           }
           final Collection<Pair<MethodRepr,ClassRepr>> overriding=u.findOverridingMethods(m,it,false);
           for (          final Pair<MethodRepr,ClassRepr> p : overriding) {
-            final DependencyContext.S fName=myClassToSourceFile.get(p.second.name);
+            final int fName=myClassToSourceFile.get(p.second.name);
             affectedFiles.add(new File(myContext.getValue(fName)));
           }
           if ((m.access & Opcodes.ACC_ABSTRACT) == 0) {
-            for (            DependencyContext.S p : propagated) {
-              if (!p.equals(it.name)) {
-                final ClassRepr s=u.reprByName(p);
-                if (s != null) {
-                  final Collection<Pair<MethodRepr,ClassRepr>> overridenInS=u.findOverridenMethods(m,s);
-                  overridenInS.addAll(overridenMethods);
-                  boolean allAbstract=true;
-                  boolean visited=false;
-                  for (                  Pair<MethodRepr,ClassRepr> pp : overridenInS) {
-                    final ClassRepr cc=pp.second;
-                    if (cc == myMockClass) {
+            propagated.forEach(new TIntProcedure(){
+              @Override public boolean execute(              int p){
+                if (p != it.name) {
+                  final ClassRepr s=u.reprByName(p);
+                  if (s != null) {
+                    final Collection<Pair<MethodRepr,ClassRepr>> overridenInS=u.findOverridenMethods(m,s);
+                    overridenInS.addAll(overridenMethods);
+                    boolean allAbstract=true;
+                    boolean visited=false;
+                    for (                    Pair<MethodRepr,ClassRepr> pp : overridenInS) {
+                      final ClassRepr cc=pp.second;
+                      if (cc == myMockClass) {
+                        visited=true;
+                        continue;
+                      }
+                      if (cc.name == it.name) {
+                        continue;
+                      }
                       visited=true;
-                      continue;
+                      allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((cc.access & Opcodes.ACC_INTERFACE) > 0);
+                      if (!allAbstract) {
+                        break;
+                      }
                     }
-                    if (cc.name.equals(it.name)) {
-                      continue;
-                    }
-                    visited=true;
-                    allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((cc.access & Opcodes.ACC_INTERFACE) > 0);
-                    if (!allAbstract) {
-                      break;
-                    }
-                  }
-                  if (allAbstract && visited) {
-                    final DependencyContext.S source=myClassToSourceFile.get(p);
-                    if (source != null) {
-                      final String f=myContext.getValue(source);
-                      debug("Removed method is not abstract & overrides some abstract method which is not then over-overriden in subclass ",p);
-                      debug("Affecting subclass source file ",f);
-                      affectedFiles.add(new File(f));
+                    if (allAbstract && visited) {
+                      final int source=myClassToSourceFile.get(p);
+                      if (source > 0) {
+                        final String f=myContext.getValue(source);
+                        debug("Removed method is not abstract & overrides some abstract method which is not then over-overriden in subclass ",p);
+                        debug("Affecting subclass source file ",f);
+                        affectedFiles.add(new File(f));
+                      }
                     }
                   }
                 }
+                return true;
               }
             }
+);
           }
         }
         debug("End of removed methods processing");
@@ -273,13 +298,13 @@ synchronized (myLock) {
           if (it.isAnnotation()) {
             if (d.defaultRemoved()) {
               debug("Class is annotation, default value is removed => adding annotation query");
-              final List<DependencyContext.S> l=new LinkedList<DependencyContext.S>();
+              final TIntHashSet l=new TIntHashSet(DEFAULT_SET_CAPACITY,DEFAULT_SET_LOAD_FACTOR);
               l.add(m.name);
               annotationQuery.add((UsageRepr.AnnotationUsage)UsageRepr.createAnnotationUsage(myContext,TypeRepr.createClassType(myContext,it.name),l,null));
             }
           }
  else           if (d.base() != Difference.NONE || throwsChanged) {
-            final Collection<DependencyContext.S> propagated=u.propagateMethodAccess(m.name,it.name);
+            final TIntHashSet propagated=u.propagateMethodAccess(m.name,it.name);
             boolean affected=false;
             boolean constrained=false;
             final Set<UsageRepr.Usage> usages=new HashSet<UsageRepr.Usage>();
@@ -336,38 +361,42 @@ synchronized (myLock) {
         debug("End of changed methods processing");
         final int mask=Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
         debug("Processing added fields");
-        for (        FieldRepr f : diff.fields().added()) {
+        for (        final FieldRepr f : diff.fields().added()) {
           debug("Field: ",f.name);
           final boolean fPrivate=(f.access & Opcodes.ACC_PRIVATE) > 0;
           final boolean fProtected=(f.access & Opcodes.ACC_PROTECTED) > 0;
           final boolean fPublic=(f.access & Opcodes.ACC_PUBLIC) > 0;
           final boolean fPLocal=!fPrivate && !fProtected && !fPublic;
           if (!fPrivate) {
-            final Collection<DependencyContext.S> subClasses=getAllSubclasses(it.name);
-            for (            final DependencyContext.S subClass : subClasses) {
-              final ClassRepr r=u.reprByName(subClass);
-              final DependencyContext.S sourceFileName=myClassToSourceFile.get(subClass);
-              if (r != null && sourceFileName != null) {
-                if (r.isLocal) {
-                  debug("Affecting local subclass (introduced field can potentially hide surrounding method parameters/local variables): ",sourceFileName);
-                  affectedFiles.add(new File(myContext.getValue(sourceFileName)));
-                }
- else {
-                  final DependencyContext.S outerClass=r.outerClassName;
-                  if (!empty(outerClass) && u.fieldVisible(outerClass,f)) {
-                    debug("Affecting inner subclass (introduced field can potentially hide surrounding class fields): ",sourceFileName);
+            final TIntHashSet subClasses=getAllSubclasses(it.name);
+            subClasses.forEach(new TIntProcedure(){
+              @Override public boolean execute(              int subClass){
+                final ClassRepr r=u.reprByName(subClass);
+                final int sourceFileName=myClassToSourceFile.get(subClass);
+                if (r != null && sourceFileName > 0) {
+                  if (r.isLocal) {
+                    debug("Affecting local subclass (introduced field can potentially hide surrounding method parameters/local variables): ",sourceFileName);
                     affectedFiles.add(new File(myContext.getValue(sourceFileName)));
                   }
+ else {
+                    final int outerClass=r.outerClassName;
+                    if (!empty(outerClass) && u.fieldVisible(outerClass,f)) {
+                      debug("Affecting inner subclass (introduced field can potentially hide surrounding class fields): ",sourceFileName);
+                      affectedFiles.add(new File(myContext.getValue(sourceFileName)));
+                    }
+                  }
                 }
-              }
-              debug("Affecting field usages referenced from subclass ",subClass);
-              final Collection<DependencyContext.S> propagated=u.propagateFieldAccess(f.name,subClass);
-              u.affectFieldUsages(f,propagated,f.createUsage(myContext,subClass),affectedUsages,dependants);
-              final Collection<DependencyContext.S> deps=myClassToClassDependency.get(subClass);
-              if (deps != null) {
-                dependants.addAll(deps);
+                debug("Affecting field usages referenced from subclass ",subClass);
+                final TIntHashSet propagated=u.propagateFieldAccess(f.name,subClass);
+                u.affectFieldUsages(f,propagated,f.createUsage(myContext,subClass),affectedUsages,dependants);
+                final TIntHashSet deps=myClassToClassDependency.get(subClass);
+                if (deps != null) {
+                  addAll(dependants,deps);
+                }
+                return true;
               }
             }
+);
           }
           final Collection<Pair<FieldRepr,ClassRepr>> overridden=u.findOverridenFields(f,it);
           for (          Pair<FieldRepr,ClassRepr> p : overridden) {
@@ -378,7 +407,7 @@ synchronized (myLock) {
             final boolean ffPublic=(ff.access & Opcodes.ACC_PUBLIC) > 0;
             final boolean ffPLocal=isPackageLocal(ff.access);
             if (!ffPrivate) {
-              final Collection<DependencyContext.S> propagated=o.propagateFieldAccess(ff.name,cc.name);
+              final TIntHashSet propagated=o.propagateFieldAccess(ff.name,cc.name);
               final Set<UsageRepr.Usage> localUsages=new HashSet<UsageRepr.Usage>();
               debug("Affecting usages of overridden field in class ",cc.name);
               u.affectFieldUsages(ff,propagated,ff.createUsage(myContext,cc.name),localUsages,dependants);
@@ -414,7 +443,7 @@ synchronized (myLock) {
               return false;
             }
           }
-          final Collection<DependencyContext.S> propagated=u.propagateFieldAccess(f.name,it.name);
+          final TIntHashSet propagated=u.propagateFieldAccess(f.name,it.name);
           u.affectFieldUsages(f,propagated,f.createUsage(myContext,it.name),affectedUsages,dependants);
         }
         debug("End of removed fields processing");
@@ -433,7 +462,7 @@ synchronized (myLock) {
             }
           }
           if (d.base() != Difference.NONE) {
-            final Collection<DependencyContext.S> propagated=u.propagateFieldAccess(field.name,it.name);
+            final TIntHashSet propagated=u.propagateFieldAccess(field.name,it.name);
             if ((d.base() & Difference.TYPE) > 0 || (d.base() & Difference.SIGNATURE) > 0) {
               debug("Type or signature changed --- affecting field usages");
               u.affectFieldUsages(field,propagated,field.createUsage(myContext,it.name),affectedUsages,dependants);
@@ -485,28 +514,36 @@ synchronized (myLock) {
       debug("Processing added classes:");
       for (      ClassRepr c : classDiff.added()) {
         delta.addChangedClass(c.name);
-        final Collection<DependencyContext.S> depClasses=myClassToClassDependency.get(c.name);
+        final TIntHashSet depClasses=myClassToClassDependency.get(c.name);
         if (depClasses != null) {
-          for (          DependencyContext.S depClass : depClasses) {
-            final DependencyContext.S fName=myClassToSourceFile.get(depClass);
-            if (fName != null) {
-              final String f=myContext.getValue(fName);
-              debug("Adding dependent file ",f);
-              affectedFiles.add(new File(f));
+          depClasses.forEach(new TIntProcedure(){
+            @Override public boolean execute(            int depClass){
+              final int fName=myClassToSourceFile.get(depClass);
+              if (fName > 0) {
+                final String f=myContext.getValue(fName);
+                debug("Adding dependent file ",f);
+                affectedFiles.add(new File(f));
+              }
+              return true;
             }
           }
+);
         }
       }
       debug("End of added classes processing.");
       debug("Checking dependent files:");
-      final Set<DependencyContext.S> dependentFiles=new HashSet<DependencyContext.S>();
-      for (      DependencyContext.S depClass : dependants) {
-        final DependencyContext.S file=myClassToSourceFile.get(depClass);
-        if (file != null) {
-          dependentFiles.add(file);
+      final TIntHashSet dependentFiles=new TIntHashSet(DEFAULT_SET_CAPACITY,DEFAULT_SET_LOAD_FACTOR);
+      dependants.forEach(new TIntProcedure(){
+        @Override public boolean execute(        int depClass){
+          final int file=myClassToSourceFile.get(depClass);
+          if (file > 0) {
+            dependentFiles.add(file);
+          }
+          return true;
         }
       }
-      filewise:       for (      DependencyContext.S depFile : dependentFiles) {
+);
+      filewise:       for (      int depFile : dependentFiles.toArray()) {
         final File theFile=new File(myContext.getValue(depFile));
         if (affectedFiles.contains(theFile) || compiledFiles.contains(theFile)) {
           continue filewise;
@@ -530,8 +567,8 @@ synchronized (myLock) {
                   continue filewise;
                 }
  else {
-                  final Set<DependencyContext.S> residenceClasses=depCluster.getResidence(usage);
-                  for (                  DependencyContext.S residentName : residenceClasses) {
+                  final TIntHashSet residenceClasses=depCluster.getResidence(usage);
+                  for (                  int residentName : residenceClasses.toArray()) {
                     if (constraint.checkResidence(residentName)) {
                       debug("Added file with satisfied constraint");
                       affectedFiles.add(theFile);

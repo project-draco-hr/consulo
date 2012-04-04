@@ -1,37 +1,41 @@
 {
   return new Callbacks.Backend(){
     public Collection<String> getClassFiles(){
-      final HashSet<String> result=new HashSet<String>();
+      final Set<String> result=new HashSet<String>();
 synchronized (myLock) {
-        for (        DependencyContext.S s : myClassToSourceFile.keyCollection()) {
-          result.add(myContext.getValue(s));
+        myClassToSourceFile.forEachEntry(new TIntIntProcedure(){
+          @Override public boolean execute(          int s,          int b){
+            result.add(myContext.getValue(s));
+            return true;
+          }
         }
+);
       }
       return result;
     }
     public void associate(    final String classFileName,    final Callbacks.SourceFileNameLookup sourceFileName,    final ClassReader cr){
 synchronized (myLock) {
-        final DependencyContext.S classFileNameS=myContext.get(classFileName);
+        final int classFileNameS=myContext.get(classFileName);
         final Pair<ClassRepr,Pair<UsageRepr.Cluster,Set<UsageRepr.Usage>>> result=new ClassfileAnalyzer(myContext).analyze(classFileNameS,cr);
         final ClassRepr repr=result.first;
         final UsageRepr.Cluster localUsages=result.second.first;
         final Set<UsageRepr.Usage> localAnnotationUsages=result.second.second;
         final String srcFileName=sourceFileName.get(repr == null ? null : myContext.getValue(repr.getSourceFileName()));
-        final DependencyContext.S sourceFileNameS=myContext.get(srcFileName);
+        final int sourceFileNameS=myContext.get(srcFileName);
         if (repr != null) {
-          final DependencyContext.S className=repr.name;
+          final int className=repr.name;
           myClassToSourceFile.put(repr.name,sourceFileNameS);
           mySourceFileToClasses.put(sourceFileNameS,repr);
-          for (          DependencyContext.S s : repr.getSupers()) {
+          for (          int s : repr.getSupers()) {
             myClassToSubclasses.put(s,repr.name);
           }
           for (          UsageRepr.Usage u : localUsages.getUsages()) {
-            final DependencyContext.S owner=u.getOwner();
-            if (!owner.equals(className)) {
-              final DependencyContext.S sourceFile=repr.getSourceFileName();
-              final DependencyContext.S ownerSourceFile=myClassToSourceFile.get(owner);
-              if (ownerSourceFile != null) {
-                if (!ownerSourceFile.equals(sourceFile)) {
+            final int owner=u.getOwner();
+            if (owner != className) {
+              final int sourceFile=repr.getSourceFileName();
+              final int ownerSourceFile=myClassToSourceFile.get(owner);
+              if (ownerSourceFile > 0) {
+                if (ownerSourceFile != sourceFile) {
                   myClassToClassDependency.put(owner,className);
                 }
               }
@@ -59,15 +63,15 @@ synchronized (myLock) {
       }
       addPostPass(new PostPass(){
         public void perform(){
-          final DependencyContext.S rootClassName=myContext.get(className.replace(".","/"));
-          final DependencyContext.S fileName=myClassToSourceFile.get(rootClassName);
+          final int rootClassName=myContext.get(className.replace(".","/"));
+          final int fileName=myClassToSourceFile.get(rootClassName);
           for (          final String i : imports) {
             if (i.endsWith("*")) {
               continue;
             }
-            final DependencyContext.S iname=myContext.get(i.replace(".","/"));
+            final int iname=myContext.get(i.replace(".","/"));
             myClassToClassDependency.put(iname,rootClassName);
-            if (fileName != null) {
+            if (fileName > 0) {
               final UsageRepr.Cluster cluster=new UsageRepr.Cluster();
               cluster.addUsage(rootClassName,UsageRepr.createClassUsage(myContext,iname));
               mySourceFileToUsages.put(fileName,cluster);
