@@ -1,31 +1,31 @@
 {
-  return new LocalPathIndifferentOperation(new AdminReaderOnStoredRepositoryPath(adminWriter),environment){
+  final LocalPathIndifferentOperation operation=new LocalPathIndifferentOperation(new AdminReaderOnStoredRepositoryPath(adminWriter),environment){
     private boolean myIsInModule=false;
-    protected Command createCommand(    CvsRootProvider root,    CvsExecutionEnvironment cvsExecutionEnvironment){
-      CheckoutCommand result=new CheckoutCommand(null);
+    @Override protected Command createCommand(    CvsRootProvider root,    CvsExecutionEnvironment cvsExecutionEnvironment){
+      final CheckoutCommand result=new CheckoutCommand(null);
       result.addModule(moduleName);
       result.setRecursive(true);
       return result;
     }
-    protected ILocalFileReader createLocalFileReader(){
+    @Override protected ILocalFileReader createLocalFileReader(){
       return ConstantLocalFileReader.FOR_EXISTING_FILE;
     }
-    protected String getOperationName(){
+    @Override protected String getOperationName(){
       return "checkout";
     }
-    protected ILocalFileWriter createLocalFileWriter(    String cvsRoot,    UpdatedFilesManager mergedFilesCollector,    CvsExecutionEnvironment cvsExecutionEnvironment){
+    @Override protected ILocalFileWriter createLocalFileWriter(    String cvsRoot,    UpdatedFilesManager mergedFilesCollector,    CvsExecutionEnvironment cvsExecutionEnvironment){
       return DeafLocalFileWriter.INSTANCE;
     }
-    public void messageSent(    String message,    final byte[] byteMessage,    boolean error,    boolean tagged){
+    @Override public void messageSent(    String message,    final byte[] byteMessage,    boolean error,    boolean tagged){
       super.messageSent(message,byteMessage,error,tagged);
-      myDirectoryContentListener.setModulePath(myAdminWriterStoringRepositoryPath.getModulePath());
+      myStreamingDirectoryContentListener.setModulePath(myAdminWriterStoringRepositoryPath.getModulePath());
       final Matcher matcher=UPDATING_PATTERN.matcher(message);
       if (matcher.matches()) {
         if (myModuleLocation != null && myModuleLocation.equals(matcher.group(1))) {
           myIsInModule=true;
         }
  else {
-          myDirectoryContentListener.messageSent(message);
+          myStreamingDirectoryContentListener.messageSent(message);
           myIsInModule=false;
         }
       }
@@ -33,13 +33,34 @@
         myIsInModule=true;
       }
       if (myIsInModule) {
-        myDirectoryContentListener.messageSent(message);
+        myStreamingDirectoryContentListener.messageSent(message);
+      }
+      final DirectoryContent streamingDirectoryContent=myStreamingDirectoryContentListener.getDirectoryContent();
+      if (myStreamingListener != null) {
+        final long timePassed=System.currentTimeMillis() - timeStamp;
+        if (streamingDirectoryContent.getTotalSize() > 0 && timePassed > 25L) {
+          myStreamingListener.consume(streamingDirectoryContent);
+          final DirectoryContentListener newListener=new DirectoryContentListener();
+          newListener.setModuleName(myStreamingDirectoryContentListener.getModuleName());
+          myStreamingDirectoryContentListener=newListener;
+          timeStamp=System.currentTimeMillis();
+        }
+      }
+ else {
+        myDirectoryContentListener.getDirectoryContent().copyDataFrom(streamingDirectoryContent);
       }
     }
-    public void modifyOptions(    GlobalOptions options){
+    @Override public void modifyOptions(    GlobalOptions options){
       super.modifyOptions(options);
       options.setDoNoChanges(true);
     }
   }
 ;
+  operation.addFinishAction(new Runnable(){
+    @Override public void run(){
+      myStreamingListener.consume(myStreamingDirectoryContentListener.getDirectoryContent());
+    }
+  }
+);
+  return operation;
 }
