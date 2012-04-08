@@ -2,7 +2,8 @@
 synchronized (myLock) {
     try {
       delta.runPostPasses();
-      final IntIntMultiMaplet classDependenciesToRemove=new IntIntTransientMultiMaplet();
+      final IntIntMultiMaplet dependenciesTrashBin=new IntIntTransientMultiMaplet();
+      final IntIntMultiMaplet subclassesTrashBin=new IntIntTransientMultiMaplet();
       if (removed != null) {
         for (        final String file : removed) {
           final int fileName=myContext.get(file);
@@ -10,7 +11,7 @@ synchronized (myLock) {
           final Collection<UsageRepr.Cluster> fileUsages=mySourceFileToUsages.get(fileName);
           if (fileClasses != null) {
             for (            final ClassRepr aClass : fileClasses) {
-              cleanupRemovedClass(aClass,fileUsages,classDependenciesToRemove);
+              cleanupRemovedClass(aClass,fileUsages,subclassesTrashBin,dependenciesTrashBin);
             }
           }
           mySourceFileToClasses.remove(fileName);
@@ -20,8 +21,16 @@ synchronized (myLock) {
       }
       if (delta.myIsDifferentiated) {
         for (        ClassRepr repr : delta.getDeletedClasses()) {
-          cleanupRemovedClass(repr,null,classDependenciesToRemove);
+          cleanupRemovedClass(repr,null,subclassesTrashBin,dependenciesTrashBin);
         }
+        subclassesTrashBin.forEachEntry(new TIntObjectProcedure<TIntHashSet>(){
+          @Override public boolean execute(          int aClass,          TIntHashSet deps){
+            myClassToSubclasses.removeAll(aClass,deps);
+            return true;
+          }
+        }
+);
+        subclassesTrashBin.close();
         delta.getChangedClasses().forEach(new TIntProcedure(){
           @Override public boolean execute(          int className){
             final TIntHashSet subClasses=delta.myClassToSubclasses.get(className);
@@ -38,7 +47,7 @@ synchronized (myLock) {
  else {
               myClassToSourceFile.remove(className);
             }
-            cleanupBackDependency(className,null,classDependenciesToRemove);
+            cleanupBackDependency(className,null,dependenciesTrashBin);
             return true;
           }
         }
@@ -72,6 +81,14 @@ synchronized (myLock) {
 );
       }
  else {
+        subclassesTrashBin.forEachEntry(new TIntObjectProcedure<TIntHashSet>(){
+          @Override public boolean execute(          int aClass,          TIntHashSet deps){
+            myClassToSubclasses.removeAll(aClass,deps);
+            return true;
+          }
+        }
+);
+        subclassesTrashBin.close();
         myClassToSubclasses.putAll(delta.myClassToSubclasses);
         myClassToSourceFile.putAll(delta.myClassToSourceFile);
         mySourceFileToClasses.replaceAll(delta.mySourceFileToClasses);
@@ -79,31 +96,32 @@ synchronized (myLock) {
         mySourceFileToAnnotationUsages.replaceAll(delta.mySourceFileToAnnotationUsages);
       }
       final TIntHashSet affectedClasses=new TIntHashSet();
-      addAllKeys(affectedClasses,classDependenciesToRemove);
+      addAllKeys(affectedClasses,dependenciesTrashBin);
       addAllKeys(affectedClasses,delta.myClassToClassDependency);
       affectedClasses.forEach(new TIntProcedure(){
         @Override public boolean execute(        int aClass){
           final TIntHashSet now=delta.myClassToClassDependency.get(aClass);
-          final TIntHashSet toRemove=classDependenciesToRemove.get(aClass);
+          final TIntHashSet toRemove=dependenciesTrashBin.get(aClass);
+          final boolean hasDataToAdd=now != null && !now.isEmpty();
           if (toRemove != null && !toRemove.isEmpty()) {
-            final TIntHashSet past=myClassToClassDependency.get(aClass);
-            if (past != null && !past.isEmpty()) {
-              boolean changed=past.removeAll(toRemove.toArray());
-              if (now != null && !now.isEmpty()) {
-                changed|=past.addAll(now.toArray());
-              }
-              if (changed) {
-                myClassToClassDependency.replace(aClass,past);
+            final TIntHashSet current=myClassToClassDependency.get(aClass);
+            if (current != null && !current.isEmpty()) {
+              final TIntHashSet before=new TIntHashSet();
+              addAll(before,current);
+              final boolean removed=current.removeAll(toRemove.toArray());
+              final boolean added=hasDataToAdd && current.addAll(now.toArray());
+              if ((removed && !added) || (!removed && added) || !before.equals(current)) {
+                myClassToClassDependency.replace(aClass,current);
               }
             }
  else {
-              if (now != null && !now.isEmpty()) {
+              if (hasDataToAdd) {
                 myClassToClassDependency.put(aClass,now);
               }
             }
           }
  else {
-            if (now != null && !now.isEmpty()) {
+            if (hasDataToAdd) {
               myClassToClassDependency.put(aClass,now);
             }
           }
