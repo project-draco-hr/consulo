@@ -1,0 +1,49 @@
+{
+  if (!SystemInfo.isWindows) {
+    System.out.println("Ignored: Windows required");
+    return;
+  }
+  final Set<Character> roots=ContainerUtil.map2Set(File.listRoots(),new Function<File,Character>(){
+    @Override public Character fun(    File root){
+      return root.getPath().toLowerCase(Locale.US).charAt(0);
+    }
+  }
+);
+  char subst=0;
+  for (char c='e'; c <= 'z'; c++) {
+    if (!roots.contains(c)) {
+      subst=c;
+      break;
+    }
+  }
+  assertFalse("Occupied: " + roots.toString(),subst == 0);
+  final File targetDir=FileUtil.createTempDirectory("top.",null);
+  final File subDir=FileUtil.createTempDirectory(targetDir,"sub.",null);
+  final File file=FileUtil.createTempFile(subDir,"test.",".txt",true,false);
+  final int rv=new GeneralCommandLine("subst",subst + ":",targetDir.getAbsolutePath()).createProcess().waitFor();
+  assertEquals(0,rv);
+  final File substDir=new File((subst + ":\\").toUpperCase(Locale.US),subDir.getName());
+  final File substFile=new File(substDir,file.getName());
+  refresh(targetDir);
+  refresh(substDir);
+  final LocalFileSystem.WatchRequest request=watch(substDir);
+  try {
+    FileUtil.writeToFile(file,"new content");
+    assertEvent(VFileContentChangeEvent.class,substFile.getAbsolutePath());
+    final LocalFileSystem.WatchRequest request2=watch(targetDir);
+    try {
+      FileUtil.delete(file);
+      assertEvent(VFileDeleteEvent.class,file.getAbsolutePath(),substFile.getAbsolutePath());
+    }
+  finally {
+      unwatch(request2);
+    }
+    FileUtil.writeToFile(file,"re-creation");
+    assertEvent(VFileCreateEvent.class,substFile.getAbsolutePath());
+  }
+  finally {
+    myFileSystem.removeWatchedRoot(request);
+    new GeneralCommandLine("subst",subst + ":","/d").createProcess().waitFor();
+    FileUtil.delete(targetDir);
+  }
+}
