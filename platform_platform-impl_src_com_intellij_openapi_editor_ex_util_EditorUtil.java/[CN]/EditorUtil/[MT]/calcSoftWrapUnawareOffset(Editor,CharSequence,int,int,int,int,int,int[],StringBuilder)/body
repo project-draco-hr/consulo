@@ -1,0 +1,121 @@
+{
+  if (debugBuffer != null) {
+    debugBuffer.append(String.format("Starting calcSoftWrapUnawareOffset(). Target range: [%d; %d), target column number to map: %d, tab size: %d, " + "x: %d, current column: %d%n",start,end,columnNumber,tabSize,x,currentColumn[0]));
+  }
+  boolean useOptimization=true;
+  boolean hasNonTabs=false;
+  boolean hasTabs=false;
+  for (int i=start; i < end; i++) {
+    char c=text.charAt(i);
+    if (debugBuffer != null) {
+      debugBuffer.append(String.format("Found symbol '%c' at the offset %d%n",c,i));
+    }
+    if (c == '\t') {
+      hasTabs=true;
+      if (hasNonTabs) {
+        useOptimization=false;
+        break;
+      }
+    }
+ else {
+      hasNonTabs=true;
+    }
+  }
+  if (debugBuffer != null) {
+    debugBuffer.append(String.format("Has tabs: %b, use optimisation: %b%n",hasTabs,useOptimization));
+  }
+  if (editor == null || useOptimization) {
+    if (!hasTabs) {
+      int result=start + columnNumber - currentColumn[0];
+      if (result < end) {
+        return result;
+      }
+ else {
+        currentColumn[0]+=end - start;
+        if (debugBuffer != null) {
+          debugBuffer.append(String.format("Incrementing 'current column' by %d (new value is %d)%n",end - start,currentColumn[0]));
+        }
+        return -1;
+      }
+    }
+    int shift=0;
+    int offset=start;
+    int prevX=x;
+    if (debugBuffer != null) {
+      debugBuffer.append("Processing a string that contains only tabs\n");
+    }
+    for (; offset < end && offset + shift + currentColumn[0] < start + columnNumber; offset++) {
+      final char c=text.charAt(offset);
+      if (c == '\t') {
+        int nextX=nextTabStop(prevX,editor,tabSize);
+        final int columnsShift=columnsNumber(nextX - prevX,getSpaceWidth(Font.PLAIN,editor)) - 1;
+        if (debugBuffer != null) {
+          debugBuffer.append(String.format("Processing tabulation symbol at the offset %d. Current X: %d, new X: %d, current columns shift: %d, new column shift: %d%n",offset,prevX,nextX,shift,shift + columnsShift));
+        }
+        shift+=columnsShift;
+        prevX=nextX;
+      }
+    }
+    int diff=start + columnNumber - offset - shift - currentColumn[0];
+    if (debugBuffer != null)     debugBuffer.append(String.format("Resulting diff: %d%n",diff));
+    if (diff < 0) {
+      return offset - 1;
+    }
+ else     if (diff == 0) {
+      return offset;
+    }
+ else {
+      final int inc=offset - start + shift;
+      if (debugBuffer != null) {
+        debugBuffer.append(String.format("Incrementing 'current column' by %d (new value is %d)%n",inc,currentColumn[0] + inc));
+      }
+      currentColumn[0]+=inc;
+      return -1;
+    }
+  }
+  EditorEx editorImpl=(EditorEx)editor;
+  int offset=start;
+  IterationState state=new IterationState(editorImpl,start,end,false);
+  int column;
+  try {
+    int fontType=state.getMergedAttributes().getFontType();
+    column=currentColumn[0];
+    int spaceSize=getSpaceWidth(fontType,editorImpl);
+    for (; column < columnNumber && offset < end; offset++) {
+      if (offset >= state.getEndOffset()) {
+        state.advance();
+        fontType=state.getMergedAttributes().getFontType();
+      }
+      char c=text.charAt(offset);
+      if (c == '\t') {
+        int prevX=x;
+        final int newX=nextTabStop(x,editorImpl);
+        final int columns=columnsNumber(x - prevX,spaceSize);
+        if (debugBuffer != null) {
+          debugBuffer.append(String.format("Processing tabulation at the offset %d. Current X: %d, new X: %d, current column: %d, new column: %d%n",offset,x,newX,column,column + columns));
+        }
+        x=newX;
+        column+=columns;
+      }
+ else {
+        final int width=charWidth(c,fontType,editorImpl);
+        if (debugBuffer != null) {
+          debugBuffer.append(String.format("Processing symbol '%c' at the offset %d. Current X: %d, new X: %d%n",c,offset,x,x + width));
+        }
+        x+=width;
+        column++;
+      }
+    }
+  }
+  finally {
+    state.dispose();
+  }
+  if (column == columnNumber) {
+    return offset;
+  }
+  if (column > columnNumber && offset > 0 && text.charAt(offset - 1) == '\t') {
+    return offset - 1;
+  }
+  currentColumn[0]=column;
+  return -1;
+}
