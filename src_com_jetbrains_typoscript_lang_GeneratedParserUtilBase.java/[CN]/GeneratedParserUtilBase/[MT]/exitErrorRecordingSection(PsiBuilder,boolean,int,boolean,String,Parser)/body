@@ -1,0 +1,78 @@
+{
+  ErrorState state=ErrorState.get(builder_);
+  Frame frame=null;
+  int initialOffset=builder_.getCurrentOffset();
+  if (state.levelCheck.isEmpty() || key != (frame=state.levelCheck.removeLast()).level || !sectionType.equals(frame.section)) {
+    LOG.error("Unbalanced error section: got " + new Frame(initialOffset,key,sectionType) + ", expected "+ frame);
+    return result;
+  }
+  if (sectionType == _SECTION_AND_ || sectionType == _SECTION_NOT_) {
+    state.predicateCount--;
+    if (sectionType == _SECTION_NOT_)     state.predicateSign=!state.predicateSign;
+    return result;
+  }
+  if (sectionType == _SECTION_RECOVER_ && !state.suppressErrors && eatMore != null) {
+    state.suppressErrors=true;
+    final boolean eatMoreFlagOnce=!builder_.eof() && eatMore.parse(builder_,frame.level + 1);
+    final int lastErrorPos=getLastVariantOffset(state,initialOffset);
+    boolean eatMoreFlag=eatMoreFlagOnce || frame.offset == initialOffset && lastErrorPos > frame.offset;
+    final LighterASTNode latestDoneMarker=(pinned || result) && lastErrorPos > initialOffset && eatMoreFlagOnce ? builder_.getLatestDoneMarker() : null;
+    PsiBuilder.Marker extensionMarker=null;
+    IElementType extensionTokenType=null;
+    if (latestDoneMarker instanceof PsiBuilder.Marker) {
+      extensionMarker=((PsiBuilder.Marker)latestDoneMarker).precede();
+      extensionTokenType=latestDoneMarker.getTokenType();
+      ((PsiBuilder.Marker)latestDoneMarker).drop();
+    }
+    int parenCount=0;
+    while (eatMoreFlag && builder_.getCurrentOffset() < lastErrorPos) {
+      if (state.braces != null) {
+        if (builder_.getTokenType() == state.braces[0].getLeftBraceType()) {
+          parenCount++;
+        }
+ else         if (builder_.getTokenType() == state.braces[0].getRightBraceType())         parenCount--;
+      }
+      builder_.advanceLexer();
+      eatMoreFlag=parenCount != 0 || eatMore.parse(builder_,frame.level + 1);
+    }
+    boolean errorReported=frame.errorReportedAt == initialOffset;
+    if (errorReported) {
+      if (eatMoreFlag) {
+        builder_.advanceLexer();
+        parseAsTree(state,builder_,frame.level + 1,DUMMY_BLOCK,true,TOKEN_ADVANCER,eatMore);
+      }
+    }
+ else     if (eatMoreFlag) {
+      String tokenText=builder_.getTokenText();
+      String expectedText=state.getExpectedText(builder_);
+      PsiBuilder.Marker mark=builder_.mark();
+      builder_.advanceLexer();
+      final String gotText=!expectedText.isEmpty() ? "got '" + tokenText + "'" : "'" + tokenText + "' unexpected";
+      mark.error(expectedText + gotText);
+      parseAsTree(state,builder_,frame.level + 1,DUMMY_BLOCK,true,TOKEN_ADVANCER,eatMore);
+      errorReported=true;
+    }
+ else     if (eatMoreFlagOnce || (!result && frame.offset != builder_.getCurrentOffset())) {
+      reportError(state,builder_,true);
+      errorReported=true;
+    }
+    if (extensionMarker != null) {
+      extensionMarker.done(extensionTokenType);
+    }
+    state.suppressErrors=false;
+    if (errorReported || result) {
+      state.clearExpectedVariants();
+    }
+    if (!result && eatMoreFlagOnce && frame.offset != builder_.getCurrentOffset())     result=true;
+  }
+ else   if (!result && pinned && frame.errorReportedAt < 0) {
+    if (getLastVariantOffset(state,initialOffset) == initialOffset) {
+      if (reportError(state,builder_,false)) {
+        frame.errorReportedAt=initialOffset;
+      }
+    }
+  }
+  Frame prevFrame=state.levelCheck.isEmpty() ? null : state.levelCheck.getLast();
+  if (prevFrame != null && prevFrame.errorReportedAt < frame.errorReportedAt)   prevFrame.errorReportedAt=frame.errorReportedAt;
+  return result;
+}
