@@ -1,6 +1,7 @@
 {
   super(new BorderLayout(0,0));
   this.project=project;
+  MAX_FILES_IN_SWITCHER=pinned ? UISettings.getInstance().RECENT_FILES_LIMIT + UISettings.getInstance().EDITOR_TAB_LIMIT : 30;
   myPinned=pinned;
   mySpeedSearch=pinned ? new SwitcherSpeedSearch() : null;
   setFocusable(true);
@@ -21,7 +22,7 @@
   descriptions.setBorder(BorderFactory.createEmptyBorder(1,4,1,4));
   descriptions.add(pathLabel,BorderLayout.CENTER);
   twManager=ToolWindowManager.getInstance(project);
-  final DefaultListModel twModel=new DefaultListModel();
+  DefaultListModel twModel=new DefaultListModel();
   for (  String id : twManager.getToolWindowIds()) {
     final ToolWindow tw=twManager.getToolWindow(id);
     if (tw.isAvailable()) {
@@ -41,8 +42,21 @@
     twModel.addElement(window);
   }
   toolWindows=new JBList(twModel);
+  if (pinned) {
+    new NameFilteringListModel<ToolWindow>(toolWindows,new Function<ToolWindow,String>(){
+      @Override public String fun(      ToolWindow window){
+        return ids.get(window);
+      }
+    }
+,new Condition<String>(){
+      @Override public boolean value(      String s){
+        return !mySpeedSearch.isPopupActive() || StringUtil.isEmpty(mySpeedSearch.getEnteredPrefix()) || mySpeedSearch.matchingFragments(s) != null;
+      }
+    }
+,mySpeedSearch);
+  }
   toolWindows.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
-  toolWindows.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  toolWindows.setSelectionMode(pinned ? ListSelectionModel.MULTIPLE_INTERVAL_SELECTION : ListSelectionModel.SINGLE_SELECTION);
   toolWindows.setCellRenderer(new SwitcherToolWindowsListRenderer(mySpeedSearch,ids,map,myPinned){
     @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean selected,    boolean hasFocus){
       final JComponent renderer=(JComponent)super.getListCellRendererComponent(list,value,index,selected,hasFocus);
@@ -70,11 +84,7 @@
     @Override protected void paintComponent(    Graphics g){
       super.paintComponent(g);
       g.setColor(SEPARATOR_COLOR);
-      g.drawLine(0,0,0,getHeight());
-    }
-    @Override public Dimension getMaximumSize(){
-      final Dimension max=super.getMaximumSize();
-      return new Dimension(5,max.height);
+      g.drawLine(getWidth() - 1,0,getWidth() - 1,getHeight());
     }
   }
 ;
@@ -125,10 +135,7 @@
   for (  FileInfo editor : filesData) {
     filesModel.addElement(editor);
   }
-  files=new JBList(filesModel);
-  files.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-  files.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
-  files.setCellRenderer(new VirtualFilesRenderer(project,mySpeedSearch){
+  final VirtualFilesRenderer filesRenderer=new VirtualFilesRenderer(project,mySpeedSearch){
     @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean selected,    boolean hasFocus){
       final JComponent renderer=(JComponent)super.getListCellRendererComponent(list,value,index,selected,hasFocus);
       if (selected) {
@@ -139,26 +146,8 @@
       return renderer;
     }
   }
-);
-  files.addKeyListener(this);
-  files.addMouseListener(this);
-  files.addMouseMotionListener(this);
-  files.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
-    public void valueChanged(    ListSelectionEvent e){
-      if (!files.getSelectionModel().isSelectionEmpty()) {
-        toolWindows.getSelectionModel().clearSelection();
-      }
-    }
-  }
-);
-  this.add(toolWindows,BorderLayout.WEST);
-  if (filesModel.size() > 0) {
-    files.setAlignmentY(1f);
-    this.add(files,BorderLayout.EAST);
-    this.add(separator,BorderLayout.CENTER);
-  }
-  this.add(descriptions,BorderLayout.SOUTH);
-  files.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+;
+  final ListSelectionListener filesSelectionListener=new ListSelectionListener(){
     private String getTitle2Text(    String fullText){
       int labelWidth=pathLabel.getWidth();
       if (fullText == null || fullText.length() == 0)       return " ";
@@ -193,14 +182,58 @@
       }
     }
   }
+;
+  files=new JBList(filesModel);
+  if (pinned) {
+    new NameFilteringListModel<FileInfo>(files,new Function<FileInfo,String>(){
+      @Override public String fun(      FileInfo info){
+        return info.getFirst().getName();
+      }
+    }
+,new Condition<String>(){
+      @Override public boolean value(      String s){
+        return !mySpeedSearch.isPopupActive() || StringUtil.isEmpty(mySpeedSearch.getEnteredPrefix()) || mySpeedSearch.matchingFragments(s) != null;
+      }
+    }
+,mySpeedSearch);
+  }
+  files.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+  files.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+    public void valueChanged(    ListSelectionEvent e){
+      if (!files.getSelectionModel().isSelectionEmpty()) {
+        toolWindows.getSelectionModel().clearSelection();
+      }
+    }
+  }
 );
+  files.getSelectionModel().addListSelectionListener(filesSelectionListener);
+  files.setCellRenderer(filesRenderer);
+  files.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
+  files.addKeyListener(this);
+  files.addMouseListener(this);
+  files.addMouseMotionListener(this);
+  this.add(toolWindows,BorderLayout.WEST);
+  if (filesModel.size() > 0) {
+    files.setAlignmentY(1f);
+    if (files.getModel().getSize() > 30) {
+      final JScrollPane pane=ScrollPaneFactory.createScrollPane(files,true);
+      pane.setPreferredSize(new Dimension(files.getPreferredSize().width + 10,30 * 20));
+      pane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+      this.add(pane,BorderLayout.EAST);
+    }
+ else {
+      this.add(files,BorderLayout.EAST);
+    }
+    this.add(separator,BorderLayout.CENTER);
+  }
+  this.add(descriptions,BorderLayout.SOUTH);
   final ShortcutSet shortcutSet=ActionManager.getInstance().getAction("Switcher").getShortcutSet();
   final int modifiers=getModifiers(shortcutSet);
   final boolean isAlt=(modifiers & Event.ALT_MASK) != 0;
   ALT_KEY=isAlt ? VK_CONTROL : VK_ALT;
   CTRL_KEY=isAlt ? VK_ALT : VK_CONTROL;
   final IdeFrameImpl ideFrame=WindowManagerEx.getInstanceEx().getFrame(project);
-  myPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(this,this).setResizable(false).setModalContext(false).setFocusable(true).setRequestFocus(true).setTitle(title).setMovable(false).setCancelKeyEnabled(false).setCancelCallback(new Computable<Boolean>(){
+  myPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(this,this).setResizable(pinned).setModalContext(false).setFocusable(true).setRequestFocus(true).setTitle(title).setMovable(pinned).setCancelKeyEnabled(false).setCancelCallback(new Computable<Boolean>(){
     public Boolean compute(){
       SWITCHER=null;
       return true;
