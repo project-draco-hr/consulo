@@ -172,7 +172,7 @@ class FileClasses {
                 if (overrides.satisfy(mm) && inheritorOf.isValue() && inheritorOf.value()) {
                   debug("Current method overrides that found");
                   final Option<Boolean> subtypeOf=u.isSubtypeOf(mm.type,m.type);
-                  if (weakerAccess(mm.access,m.access) || ((m.access & Opcodes.ACC_STATIC) > 0 && (mm.access & Opcodes.ACC_STATIC) == 0) || ((m.access & Opcodes.ACC_STATIC) == 0 && (mm.access & Opcodes.ACC_STATIC) > 0)|| ((m.access & Opcodes.ACC_FINAL) > 0)|| !m.exceptions.equals(mm.exceptions)|| (subtypeOf.isNone() || !subtypeOf.value())|| !empty(mm.signature)|| !empty(m.signature)) {
+                  if (Difference.weakerAccess(mm.access,m.access) || ((m.access & Opcodes.ACC_STATIC) > 0 && (mm.access & Opcodes.ACC_STATIC) == 0) || ((m.access & Opcodes.ACC_STATIC) == 0 && (mm.access & Opcodes.ACC_STATIC) > 0)|| ((m.access & Opcodes.ACC_FINAL) > 0)|| !m.exceptions.equals(mm.exceptions)|| (subtypeOf.isNone() || !subtypeOf.value())|| !empty(mm.signature)|| !empty(m.signature)) {
                     final int file=myClassToSourceFile.get(cc.name);
                     if (file > 0) {
                       final String f=myContext.getValue(file);
@@ -405,7 +405,7 @@ class FileClasses {
             final boolean ffPrivate=(ff.access & Opcodes.ACC_PRIVATE) > 0;
             final boolean ffProtected=(ff.access & Opcodes.ACC_PROTECTED) > 0;
             final boolean ffPublic=(ff.access & Opcodes.ACC_PUBLIC) > 0;
-            final boolean ffPLocal=isPackageLocal(ff.access);
+            final boolean ffPLocal=Difference.isPackageLocal(ff.access);
             if (!ffPrivate) {
               final TIntHashSet propagated=o.propagateFieldAccess(ff.name,cc.name);
               final Set<UsageRepr.Usage> localUsages=new HashSet<UsageRepr.Usage>();
@@ -451,10 +451,14 @@ class FileClasses {
         for (        final Pair<FieldRepr,Difference> f : diff.fields().changed()) {
           final Difference d=f.second;
           final FieldRepr field=f.first;
-          debug("Field: ",it.name);
+          debug("Field: ",field.name);
           if ((field.access & Opcodes.ACC_PRIVATE) == 0 && (field.access & mask) == mask) {
-            if ((d.base() & Difference.ACCESS) > 0 || ((d.base() & Difference.VALUE) > 0 && d.hadValue())) {
-              debug("Inline field changed its access or value => a switch to non-incremental mode requested");
+            final int changedModifiers=d.addedModifiers() | d.removedModifiers();
+            final boolean harmful=(changedModifiers & (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) > 0;
+            final boolean accessChanged=(changedModifiers & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) > 0;
+            final boolean valueChanged=(d.base() & Difference.VALUE) > 0 && d.hadValue();
+            if (harmful || valueChanged || (accessChanged && !d.weakedAccess())) {
+              debug("Inline field changed it's access or value => a switch to non-incremental mode requested");
               if (!incrementalDecision(it.name,field,affectedFiles,filter)) {
                 debug("End of Differentiate, returning false");
                 return false;
