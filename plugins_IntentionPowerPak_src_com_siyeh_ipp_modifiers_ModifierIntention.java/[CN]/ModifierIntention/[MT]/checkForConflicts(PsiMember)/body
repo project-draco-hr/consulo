@@ -1,0 +1,34 @@
+{
+  final PsiModifierList modifierList=member.getModifierList();
+  if (modifierList == null) {
+    return false;
+  }
+  if (modifierList.hasModifierProperty(PsiModifier.PRIVATE)) {
+    return true;
+  }
+  final PsiModifierList modifierListCopy=(PsiModifierList)modifierList.copy();
+  modifierListCopy.setModifierProperty(getModifier(),true);
+  final List<PsiElement> problemReferences=new ArrayList();
+  final Query<PsiReference> search=ReferencesSearch.search(member,member.getResolveScope());
+  search.forEach(new Processor<PsiReference>(){
+    @Override public boolean process(    PsiReference reference){
+      final PsiElement element=reference.getElement();
+      if (!JavaResolveUtil.isAccessible(member,member.getContainingClass(),modifierListCopy,element,null,null)) {
+        problemReferences.add(element);
+      }
+      return true;
+    }
+  }
+);
+  if (problemReferences.isEmpty()) {
+    return true;
+  }
+  final MultiMap<PsiElement,String> conflicts=new MultiMap();
+  for (  PsiElement reference : problemReferences) {
+    final PsiNameIdentifierOwner context=PsiTreeUtil.getParentOfType(reference,PsiMethod.class,PsiField.class,PsiClass.class);
+    conflicts.putValue(reference,RefactoringUIUtil.getDescription(member,false) + " with " + getModifier()+ " visibility won't be accessible from "+ RefactoringUIUtil.getDescription(context,true));
+  }
+  final ConflictsDialog conflictsDialog=new ConflictsDialog(member.getProject(),conflicts);
+  conflictsDialog.show();
+  return conflictsDialog.isOK();
+}
