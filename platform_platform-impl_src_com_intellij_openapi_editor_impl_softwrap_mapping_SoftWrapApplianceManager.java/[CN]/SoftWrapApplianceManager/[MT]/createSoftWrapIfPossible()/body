@@ -2,11 +2,29 @@
   final int offset=myContext.currentPosition.offset;
   myContext.logicalLineData.update(offset);
   int softWrapStartOffset=myContext.softWrapStartOffset;
-  SoftWrap softWrap=registerSoftWrap(softWrapStartOffset,Math.max(softWrapStartOffset,offset),calculateSoftWrapEndOffset(softWrapStartOffset,myContext.logicalLineData.endLineOffset),myContext.getSpaceWidth(),myContext.logicalLineData);
+  int preferredOffset=Math.max(softWrapStartOffset,offset - 1);
+  SoftWrap softWrap=registerSoftWrap(softWrapStartOffset,preferredOffset,calculateSoftWrapEndOffset(softWrapStartOffset,myContext.logicalLineData.endLineOffset),myContext.getSpaceWidth(),myContext.logicalLineData);
+  boolean revertedToFoldRegion=false;
   if (softWrap == null) {
-    myContext.tryToShiftToNextLine();
-    myHasLinesWithFailedWrap=true;
-    return;
+    EditorPosition wrapPosition=null;
+    if (myContext.lastFoldEndPosition != null && myStorage.getSoftWrap(myContext.lastFoldEndPosition.offset) == null && myContext.lastFoldEndPosition.offset + 1 < myContext.currentPosition.offset) {
+      wrapPosition=myContext.lastFoldEndPosition;
+    }
+    if (wrapPosition == null && myContext.lastFoldStartPosition != null && myStorage.getSoftWrap(myContext.lastFoldStartPosition.offset) == null && myContext.lastFoldStartPosition.offset < myContext.currentPosition.offset) {
+      wrapPosition=myContext.lastFoldStartPosition;
+    }
+    if (wrapPosition != null) {
+      revertListeners(wrapPosition.offset,wrapPosition.visualLine);
+      myContext.currentPosition=wrapPosition;
+      softWrap=registerSoftWrap(wrapPosition.offset,myContext.getSpaceWidth(),myContext.logicalLineData);
+      myContext.tokenStartOffset=wrapPosition.offset;
+      revertedToFoldRegion=true;
+    }
+ else {
+      myContext.tryToShiftToNextLine();
+      myHasLinesWithFailedWrap=true;
+      return;
+    }
   }
   myContext.skipToLineEnd=false;
   notifyListenersOnVisualLineStart(myContext.lineStartPosition);
@@ -17,14 +35,16 @@
     return;
   }
  else   if (actualSoftWrapOffset < offset) {
-    revertListeners(actualSoftWrapOffset,myContext.currentPosition.visualLine);
-    for (int j=offset - 1; j >= actualSoftWrapOffset; j--) {
-      int pixelsDiff=myOffset2widthInPixels.data[j - myOffset2widthInPixels.anchor];
-      int tmpFontType=myOffset2fontType.get(j);
-      int columnsDiff=calculateWidthInColumns(myContext.text.charAt(j),pixelsDiff,myContext.getSpaceWidth(tmpFontType));
-      myContext.currentPosition.offset--;
-      myContext.currentPosition.logicalColumn-=columnsDiff;
-      myContext.currentPosition.visualColumn-=columnsDiff;
+    if (!revertedToFoldRegion) {
+      revertListeners(actualSoftWrapOffset,myContext.currentPosition.visualLine);
+      for (int j=offset - 1; j >= actualSoftWrapOffset; j--) {
+        int pixelsDiff=myOffset2widthInPixels.data[j - myOffset2widthInPixels.anchor];
+        int tmpFontType=myOffset2fontType.get(j);
+        int columnsDiff=calculateWidthInColumns(myContext.text.charAt(j),pixelsDiff,myContext.getSpaceWidth(tmpFontType));
+        myContext.currentPosition.offset--;
+        myContext.currentPosition.logicalColumn-=columnsDiff;
+        myContext.currentPosition.visualColumn-=columnsDiff;
+      }
     }
   }
  else   if (actualSoftWrapOffset > offset) {
@@ -37,4 +57,7 @@
   myContext.currentPosition.offset=actualSoftWrapOffset;
   myOffset2fontType.clear();
   myOffset2widthInPixels.clear();
+  if (revertedToFoldRegion && myContext.currentPosition.offset == myContext.lastFold.getStartOffset()) {
+    processCollapsedFoldRegion(myContext.lastFold);
+  }
 }
