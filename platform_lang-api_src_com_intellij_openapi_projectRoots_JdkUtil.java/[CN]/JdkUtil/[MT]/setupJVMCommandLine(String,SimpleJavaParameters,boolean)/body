@@ -1,42 +1,18 @@
 {
   final GeneralCommandLine commandLine=new GeneralCommandLine();
   commandLine.setExePath(exePath);
-  ParametersList parametersList=javaParameters.getVMParametersList();
+  final ParametersList vmParametersList=javaParameters.getVMParametersList();
   commandLine.setEnvParams(javaParameters.getEnv());
   commandLine.setPassParentEnvs(javaParameters.isPassParentEnvs());
   final Class commandLineWrapper;
-  if (forceDynamicClasspath && (commandLineWrapper=getCommandLineWrapperClass()) != null) {
-    File classpathFile=null;
-    File vmParamsFile=null;
-    if (!parametersList.hasParameter("-classpath") && !parametersList.hasParameter("-cp")) {
-      try {
-        classpathFile=FileUtil.createTempFile("classpath",null);
-        final PrintWriter writer=new PrintWriter(classpathFile);
-        try {
-          for (          String path : javaParameters.getClassPath().getPathList()) {
-            writer.println(path);
-          }
-        }
-  finally {
-          writer.close();
-        }
-        String classpath=PathUtil.getJarPathForClass(commandLineWrapper);
-        final Class<UrlClassLoader> ourUrlClassLoader=UrlClassLoader.class;
-        if (ourUrlClassLoader.getName().equals(parametersList.getPropertyValue("java.system.class.loader"))) {
-          classpath+=File.pathSeparator + PathUtil.getJarPathForClass(ourUrlClassLoader);
-          classpath+=File.pathSeparator + PathUtil.getJarPathForClass(THashMap.class);
-        }
-        commandLine.addParameter("-classpath");
-        commandLine.addParameter(classpath);
-      }
- catch (      IOException e) {
-        LOG.error(e);
-      }
+  if ((commandLineWrapper=getCommandLineWrapperClass()) != null) {
+    if (javaParameters.isDynamicVMOptions() && useDynamicVMOptions()) {
+      File vmParamsFile=null;
       try {
         vmParamsFile=FileUtil.createTempFile("vm_params",null);
         final PrintWriter writer=new PrintWriter(vmParamsFile);
         try {
-          for (          String param : parametersList.getList()) {
+          for (          String param : vmParametersList.getList()) {
             if (param.startsWith("-D")) {
               writer.println(param);
             }
@@ -49,37 +25,57 @@
  catch (      IOException e) {
         LOG.error(e);
       }
-    }
-    final List<String> list=parametersList.getList();
-    if (vmParamsFile == null) {
-      commandLine.addParameters(list);
-    }
- else {
+      final List<String> list=vmParametersList.getList();
       for (      String param : list) {
         if (!param.trim().startsWith("-D")) {
           commandLine.addParameter(param);
         }
       }
-    }
-    appendEncoding(javaParameters,commandLine,parametersList);
-    if (classpathFile != null) {
-      commandLine.addParameter(commandLineWrapper.getName());
-      commandLine.addParameter(classpathFile.getAbsolutePath());
-    }
-    if (vmParamsFile != null) {
       commandLine.addParameter("@vm_params");
       commandLine.addParameter(vmParamsFile.getAbsolutePath());
     }
-  }
- else   if (!parametersList.hasParameter("-classpath") && !parametersList.hasParameter("-cp")) {
-    commandLine.addParameters(parametersList.getList());
-    appendEncoding(javaParameters,commandLine,parametersList);
-    commandLine.addParameter("-classpath");
-    commandLine.addParameter(javaParameters.getClassPath().getPathsString());
+ else {
+      commandLine.addParameters(vmParametersList.getList());
+    }
+    if (forceDynamicClasspath) {
+      File classpathFile=null;
+      if (!vmParametersList.hasParameter("-classpath") && !vmParametersList.hasParameter("-cp")) {
+        try {
+          classpathFile=FileUtil.createTempFile("classpath",null);
+          final PrintWriter writer=new PrintWriter(classpathFile);
+          try {
+            for (            String path : javaParameters.getClassPath().getPathList()) {
+              writer.println(path);
+            }
+          }
+  finally {
+            writer.close();
+          }
+          String classpath=PathUtil.getJarPathForClass(commandLineWrapper);
+          final Class<UrlClassLoader> ourUrlClassLoader=UrlClassLoader.class;
+          if (ourUrlClassLoader.getName().equals(vmParametersList.getPropertyValue("java.system.class.loader"))) {
+            classpath+=File.pathSeparator + PathUtil.getJarPathForClass(ourUrlClassLoader);
+            classpath+=File.pathSeparator + PathUtil.getJarPathForClass(THashMap.class);
+          }
+          commandLine.addParameter("-classpath");
+          commandLine.addParameter(classpath);
+        }
+ catch (        IOException e) {
+          LOG.error(e);
+        }
+      }
+      appendEncoding(javaParameters,commandLine,vmParametersList);
+      if (classpathFile != null) {
+        commandLine.addParameter(commandLineWrapper.getName());
+        commandLine.addParameter(classpathFile.getAbsolutePath());
+      }
+    }
+ else {
+      appendEncodingClasspath(javaParameters,commandLine,vmParametersList);
+    }
   }
  else {
-    commandLine.addParameters(parametersList.getList());
-    appendEncoding(javaParameters,commandLine,parametersList);
+    appendParamsEncodingClasspath(javaParameters,commandLine,vmParametersList);
   }
   final String mainClass=javaParameters.getMainClass();
   commandLine.addParameter(mainClass);
