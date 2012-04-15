@@ -1,0 +1,58 @@
+{
+  final Process process=launchServer(port,serverPingInterval,workDirectory);
+  final OSProcessHandler processHandler=new OSProcessHandler(process,null){
+    @Override protected boolean shouldDestroyProcessRecursively(){
+      return true;
+    }
+  }
+;
+  final StringBuilder serverStartMessage=new StringBuilder();
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  processHandler.addProcessListener(new ProcessAdapter(){
+    @Override public void onTextAvailable(    ProcessEvent event,    Key outputType){
+      final String text=event.getText();
+      if (!StringUtil.isEmpty(text)) {
+        LOG.info("COMPILE_SERVER [" + outputType.toString() + "]: "+ text.trim());
+      }
+    }
+  }
+);
+  processHandler.addProcessListener(new ProcessAdapter(){
+    @Override public void processTerminated(    ProcessEvent event){
+      try {
+        processHandler.removeProcessListener(this);
+      }
+  finally {
+        semaphore.up();
+      }
+    }
+    @Override public void onTextAvailable(    ProcessEvent event,    Key outputType){
+      if (outputType == ProcessOutputTypes.STDERR) {
+        try {
+          final String text=event.getText();
+          if (text != null) {
+            if (text.contains(Server.SERVER_SUCCESS_START_MESSAGE) || text.contains(Server.SERVER_ERROR_START_MESSAGE)) {
+              processHandler.removeProcessListener(this);
+            }
+            if (serverStartMessage.length() > 0) {
+              serverStartMessage.append("\n");
+            }
+            serverStartMessage.append(text);
+          }
+        }
+  finally {
+          semaphore.up();
+        }
+      }
+    }
+  }
+);
+  processHandler.startNotify();
+  semaphore.waitFor();
+  final String startupMsg=serverStartMessage.toString();
+  if (!startupMsg.contains(Server.SERVER_SUCCESS_START_MESSAGE)) {
+    throw new Exception("Server startup failed: " + startupMsg);
+  }
+  return new ServerWrapper(processHandler,null);
+}
