@@ -1,7 +1,7 @@
 {
-  final ServerWrapper ph=myProcessHandler;
+  final OSProcessHandler ph=myProcessHandler;
   final CompileServerClient cl=myClient;
-  final boolean processNotRunning=ph == null || ph.isDead();
+  final boolean processNotRunning=ph == null || ph.isProcessTerminated() || ph.isProcessTerminating();
   final boolean clientNotConnected=cl == null || !cl.isConnected();
   if (processNotRunning || clientNotConnected) {
     shutdownServer(cl,ph);
@@ -10,26 +10,77 @@
     if (!forceRestart) {
       return null;
     }
-    final File workDirectory=new File(mySystemDirectory,COMPILE_SERVER_SYSTEM_ROOT);
-    workDirectory.mkdirs();
-    ensureLogConfigExists(workDirectory);
     final int port=NetUtils.findAvailableSocketPort();
     final long serverPingInterval=Registry.intValue("compiler.server.ping.interval",-1) * 1000L;
-    ServerWrapper wrapper=Registry.is("compiler.server.in.process") ? launchServerThread(workDirectory,port) : launchServerProcess(port,serverPingInterval,workDirectory);
-    CompileServerClient client=new CompileServerClient(serverPingInterval,myAsyncExec);
+    final Process process=launchServer(port,serverPingInterval);
+    final OSProcessHandler processHandler=new OSProcessHandler(process,null){
+      @Override protected boolean shouldDestroyProcessRecursively(){
+        return true;
+      }
+    }
+;
+    final StringBuilder serverStartMessage=new StringBuilder();
+    final Semaphore semaphore=new Semaphore();
+    semaphore.down();
+    processHandler.addProcessListener(new ProcessAdapter(){
+      @Override public void onTextAvailable(      ProcessEvent event,      Key outputType){
+        final String text=event.getText();
+        if (!StringUtil.isEmpty(text)) {
+          LOG.info("COMPILE_SERVER [" + outputType.toString() + "]: "+ text.trim());
+        }
+      }
+    }
+);
+    processHandler.addProcessListener(new ProcessAdapter(){
+      @Override public void processTerminated(      ProcessEvent event){
+        try {
+          processHandler.removeProcessListener(this);
+        }
+  finally {
+          semaphore.up();
+        }
+      }
+      @Override public void onTextAvailable(      ProcessEvent event,      Key outputType){
+        if (outputType == ProcessOutputTypes.STDERR) {
+          try {
+            final String text=event.getText();
+            if (text != null) {
+              if (text.contains(Server.SERVER_SUCCESS_START_MESSAGE) || text.contains(Server.SERVER_ERROR_START_MESSAGE)) {
+                processHandler.removeProcessListener(this);
+              }
+              if (serverStartMessage.length() > 0) {
+                serverStartMessage.append("\n");
+              }
+              serverStartMessage.append(text);
+            }
+          }
+  finally {
+            semaphore.up();
+          }
+        }
+      }
+    }
+);
+    processHandler.startNotify();
+    semaphore.waitFor();
+    final String startupMsg=serverStartMessage.toString();
+    if (!startupMsg.contains(Server.SERVER_SUCCESS_START_MESSAGE)) {
+      throw new Exception("Server startup failed: " + startupMsg);
+    }
+    CompileServerClient client=new CompileServerClient(serverPingInterval,myPooledThreadExecutor);
     boolean connected=false;
     try {
       connected=client.connect(NetUtils.getLocalHostString(),port);
       if (connected) {
         final RequestFuture setupFuture=sendSetupRequest(client);
         setupFuture.waitFor();
-        myProcessHandler=wrapper;
+        myProcessHandler=processHandler;
         myClient=client;
       }
     }
   finally {
       if (!connected) {
-        shutdownServer(cl,wrapper);
+        shutdownServer(cl,processHandler);
       }
     }
   }
