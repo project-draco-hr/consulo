@@ -1,0 +1,39 @@
+{
+  if (myRunConfiguration instanceof UnknownRunConfiguration) {
+    return;
+  }
+  final JBPopupFactory popupFactory=JBPopupFactory.getInstance();
+  final BeforeRunTaskProvider<BeforeRunTask>[] providers=Extensions.getExtensions(BeforeRunTaskProvider.EXTENSION_POINT_NAME,myRunConfiguration.getProject());
+  final List<Key> activeProviderKeys=getActiveProviderKeys();
+  DefaultActionGroup actionGroup=new DefaultActionGroup(null,false);
+  for (  final BeforeRunTaskProvider<BeforeRunTask> provider : providers) {
+    String providerName=provider.getName();
+    if (provider.createTask(myRunConfiguration) == null)     continue;
+    if (activeProviderKeys.contains(provider.getId()) && provider.isSingleton())     continue;
+    AnAction providerAction=new AnAction(providerName,null,provider.getIcon()){
+      @Override public void actionPerformed(      AnActionEvent e){
+        BeforeRunTask task=provider.createTask(myRunConfiguration);
+        if (task != null) {
+          provider.configureTask(myRunConfiguration,task);
+          if (!provider.canExecuteTask(myRunConfiguration,task))           return;
+        }
+ else {
+          return;
+        }
+        task.setEnabled(true);
+        Set<RunConfiguration> configurationSet=new HashSet<RunConfiguration>();
+        getAllRunBeforeRuns(task,configurationSet);
+        if (configurationSet.contains(myRunConfiguration)) {
+          JOptionPane.showMessageDialog(BeforeRunStepsPanel.this,ExecutionBundle.message("before.launch.panel.cyclic_dependency_warning",myRunConfiguration.getName(),provider.getDescription(task)),ExecutionBundle.message("warning.common.title"),JOptionPane.WARNING_MESSAGE);
+          return;
+        }
+        myModel.add(task);
+        myListener.fireStepsBeforeRunChanged();
+      }
+    }
+;
+    actionGroup.add(providerAction);
+  }
+  final ListPopup popup=popupFactory.createActionGroupPopup(ExecutionBundle.message("add.new.run.configuration.acrtion.name"),actionGroup,SimpleDataContext.getProjectContext(myRunConfiguration.getProject()),false,false,false,null,-1,Condition.TRUE);
+  popup.show(button.getPreferredPopupPoint());
+}

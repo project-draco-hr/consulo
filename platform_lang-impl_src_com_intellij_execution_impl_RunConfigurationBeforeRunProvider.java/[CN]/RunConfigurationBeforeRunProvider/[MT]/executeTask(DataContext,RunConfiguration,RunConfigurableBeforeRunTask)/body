@@ -1,0 +1,52 @@
+{
+  RunnerAndConfigurationSettings settings=task.getSettings();
+  if (settings == null) {
+    return false;
+  }
+  final Executor executor=DefaultRunExecutor.getRunExecutorInstance();
+  String executorId=executor.getId();
+  final ProgramRunner runner=ProgramRunnerUtil.getRunner(executorId,settings);
+  if (runner == null)   return false;
+  final ExecutionEnvironment environment=new ExecutionEnvironment(runner,settings,myProject);
+  if (!runner.canRun(executorId,environment.getRunProfile())) {
+    return false;
+  }
+ else {
+    final Semaphore targetDone=new Semaphore();
+    final boolean[] result=new boolean[1];
+    try {
+      ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+        public void run(){
+          targetDone.down();
+          try {
+            runner.execute(executor,environment,new ProgramRunner.Callback(){
+              @Override public void processStarted(              RunContentDescriptor descriptor){
+                ProcessHandler processHandler=descriptor != null ? descriptor.getProcessHandler() : null;
+                if (processHandler != null) {
+                  processHandler.addProcessListener(new ProcessAdapter(){
+                    @Override public void processTerminated(                    ProcessEvent event){
+                      result[0]=event.getExitCode() == 0;
+                      targetDone.up();
+                    }
+                  }
+);
+                }
+              }
+            }
+);
+          }
+ catch (          ExecutionException e) {
+            LOG.error(e);
+          }
+        }
+      }
+,ModalityState.NON_MODAL);
+    }
+ catch (    Exception e) {
+      LOG.error(e);
+      return false;
+    }
+    targetDone.waitFor();
+    return result[0];
+  }
+}
