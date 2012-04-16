@@ -1,0 +1,50 @@
+{
+  for (  GitCommit commit : commits) {
+    GitSimpleEventDetector conflictDetector=new GitSimpleEventDetector(CHERRY_PICK_CONFLICT);
+    GitSimpleEventDetector localChangesOverwrittenDetector=new GitSimpleEventDetector(LOCAL_CHANGES_OVERWRITTEN_BY_CHERRY_PICK);
+    GitMessageWithFilesDetector untrackedFilesDetector=new GitMessageWithFilesDetector(UNTRACKED_FILES_OVERWRITTEN_BY,repository.getRoot());
+    GitCommandResult result=myGit.cherryPick(repository,commit.getHash().getValue(),myAutoCommit,conflictDetector,localChangesOverwrittenDetector,untrackedFilesDetector);
+    if (result.success()) {
+      if (myAutoCommit) {
+        successfulCommits.add(commit);
+      }
+ else {
+        boolean committed=updateChangeListManagerShowCommitDialogAndRemoveChangeListOnSuccess(repository,commit,successfulCommits);
+        if (!committed) {
+          notifyCommitCancelled(commit,successfulCommits);
+          return false;
+        }
+      }
+    }
+ else     if (conflictDetector.hasHappened()) {
+      boolean mergeCompleted=new CherryPickConflictResolver(myProject,myGit,myPlatformFacade,repository.getRoot(),commit.getShortHash().getString(),commit.getAuthor(),commit.getSubject()).merge();
+      if (mergeCompleted) {
+        boolean committed=updateChangeListManagerShowCommitDialogAndRemoveChangeListOnSuccess(repository,commit,successfulCommits);
+        if (!committed) {
+          notifyCommitCancelled(commit,successfulCommits);
+          return false;
+        }
+      }
+ else {
+        updateChangeListManager(commit);
+        notifyConflictWarning(repository,commit,successfulCommits);
+        return false;
+      }
+    }
+ else     if (untrackedFilesDetector.wasMessageDetected()) {
+      String description=commitDetails(commit) + "<br/>Some untracked working tree files would be overwritten by cherry-pick.<br/>" + "Please move, remove or add them before you can cherry-pick. <a href='view'>View them</a>";
+      description+=getSuccessfulCommitDetailsIfAny(successfulCommits);
+      UntrackedFilesNotifier.notifyUntrackedFilesOverwrittenBy(myProject,myPlatformFacade,untrackedFilesDetector.getFiles(),"cherry-pick",description);
+      return false;
+    }
+ else     if (localChangesOverwrittenDetector.hasHappened()) {
+      notifyError("Your local changes would be overwritten by cherry-pick.<br/>Commit your changes or stash them to proceed.",commit,successfulCommits);
+      return false;
+    }
+ else {
+      notifyError(result.getErrorOutputAsHtmlString(),commit,successfulCommits);
+      return false;
+    }
+  }
+  return true;
+}
