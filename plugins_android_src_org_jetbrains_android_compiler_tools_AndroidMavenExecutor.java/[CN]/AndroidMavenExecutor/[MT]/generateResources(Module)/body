@@ -1,10 +1,25 @@
 {
   MavenProjectsManager projectsManager=MavenProjectsManager.getInstance(module.getProject());
-  MavenRunnerParameters parameters=new MavenRunnerParameters(true,projectsManager.findProject(module).getDirectory(),Collections.singletonList("process-resources"),projectsManager.getExplicitProfiles());
-  Map<CompilerMessageCategory,List<String>> result=new HashMap<CompilerMessageCategory,List<String>>();
+  final MavenRunnerParameters parameters=new MavenRunnerParameters(true,projectsManager.findProject(module).getDirectory(),Collections.singletonList("process-resources"),projectsManager.getExplicitProfiles());
+  final Map<CompilerMessageCategory,List<String>> result=new HashMap<CompilerMessageCategory,List<String>>();
   result.put(CompilerMessageCategory.ERROR,new ArrayList<String>());
   try {
-    JavaParameters javaParams=MavenExternalParameters.createJavaParameters(module.getProject(),parameters);
+    JavaParameters javaParams=ApplicationManager.getApplication().runReadAction(new Computable<JavaParameters>(){
+      @Nullable @Override public JavaParameters compute(){
+        try {
+          return MavenExternalParameters.createJavaParameters(module.getProject(),parameters);
+        }
+ catch (        ExecutionException e) {
+          LOG.info(e);
+          result.get(CompilerMessageCategory.ERROR).add(e.getMessage());
+          return null;
+        }
+      }
+    }
+);
+    if (javaParams == null) {
+      return result;
+    }
     GeneralCommandLine commandLine=CommandLineBuilder.createFromJavaParameters(javaParams);
     StringBuilder messageBuilder=new StringBuilder();
     boolean success=AndroidUtils.executeCommand(commandLine,messageBuilder,null) == ExecutionStatus.SUCCESS;
@@ -14,7 +29,6 @@
       String lcmessage=message.toLowerCase();
       int buildErrorIndex=lcmessage.indexOf(BUILD_ERROR_INDICATOR);
       if (buildErrorIndex >= 0) {
-        int failedToResolveIndex=lcmessage.indexOf(FAILED_TO_RESOLVE_ARTIFACT_INDICATOR);
         result.get(CompilerMessageCategory.ERROR).add(message.substring(buildErrorIndex));
       }
     }
