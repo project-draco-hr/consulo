@@ -1,0 +1,68 @@
+{
+  myProjectManager=projectManager;
+  final String systemPath=PathManager.getSystemPath();
+  File system=new File(systemPath);
+  try {
+    system=system.getCanonicalFile();
+  }
+ catch (  IOException e) {
+    LOG.info(e);
+  }
+  mySystemDirectory=system;
+  projectManager.addProjectManagerListener(new ProjectWatcher());
+  final MessageBusConnection conn=ApplicationManager.getApplication().getMessageBus().connect();
+  conn.subscribe(VirtualFileManager.VFS_CHANGES,new BulkFileListener(){
+    private final Alarm myAlarm=new Alarm(Alarm.ThreadToUse.SHARED_THREAD);
+    private final AtomicBoolean myAutoMakeInProgress=new AtomicBoolean(false);
+    @Override public void before(    @NotNull List<? extends VFileEvent> events){
+    }
+    @Override public void after(    @NotNull List<? extends VFileEvent> events){
+      if (shouldTriggerMake(events)) {
+        scheduleMake(new Runnable(){
+          @Override public void run(){
+            if (!myAutoMakeInProgress.getAndSet(true)) {
+              try {
+                ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+                  @Override public void run(){
+                    try {
+                      runAutoMake();
+                    }
+  finally {
+                      myAutoMakeInProgress.set(false);
+                    }
+                  }
+                }
+);
+              }
+ catch (              RejectedExecutionException ignored) {
+              }
+            }
+ else {
+              scheduleMake(this);
+            }
+          }
+        }
+);
+      }
+    }
+    private void scheduleMake(    Runnable runnable){
+      myAlarm.cancelAllRequests();
+      myAlarm.addRequest(runnable,MAKE_TRIGGER_DELAY);
+    }
+    private boolean shouldTriggerMake(    List<? extends VFileEvent> events){
+      for (      VFileEvent event : events) {
+        if (event.isFromRefresh() || event.getRequestor() instanceof SavingRequestor) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+);
+  ShutDownTracker.getInstance().registerShutdownTask(new Runnable(){
+    @Override public void run(){
+      stopListening();
+    }
+  }
+);
+}
