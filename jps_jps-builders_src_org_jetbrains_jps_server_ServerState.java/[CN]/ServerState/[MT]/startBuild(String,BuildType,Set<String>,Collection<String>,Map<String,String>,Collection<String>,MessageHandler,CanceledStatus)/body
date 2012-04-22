@@ -1,4 +1,5 @@
 {
+  boolean forceCleanCaches=false;
   ProjectDescriptor pd;
 synchronized (myConfigurationLock) {
     pd=myProjects.get(projectPath);
@@ -11,16 +12,20 @@ synchronized (myConfigurationLock) {
       try {
         timestamps=new ProjectTimestamps(dataStorageRoot);
         dataManager=new BuildDataManager(dataStorageRoot,myKeepTempCachesInMemory);
+        if (dataManager.versionDiffers()) {
+          forceCleanCaches=true;
+          msgHandler.processMessage(new CompilerMessage("compile-server",BuildMessage.Kind.INFO,"Dependency data format has changed, project rebuild required"));
+        }
       }
  catch (      Exception e) {
-        e.printStackTrace(System.err);
+        LOG.info(e);
         if (timestamps != null) {
           timestamps.close();
         }
         if (dataManager != null) {
           dataManager.close();
         }
-        buildType=BuildType.PROJECT_REBUILD;
+        forceCleanCaches=true;
         FileUtil.delete(dataStorageRoot);
         timestamps=new ProjectTimestamps(dataStorageRoot);
         dataManager=new BuildDataManager(dataStorageRoot,myKeepTempCachesInMemory);
@@ -32,23 +37,38 @@ synchronized (myConfigurationLock) {
     pd.incUsageCounter();
   }
   try {
-    final CompileScope compileScope=createCompilationScope(buildType,pd,modules,artifacts,paths);
-    final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),builderParams,cs);
-    if (msgHandler != null) {
+    for (int attempt=0; attempt < 2; attempt++) {
+      if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
+        buildType=BuildType.PROJECT_REBUILD;
+      }
+      final CompileScope compileScope=createCompilationScope(buildType,pd,modules,artifacts,paths);
+      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),builderParams,cs);
       builder.addMessageHandler(msgHandler);
-    }
+      try {
 switch (buildType) {
 case PROJECT_REBUILD:
-      builder.build(compileScope,false,true);
-    break;
+          builder.build(compileScope,false,true,forceCleanCaches);
+        break;
 case FORCED_COMPILATION:
-  builder.build(compileScope,false,false);
-break;
+      builder.build(compileScope,false,false,forceCleanCaches);
+    break;
 case MAKE:
-builder.build(compileScope,true,false);
+  builder.build(compileScope,true,false,forceCleanCaches);
 break;
 case CLEAN:
 break;
+}
+break;
+}
+ catch (RebuildRequestedException e) {
+if (attempt == 0) {
+LOG.info(e);
+forceCleanCaches=true;
+}
+ else {
+throw e;
+}
+}
 }
 }
   finally {

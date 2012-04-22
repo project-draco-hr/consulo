@@ -1,0 +1,48 @@
+{
+  final LowMemoryWatcher memWatcher=LowMemoryWatcher.register(new Forceable(){
+    @Override public boolean isDirty(){
+      return true;
+    }
+    @Override public void force(){
+      myProjectDescriptor.dataManager.flush(false);
+      myProjectDescriptor.timestamps.getStorage().force();
+    }
+  }
+);
+  CompileContext context=null;
+  try {
+    context=createContext(scope,isMake,isProjectRebuild);
+    runBuild(context,forceCleanCaches);
+    myProjectDescriptor.dataManager.saveVersion();
+  }
+ catch (  ProjectBuildException e) {
+    final Throwable cause=e.getCause();
+    if (cause instanceof PersistentEnumerator.CorruptedException || cause instanceof MappingFailedException || cause instanceof IOException) {
+      myMessageDispatcher.processMessage(new CompilerMessage(COMPILE_SERVER_NAME,BuildMessage.Kind.INFO,"Internal caches are corrupted or have outdated format, forcing project rebuild: " + e.getMessage()));
+      throw new RebuildRequestedException(cause);
+    }
+ else {
+      if (cause == null) {
+        final String msg=e.getMessage();
+        if (!StringUtil.isEmpty(msg)) {
+          myMessageDispatcher.processMessage(new ProgressMessage(msg));
+        }
+      }
+ else {
+        myMessageDispatcher.processMessage(new CompilerMessage(COMPILE_SERVER_NAME,cause));
+      }
+    }
+  }
+ finally {
+    memWatcher.stop();
+    flushContext(context);
+    for (    Future task : myAsyncTasks) {
+      try {
+        task.get();
+      }
+ catch (      Throwable th) {
+        LOG.info(th);
+      }
+    }
+  }
+}
