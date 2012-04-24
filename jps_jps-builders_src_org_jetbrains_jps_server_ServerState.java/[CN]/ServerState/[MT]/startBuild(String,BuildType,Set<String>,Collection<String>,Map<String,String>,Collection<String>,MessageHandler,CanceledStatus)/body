@@ -36,13 +36,33 @@ synchronized (myConfigurationLock) {
     }
     pd.incUsageCounter();
   }
+  final ProjectDescriptor finalPd=pd;
+  final LowMemoryWatcher memWatcher=LowMemoryWatcher.register(new Forceable(){
+    @Override public boolean isDirty(){
+      return true;
+    }
+    @Override public void force(){
+      finalPd.dataManager.flush(false);
+      finalPd.timestamps.getStorage().force();
+    }
+  }
+);
   try {
     for (int attempt=0; attempt < 2; attempt++) {
       if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
         buildType=BuildType.PROJECT_REBUILD;
       }
-      final CompileScope compileScope=createCompilationScope(buildType,pd,modules,artifacts,paths);
-      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),builderParams,cs);
+      if (buildType == BuildType.PROJECT_REBUILD || forceCleanCaches) {
+        try {
+          pd.timestamps.clean();
+        }
+ catch (        IOException e) {
+          throw new ProjectBuildException("Error cleaning timestamps storage",e);
+        }
+      }
+      final Timestamps timestamps=pd.timestamps.getStorage();
+      final CompileScope compileScope=createCompilationScope(buildType,pd,timestamps,modules,artifacts,paths);
+      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),timestamps,builderParams,cs);
       builder.addMessageHandler(msgHandler);
       try {
 switch (buildType) {
@@ -72,6 +92,7 @@ throw e;
 }
 }
   finally {
+memWatcher.stop();
 pd.release();
 clearZipIndexCache();
 }
