@@ -1,0 +1,62 @@
+{
+  Set<Artifact> artifacts=new HashSet<Artifact>();
+  if (artifactNames.isEmpty() && buildType == BuildType.PROJECT_REBUILD) {
+    artifacts.addAll(pd.project.getArtifacts().values());
+  }
+ else {
+    final Map<String,Artifact> artifactMap=pd.project.getArtifacts();
+    for (    String name : artifactNames) {
+      final Artifact artifact=artifactMap.get(name);
+      if (artifact != null && !StringUtil.isEmpty(artifact.getOutputPath())) {
+        artifacts.add(artifact);
+      }
+    }
+  }
+  final CompileScope compileScope;
+  if (buildType == BuildType.PROJECT_REBUILD || (modules.isEmpty() && paths.isEmpty())) {
+    compileScope=new AllProjectScope(pd.project,artifacts,buildType != BuildType.MAKE);
+  }
+ else {
+    final Set<Module> forcedModules;
+    if (!modules.isEmpty()) {
+      forcedModules=new HashSet<Module>();
+      for (      Module m : pd.project.getModules().values()) {
+        if (modules.contains(m.getName())) {
+          forcedModules.add(m);
+        }
+      }
+    }
+ else {
+      forcedModules=Collections.emptySet();
+    }
+    final Map<String,Set<File>> filesToCompile;
+    if (!paths.isEmpty()) {
+      filesToCompile=new HashMap<String,Set<File>>();
+      for (      String path : paths) {
+        final File file=new File(path);
+        final RootDescriptor rd=pd.rootsIndex.getModuleAndRoot(file);
+        if (rd != null) {
+          Set<File> files=filesToCompile.get(rd.module);
+          if (files == null) {
+            files=new HashSet<File>();
+            filesToCompile.put(rd.module,files);
+          }
+          files.add(file);
+          if (buildType == BuildType.FORCED_COMPILATION) {
+            pd.fsState.markDirty(file,rd,timestamps);
+          }
+        }
+      }
+    }
+ else {
+      filesToCompile=Collections.emptyMap();
+    }
+    if (filesToCompile.isEmpty()) {
+      compileScope=new ModulesScope(pd.project,forcedModules,artifacts,buildType != BuildType.MAKE);
+    }
+ else {
+      compileScope=new ModulesAndFilesScope(pd.project,forcedModules,filesToCompile,artifacts,buildType != BuildType.MAKE);
+    }
+  }
+  return compileScope;
+}
