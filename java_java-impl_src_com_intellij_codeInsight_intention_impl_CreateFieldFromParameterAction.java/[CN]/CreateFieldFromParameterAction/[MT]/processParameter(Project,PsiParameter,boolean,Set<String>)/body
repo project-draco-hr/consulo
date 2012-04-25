@@ -1,0 +1,123 @@
+{
+  IdeDocumentHistory.getInstance(project).includeCurrentPlaceAsChangePlace();
+  final PsiType[] types=getTypes(myParameter);
+  final JavaCodeStyleManager styleManager=JavaCodeStyleManager.getInstance(project);
+  final String parameterName=myParameter.getName();
+  String propertyName=styleManager.variableNameToPropertyName(parameterName,VariableKind.PARAMETER);
+  String fieldNameToCalc;
+  boolean isFinalToCalc;
+  PsiType type;
+  final PsiClass targetClass=PsiTreeUtil.getParentOfType(myParameter,PsiClass.class);
+  final PsiMethod method=(PsiMethod)myParameter.getDeclarationScope();
+  final boolean isMethodStatic=method.hasModifierProperty(PsiModifier.STATIC);
+  VariableKind kind=isMethodStatic ? VariableKind.STATIC_FIELD : VariableKind.FIELD;
+  SuggestedNameInfo suggestedNameInfo=styleManager.suggestVariableName(kind,propertyName,null,types[0]);
+  String[] names=suggestedNameInfo.names;
+  if (isInteractive) {
+    List<String> namesList=new ArrayList<String>();
+    ContainerUtil.addAll(namesList,names);
+    String defaultName=styleManager.propertyNameToVariableName(propertyName,kind);
+    if (namesList.contains(defaultName)) {
+      Collections.swap(namesList,0,namesList.indexOf(defaultName));
+    }
+ else {
+      namesList.add(0,defaultName);
+    }
+    names=ArrayUtil.toStringArray(namesList);
+    boolean myBeFinal=method.isConstructor();
+    CreateFieldFromParameterDialog dialog=new CreateFieldFromParameterDialog(project,names,targetClass,myBeFinal,types);
+    dialog.show();
+    if (!dialog.isOK())     return;
+    type=dialog.getType();
+    if (type == null)     return;
+    fieldNameToCalc=dialog.getEnteredName();
+    isFinalToCalc=dialog.isDeclareFinal();
+    suggestedNameInfo.nameChoosen(fieldNameToCalc);
+  }
+ else {
+    isFinalToCalc=!isMethodStatic && method.isConstructor();
+    if (usedNames.add(names[0])) {
+      fieldNameToCalc=names[0];
+    }
+ else {
+      fieldNameToCalc=JavaCodeStyleManager.getInstance(project).suggestUniqueVariableName(names[0],myParameter,true);
+    }
+    type=types[0];
+  }
+  final boolean isFinal=isFinalToCalc;
+  final String fieldName=fieldNameToCalc;
+  final PsiType fieldType=type;
+  ApplicationManager.getApplication().runWriteAction(new Runnable(){
+    @Override public void run(){
+      try {
+        PsiManager psiManager=PsiManager.getInstance(project);
+        PsiElementFactory factory=JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory();
+        PsiField field=factory.createField(fieldName,fieldType);
+        PsiModifierList modifierList=field.getModifierList();
+        modifierList.setModifierProperty(PsiModifier.STATIC,isMethodStatic);
+        modifierList.setModifierProperty(PsiModifier.FINAL,isFinal);
+        final NullableNotNullManager manager=NullableNotNullManager.getInstance(project);
+        final String nullable=manager.getNullable(myParameter);
+        if (nullable != null) {
+          modifierList.addAfter(factory.createAnnotationFromText("@" + nullable,field),null);
+        }
+ else         if (isFinal) {
+          final String notNull=manager.getNotNull(myParameter);
+          if (notNull != null) {
+            modifierList.addAfter(factory.createAnnotationFromText("@" + notNull,field),null);
+          }
+        }
+        PsiCodeBlock methodBody=method.getBody();
+        if (methodBody == null)         return;
+        PsiStatement[] statements=methodBody.getStatements();
+        Ref<Pair<PsiField,Boolean>> anchorRef=new Ref<Pair<PsiField,Boolean>>();
+        int i=findFieldAssignmentAnchor(statements,anchorRef,targetClass,myParameter);
+        Pair<PsiField,Boolean> fieldAnchor=anchorRef.get();
+        String stmtText=fieldName + " = " + parameterName+ ";";
+        if (fieldName.equals(parameterName)) {
+          @NonNls String prefix=isMethodStatic ? targetClass.getName() == null ? "" : targetClass.getName() + "." : "this.";
+          stmtText=prefix + stmtText;
+        }
+        PsiStatement assignmentStmt=factory.createStatementFromText(stmtText,methodBody);
+        assignmentStmt=(PsiStatement)CodeStyleManager.getInstance(project).reformat(assignmentStmt);
+        if (i == statements.length) {
+          methodBody.add(assignmentStmt);
+        }
+ else {
+          methodBody.addAfter(assignmentStmt,i > 0 ? statements[i - 1] : null);
+        }
+        if (fieldAnchor != null) {
+          PsiVariable psiVariable=fieldAnchor.getFirst();
+          psiVariable.normalizeDeclaration();
+        }
+        boolean found=false;
+        final PsiField[] fields=targetClass.getFields();
+        for (        PsiField f : fields) {
+          if (f.getName().equals(field.getName())) {
+            found=true;
+            break;
+          }
+        }
+        if (!found) {
+          if (fieldAnchor != null) {
+            Boolean insertBefore=fieldAnchor.getSecond();
+            PsiField inField=fieldAnchor.getFirst();
+            if (insertBefore.booleanValue()) {
+              targetClass.addBefore(field,inField);
+            }
+ else {
+              targetClass.addAfter(field,inField);
+            }
+          }
+ else {
+            targetClass.add(field);
+          }
+        }
+      }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
+      }
+    }
+  }
+);
+}
