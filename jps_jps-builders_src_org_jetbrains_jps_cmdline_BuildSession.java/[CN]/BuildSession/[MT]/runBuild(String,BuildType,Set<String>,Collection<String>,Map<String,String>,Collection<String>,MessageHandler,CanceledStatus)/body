@@ -3,11 +3,11 @@
   ProjectDescriptor pd;
   final Project project=loadProject(projectPath);
   final BuildFSState fsState=new BuildFSState(false);
-  ProjectTimestamps timestamps=null;
+  ProjectTimestamps projectTimestamps=null;
   BuildDataManager dataManager=null;
   final File dataStorageRoot=Utils.getDataStorageRoot(project);
   try {
-    timestamps=new ProjectTimestamps(dataStorageRoot);
+    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
     dataManager=new BuildDataManager(dataStorageRoot,true);
     if (dataManager.versionDiffers()) {
       forceCleanCaches=true;
@@ -16,26 +16,35 @@
   }
  catch (  Exception e) {
     LOG.info(e);
-    if (timestamps != null) {
-      timestamps.close();
+    if (projectTimestamps != null) {
+      projectTimestamps.close();
     }
     if (dataManager != null) {
       dataManager.close();
     }
     forceCleanCaches=true;
     FileUtil.delete(dataStorageRoot);
-    timestamps=new ProjectTimestamps(dataStorageRoot);
+    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
     dataManager=new BuildDataManager(dataStorageRoot,true);
     msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
   }
-  pd=new ProjectDescriptor(project,fsState,timestamps,dataManager,BuildLoggingManager.DEFAULT);
+  pd=new ProjectDescriptor(project,fsState,projectTimestamps,dataManager,BuildLoggingManager.DEFAULT);
   try {
     for (int attempt=0; attempt < 2; attempt++) {
       if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
         buildType=BuildType.PROJECT_REBUILD;
       }
-      final CompileScope compileScope=createCompilationScope(buildType,pd,modules,artifacts,paths);
-      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),builderParams,cs);
+      if (buildType == BuildType.PROJECT_REBUILD || forceCleanCaches) {
+        try {
+          pd.timestamps.clean();
+        }
+ catch (        IOException e) {
+          throw new ProjectBuildException("Error cleaning timestamps storage",e);
+        }
+      }
+      final Timestamps timestamps=pd.timestamps.getStorage();
+      final CompileScope compileScope=createCompilationScope(buildType,pd,timestamps,modules,artifacts,paths);
+      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),timestamps,builderParams,cs);
       builder.addMessageHandler(msgHandler);
       try {
 switch (buildType) {

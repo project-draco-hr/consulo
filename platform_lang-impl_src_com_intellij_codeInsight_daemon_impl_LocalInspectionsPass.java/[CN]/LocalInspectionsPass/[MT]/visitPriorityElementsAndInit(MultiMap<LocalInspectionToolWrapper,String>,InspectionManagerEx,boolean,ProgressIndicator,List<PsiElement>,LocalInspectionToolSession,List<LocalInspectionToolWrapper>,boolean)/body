@@ -1,0 +1,37 @@
+{
+  final ArrayList<InspectionContext> init=new ArrayList<InspectionContext>();
+  List<Map.Entry<LocalInspectionToolWrapper,Collection<String>>> entries=new ArrayList<Map.Entry<LocalInspectionToolWrapper,Collection<String>>>(tools.entrySet());
+  boolean result=JobUtil.invokeConcurrentlyUnderProgress(entries,indicator,myFailFastOnAcquireReadAction,new Processor<Map.Entry<LocalInspectionToolWrapper,Collection<String>>>(){
+    @Override public boolean process(    final Map.Entry<LocalInspectionToolWrapper,Collection<String>> pair){
+      indicator.checkCanceled();
+      ApplicationManager.getApplication().assertReadAccessAllowed();
+      final LocalInspectionToolWrapper wrapper=pair.getKey();
+      LocalInspectionTool tool=wrapper.getTool();
+      final boolean[] applyIncrementally={isOnTheFly};
+      ProblemsHolder holder=new ProblemsHolder(iManager,myFile,isOnTheFly){
+        @Override public void registerProblem(        @NotNull ProblemDescriptor descriptor){
+          super.registerProblem(descriptor);
+          if (applyIncrementally[0]) {
+            addDescriptorIncrementally(descriptor,wrapper,indicator);
+          }
+        }
+      }
+;
+      Set<String> languages=(Set<String>)pair.getValue();
+      PsiElementVisitor visitor=createVisitorAndAcceptElements(tool,holder,isOnTheFly,session,elements,languages);
+synchronized (init) {
+        init.add(new InspectionContext(wrapper,holder,visitor,languages));
+      }
+      advanceProgress(1);
+      if (holder.hasResults()) {
+        appendDescriptors(myFile,holder.getResults(),wrapper);
+      }
+      applyIncrementally[0]=false;
+      return true;
+    }
+  }
+);
+  if (!result)   throw new ProcessCanceledException();
+  inspectInjectedPsi(elements,isOnTheFly,indicator,iManager,true,checkDumbAwareness,wrappers);
+  return init;
+}

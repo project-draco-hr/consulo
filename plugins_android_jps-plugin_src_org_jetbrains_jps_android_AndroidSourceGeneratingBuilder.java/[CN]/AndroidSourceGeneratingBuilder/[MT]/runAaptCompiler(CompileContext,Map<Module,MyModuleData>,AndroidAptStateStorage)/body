@@ -4,6 +4,9 @@
     final Module module=entry.getKey();
     final MyModuleData moduleData=entry.getValue();
     final AndroidFacet facet=moduleData.getFacet();
+    if (!needToRunAaptCompilation(facet)) {
+      continue;
+    }
     final IAndroidTarget target=moduleData.getAndroidTarget();
     try {
       final String[] resPaths=AndroidJpsUtil.collectResourceDirsForCompilation(facet,false,context);
@@ -28,10 +31,16 @@
       if (hasBadCircularDependencies(facet,packageMap)) {
         continue;
       }
+      final Module circularDepLibWithSamePackage=AndroidJpsUtil.findCircularDependencyOnLibraryWithSamePackage(facet,packageMap);
+      if (circularDepLibWithSamePackage != null && !facet.isLibrary()) {
+        final String message="Generated fields in " + packageName + ".R class in module '"+ module.getName()+ "' won't be final, because of circular dependency on module '"+ circularDepLibWithSamePackage.getName()+ "'";
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.WARNING,message));
+      }
+      final boolean generateNonFinalFields=facet.isLibrary() || circularDepLibWithSamePackage != null;
       final Set<String> depLibPackagesSet=new HashSet<String>(depLibPackageMap.values());
       depLibPackagesSet.remove(packageName);
-      final Set<ResourceEntry> resources=collectResources(resPaths);
-      final Set<ResourceEntry> manifestElements=collectManifestElements(manifestFile);
+      final Map<String,ResourceFileData> resources=collectResources(resPaths);
+      final List<ResourceEntry> manifestElements=collectManifestElements(manifestFile);
       final AndroidAptValidityState newState=new AndroidAptValidityState(resources,manifestElements,depLibPackagesSet,packageName);
       if (context.isMake()) {
         final AndroidAptValidityState oldState=storage.getState(module.getName());
@@ -51,7 +60,7 @@
         continue;
       }
       context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.aapt",module.getName())));
-      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,aptOutputDirectory.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),facet.getLibrary());
+      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,aptOutputDirectory.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),generateNonFinalFields);
       AndroidJpsUtil.addMessages(context,messages,BUILDER_NAME);
       if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
         success=false;
