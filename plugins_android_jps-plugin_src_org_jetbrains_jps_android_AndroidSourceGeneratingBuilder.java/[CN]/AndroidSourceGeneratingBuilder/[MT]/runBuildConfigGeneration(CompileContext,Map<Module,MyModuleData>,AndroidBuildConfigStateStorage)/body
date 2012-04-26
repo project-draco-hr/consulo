@@ -1,0 +1,47 @@
+{
+  boolean success=true;
+  for (  Map.Entry<Module,MyModuleData> entry : moduleDataMap.entrySet()) {
+    final Module module=entry.getKey();
+    final MyModuleData moduleData=entry.getValue();
+    final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
+    final File generatedSourcesDir=AndroidJpsUtil.getGeneratedSourcesStorage(module);
+    final File outputDirectory=new File(generatedSourcesDir,AndroidJpsUtil.BUILD_CONFIG_GENERATED_SOURCE_ROOT_NAME);
+    try {
+      if (facet == null || isLibraryWithBadCircularDependency(facet)) {
+        if (!clearDirectoryIfNotEmpty(outputDirectory,context)) {
+          success=false;
+        }
+        continue;
+      }
+      final String packageName=moduleData.getPackage();
+      final boolean debug=!AndroidJpsUtil.isReleaseBuild(context);
+      final Set<String> libPackages=new HashSet<String>(getDepLibPackages(module).values());
+      libPackages.remove(packageName);
+      final AndroidBuildConfigState newState=new AndroidBuildConfigState(packageName,libPackages,debug);
+      if (context.isMake()) {
+        final AndroidBuildConfigState oldState=storage.getState(module.getName());
+        if (newState.equalsTo(oldState)) {
+          continue;
+        }
+      }
+      if (!clearDirectory(outputDirectory,context)) {
+        success=false;
+        continue;
+      }
+      context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.build.config",module.getName())));
+      if (doBuildConfigGeneration(packageName,libPackages,debug,outputDirectory,context)) {
+        storage.update(module.getName(),newState);
+        markDirtyRecursively(outputDirectory,context);
+      }
+ else {
+        storage.update(module.getName(),null);
+        success=false;
+      }
+    }
+ catch (    IOException e) {
+      AndroidJpsUtil.reportExceptionError(context,null,e,BUILDER_NAME);
+      success=false;
+    }
+  }
+  return success;
+}

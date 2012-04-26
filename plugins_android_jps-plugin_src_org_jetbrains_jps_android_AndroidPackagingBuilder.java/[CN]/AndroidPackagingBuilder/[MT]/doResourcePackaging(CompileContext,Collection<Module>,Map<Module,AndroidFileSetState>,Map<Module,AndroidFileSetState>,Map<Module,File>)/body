@@ -1,0 +1,60 @@
+{
+  boolean success=true;
+  final File dataStorageRoot=context.getDataManager().getDataStorageRoot();
+  final boolean releaseBuild=AndroidJpsUtil.isReleaseBuild(context);
+  AndroidFileSetStorage resourcesStorage=null;
+  AndroidFileSetStorage assetsStorage=null;
+  TimestampStorage manifestStorage=null;
+  try {
+    final String resourcesStorageName=releaseBuild ? "resources_packaging_release" : "resources_packaging_dev";
+    resourcesStorage=new AndroidFileSetStorage(dataStorageRoot,resourcesStorageName);
+    final String assetsStorageName=releaseBuild ? "assets_packaging_release" : "assets_packaging_dev";
+    assetsStorage=new AndroidFileSetStorage(dataStorageRoot,assetsStorageName);
+    final String manifestStorageName=releaseBuild ? "manifest_packaging_release" : "manifest_packaging_dev";
+    manifestStorage=new TimestampStorage(AndroidJpsUtil.getStorageFile(dataStorageRoot,manifestStorageName));
+    final Set<Module> modulesToUpdateState=new HashSet<Module>();
+    for (    Module module : modules) {
+      final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
+      if (facet == null) {
+        continue;
+      }
+      final File manifestFile=manifestFiles.get(module);
+      if (manifestFile == null) {
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.manifest.not.found",module.getName())));
+        success=false;
+        continue;
+      }
+      boolean updateState=true;
+      if (!facet.isLibrary() && !(context.isMake() && checkUpToDate(module,resourcesStates,resourcesStorage) && checkUpToDate(module,assetsStates,assetsStorage)&& manifestFile.lastModified() == manifestStorage.getStamp(manifestFile))) {
+        updateState=packageResources(facet,manifestFile,context);
+        if (!updateState) {
+          success=false;
+        }
+      }
+      if (updateState) {
+        modulesToUpdateState.add(module);
+      }
+    }
+    for (    Module module : modules) {
+      final boolean updateState=modulesToUpdateState.contains(module);
+      resourcesStorage.update(module.getName(),updateState ? resourcesStates.get(module) : null);
+      assetsStorage.update(module.getName(),updateState ? assetsStates.get(module) : null);
+      final File manifestFile=manifestFiles.get(module);
+      if (manifestFile != null) {
+        manifestStorage.update(manifestFile,new TimestampValidityState(manifestFile.lastModified()));
+      }
+    }
+  }
+  finally {
+    if (resourcesStorage != null) {
+      resourcesStorage.close();
+    }
+    if (assetsStorage != null) {
+      assetsStorage.close();
+    }
+    if (manifestStorage != null) {
+      manifestStorage.close();
+    }
+  }
+  return success;
+}
