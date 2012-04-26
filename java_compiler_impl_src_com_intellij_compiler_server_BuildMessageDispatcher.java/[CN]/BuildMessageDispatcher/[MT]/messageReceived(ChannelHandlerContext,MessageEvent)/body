@@ -1,0 +1,51 @@
+{
+  final CmdlineRemoteProto.Message message=(CmdlineRemoteProto.Message)e.getMessage();
+  SessionData sessionData=(SessionData)ctx.getAttachment();
+  UUID sessionId;
+  if (sessionData == null) {
+    final CmdlineRemoteProto.Message.UUID id=message.getSessionId();
+    sessionId=new UUID(id.getMostSigBits(),id.getLeastSigBits());
+    sessionData=myMessageHandlers.get(sessionId);
+    if (sessionData != null) {
+      sessionData.channel=ctx.getChannel();
+      ctx.setAttachment(sessionData);
+    }
+    if (myCanceledSessions.contains(sessionId)) {
+      Channels.write(ctx.getChannel(),CmdlineProtoUtil.toMessage(sessionId,CmdlineProtoUtil.createCancelCommand()));
+    }
+  }
+ else {
+    sessionId=sessionData.sessionId;
+  }
+  final BuilderMessageHandler handler=sessionData != null ? sessionData.handler : null;
+  if (handler == null) {
+    LOG.info("No message handler registered for session " + sessionId);
+    return;
+  }
+  final CmdlineRemoteProto.Message.Type messageType=message.getType();
+switch (messageType) {
+case FAILURE:
+    handler.handleFailure(message.getFailure());
+  break;
+case BUILDER_MESSAGE:
+final CmdlineRemoteProto.Message.BuilderMessage builderMessage=message.getBuilderMessage();
+final CmdlineRemoteProto.Message.BuilderMessage.Type msgType=builderMessage.getType();
+if (msgType == CmdlineRemoteProto.Message.BuilderMessage.Type.PARAM_REQUEST) {
+final CmdlineRemoteProto.Message.ControllerMessage params=sessionData.params;
+if (params != null) {
+sessionData.params=null;
+Channels.write(ctx.getChannel(),CmdlineProtoUtil.toMessage(sessionId,params));
+}
+ else {
+cancelSession(sessionId);
+}
+}
+ else {
+handler.handleBuildMessage(builderMessage);
+}
+break;
+default :
+LOG.info("Unsupported message type " + messageType);
+break;
+}
+}
