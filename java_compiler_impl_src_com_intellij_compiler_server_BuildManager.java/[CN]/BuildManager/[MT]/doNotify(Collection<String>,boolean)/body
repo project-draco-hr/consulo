@@ -1,0 +1,68 @@
+{
+  final Project[] openProjects=myProjectManager.getOpenProjects();
+  myPooledThreadExecutor.execute(new Runnable(){
+    @Override public void run(){
+      List<Pair<ProjectFileIndex,ProjectData>> activeProjects=new ArrayList<Pair<ProjectFileIndex,ProjectData>>();
+      for (      Project project : openProjects) {
+        if (project.isDisposed() || project.isDefault()) {
+          continue;
+        }
+        final String projectPath=getProjectPath(project);
+        final ProjectData data=myProjectDataMap.get(projectPath);
+        if (data != null) {
+          activeProjects.add(Pair.create(ProjectRootManager.getInstance(project).getFileIndex(),data));
+        }
+      }
+      final LocalFileSystem lfs=LocalFileSystem.getInstance();
+      for (      final Pair<ProjectFileIndex,ProjectData> pair : activeProjects) {
+        final ProjectFileIndex fileIndex=pair.first;
+        final FSState fsState=pair.second.fsState;
+        pair.second.requestQueue.submit(new Runnable(){
+          @Override public void run(){
+            ApplicationManager.getApplication().runReadAction(new Runnable(){
+              @Override public void run(){
+                for (                String filePath : paths) {
+                  final VirtualFile vFile=lfs.findFileByPath(filePath);
+                  if (vFile == null) {
+                    continue;
+                  }
+                  final Module module=fileIndex.getModuleForFile(vFile);
+                  if (module == null) {
+                    continue;
+                  }
+                  final String moduleName=module.getName();
+                  if (!fsState.isInitialized(moduleName)) {
+                    continue;
+                  }
+                  final VirtualFile srcRoot=fileIndex.getSourceRootForFile(vFile);
+                  if (srcRoot == null) {
+                    return;
+                  }
+                  final boolean inTestSources=fileIndex.isInTestSourceContent(vFile);
+                  if (!inTestSources && !fileIndex.isInSourceContent(vFile)) {
+                    continue;
+                  }
+                  try {
+                    final File file=new File(vFile.getPath());
+                    if (notifyDeletion) {
+                      fsState.registerDeleted(moduleName,file,inTestSources,null);
+                    }
+ else {
+                      fsState.markDirty(file,new RootDescriptor(moduleName,new File(srcRoot.getPath()),inTestSources,false),null);
+                    }
+                  }
+ catch (                  IOException e) {
+                    LOG.error(e);
+                  }
+                }
+              }
+            }
+);
+          }
+        }
+);
+      }
+    }
+  }
+);
+}
