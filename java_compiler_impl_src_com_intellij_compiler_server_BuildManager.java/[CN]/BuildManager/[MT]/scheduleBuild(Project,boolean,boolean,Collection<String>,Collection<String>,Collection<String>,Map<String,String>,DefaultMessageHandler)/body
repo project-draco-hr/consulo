@@ -1,0 +1,90 @@
+{
+  final String projectPath=getProjectPath(project);
+  final UUID sessionId=UUID.randomUUID();
+  final CmdlineRemoteProto.Message.ControllerMessage params;
+  CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings globals=myGlobals;
+  if (globals == null) {
+    globals=buildGlobalSettings();
+    myGlobals=globals;
+  }
+  final SequentialTaskExecutor sequential;
+  final FSState fsState;
+synchronized (myProjectDataMap) {
+    ProjectData data=myProjectDataMap.get(projectPath);
+    if (data == null) {
+      data=new ProjectData(new SequentialTaskExecutor(myPooledThreadExecutor),new FSState());
+      myProjectDataMap.put(projectPath,data);
+    }
+    sequential=data.requestQueue;
+    fsState=data.fsState;
+    handler=new FSStateMessageHandler(data.fsState,handler);
+  }
+  if (isRebuild) {
+    params=CmdlineProtoUtil.createRebuildRequest(projectPath,userData,globals,fsState);
+  }
+ else {
+    params=isMake ? CmdlineProtoUtil.createMakeRequest(projectPath,modules,artifacts,userData,globals,fsState) : CmdlineProtoUtil.createForceCompileRequest(projectPath,modules,artifacts,paths,userData,globals,fsState);
+  }
+  myMessageDispatcher.registerBuildMessageHandler(sessionId,handler,params);
+  if (myListenPort < 0) {
+    try {
+      myListenPort=startListening();
+    }
+ catch (    Exception e) {
+      myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+      handler.handleFailure(CmdlineProtoUtil.createFailure(e.getMessage(),null));
+      handler.sessionTerminated();
+      return null;
+    }
+  }
+  final RequestFuture<BuilderMessageHandler> future=new RequestFuture<BuilderMessageHandler>(handler,sessionId,new RequestFuture.CancelAction<BuilderMessageHandler>(){
+    @Override public void cancel(    RequestFuture<BuilderMessageHandler> future) throws Exception {
+      myMessageDispatcher.cancelSession(future.getRequestID());
+    }
+  }
+);
+  sequential.submit(new Runnable(){
+    @Override public void run(){
+      try {
+        if (project.isDisposed()) {
+          future.cancel(false);
+          return;
+        }
+        final Process process=launchBuildProcess(myListenPort,sessionId);
+        final OSProcessHandler processHandler=new OSProcessHandler(process,null){
+          @Override protected boolean shouldDestroyProcessRecursively(){
+            return true;
+          }
+        }
+;
+        processHandler.addProcessListener(new ProcessAdapter(){
+          @Override public void processTerminated(          ProcessEvent event){
+            final BuilderMessageHandler handler=myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+            if (handler != null) {
+              handler.sessionTerminated();
+            }
+          }
+          @Override public void onTextAvailable(          ProcessEvent event,          Key outputType){
+            final String text=event.getText();
+            if (!StringUtil.isEmpty(text)) {
+              LOG.info("BUILDER_PROCESS [" + outputType.toString() + "]: "+ text.trim());
+            }
+          }
+        }
+);
+        processHandler.startNotify();
+        processHandler.waitFor();
+      }
+ catch (      ExecutionException e) {
+        myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+        future.getMessageHandler().handleFailure(CmdlineProtoUtil.createFailure(e.getMessage(),e));
+        future.getMessageHandler().sessionTerminated();
+      }
+ finally {
+        future.setDone();
+      }
+    }
+  }
+);
+  return future;
+}

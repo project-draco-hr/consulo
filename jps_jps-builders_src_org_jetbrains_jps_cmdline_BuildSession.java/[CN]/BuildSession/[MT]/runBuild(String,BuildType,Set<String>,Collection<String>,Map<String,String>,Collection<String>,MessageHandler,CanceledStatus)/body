@@ -3,10 +3,28 @@
   ProjectDescriptor pd;
   final Project project=loadProject(projectPath);
   final BuildFSState fsState=new BuildFSState(false);
+  for (  CmdlineRemoteProto.Message.FSStateMessage state : myModuleFSStates) {
+    final Map<File,Set<File>> recompileProduction=new HashMap<File,Set<File>>();
+    final Map<File,Set<File>> recompileTests=new HashMap<File,Set<File>>();
+    for (    CmdlineRemoteProto.Message.FSStateMessage.RootDelta delta : state.getRecompileDeltaList()) {
+      final Map<File,Set<File>> map=delta.getTestSources() ? recompileTests : recompileProduction;
+      final File root=new File(delta.getRoot());
+      Set<File> files=map.get(root);
+      if (files == null) {
+        files=new HashSet<File>();
+        map.put(root,files);
+      }
+      for (      String path : delta.getPathList()) {
+        files.add(new File(path));
+      }
+    }
+    fsState.init(state.getModuleName(),state.getDeletedProductionList(),state.getDeletedTestsList(),recompileProduction,recompileTests);
+  }
   ProjectTimestamps projectTimestamps=null;
   BuildDataManager dataManager=null;
   final File dataStorageRoot=Utils.getDataStorageRoot(project);
   try {
+    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
     dataManager=new BuildDataManager(dataStorageRoot,true);
     if (dataManager.versionDiffers()) {
       forceCleanCaches=true;
@@ -32,7 +50,7 @@
       if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
         buildType=BuildType.PROJECT_REBUILD;
       }
-      final Timestamps timestamps=projectTimestamps != null ? projectTimestamps.getStorage() : new NetworkStamps(mySessionId,myChannel);
+      final Timestamps timestamps=pd.timestamps.getStorage();
       final CompileScope compileScope=createCompilationScope(buildType,pd,timestamps,modules,artifacts,paths);
       final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),timestamps,builderParams,cs);
       builder.addMessageHandler(msgHandler);
@@ -60,6 +78,11 @@ forceCleanCaches=true;
  else {
 throw e;
 }
+}
+}
+for (Module module : pd.project.getModules().values()) {
+if (fsState.isInitialized(module.getName())) {
+Channels.write(myChannel,CmdlineProtoUtil.toMessage(mySessionId,CmdlineProtoUtil.createFSStateBuilderMessage(module.getName(),fsState)));
 }
 }
 }

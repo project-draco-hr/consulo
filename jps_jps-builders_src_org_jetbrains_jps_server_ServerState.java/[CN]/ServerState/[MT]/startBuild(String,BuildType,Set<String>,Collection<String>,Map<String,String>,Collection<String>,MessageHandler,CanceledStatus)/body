@@ -1,2 +1,80 @@
 {
+  boolean forceCleanCaches=false;
+  ProjectDescriptor pd;
+synchronized (myConfigurationLock) {
+    pd=myProjects.get(projectPath);
+    if (pd == null) {
+      final Project project=loadProject(projectPath);
+      final BuildFSState fsState=new BuildFSState(false);
+      ProjectTimestamps timestamps=null;
+      BuildDataManager dataManager=null;
+      final File dataStorageRoot=Utils.getDataStorageRoot(project);
+      try {
+        timestamps=new ProjectTimestamps(dataStorageRoot);
+        dataManager=new BuildDataManager(dataStorageRoot,myKeepTempCachesInMemory);
+        if (dataManager.versionDiffers()) {
+          forceCleanCaches=true;
+          msgHandler.processMessage(new CompilerMessage("compile-server",BuildMessage.Kind.INFO,"Dependency data format has changed, project rebuild required"));
+        }
+      }
+ catch (      Exception e) {
+        LOG.info(e);
+        if (timestamps != null) {
+          timestamps.close();
+        }
+        if (dataManager != null) {
+          dataManager.close();
+        }
+        forceCleanCaches=true;
+        FileUtil.delete(dataStorageRoot);
+        timestamps=new ProjectTimestamps(dataStorageRoot);
+        dataManager=new BuildDataManager(dataStorageRoot,myKeepTempCachesInMemory);
+        msgHandler.processMessage(new CompilerMessage("compile-server",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
+      }
+      pd=new ProjectDescriptor(project,fsState,timestamps,dataManager,BuildLoggingManager.DEFAULT);
+      myProjects.put(projectPath,pd);
+    }
+    pd.incUsageCounter();
+  }
+  final ProjectDescriptor finalPd=pd;
+  try {
+    for (int attempt=0; attempt < 2; attempt++) {
+      if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
+        buildType=BuildType.PROJECT_REBUILD;
+      }
+      final Timestamps timestamps=pd.timestamps.getStorage();
+      final CompileScope compileScope=createCompilationScope(buildType,pd,timestamps,modules,artifacts,paths);
+      final IncProjectBuilder builder=new IncProjectBuilder(pd,BuilderRegistry.getInstance(),timestamps,builderParams,cs);
+      builder.addMessageHandler(msgHandler);
+      try {
+switch (buildType) {
+case PROJECT_REBUILD:
+          builder.build(compileScope,false,true,forceCleanCaches);
+        break;
+case FORCED_COMPILATION:
+      builder.build(compileScope,false,false,forceCleanCaches);
+    break;
+case MAKE:
+  builder.build(compileScope,true,false,forceCleanCaches);
+break;
+case CLEAN:
+break;
+}
+break;
+}
+ catch (RebuildRequestedException e) {
+if (attempt == 0) {
+LOG.info(e);
+forceCleanCaches=true;
+}
+ else {
+throw e;
+}
+}
+}
+}
+  finally {
+pd.release();
+clearZipIndexCache();
+}
 }
