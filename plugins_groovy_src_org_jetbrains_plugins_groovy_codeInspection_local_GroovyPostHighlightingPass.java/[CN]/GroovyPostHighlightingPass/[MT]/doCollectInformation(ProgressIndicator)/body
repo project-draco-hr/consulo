@@ -21,14 +21,19 @@
 ;
   final List<HighlightInfo> unusedDeclarations=new ArrayList<HighlightInfo>();
   final Set<GrImportStatement> unusedImports=new HashSet<GrImportStatement>(PsiUtil.getValidImportStatements(myFile));
+  final Map<GrParameter,Boolean> usedParams=new HashMap<GrParameter,Boolean>();
   myFile.accept(new PsiRecursiveElementWalkingVisitor(){
     @Override public void visitElement(    PsiElement element){
       if (element instanceof GrReferenceElement) {
         for (        GroovyResolveResult result : ((GrReferenceElement)element).multiResolve(true)) {
           GroovyPsiElement context=result.getCurrentFileResolveContext();
+          PsiElement resolved=result.getElement();
           if (context instanceof GrImportStatement) {
             GrImportStatement importStatement=(GrImportStatement)context;
             unusedImports.remove(importStatement);
+          }
+          if (resolved instanceof GrParameter && resolved.getContainingFile() == myFile) {
+            usedParams.put((GrParameter)resolved,Boolean.TRUE);
           }
         }
       }
@@ -55,6 +60,11 @@
             QuickFixAction.registerQuickFixAction(highlightInfo,new SafeDeleteFix(element));
             unusedDeclarations.add(highlightInfo);
           }
+ else           if (element instanceof GrParameter) {
+            if (!usedParams.containsKey(element)) {
+              usedParams.put((GrParameter)element,Boolean.FALSE);
+            }
+          }
         }
       }
       super.visitElement(element);
@@ -62,6 +72,22 @@
   }
 );
   myUnusedImports=unusedImports;
+  if (deadCodeEnabled) {
+    for (    GrParameter parameter : usedParams.keySet()) {
+      if (usedParams.get(parameter))       continue;
+      PsiElement scope=parameter.getDeclarationScope();
+      if (scope instanceof GrMethod) {
+        GrMethod method=(GrMethod)scope;
+        if ((method.isConstructor() || method.hasModifierProperty(PsiModifier.PRIVATE) || method.hasModifierProperty(PsiModifier.STATIC)|| !method.hasModifierProperty(PsiModifier.ABSTRACT) && !isOverriddenOrOverrides(method)) && !method.hasModifierProperty(PsiModifier.NATIVE) && !HighlightMethodUtil.isSerializationRelatedMethod(method,method.getContainingClass())&& !PsiClassImplUtil.isMainMethod(method)) {
+          HighlightInfo highlightInfo=PostHighlightingPass.createUnusedSymbolInfo(parameter.getNameIdentifierGroovy(),"Parameter " + parameter.getName() + " is unused",HighlightInfoType.UNUSED_SYMBOL);
+          QuickFixAction.registerQuickFixAction(highlightInfo,new SafeDeleteFix(parameter));
+          unusedDeclarations.add(highlightInfo);
+        }
+      }
+ else       if (scope instanceof GrClosableBlock) {
+      }
+    }
+  }
   myUnusedDeclarations=unusedDeclarations;
   if (!unusedImports.isEmpty() && CodeInsightSettings.getInstance().OPTIMIZE_IMPORTS_ON_THE_FLY) {
     final VirtualFile vfile=myFile.getVirtualFile();
