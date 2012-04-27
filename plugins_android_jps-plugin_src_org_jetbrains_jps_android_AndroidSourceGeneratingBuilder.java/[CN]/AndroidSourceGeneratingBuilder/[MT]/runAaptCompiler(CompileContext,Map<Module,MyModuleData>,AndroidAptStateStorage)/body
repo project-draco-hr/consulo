@@ -4,43 +4,43 @@
     final Module module=entry.getKey();
     final MyModuleData moduleData=entry.getValue();
     final AndroidFacet facet=moduleData.getFacet();
-    if (!needToRunAaptCompilation(facet)) {
-      continue;
-    }
+    final File generatedSourcesDir=AndroidJpsUtil.getGeneratedSourcesStorage(module);
+    final File aptOutputDirectory=new File(generatedSourcesDir,AndroidJpsUtil.AAPT_GENERATED_SOURCE_ROOT_NAME);
     final IAndroidTarget target=moduleData.getAndroidTarget();
     try {
+      if (!needToRunAaptCompilation(facet)) {
+        if (!clearDirectoryIfNotEmpty(aptOutputDirectory,context)) {
+          success=false;
+        }
+        continue;
+      }
       final String[] resPaths=AndroidJpsUtil.collectResourceDirsForCompilation(facet,false,context);
       if (resPaths.length == 0) {
+        if (!clearDirectoryIfNotEmpty(aptOutputDirectory,context)) {
+          success=false;
+        }
         continue;
       }
-      final File manifestFile=AndroidJpsUtil.getManifestFileForCompilationPath(facet);
-      if (manifestFile == null || !manifestFile.exists()) {
-        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.manifest.not.found",module.getName())));
-        success=false;
+      final String packageName=moduleData.getPackage();
+      final File manifestFile=moduleData.getManifestFileForCompiler();
+      if (isLibraryWithBadCircularDependency(facet)) {
+        if (!clearDirectoryIfNotEmpty(aptOutputDirectory,context)) {
+          success=false;
+        }
         continue;
       }
-      final String packageName=parsePackageNameFromManifestFile(manifestFile);
-      if (packageName == null || packageName.length() == 0) {
-        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.package.not.specified",module.getName())));
-        success=false;
-        continue;
-      }
-      final Map<Module,String> depLibPackageMap=getDepLibPackages(module);
-      final Map<Module,String> packageMap=new HashMap<Module,String>(depLibPackageMap);
+      final Map<Module,String> packageMap=getDepLibPackages(module);
       packageMap.put(module,packageName);
-      if (hasBadCircularDependencies(facet,packageMap)) {
-        continue;
-      }
-      final Module circularDepLibWithSamePackage=AndroidJpsUtil.findCircularDependencyOnLibraryWithSamePackage(facet,packageMap);
+      final Module circularDepLibWithSamePackage=findCircularDependencyOnLibraryWithSamePackage(facet,packageMap);
       if (circularDepLibWithSamePackage != null && !facet.isLibrary()) {
         final String message="Generated fields in " + packageName + ".R class in module '"+ module.getName()+ "' won't be final, because of circular dependency on module '"+ circularDepLibWithSamePackage.getName()+ "'";
         context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.WARNING,message));
       }
       final boolean generateNonFinalFields=facet.isLibrary() || circularDepLibWithSamePackage != null;
-      final Set<String> depLibPackagesSet=new HashSet<String>(depLibPackageMap.values());
-      depLibPackagesSet.remove(packageName);
       final Map<String,ResourceFileData> resources=collectResources(resPaths);
       final List<ResourceEntry> manifestElements=collectManifestElements(manifestFile);
+      final Set<String> depLibPackagesSet=new HashSet<String>(packageMap.values());
+      depLibPackagesSet.remove(packageName);
       final AndroidAptValidityState newState=new AndroidAptValidityState(resources,manifestElements,depLibPackagesSet,packageName);
       if (context.isMake()) {
         final AndroidAptValidityState oldState=storage.getState(module.getName());
@@ -48,14 +48,7 @@
           continue;
         }
       }
-      final File generatedSourcesDir=AndroidJpsUtil.getGeneratedSourcesStorage(module);
-      final File aptOutputDirectory=new File(generatedSourcesDir,AndroidJpsUtil.AAPT_GENERATED_SOURCE_ROOT_NAME);
-      if (!deleteAndMarkRecursively(aptOutputDirectory,context)) {
-        success=false;
-        continue;
-      }
-      if (!aptOutputDirectory.mkdirs()) {
-        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,"Cannot create directory " + aptOutputDirectory.getPath()));
+      if (!clearDirectory(aptOutputDirectory,context)) {
         success=false;
         continue;
       }
