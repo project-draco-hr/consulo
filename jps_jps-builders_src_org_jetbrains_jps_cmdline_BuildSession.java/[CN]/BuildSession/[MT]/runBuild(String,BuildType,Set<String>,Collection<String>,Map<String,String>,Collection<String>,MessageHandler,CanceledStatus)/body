@@ -2,27 +2,9 @@
   boolean forceCleanCaches=false;
   ProjectDescriptor pd;
   final Project project=loadProject(projectPath);
-  final BuildFSState fsState=new BuildFSState(false);
-  for (  CmdlineRemoteProto.Message.FSStateMessage state : myModuleFSStates) {
-    final Map<File,Set<File>> recompileProduction=new HashMap<File,Set<File>>();
-    final Map<File,Set<File>> recompileTests=new HashMap<File,Set<File>>();
-    for (    CmdlineRemoteProto.Message.FSStateMessage.RootDelta delta : state.getRecompileDeltaList()) {
-      final Map<File,Set<File>> map=delta.getTestSources() ? recompileTests : recompileProduction;
-      final File root=new File(delta.getRoot());
-      Set<File> files=map.get(root);
-      if (files == null) {
-        files=new HashSet<File>();
-        map.put(root,files);
-      }
-      for (      String path : delta.getPathList()) {
-        files.add(new File(path));
-      }
-    }
-    fsState.init(state.getModuleName(),state.getDeletedProductionList(),state.getDeletedTestsList(),recompileProduction,recompileTests);
-  }
+  final File dataStorageRoot=Utils.getDataStorageRoot(project);
   ProjectTimestamps projectTimestamps=null;
   BuildDataManager dataManager=null;
-  final File dataStorageRoot=Utils.getDataStorageRoot(project);
   try {
     projectTimestamps=new ProjectTimestamps(dataStorageRoot);
     dataManager=new BuildDataManager(dataStorageRoot,true);
@@ -41,10 +23,16 @@
     }
     forceCleanCaches=true;
     FileUtil.delete(dataStorageRoot);
+    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
     dataManager=new BuildDataManager(dataStorageRoot,true);
     msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
   }
+  final BuildFSState fsState=new BuildFSState(false);
   pd=new ProjectDescriptor(project,fsState,projectTimestamps,dataManager,BuildLoggingManager.DEFAULT);
+  myProjectDescriptor=pd;
+  loadFsState(myProjectDescriptor,dataStorageRoot,myInitialFSDelta);
+  myInitialFSDelta=null;
+  myEventsProcessor.startProcessing();
   try {
     for (int attempt=0; attempt < 2; attempt++) {
       if (forceCleanCaches && modules.isEmpty() && paths.isEmpty()) {
@@ -80,13 +68,9 @@ throw e;
 }
 }
 }
-for (Module module : pd.project.getModules().values()) {
-if (fsState.isInitialized(module.getName())) {
-Channels.write(myChannel,CmdlineProtoUtil.toMessage(mySessionId,CmdlineProtoUtil.createFSStateBuilderMessage(module.getName(),fsState)));
-}
-}
 }
   finally {
+saveFsState(dataStorageRoot,pd.fsState,myLastEventOrdinal);
 pd.release();
 }
 }

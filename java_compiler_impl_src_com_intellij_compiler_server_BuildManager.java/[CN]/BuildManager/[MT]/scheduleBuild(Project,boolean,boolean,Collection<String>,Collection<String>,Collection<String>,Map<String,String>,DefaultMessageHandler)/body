@@ -7,23 +7,29 @@
     globals=buildGlobalSettings();
     myGlobals=globals;
   }
-  final SequentialTaskExecutor sequential;
-  final FSState fsState;
+  CmdlineRemoteProto.Message.ControllerMessage.FSEvent currentFSChanges=null;
+  final SequentialTaskExecutor projectTaskQueue;
 synchronized (myProjectDataMap) {
     ProjectData data=myProjectDataMap.get(projectPath);
     if (data == null) {
-      data=new ProjectData(new SequentialTaskExecutor(myPooledThreadExecutor),new FSState());
+      data=new ProjectData(new SequentialTaskExecutor(myPooledThreadExecutor));
       myProjectDataMap.put(projectPath,data);
     }
-    sequential=data.requestQueue;
-    fsState=data.fsState;
-    handler=new FSStateMessageHandler(data.fsState,handler);
+ else {
+      if (!isRebuild) {
+        currentFSChanges=data.createNextEvent();
+      }
+ else {
+        data.clearFSChanges();
+      }
+    }
+    projectTaskQueue=data.taskQueue;
   }
   if (isRebuild) {
-    params=CmdlineProtoUtil.createRebuildRequest(projectPath,userData,globals,fsState);
+    params=CmdlineProtoUtil.createRebuildRequest(projectPath,userData,globals);
   }
  else {
-    params=isMake ? CmdlineProtoUtil.createMakeRequest(projectPath,modules,artifacts,userData,globals,fsState) : CmdlineProtoUtil.createForceCompileRequest(projectPath,modules,artifacts,paths,userData,globals,fsState);
+    params=isMake ? CmdlineProtoUtil.createMakeRequest(projectPath,modules,artifacts,userData,globals,currentFSChanges) : CmdlineProtoUtil.createForceCompileRequest(projectPath,modules,artifacts,paths,userData,globals,currentFSChanges);
   }
   myMessageDispatcher.registerBuildMessageHandler(sessionId,handler,params);
   if (myListenPort < 0) {
@@ -43,13 +49,14 @@ synchronized (myProjectDataMap) {
     }
   }
 );
-  sequential.submit(new Runnable(){
+  projectTaskQueue.submit(new Runnable(){
     @Override public void run(){
       try {
         if (project.isDisposed()) {
           future.cancel(false);
           return;
         }
+        myBuildsInProgress.put(projectPath,future);
         final Process process=launchBuildProcess(myListenPort,sessionId);
         final OSProcessHandler processHandler=new OSProcessHandler(process,null){
           @Override protected boolean shouldDestroyProcessRecursively(){
@@ -81,6 +88,7 @@ synchronized (myProjectDataMap) {
         future.getMessageHandler().sessionTerminated();
       }
  finally {
+        myBuildsInProgress.remove(projectPath);
         future.setDone();
       }
     }
