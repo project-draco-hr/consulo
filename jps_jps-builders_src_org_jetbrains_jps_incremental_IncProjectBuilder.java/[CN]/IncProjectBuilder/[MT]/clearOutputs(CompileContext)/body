@@ -1,0 +1,51 @@
+{
+  final Collection<Module> modulesToClean=context.getProject().getModules().values();
+  final Map<File,Set<Pair<String,Boolean>>> rootsToDelete=new HashMap<File,Set<Pair<String,Boolean>>>();
+  final Set<File> allSourceRoots=new HashSet<File>();
+  for (  Module module : modulesToClean) {
+    final File out=context.getProjectPaths().getModuleOutputDir(module,false);
+    if (out != null) {
+      appendRootInfo(rootsToDelete,out,module,false);
+    }
+    final File testOut=context.getProjectPaths().getModuleOutputDir(module,true);
+    if (testOut != null) {
+      appendRootInfo(rootsToDelete,testOut,module,true);
+    }
+    final List<RootDescriptor> moduleRoots=context.getModuleRoots(module);
+    for (    RootDescriptor d : moduleRoots) {
+      allSourceRoots.add(d.root);
+    }
+  }
+  final List<File> filesToDelete=new ArrayList<File>();
+  for (  Map.Entry<File,Set<Pair<String,Boolean>>> entry : rootsToDelete.entrySet()) {
+    context.checkCanceled();
+    boolean okToDelete=true;
+    final File outputRoot=entry.getKey();
+    if (PathUtil.isUnder(allSourceRoots,outputRoot)) {
+      okToDelete=false;
+    }
+ else {
+      final Set<File> _outRoot=Collections.singleton(outputRoot);
+      for (      File srcRoot : allSourceRoots) {
+        if (PathUtil.isUnder(_outRoot,srcRoot)) {
+          okToDelete=false;
+          break;
+        }
+      }
+    }
+    if (okToDelete) {
+      final File[] children=outputRoot.listFiles();
+      if (children != null) {
+        filesToDelete.addAll(Arrays.asList(children));
+      }
+    }
+ else {
+      context.processMessage(new CompilerMessage(COMPILE_SERVER_NAME,BuildMessage.Kind.WARNING,"Output path " + outputRoot.getPath() + " intersects with a source root. The output cannot be cleaned."));
+      for (      Pair<String,Boolean> info : entry.getValue()) {
+        clearOutputFiles(context,info.first,info.second);
+      }
+    }
+  }
+  context.processMessage(new ProgressMessage("Cleaning output directories..."));
+  FileUtil.asyncDelete(filesToDelete);
+}
