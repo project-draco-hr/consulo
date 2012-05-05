@@ -1,26 +1,61 @@
 {
-  if (myCachedNormalizedRequests != null)   return myCachedNormalizedRequests;
-  List<WatchRequestImpl> result=new ArrayList<WatchRequestImpl>();
+  final List<WatchRequestImpl> result=new ArrayList<WatchRequestImpl>();
 synchronized (myLock) {
-    NextRoot:     for (    WatchRequestImpl request : myRootsToWatch) {
+    TreeNode rootNode=new TreeNode();
+    for (    WatchRequestImpl request : myRootsToWatch) {
       String rootPath=request.getRootPath();
-      boolean recursively=request.isToWatchRecursively();
-      for (Iterator<WatchRequestImpl> iterator1=result.iterator(); iterator1.hasNext(); ) {
-        final WatchRequestImpl otherRequest=iterator1.next();
-        final String otherRootPath=otherRequest.getRootPath();
-        final boolean otherRecursively=otherRequest.isToWatchRecursively();
-        if ((rootPath.equals(otherRootPath) && (!recursively || otherRecursively)) || (FileUtil.startsWith(rootPath,otherRootPath) && otherRecursively)) {
-          continue NextRoot;
+      TreeNode currentNode=rootNode;
+      MainLoop:       for (      String subPath : rootPath.split("/")) {
+        if (!SystemInfo.isFileSystemCaseSensitive) {
+          subPath=subPath.toLowerCase();
         }
- else         if (FileUtil.startsWith(otherRootPath,rootPath) && (recursively || !otherRecursively)) {
-          otherRequest.myDominated=true;
-          iterator1.remove();
+        TreeNode nextNode=currentNode.nodes.get(subPath);
+        if (nextNode != null) {
+          currentNode=nextNode;
+          if (currentNode.watchRequest != null && currentNode.watchRequest.isToWatchRecursively()) {
+            request.myDominated=true;
+            break MainLoop;
+          }
+        }
+ else {
+          TreeNode newNode=new TreeNode();
+          currentNode.nodes.put(subPath,newNode);
+          currentNode=newNode;
         }
       }
-      result.add(request);
-      request.myDominated=false;
+      if (currentNode.watchRequest == null) {
+        currentNode.watchRequest=request;
+      }
+ else {
+        if (!currentNode.watchRequest.isToWatchRecursively()) {
+          currentNode.watchRequest.myDominated=true;
+          currentNode.watchRequest=request;
+        }
+ else {
+          request.myDominated=true;
+        }
+      }
+      if (currentNode.watchRequest.isToWatchRecursively() && currentNode.nodes.size() > 0) {
+        visitTree(currentNode,new Consumer<TreeNode>(){
+          @Override public void consume(          final TreeNode node){
+            if (node.watchRequest != null) {
+              node.watchRequest.myDominated=true;
+            }
+          }
+        }
+);
+        currentNode.nodes.clear();
+      }
     }
+    visitTree(rootNode,new Consumer<TreeNode>(){
+      @Override public void consume(      final TreeNode node){
+        if (node.watchRequest != null) {
+          result.add(node.watchRequest);
+        }
+      }
+    }
+);
+    myNormalizedTree=rootNode;
   }
-  myCachedNormalizedRequests=result.toArray(new WatchRequestImpl[result.size()]);
-  return myCachedNormalizedRequests;
+  return result.toArray(new WatchRequestImpl[result.size()]);
 }
