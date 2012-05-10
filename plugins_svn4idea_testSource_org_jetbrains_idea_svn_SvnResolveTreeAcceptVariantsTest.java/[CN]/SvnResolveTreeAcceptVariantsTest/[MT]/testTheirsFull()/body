@@ -1,0 +1,58 @@
+{
+  int cnt=0;
+  myWorkingCopyDir=createDirInCommand(myWorkingCopyDir,"test--");
+  myTheirs=createDirInCommand(myTheirs,"theirs--");
+  for (  final TreeConflictData.Data data : TreeConflictData.ourAll) {
+    if (myTraceClient) {
+      System.out.println("========= TEST " + getTestName(data) + " =========");
+    }
+    myWorkingCopyDir=createDirInCommand(myWorkingCopyDir.getParent(),"test" + cnt);
+    myTheirs=createDirInCommand(myTheirs.getParent(),"theirs" + cnt);
+    mySvnClientRunner.checkout(myRepoUrl,myTheirs);
+    mySvnClientRunner.checkout(myRepoUrl,myWorkingCopyDir);
+    createSubTree();
+    final ConflictCreator creator=new ConflictCreator(myProject,myTheirs,myWorkingCopyDir,data,mySvnClientRunner);
+    creator.create();
+    myDirtyScopeManager.markEverythingDirty();
+    myChangeListManager.ensureUpToDate(false);
+    myDirtyScopeManager.markEverythingDirty();
+    myChangeListManager.ensureUpToDate(false);
+    final String conflictFile=data.getConflictFile();
+    final File conflictIoFile=new File(myWorkingCopyDir.getPath(),conflictFile);
+    final FilePathImpl filePath=new FilePathImpl(conflictIoFile,conflictIoFile.isDirectory());
+    final Change change=myChangeListManager.getChange(filePath);
+    Assert.assertNotNull(change);
+    Assert.assertTrue(change instanceof ConflictedSvnChange);
+    final SvnRevisionNumber committedRevision=change.getBeforeRevision() != null ? (SvnRevisionNumber)change.getBeforeRevision().getRevisionNumber() : null;
+    FilePath beforePath=null;
+    if (change.isMoved() || change.isRenamed()) {
+      beforePath=change.getBeforeRevision().getFile();
+    }
+    final SvnTreeConflictResolver resolver=new SvnTreeConflictResolver(myVcs,filePath,committedRevision,beforePath);
+    resolver.resolveSelectTheirsFull(((ConflictedSvnChange)change).getBeforeDescription());
+    myTheirs.refresh(false,true);
+    myWorkingCopyDir.refresh(false,true);
+    VfsUtil.processFileRecursivelyWithoutIgnored(myTheirs,new Processor<VirtualFile>(){
+      @Override public boolean process(      VirtualFile file){
+        final String relative=VfsUtil.getRelativePath(file,myTheirs,File.separatorChar);
+        File workingFile=new File(myWorkingCopyDir.getPath(),relative);
+        boolean exists=workingFile.exists();
+        if (!exists) {
+          String[] excluded=data.getExcludeFromToTheirsCheck();
+          if (excluded != null && Arrays.asList(excluded).contains(relative)) {
+            return true;
+          }
+          Assert.assertTrue("Check failed for test: " + getTestName(data) + " and file: "+ relative+ " in: "+ myWorkingCopyDir.getPath(),exists);
+        }
+        SVNInfo theirsInfo=myVcs.getInfo(new File(file.getPath()));
+        SVNInfo thisInfo=myVcs.getInfo(workingFile);
+        if (theirsInfo != null) {
+          Assert.assertEquals("Check failed for test: " + getTestName(data) + " and file: "+ relative+ " in: "+ myWorkingCopyDir.getPath()+ ", theirs: "+ theirsInfo.getRevision().getNumber()+ ", mine: "+ thisInfo.getRevision().getNumber(),theirsInfo.getRevision().getNumber(),thisInfo.getRevision().getNumber());
+        }
+        return true;
+      }
+    }
+);
+    ++cnt;
+  }
+}

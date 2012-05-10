@@ -1,0 +1,50 @@
+{
+  FilePath committedPath=path;
+  Change change=ChangeListManager.getInstance(myVcs.getProject()).getChange(path);
+  if (change != null) {
+    final ContentRevision beforeRevision=change.getBeforeRevision();
+    final ContentRevision afterRevision=change.getAfterRevision();
+    if (beforeRevision != null && afterRevision != null && !beforeRevision.getFile().equals(afterRevision.getFile()) && afterRevision.getFile().equals(path)) {
+      committedPath=beforeRevision.getFile();
+    }
+    if (peg == null && change.getBeforeRevision() != null) {
+      peg=((SvnRevisionNumber)change.getBeforeRevision().getRevisionNumber()).getRevision();
+    }
+  }
+  final LogLoader logLoader;
+  if (path.isNonLocal()) {
+    logLoader=new RepositoryLoader(myVcs,path,from,to,limit,peg,forceBackwards);
+  }
+ else {
+    logLoader=new LocalLoader(myVcs,path,from,to,limit,peg);
+  }
+  try {
+    logLoader.preliminary();
+  }
+ catch (  SVNCancelException e) {
+    return;
+  }
+catch (  SVNException e) {
+    throw new VcsException(e);
+  }
+  logLoader.initSupports15();
+  final SvnHistorySession historySession=new SvnHistorySession(myVcs,Collections.<VcsFileRevision>emptyList(),committedPath,Boolean.TRUE.equals(logLoader.mySupport15),null,false);
+  final Ref<Boolean> sessionReported=new Ref<Boolean>();
+  final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  if (indicator != null) {
+    indicator.setText(SvnBundle.message("progress.text2.collecting.history",path.getName()));
+  }
+  final Consumer<VcsFileRevision> consumer=new Consumer<VcsFileRevision>(){
+    public void consume(    VcsFileRevision vcsFileRevision){
+      if (!Boolean.TRUE.equals(sessionReported.get())) {
+        partner.reportCreatedEmptySession(historySession);
+        sessionReported.set(true);
+      }
+      partner.acceptRevision(vcsFileRevision);
+    }
+  }
+;
+  logLoader.setConsumer(consumer);
+  logLoader.load();
+  logLoader.check();
+}
