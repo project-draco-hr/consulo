@@ -1,0 +1,62 @@
+{
+  myVcs=vcs;
+  myLastPath=lastPath;
+  myCharset=charset;
+  myIndicator=ProgressManager.getInstance().getProgressIndicator();
+  myResult=result;
+  myPegRevision=pegRevision;
+  myUrl=url;
+  myRepositoryRoot=repoRootURL;
+  myTracker=new SvnMergeSourceTracker(new ThrowableConsumer<Pair<SVNLogEntry,Integer>,SVNException>(){
+    public void consume(    final Pair<SVNLogEntry,Integer> svnLogEntryIntegerPair) throws SVNException {
+      final SVNLogEntry logEntry=svnLogEntryIntegerPair.getFirst();
+      if (myIndicator != null) {
+        if (myIndicator.isCanceled()) {
+          SVNErrorManager.cancel(SvnBundle.message("exception.text.update.operation.cancelled"),SVNLogType.DEFAULT);
+        }
+        myIndicator.setText2(SvnBundle.message("progress.text2.revision.processed",logEntry.getRevision()));
+      }
+      String copyPath=null;
+      SVNLogEntryPath entryPath=(SVNLogEntryPath)logEntry.getChangedPaths().get(myLastPath);
+      if (entryPath != null) {
+        copyPath=entryPath.getCopyPath();
+      }
+ else {
+        String path=SVNPathUtil.removeTail(myLastPath);
+        while (path.length() > 0) {
+          entryPath=(SVNLogEntryPath)logEntry.getChangedPaths().get(path);
+          if (entryPath != null && (entryPath.getType() == 'A' || entryPath.getType() == 'D')) {
+            String relativePath=myLastPath.substring(entryPath.getPath().length());
+            if (entryPath.getCopyPath() != null) {
+              copyPath=entryPath.getCopyPath() + relativePath;
+            }
+            break;
+          }
+          path=SVNPathUtil.removeTail(path);
+        }
+      }
+      if (entryPath == null) {
+        if (!checkForChildChanges(logEntry))         return;
+      }
+      final int mergeLevel=svnLogEntryIntegerPair.getSecond();
+      final SvnFileRevision revision=createRevision(logEntry,copyPath,entryPath);
+      if (copyPath != null) {
+        myLastPath=copyPath;
+      }
+ else {
+        myLastPath=correctLastPathAccordingToFolderRenames(myLastPath,logEntry);
+      }
+      if (mergeLevel >= 0) {
+        addToListByLevel((SvnFileRevision)myPrevious,revision,mergeLevel);
+      }
+ else {
+        myResult.consume(revision);
+        myPrevious=revision;
+      }
+      if (myThrowCancelOnMeetPathCreation && myUrl.equals(revision.getURL()) && entryPath != null && entryPath.getType() == 'A') {
+        throw new SVNCancelException();
+      }
+    }
+  }
+);
+}
