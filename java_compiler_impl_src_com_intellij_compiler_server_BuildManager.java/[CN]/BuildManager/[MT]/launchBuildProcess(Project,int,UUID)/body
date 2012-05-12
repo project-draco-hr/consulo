@@ -1,9 +1,6 @@
 {
-  final JavaCompiler systemCompiler=ToolProvider.getSystemJavaCompiler();
-  if (systemCompiler == null) {
-    throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
-  }
-  Sdk projectJdk=JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
+  final Sdk internalJdk=JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
+  Sdk projectJdk=internalJdk;
   final String versionString=projectJdk.getVersionString();
   if (versionString != null) {
     JavaSdkVersion sdkVersion=((JavaSdk)projectJdk.getSdkType()).getVersion(versionString);
@@ -28,6 +25,21 @@
         }
       }
     }
+  }
+  final File compilerPath;
+  if (projectJdk.equals(internalJdk)) {
+    final JavaCompiler systemCompiler=ToolProvider.getSystemJavaCompiler();
+    if (systemCompiler == null) {
+      throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
+    }
+    compilerPath=ClasspathBootstrap.getResourcePath(systemCompiler.getClass());
+  }
+ else {
+    final String path=((JavaSdk)projectJdk.getSdkType()).getToolsPath(projectJdk);
+    if (path == null) {
+      throw new ExecutionException("Cannot determine path to 'tools.jar' library for " + projectJdk.getName() + " ("+ projectJdk.getHomePath()+ ")");
+    }
+    compilerPath=new File(path);
   }
   final GeneralCommandLine cmdLine=new GeneralCommandLine();
   final String vmExecutablePath=((JavaSdkType)projectJdk.getSdkType()).getVMExecutablePath(projectJdk);
@@ -81,7 +93,8 @@
     cmdLine.addParameter("-Duser.region=" + region);
   }
   cmdLine.addParameter("-classpath");
-  final List<File> cp=ClasspathBootstrap.getCompileServerApplicationClasspath();
+  final List<File> cp=ClasspathBootstrap.getBuildProcessApplicationClasspath();
+  cp.add(compilerPath);
   cp.addAll(myClasspathManager.getCompileServerPluginsClasspath());
   cmdLine.addParameter(classpathToString(cp));
   cmdLine.addParameter(BuildMain.class.getName());
