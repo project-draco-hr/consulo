@@ -1,0 +1,85 @@
+{
+  final VirtualFile virtualFile=(VirtualFile)dc.getData(DataConstants.VIRTUAL_FILE);
+  final IntHolder count=new IntHolder();
+  final VirtualFileVisitor counter=new VirtualFileVisitor(){
+    void visitVirtualFile(    final VirtualFile f){
+      if (!f.isDirectory())       count.n++;
+    }
+  }
+;
+  counter.accept(virtualFile);
+  logger.debug("counted " + count.n + " files");
+  final RearrangerActionHandler rah=new RearrangerActionHandler();
+  final PsiDocumentManager dm=PsiDocumentManager.getInstance(project);
+  final PsiManager pm=PsiManager.getInstance(project);
+  final VirtualFileVisitor executor=new VirtualFileVisitor(){
+    int currentCount=0;
+    void visitVirtualFile(    final VirtualFile f){
+      try {
+        final PsiFile psiFile=pm.findFile(f);
+        if (psiFile != null && psiFile.canContainJavaCode()) {
+          logger.debug("rearrange psiFile=" + psiFile.toString());
+          if (SwingUtilities.isEventDispatchThread()) {
+            logger.debug("event dispatch thread setting filename to " + psiFile.getName());
+            filename.setText(psiFile.getName());
+          }
+ else {
+            logger.debug("invokeAndWait to set filename to " + psiFile.getName());
+            SwingUtilities.invokeAndWait(new Runnable(){
+              public void run(){
+                logger.debug("event dispatch thread within invokeAndWait setting filename to " + psiFile.getName());
+                filename.setText(psiFile.getName());
+              }
+            }
+);
+          }
+          filename.repaint();
+          filename.paintImmediately(filename.getVisibleRect());
+          Thread.sleep(8000);
+          final Document document=dm.getDocument(psiFile);
+          if (document == null) {
+            logger.debug("document was null");
+          }
+ else {
+            rah.runWriteActionRearrangement(project,document,psiFile);
+          }
+          logger.debug("done rearranging psiFile=" + psiFile.toString());
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+          logger.debug("EventDispatchThread updating progress bar value to " + currentCount);
+          bar.setValue(currentCount);
+        }
+ else {
+          logger.debug("invokeAndWait to set progress bar value to " + currentCount);
+          SwingUtilities.invokeAndWait(new Runnable(){
+            public void run(){
+              logger.debug("EventDispatchThread within InvokeAndWait setting progress bar value to " + currentCount);
+              bar.setValue(currentCount);
+            }
+          }
+);
+        }
+        bar.repaint();
+        bar.paintImmediately(bar.getVisibleRect());
+        bar.paint(bar.getGraphics());
+        currentCount++;
+        Thread.sleep(5000);
+      }
+ catch (      InterruptedException e) {
+        e.printStackTrace();
+      }
+catch (      InvocationTargetException e) {
+        e.printStackTrace();
+      }
+    }
+  }
+;
+  final JDialog dialog=getProgressFrame(executor,count.n);
+  dialog.show();
+  dialog.setVisible(true);
+  dialog.paint(dialog.getGraphics());
+  executor.accept(virtualFile);
+  dialog.setVisible(false);
+  dialog.hide();
+  dialog.dispose();
+}

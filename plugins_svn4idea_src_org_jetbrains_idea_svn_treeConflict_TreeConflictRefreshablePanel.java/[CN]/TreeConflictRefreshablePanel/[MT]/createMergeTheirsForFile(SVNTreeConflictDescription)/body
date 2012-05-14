@@ -1,0 +1,61 @@
+{
+  return new ActionListener(){
+    @Override public void actionPerformed(    ActionEvent e){
+      final FilePath oldFilePath=myChange.getBeforeRevision().getFile();
+      final FilePath newFilePath=myChange.getAfterRevision().getFile();
+      int ok=Messages.showOkCancelDialog(myVcs.getProject(),(myChange.isMoved() ? SvnBundle.message("confirmation.resolve.tree.conflict.merge.moved",filePath(oldFilePath),filePath(newFilePath)) : SvnBundle.message("confirmation.resolve.tree.conflict.merge.renamed",filePath(oldFilePath),filePath(newFilePath))),"Resolve tree conflict",Messages.getQuestionIcon());
+      if (Messages.OK != ok)       return;
+      final String name="Merge changes from theirs for: " + oldFilePath;
+      final GatheringContinuationContext cc=new GatheringContinuationContext();
+      cc.addExceptionHandler(VcsException.class,new Consumer<VcsException>(){
+        @Override public void consume(        VcsException e){
+          AbstractVcsHelper.getInstance(myVcs.getProject()).showErrors(Collections.singletonList(e),name);
+        }
+      }
+);
+      cc.next(new TaskDescriptor("Creating patch for theirs changes",Where.POOLED){
+        @Override public void run(        ContinuationContext context){
+          try {
+            ProgressManager.progress("Getting base and theirs revisions content");
+            final SvnContentRevision base=SvnContentRevision.createBaseRevision(myVcs,newFilePath,myCommittedRevision.getRevision());
+            final SvnContentRevision remote=SvnContentRevision.createRemote(myVcs,oldFilePath,SVNRevision.create(description.getSourceRightVersion().getPegRevision()));
+            final ContentRevision newBase=new SimpleContentRevision(base.getContent(),newFilePath,base.getRevisionNumber().asString());
+            final ContentRevision newRemote=new SimpleContentRevision(remote.getContent(),newFilePath,remote.getRevisionNumber().asString());
+            ProgressManager.progress("Creating patch for theirs changes");
+            final VirtualFile baseForPatch=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile>(){
+              @Override public VirtualFile compute(){
+                return ChangesUtil.findValidParent(newFilePath);
+              }
+            }
+);
+            final Project project=myVcs.getProject();
+            final List<FilePatch> patches=IdeaTextPatchBuilder.buildPatch(project,Collections.singletonList(new Change(newBase,newRemote)),baseForPatch.getPath(),false);
+            ProgressManager.progress("Applying patch to " + newFilePath.getPath());
+            final ChangeListManager clManager=ChangeListManager.getInstance(project);
+            final LocalChangeList changeList=clManager.getChangeList(myChange);
+            final PatchApplier<BinaryFilePatch> patchApplier=new PatchApplier<BinaryFilePatch>(project,baseForPatch,patches,changeList,null,null);
+            patchApplier.scheduleSelf(false,context,true);
+            context.last(new TaskDescriptor("Accepting working state",Where.POOLED){
+              @Override public void run(              ContinuationContext context){
+                try {
+                  new SvnTreeConflictResolver(myVcs,oldFilePath,myCommittedRevision,null).resolveSelectMineFull(description);
+                }
+ catch (                VcsException e1) {
+                  context.handleException(e1);
+                }
+              }
+            }
+);
+          }
+ catch (          VcsException e1) {
+            context.handleException(e1);
+          }
+        }
+      }
+);
+      final Continuation fragmented=Continuation.createFragmented(myVcs.getProject(),false);
+      fragmented.run(cc.getList());
+    }
+  }
+;
+}

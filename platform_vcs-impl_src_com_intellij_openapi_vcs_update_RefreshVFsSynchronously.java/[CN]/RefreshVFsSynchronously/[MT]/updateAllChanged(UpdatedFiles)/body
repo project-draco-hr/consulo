@@ -1,13 +1,22 @@
 {
-  final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
-  if (progressIndicator != null) {
-    progressIndicator.setIndeterminate(false);
+  FilesToRefreshCollector callback=new FilesToRefreshCollector();
+  UpdateFilesHelper.iterateFileGroupFilesDeletedOnServerFirst(updatedFiles,callback);
+  for (  File file : callback.getToRefreshDeletedOrReplaced()) {
+    refreshDeletedOrReplaced(file);
   }
-  final int num=getFilesNum(updatedFiles);
-  wrapIntoLock(new Runnable(){
-    public void run(){
-      UpdateFilesHelper.iterateFileGroupFilesDeletedOnServerFirst(updatedFiles,new MyRefreshCallback(num,progressIndicator));
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  try {
+    LocalFileSystem.getInstance().refreshIoFiles(callback.getToRefresh(),true,false,new Runnable(){
+      @Override public void run(){
+        semaphore.up();
+      }
     }
-  }
 );
+  }
+ catch (  Throwable t) {
+    semaphore.up();
+    throw new RuntimeException(t);
+  }
+  semaphore.waitFor();
 }
