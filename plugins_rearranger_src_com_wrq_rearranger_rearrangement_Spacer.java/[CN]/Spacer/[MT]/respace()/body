@@ -1,0 +1,163 @@
+{
+  sb.append(document.getText());
+  JavaElementVisitor visitor=new JavaRecursiveElementVisitor(){
+    private int bias=0;
+    public void visitReferenceExpression(    PsiReferenceExpression referenceExpression){
+    }
+    public void visitFile(    PsiFile psiFile){
+      super.visitFile(psiFile);
+      if (settings.getNewlinesAtEOF().isForce()) {
+        while (sb.length() > 0 && sb.charAt(sb.length() - 1) == '\n') {
+          sb.setLength(sb.length() - 1);
+        }
+        for (int count=0; count < settings.getNewlinesAtEOF().getnBlankLines(); count++) {
+          sb.append('\n');
+        }
+      }
+    }
+    public void visitAnonymousClass(    PsiAnonymousClass psiAnonymousClass){
+      super.visitAnonymousClass(psiAnonymousClass);
+    }
+    public void visitClass(    PsiClass psiClass){
+      if (psiClass instanceof PsiTypeParameter) {
+        return;
+      }
+      boolean anonymous=psiClass.getName() == null;
+      int oldbias=bias;
+      try {
+        bias+=adjustSpacing(psiClass.getLBrace(),psiClass.getRBrace(),settings.getAfterClassLBrace(),bias);
+      }
+ catch (      BadPsiElement badPsiElement) {
+        handleBadPsiElementException(badPsiElement,"class " + psiClass.getName() + " missing left brace.  Body follows:",psiClass);
+      }
+      log(settings.getAfterClassLBrace(),psiClass.getName(),oldbias,bias);
+      super.visitClass(psiClass);
+      oldbias=bias;
+      try {
+        bias+=adjustSpacing(psiClass.getRBrace(),psiClass.getLBrace(),settings.getBeforeClassRBrace(),bias);
+      }
+ catch (      BadPsiElement badPsiElement) {
+        handleBadPsiElementException(badPsiElement,"class " + psiClass.getName() + " missing right brace.  Body follows:",psiClass);
+      }
+      log(settings.getBeforeClassRBrace(),psiClass.getName(),oldbias,bias);
+      if (anonymous) {
+        return;
+      }
+      boolean lastClass=false;
+      if (psiClass.getParent() instanceof PsiJavaFile) {
+        lastClass=isLastMeaningfulElement(psiClass.getParent(),psiClass);
+      }
+      if (!lastClass) {
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiClass.getRBrace(),psiClass.getLBrace(),settings.getAfterClassRBrace(),bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"class " + psiClass.getName() + " missing left brace.  Body follows:",psiClass);
+        }
+        log(settings.getAfterClassRBrace(),psiClass.getName(),oldbias,bias);
+      }
+ else {
+        LOG.debug("class " + psiClass.getName() + " is last in file, no 'after right brace' adjustment");
+      }
+    }
+    public void visitMethod(    PsiMethod psiMethod){
+      int oldbias;
+      if (psiMethod.getBody() == null) {
+        LOG.debug("skipping interface or abstract method " + psiMethod.getName());
+        super.visitMethod(psiMethod);
+        return;
+      }
+      boolean methodIsEmpty=true;
+{
+        PsiElement element=psiMethod.getBody().getLBrace().getNextSibling();
+        while (element != null) {
+          if (!(element instanceof PsiWhiteSpace) && element != psiMethod.getBody().getRBrace()) {
+            methodIsEmpty=false;
+            break;
+          }
+          element=element.getNextSibling();
+        }
+      }
+      if (!methodIsEmpty) {
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiMethod.getBody().getLBrace(),psiMethod.getBody().getRBrace(),settings.getBeforeMethodLBrace(),bias);
+          bias+=adjustSpacing(psiMethod.getBody().getLBrace(),psiMethod.getBody().getRBrace(),settings.getAfterMethodLBrace(),bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"body of method " + psiMethod.getName() + " missing left brace.  Body follows:",psiMethod);
+        }
+        log(settings.getAfterMethodLBrace(),psiMethod.getName(),oldbias,bias);
+        super.visitMethod(psiMethod);
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiMethod.getBody().getRBrace(),psiMethod.getBody().getLBrace(),settings.getBeforeMethodRBrace(),bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"body of method " + psiMethod.getName() + " missing right brace.  Body follows:",psiMethod);
+        }
+        log(settings.getBeforeMethodRBrace(),psiMethod.getName(),oldbias,bias);
+      }
+ else {
+        LOG.debug("method " + psiMethod.getName() + " is empty, no internal spacing changes");
+      }
+      boolean lastMethod=false;
+      PsiClass owner=psiMethod.getContainingClass();
+      if (owner == psiMethod.getParent()) {
+        lastMethod=isLastMeaningfulElement(owner,psiMethod);
+      }
+      if (!lastMethod) {
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiMethod.getBody().getRBrace(),psiMethod.getBody().getLBrace(),settings.getAfterMethodRBrace(),bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"body of method " + psiMethod.getName() + " missing right brace.  Body follows:",psiMethod);
+        }
+        log(settings.getAfterMethodRBrace(),psiMethod.getName(),oldbias,bias);
+      }
+ else {
+        LOG.debug("method " + psiMethod.getName() + " is last in class, no 'after right brace' adjustment");
+      }
+    }
+    public void visitCodeBlock(    PsiCodeBlock psiCodeBlock){
+      int oldbias;
+      if (!(psiCodeBlock.getParent() instanceof PsiMethod) && settings.isRemoveBlanksInsideCodeBlocks()) {
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiCodeBlock.getLBrace(),psiCodeBlock.getRBrace(),false,0,bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"code block missing left brace.  Content follows:\n",psiCodeBlock);
+        }
+        log("code block left brace",oldbias,bias);
+      }
+      super.visitCodeBlock(psiCodeBlock);
+      if (!(psiCodeBlock.getParent() instanceof PsiMethod) && settings.isRemoveBlanksInsideCodeBlocks()) {
+        oldbias=bias;
+        try {
+          bias+=adjustSpacing(psiCodeBlock.getRBrace(),psiCodeBlock.getLBrace(),true,0,bias);
+        }
+ catch (        BadPsiElement badPsiElement) {
+          handleBadPsiElementException(badPsiElement,"code block missing right brace.  Content follows:\n",psiCodeBlock);
+        }
+        log("code block right brace",oldbias,bias);
+      }
+    }
+  }
+;
+  try {
+    psiFile.accept(visitor);
+  }
+ catch (  AbortRespacing ar) {
+    return false;
+  }
+  if (changesMade) {
+    LOG.debug("changes made to document; old length=" + document.getTextLength() + ", new="+ sb.length());
+    LOG.debug("old document is:\n" + document.getText());
+    LOG.debug("new document is:\n" + sb.toString());
+    document.replaceString(0,document.getTextLength(),sb.toString());
+  }
+  return changesMade;
+}
