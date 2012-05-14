@@ -1,0 +1,86 @@
+{
+  final VirtualFile virtualFile=(VirtualFile)dc.getData(DataConstants.VIRTUAL_FILE);
+  final List<VirtualFile> files=new ArrayList<VirtualFile>();
+  final IntHolder count=new IntHolder();
+  final VirtualFileVisitor counter=new VirtualFileVisitor(){
+    void visitVirtualFile(    final VirtualFile file){
+      if (!file.isDirectory()) {
+        count.n++;
+        LOG.debug("" + count.n + ": file "+ file.getName());
+        files.add(file);
+      }
+    }
+  }
+;
+  final Application application=ApplicationManager.getApplication();
+  application.runReadAction(new Runnable(){
+    public void run(){
+      counter.accept(virtualFile);
+    }
+  }
+);
+  LOG.debug("counted " + count.n + " files");
+  final RearrangerActionHandler rah=new RearrangerActionHandler();
+  final PsiDocumentManager dm=PsiDocumentManager.getInstance(project);
+  final PsiManager pm=PsiManager.getInstance(project);
+  final BoolHolder cancelled=new BoolHolder();
+  final JDialog dialog=getProgressFrame(cancelled,count.n);
+  dialog.setVisible(true);
+  for (int currentCount=0; currentCount < files.size(); currentCount++) {
+    if (cancelled.value) {
+      LOG.debug("cancelled rearrangement");
+      break;
+    }
+    final VirtualFile f=files.get(currentCount);
+    final int k=currentCount;
+    Runnable fn=new Runnable(){
+      public void run(){
+        final PsiFile psiFile=pm.findFile(f);
+        LOG.debug("SDT setting filename to " + psiFile.getName());
+        filename.setText(psiFile.getName());
+        filename.repaint();
+      }
+    }
+;
+    Runnable r=new Runnable(){
+      public void run(){
+        final PsiFile psiFile=pm.findFile(f);
+        if (psiFile != null && psiFile.getName().endsWith(".java") && psiFile.isWritable()) {
+          LOG.debug("SDT rearranging file " + psiFile.getName());
+          final Document document=dm.getDocument(psiFile);
+          final Application application=ApplicationManager.getApplication();
+          application.runWriteAction(new Runnable(){
+            public void run(){
+              final Application application=ApplicationManager.getApplication();
+              final Rearranger rearranger=application.getComponent(Rearranger.class);
+              RearrangerSettings settings=rearranger.getSettings();
+              settings=settings.deepCopy();
+              settings.setAskBeforeRearranging(false);
+              rah.runWriteActionRearrangement(project,document,psiFile,settings);
+            }
+          }
+);
+        }
+        ;
+        if (!cancelled.value) {
+          LOG.debug("SDT setting progress bar value to " + (k + 1));
+          bar.setValue(k + 1);
+          bar.repaint();
+        }
+      }
+    }
+;
+    try {
+      SwingUtilities.invokeAndWait(fn);
+      SwingUtilities.invokeAndWait(r);
+    }
+ catch (    InterruptedException e) {
+      e.printStackTrace();
+    }
+catch (    InvocationTargetException e) {
+      e.printStackTrace();
+    }
+  }
+  dialog.setVisible(false);
+  dialog.dispose();
+}
