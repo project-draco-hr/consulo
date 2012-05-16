@@ -60,6 +60,7 @@ synchronized (myProjectDataMap) {
           }
         }
 ;
+        final StringBuilder stdErrOutput=new StringBuilder();
         processHandler.addProcessListener(new ProcessAdapter(){
           @Override public void processTerminated(          ProcessEvent event){
             final BuilderMessageHandler handler=myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
@@ -71,12 +72,32 @@ synchronized (myProjectDataMap) {
             final String text=event.getText();
             if (!StringUtil.isEmpty(text)) {
               LOG.info("BUILDER_PROCESS [" + outputType.toString() + "]: "+ text.trim());
+              if (stdErrOutput.length() < 1024 && ProcessOutputTypes.STDERR.equals(outputType)) {
+                stdErrOutput.append(text);
+              }
             }
           }
         }
 );
         processHandler.startNotify();
-        processHandler.waitFor();
+        final boolean terminated=processHandler.waitFor();
+        if (terminated) {
+          final int exitValue=processHandler.getProcess().exitValue();
+          if (exitValue != 0) {
+            final StringBuilder msg=new StringBuilder();
+            msg.append("Abnormal build process termination: ");
+            if (stdErrOutput.length() > 0) {
+              msg.append("\n").append(stdErrOutput);
+            }
+ else {
+              msg.append("unknown error");
+            }
+            future.getMessageHandler().handleFailure(sessionId,CmdlineProtoUtil.createFailure(msg.toString(),null));
+          }
+        }
+ else {
+          future.getMessageHandler().handleFailure(sessionId,CmdlineProtoUtil.createFailure("Disconnected from build process",null));
+        }
       }
  catch (      ExecutionException e) {
         myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
