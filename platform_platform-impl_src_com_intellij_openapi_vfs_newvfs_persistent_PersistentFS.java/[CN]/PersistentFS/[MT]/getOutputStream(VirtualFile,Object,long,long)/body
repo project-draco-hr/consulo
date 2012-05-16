@@ -5,27 +5,27 @@
   final BulkFileListener publisher=myEventsBus.syncPublisher(VirtualFileManager.VFS_CHANGES);
   publisher.before(events);
   return new ByteArrayOutputStream(){
+    private boolean closed;
     @Override public void close() throws IOException {
+      if (closed)       return;
       super.close();
       NewVirtualFileSystem delegate=getDelegate(canonicalFile);
-      final OutputStream outputStream=delegate.getOutputStream(canonicalFile,requestor,modStamp,timeStamp);
-      final DupOutputStream sink=new DupOutputStream(new BufferedOutputStream(writeContent(canonicalFile,delegate.isReadOnly())),outputStream){
-        @Override public void close() throws IOException {
-          try {
-            super.close();
-          }
-  finally {
-            executeTouch(canonicalFile,false,event.getModificationStamp());
-            publisher.after(events);
-          }
-        }
-      }
-;
+      OutputStream ioFileStream=delegate.getOutputStream(canonicalFile,requestor,modStamp,timeStamp);
+      OutputStream persistenceStream=writeContent(canonicalFile,delegate.isReadOnly());
       try {
-        sink.write(buf,0,count);
+        persistenceStream.write(buf,0,count);
       }
   finally {
-        sink.close();
+        try {
+          ioFileStream.write(buf,0,count);
+        }
+  finally {
+          closed=true;
+          persistenceStream.close();
+          ioFileStream.close();
+          executeTouch(canonicalFile,false,event.getModificationStamp());
+          publisher.after(events);
+        }
       }
     }
   }
