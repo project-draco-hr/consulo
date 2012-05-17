@@ -1,0 +1,50 @@
+{
+  final Map<String,RootModelImpl> nameToModel=new com.intellij.util.containers.HashMap<String,RootModelImpl>();
+  for (  final RootModelImpl rootModel : rootModels) {
+    final String name=rootModel.getModule().getName();
+    LOG.assertTrue(!nameToModel.containsKey(name),name);
+    nameToModel.put(name,rootModel);
+  }
+  final Module[] modules=moduleModel.getModules();
+  for (  final Module module : modules) {
+    final String name=module.getName();
+    if (!nameToModel.containsKey(name)) {
+      final RootModelImpl rootModel=((ModuleRootManagerImpl)ModuleRootManager.getInstance(module)).getRootModel();
+      nameToModel.put(name,rootModel);
+    }
+  }
+  final Collection<RootModelImpl> allRootModels=nameToModel.values();
+  return new DFSTBuilder<RootModelImpl>(new GraphGenerator<RootModelImpl>(new CachingSemiGraph<RootModelImpl>(new GraphGenerator.SemiGraph<RootModelImpl>(){
+    public Collection<RootModelImpl> getNodes(){
+      return allRootModels;
+    }
+    public Iterator<RootModelImpl> getIn(    RootModelImpl rootModel){
+      final List<String> namesList=rootModel.orderEntries().withoutSdk().withoutLibraries().withoutModuleSourceEntries().process(new RootPolicy<ArrayList<String>>(){
+        public ArrayList<String> visitModuleOrderEntry(        ModuleOrderEntry moduleOrderEntry,        ArrayList<String> strings){
+          final Module module=moduleOrderEntry.getModule();
+          if (module != null && !module.isDisposed()) {
+            strings.add(module.getName());
+          }
+ else {
+            final Module moduleToBeRenamed=moduleModel.getModuleToBeRenamed(moduleOrderEntry.getModuleName());
+            if (moduleToBeRenamed != null && !moduleToBeRenamed.isDisposed()) {
+              strings.add(moduleToBeRenamed.getName());
+            }
+          }
+          return strings;
+        }
+      }
+,new ArrayList<String>());
+      final String[] names=ArrayUtil.toStringArray(namesList);
+      List<RootModelImpl> result=new ArrayList<RootModelImpl>();
+      for (      String name : names) {
+        final RootModelImpl depRootModel=nameToModel.get(name);
+        if (depRootModel != null) {
+          result.add(depRootModel);
+        }
+      }
+      return result.iterator();
+    }
+  }
+)));
+}
