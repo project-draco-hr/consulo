@@ -1,0 +1,28 @@
+{
+  final Collection<PsiReference> refs=ReferencesSearch.search(myVariable).findAll();
+  if (refs.isEmpty())   return null;
+  final PsiCodeBlock anchorBlock=findAnchorBlock(refs);
+  if (anchorBlock == null)   return null;
+  if (!CodeInsightUtil.preparePsiElementsForWrite(anchorBlock))   return null;
+  final PsiElement firstElement=getLowestOffsetElement(refs);
+  final String localName=suggestLocalName(project,myVariable,anchorBlock);
+  final PsiElement anchor=getAnchorElement(anchorBlock,firstElement);
+  final PsiElementFactory elementFactory=JavaPsiFacade.getElementFactory(project);
+  final PsiAssignmentExpression anchorAssignmentExpression=searchAssignmentExpression(anchor);
+  if (anchorAssignmentExpression != null && isVariableAssignment(anchorAssignmentExpression,myVariable)) {
+    final PsiExpression initializer=anchorAssignmentExpression.getRExpression();
+    final PsiDeclarationStatement declaration=elementFactory.createVariableDeclarationStatement(localName,myVariable.getType(),initializer);
+    if (!mayBeFinal(firstElement,refs)) {
+      PsiUtil.setModifierProperty((PsiModifierListOwner)declaration.getDeclaredElements()[0],PsiModifier.FINAL,false);
+    }
+    final PsiElement newDeclaration=anchor.replace(declaration);
+    final Set<PsiReference> refsSet=new HashSet<PsiReference>(refs);
+    refsSet.remove(anchorAssignmentExpression.getLExpression());
+    retargetReferences(elementFactory,localName,refsSet);
+    return newDeclaration;
+  }
+  final PsiDeclarationStatement declaration=elementFactory.createVariableDeclarationStatement(localName,myVariable.getType(),myVariable.getInitializer());
+  final PsiElement newDeclaration=anchorBlock.addBefore(declaration,anchor);
+  retargetReferences(elementFactory,localName,refs);
+  return newDeclaration;
+}
