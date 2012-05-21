@@ -1,0 +1,87 @@
+{
+  super(project,true);
+  myCallback=callback;
+  myExecutors=executors;
+  setModal(false);
+  setTitle(applyPatchMode.getTitle());
+  final FileChooserDescriptor descriptor=createSelectPatchDescriptor();
+  descriptor.setTitle(VcsBundle.message("patch.apply.select.title"));
+  myProject=project;
+  myPatches=new LinkedList<FilePatchInProgress>();
+  myRecentPathFileChange=new AtomicReference<FilePresentation>();
+  myChangesTreeList=new MyChangeTreeList(project,Collections.<FilePatchInProgress.PatchChange>emptyList(),new Runnable(){
+    public void run(){
+      final NamedTrinity includedTrinity=new NamedTrinity();
+      final Collection<FilePatchInProgress.PatchChange> includedChanges=myChangesTreeList.getIncludedChanges();
+      final Set<Pair<String,String>> set=new HashSet<Pair<String,String>>();
+      for (      FilePatchInProgress.PatchChange change : includedChanges) {
+        final TextFilePatch patch=change.getPatchInProgress().getPatch();
+        final Pair<String,String> pair=new Pair<String,String>(patch.getBeforeName(),patch.getAfterName());
+        if (set.contains(pair))         continue;
+        set.add(pair);
+        acceptChange(includedTrinity,change);
+      }
+      myInfoCalculator.setIncluded(includedTrinity);
+      myCommitLegendPanel.update();
+    }
+  }
+,new MyChangeNodeDecorator());
+  myUpdater=new MyUpdater();
+  myPatchFile=new TextFieldWithBrowseButton();
+  myPatchFile.addBrowseFolderListener(VcsBundle.message("patch.apply.select.title"),"",project,descriptor);
+  myPatchFile.getTextField().getDocument().addDocumentListener(new DocumentAdapter(){
+    protected void textChanged(    DocumentEvent e){
+      setPathFileChangeDefault();
+      myLoadQueue.queue(myUpdater);
+    }
+  }
+);
+  myLoadQueue=new ZipperUpdater(500,getDisposable());
+  myCanChangePatchFile=applyPatchMode.isCanChangePatchFile();
+  myReset=myCanChangePatchFile ? new Runnable(){
+    public void run(){
+      reset();
+    }
+  }
+ : EmptyRunnable.getInstance();
+  myChangeListChooser=new ChangeListChooserPanel(project,new Consumer<String>(){
+    public void consume(    final String errorMessage){
+      setOKActionEnabled(errorMessage == null);
+      setErrorText(errorMessage);
+    }
+  }
+);
+  ChangeListManager changeListManager=ChangeListManager.getInstance(project);
+  myChangeListChooser.setChangeLists(changeListManager.getChangeListsCopy());
+  myChangeListChooser.setDefaultSelection(changeListManager.getDefaultChangeList());
+  myChangeListChooser.init();
+  myInfoCalculator=new ChangesLegendCalculator();
+  myCommitLegendPanel=new CommitLegendPanel(myInfoCalculator);
+  init();
+  if (patchFile != null && patchFile.isValid()) {
+    init(patchFile);
+  }
+ else   if (patches != null) {
+    init(patches,defaultList);
+  }
+  myPatchFileLabel.setVisible(myCanChangePatchFile);
+  myPatchFile.setVisible(myCanChangePatchFile);
+  if (myCanChangePatchFile) {
+    myListener=new VirtualFileAdapter(){
+      @Override public void contentsChanged(      VirtualFileEvent event){
+        if (myRecentPathFileChange.get() != null && myRecentPathFileChange.get().getVf() != null && myRecentPathFileChange.get().getVf().equals(event.getFile())) {
+          myLoadQueue.queue(myUpdater);
+        }
+      }
+    }
+;
+    final VirtualFileManager fileManager=VirtualFileManager.getInstance();
+    fileManager.addVirtualFileListener(myListener);
+    Disposer.register(getDisposable(),new Disposable(){
+      @Override public void dispose(){
+        fileManager.removeVirtualFileListener(myListener);
+      }
+    }
+);
+  }
+}
