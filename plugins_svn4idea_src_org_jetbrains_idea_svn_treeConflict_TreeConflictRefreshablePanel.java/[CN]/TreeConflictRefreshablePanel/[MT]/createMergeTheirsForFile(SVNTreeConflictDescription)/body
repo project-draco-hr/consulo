@@ -1,70 +1,7 @@
 {
   return new ActionListener(){
     @Override public void actionPerformed(    ActionEvent e){
-      final FilePath oldFilePath=myChange.getBeforeRevision().getFile();
-      final FilePath newFilePath=myChange.getAfterRevision().getFile();
-      int ok=Messages.showOkCancelDialog(myVcs.getProject(),(myChange.isMoved() ? SvnBundle.message("confirmation.resolve.tree.conflict.merge.moved",filePath(oldFilePath),filePath(newFilePath)) : SvnBundle.message("confirmation.resolve.tree.conflict.merge.renamed",filePath(oldFilePath),filePath(newFilePath))),TITLE,Messages.getQuestionIcon());
-      if (Messages.OK != ok)       return;
-      FileDocumentManager.getInstance().saveAllDocuments();
-      final String name="Merge changes from theirs for: " + filePath(oldFilePath);
-      final GatheringContinuationContext cc=new GatheringContinuationContext();
-      cc.addExceptionHandler(VcsException.class,new Consumer<VcsException>(){
-        @Override public void consume(        VcsException e){
-          AbstractVcsHelper.getInstance(myVcs.getProject()).showErrors(Collections.singletonList(e),name);
-        }
-      }
-);
-      cc.next(new TaskDescriptor("Creating patch for theirs changes",Where.POOLED){
-        @Override public void run(        ContinuationContext context){
-          try {
-            ProgressManager.progress("Getting base and theirs revisions content");
-            final List<Change> changes=new SmartList<Change>();
-            if (SVNNodeKind.DIR.equals(description.getNodeKind())) {
-              long max=description.getSourceRightVersion().getPegRevision();
-              long min=description.getSourceLeftVersion().getPegRevision();
-              final ChangeBrowserSettings settings=new ChangeBrowserSettings();
-              settings.USE_CHANGE_BEFORE_FILTER=settings.USE_CHANGE_AFTER_FILTER=true;
-              settings.CHANGE_BEFORE="" + max;
-              settings.CHANGE_AFTER="" + min;
-              final List<SvnChangeList> committedChanges=myVcs.getCachingCommittedChangesProvider().getCommittedChanges(settings,new SvnRepositoryLocation(description.getSourceRightVersion().getRepositoryRoot().toString()),0);
-              final List<CommittedChangeList> lst=new ArrayList<CommittedChangeList>(committedChanges.size() - 1);
-              for (              SvnChangeList change : committedChanges) {
-                if (change.getNumber() == min) {
-                  continue;
-                }
-                lst.add(change);
-              }
-              final List<Change> changesForPatch=CommittedChangesTreeBrowser.collectChanges(lst,true);
-              for (              Change change : changesForPatch) {
-                if (!isUnderOldDir(change,oldFilePath))                 continue;
-                ContentRevision before=null;
-                ContentRevision after=null;
-                if (change.getBeforeRevision() != null) {
-                  before=new SimpleContentRevision(change.getBeforeRevision().getContent(),rebasePath(oldFilePath,newFilePath,change.getBeforeRevision().getFile()),change.getBeforeRevision().getRevisionNumber().asString());
-                }
-                if (change.getAfterRevision() != null) {
-                  after=new SimpleContentRevision(change.getAfterRevision().getContent(),rebasePath(oldFilePath,newFilePath,change.getAfterRevision().getFile()),change.getAfterRevision().getRevisionNumber().asString());
-                }
-                changes.add(new Change(before,after));
-              }
-            }
- else {
-              final SvnContentRevision base=SvnContentRevision.createBaseRevision(myVcs,newFilePath,myCommittedRevision.getRevision());
-              final SvnContentRevision remote=SvnContentRevision.createRemote(myVcs,oldFilePath,SVNRevision.create(description.getSourceRightVersion().getPegRevision()));
-              final ContentRevision newBase=new SimpleContentRevision(base.getContent(),newFilePath,base.getRevisionNumber().asString());
-              final ContentRevision newRemote=new SimpleContentRevision(remote.getContent(),newFilePath,remote.getRevisionNumber().asString());
-              changes.add(new Change(newBase,newRemote));
-            }
-            mergeFromTheirs(context,newFilePath,oldFilePath,description,changes);
-          }
- catch (          VcsException e1) {
-            context.handleException(e1);
-          }
-        }
-      }
-);
-      final Continuation fragmented=Continuation.createFragmented(myVcs.getProject(),false);
-      fragmented.run(cc.getList());
+      new MergeFromTheirsResolver(myVcs,description,myChange,myCommittedRevision).execute();
     }
   }
 ;
