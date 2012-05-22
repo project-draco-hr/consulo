@@ -1,2 +1,55 @@
 {
+  final String name=getReferenceName();
+  if (name == null)   return GroovyResolveResult.EMPTY_ARRAY;
+  PropertyResolverProcessor propertyResolver=new PropertyResolverProcessor(name,this);
+  GrReferenceResolveUtil.resolveImpl(propertyResolver,this);
+  final GroovyResolveResult[] propertyCandidates=propertyResolver.getCandidates();
+  if (!allVariants) {
+    for (    GroovyResolveResult candidate : propertyCandidates) {
+      if (candidate.getElement() instanceof GrVariable && !(candidate.getElement() instanceof GrField)) {
+        return propertyResolver.getCandidates();
+      }
+    }
+  }
+  final Pair<Boolean,GroovyResolveResult[]> shapeResults=resolveByShape(allVariants,upToArgument);
+  if (!genericsMatter && !allVariants && shapeResults.first) {
+    assertAllAreValid(shapeResults.second);
+    return shapeResults.second;
+  }
+  MethodResolverProcessor methodResolver=null;
+  if (genericsMatter) {
+    methodResolver=createMethodProcessor(allVariants,name,false,upToArgument);
+    for (    GroovyResolveResult result : shapeResults.second) {
+      final ResolveState state=ResolveState.initial().put(PsiSubstitutor.KEY,result.getSubstitutor()).put(ResolverProcessor.RESOLVE_CONTEXT,result.getCurrentFileResolveContext()).put(SpreadState.SPREAD_STATE,result.getSpreadState());
+      methodResolver.execute(result.getElement(),state);
+    }
+    if (!allVariants && methodResolver.hasApplicableCandidates()) {
+      return methodResolver.getCandidates();
+    }
+  }
+  if (!allVariants) {
+    for (    GroovyResolveResult candidate : propertyCandidates) {
+      final PsiElement element=candidate.getElement();
+      if (element instanceof GrField) {
+        final PsiClass containingClass=((PsiField)element).getContainingClass();
+        if (containingClass != null && PsiTreeUtil.isContextAncestor(containingClass,this,true))         return propertyCandidates;
+      }
+    }
+  }
+  List<GroovyResolveResult> allCandidates=new ArrayList<GroovyResolveResult>();
+  ContainerUtil.addAll(allCandidates,propertyCandidates);
+  ContainerUtil.addAll(allCandidates,genericsMatter ? methodResolver.getCandidates() : shapeResults.second);
+  for (  String getterName : GroovyPropertyUtils.suggestGettersName(name)) {
+    AccessorResolverProcessor getterResolver=new AccessorResolverProcessor(getterName,name,this,true,genericsMatter,getThisType(),getTypeArguments());
+    GrReferenceResolveUtil.resolveImpl(getterResolver,this);
+    final GroovyResolveResult[] candidates=getterResolver.getCandidates();
+    if (!allVariants && candidates.length == 1) {
+      return candidates;
+    }
+    ContainerUtil.addAll(allCandidates,candidates);
+  }
+  if (allCandidates.size() > 0) {
+    return allCandidates.toArray(new GroovyResolveResult[allCandidates.size()]);
+  }
+  return GroovyResolveResult.EMPTY_ARRAY;
 }
