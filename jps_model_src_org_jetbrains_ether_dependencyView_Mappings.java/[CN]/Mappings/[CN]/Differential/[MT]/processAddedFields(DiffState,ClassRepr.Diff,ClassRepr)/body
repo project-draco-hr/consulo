@@ -1,0 +1,76 @@
+{
+  debug("Processing added fields");
+  for (  final FieldRepr f : diff.fields().added()) {
+    debug("Field: ",f.name);
+    final boolean fPrivate=(f.access & Opcodes.ACC_PRIVATE) > 0;
+    final boolean fProtected=(f.access & Opcodes.ACC_PROTECTED) > 0;
+    final boolean fPublic=(f.access & Opcodes.ACC_PUBLIC) > 0;
+    final boolean fPLocal=!fPrivate && !fProtected && !fPublic;
+    if (!fPrivate) {
+      final TIntHashSet subClasses=getAllSubclasses(it.name);
+      subClasses.forEach(new TIntProcedure(){
+        @Override public boolean execute(        int subClass){
+          final ClassRepr r=myUpdated.reprByName(subClass);
+          final int sourceFileName=myClassToSourceFile.get(subClass);
+          if (r != null && sourceFileName > 0) {
+            if (r.isLocal) {
+              debug("Affecting local subclass (introduced field can potentially hide surrounding method parameters/local variables): ",sourceFileName);
+              myAffectedFiles.add(new File(myContext.getValue(sourceFileName)));
+            }
+ else {
+              final int outerClass=r.outerClassName;
+              if (!empty(outerClass) && myUpdated.fieldVisible(outerClass,f)) {
+                debug("Affecting inner subclass (introduced field can potentially hide surrounding class fields): ",sourceFileName);
+                myAffectedFiles.add(new File(myContext.getValue(sourceFileName)));
+              }
+            }
+          }
+          debug("Affecting field usages referenced from subclass ",subClass);
+          final TIntHashSet propagated=myUpdated.propagateFieldAccess(f.name,subClass);
+          myUpdated.affectFieldUsages(f,propagated,f.createUsage(myContext,subClass),state.affectedUsages,state.dependants);
+          final TIntHashSet deps=myClassToClassDependency.get(subClass);
+          if (deps != null) {
+            addAll(state.dependants,deps);
+          }
+          return true;
+        }
+      }
+);
+    }
+    final Collection<Pair<FieldRepr,ClassRepr>> overridden=myUpdated.findOverridenFields(f,it);
+    for (    final Pair<FieldRepr,ClassRepr> p : overridden) {
+      final FieldRepr ff=p.first;
+      final ClassRepr cc=p.second;
+      final boolean ffPrivate=(ff.access & Opcodes.ACC_PRIVATE) > 0;
+      final boolean ffProtected=(ff.access & Opcodes.ACC_PROTECTED) > 0;
+      final boolean ffPublic=(ff.access & Opcodes.ACC_PUBLIC) > 0;
+      final boolean ffPLocal=Difference.isPackageLocal(ff.access);
+      if (!ffPrivate) {
+        final TIntHashSet propagated=myOriginal.propagateFieldAccess(ff.name,cc.name);
+        final Set<UsageRepr.Usage> localUsages=new HashSet<UsageRepr.Usage>();
+        debug("Affecting usages of overridden field in class ",cc.name);
+        myUpdated.affectFieldUsages(ff,propagated,ff.createUsage(myContext,cc.name),localUsages,state.dependants);
+        if (fPrivate || (fPublic && (ffPublic || ffPLocal)) || (fProtected && ffProtected)|| (fPLocal && ffPLocal)) {
+        }
+ else {
+          Util.UsageConstraint constaint;
+          if ((ffProtected && fPublic) || (fProtected && ffPublic) || (ffPLocal && fProtected)) {
+            constaint=myUpdated.new NegationConstraint(myUpdated.new InheritanceConstraint(cc.name));
+          }
+ else           if (ffPublic && ffPLocal) {
+            constaint=myUpdated.new NegationConstraint(myUpdated.new PackageConstraint(cc.getPackageName()));
+          }
+ else {
+            constaint=myUpdated.new IntersectionConstraint(myUpdated.new NegationConstraint(myUpdated.new InheritanceConstraint(cc.name)),myUpdated.new NegationConstraint(myUpdated.new PackageConstraint(cc.getPackageName())));
+          }
+          for (          final UsageRepr.Usage usage : localUsages) {
+            state.usageConstraints.put(usage,constaint);
+          }
+        }
+        state.affectedUsages.addAll(localUsages);
+      }
+    }
+  }
+  debug("End of added fields processing");
+  return true;
+}

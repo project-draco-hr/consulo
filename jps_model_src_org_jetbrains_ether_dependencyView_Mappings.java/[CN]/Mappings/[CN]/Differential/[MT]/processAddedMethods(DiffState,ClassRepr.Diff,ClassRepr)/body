@@ -1,0 +1,95 @@
+{
+  debug("Processing added methods: ");
+  for (  final MethodRepr m : diff.methods().added()) {
+    debug("Method: ",m.name);
+    if (it.isAnnotation()) {
+      debug("Class is annotation, skipping method analysis");
+      continue;
+    }
+    if ((it.access & Opcodes.ACC_INTERFACE) > 0 || (it.access & Opcodes.ACC_ABSTRACT) > 0 || (m.access & Opcodes.ACC_ABSTRACT) > 0) {
+      debug("Class is abstract, or is interface, or added method in abstract => affecting all subclasses");
+      myUpdated.affectSubclasses(it.name,myAffectedFiles,state.affectedUsages,state.dependants,false);
+    }
+    TIntHashSet propagated=null;
+    if ((m.access & Opcodes.ACC_PRIVATE) == 0 && m.name != myInitName) {
+      final ClassRepr oldIt=getReprByName(it.name);
+      if (oldIt != null && mySelf.findOverridenMethods(m,oldIt).size() > 0) {
+      }
+ else {
+        if (m.argumentTypes.length > 0) {
+          propagated=myUpdated.propagateMethodAccess(m.name,it.name);
+          debug("Conservative case on overriding methods, affecting method usages");
+          myUpdated.affectMethodUsages(m,propagated,m.createMetaUsage(myContext,it.name),state.affectedUsages,state.dependants);
+        }
+      }
+    }
+    if ((m.access & Opcodes.ACC_PRIVATE) == 0) {
+      final Collection<Pair<MethodRepr,ClassRepr>> affectedMethods=myUpdated.findAllMethodsBySpecificity(m,it);
+      final MethodRepr.Predicate overrides=MethodRepr.equalByJavaRules(m);
+      if (propagated == null) {
+        propagated=myUpdated.propagateMethodAccess(m.name,it.name);
+      }
+      final Collection<MethodRepr> lessSpecific=it.findMethods(myUpdated.lessSpecific(m));
+      for (      final MethodRepr mm : lessSpecific) {
+        if (!mm.equals(m)) {
+          debug("Found less specific method, affecting method usages");
+          myUpdated.affectMethodUsages(mm,propagated,mm.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+        }
+      }
+      debug("Processing affected by specificity methods");
+      for (      final Pair<MethodRepr,ClassRepr> p : affectedMethods) {
+        final MethodRepr mm=p.first;
+        final ClassRepr cc=p.second;
+        if (cc == myMockClass) {
+        }
+ else {
+          final Option<Boolean> inheritorOf=mySelf.isInheritorOf(cc.name,it.name);
+          debug("Method: ",mm.name);
+          debug("Class : ",cc.name);
+          if (overrides.satisfy(mm) && inheritorOf.isValue() && inheritorOf.value()) {
+            debug("Current method overrides that found");
+            final int file=myClassToSourceFile.get(cc.name);
+            if (file > 0) {
+              final String f=myContext.getValue(file);
+              debug("Affecting file ",f);
+              myAffectedFiles.add(new File(f));
+            }
+          }
+ else {
+            debug("Current method does not override that found");
+            final TIntHashSet yetPropagated=mySelf.propagateMethodAccess(mm.name,it.name);
+            if (inheritorOf.isValue() && inheritorOf.value()) {
+              final TIntHashSet deps=myClassToClassDependency.get(cc.name);
+              if (deps != null) {
+                addAll(state.dependants,deps);
+              }
+              myUpdated.affectMethodUsages(mm,yetPropagated,mm.createUsage(myContext,cc.name),state.affectedUsages,state.dependants);
+            }
+            debug("Affecting method usages for that found");
+            myUpdated.affectMethodUsages(mm,yetPropagated,mm.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+          }
+        }
+      }
+      final TIntHashSet subClasses=getAllSubclasses(it.name);
+      if (subClasses != null) {
+        subClasses.forEach(new TIntProcedure(){
+          @Override public boolean execute(          int subClass){
+            final ClassRepr r=myUpdated.reprByName(subClass);
+            final int sourceFileName=myClassToSourceFile.get(subClass);
+            if (r != null && sourceFileName > 0) {
+              final int outerClass=r.outerClassName;
+              if (myUpdated.methodVisible(outerClass,m)) {
+                final String f=myContext.getValue(sourceFileName);
+                debug("Affecting file due to local overriding: ",f);
+                myAffectedFiles.add(new File(f));
+              }
+            }
+            return true;
+          }
+        }
+);
+      }
+    }
+  }
+  debug("End of added methods processing");
+}
