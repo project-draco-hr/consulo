@@ -1,0 +1,66 @@
+{
+  debug("Processing changed fields:");
+  for (  final Pair<FieldRepr,Difference> f : diff.fields().changed()) {
+    final Difference d=f.second;
+    final FieldRepr field=f.first;
+    debug("Field: ",field.name);
+    if ((field.access & Opcodes.ACC_PRIVATE) == 0 && (field.access & DESPERATE_MASK) == DESPERATE_MASK) {
+      final int changedModifiers=d.addedModifiers() | d.removedModifiers();
+      final boolean harmful=(changedModifiers & (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) > 0;
+      final boolean accessChanged=(changedModifiers & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) > 0;
+      final boolean valueChanged=(d.base() & Difference.VALUE) > 0 && d.hadValue();
+      if (harmful || valueChanged || (accessChanged && !d.weakedAccess())) {
+        debug("Inline field changed it's access or value => a switch to non-incremental mode requested");
+        if (myConstantSearch != null) {
+          myDelayedWorks.addConstantWork(it.name,field,false,accessChanged);
+        }
+ else {
+          if (!incrementalDecision(it.name,field,myAffectedFiles,myFilter)) {
+            debug("End of Differentiate, returning false");
+            return false;
+          }
+        }
+      }
+    }
+    if (d.base() != Difference.NONE) {
+      final TIntHashSet propagated=myUpdated.propagateFieldAccess(field.name,it.name);
+      if ((d.base() & Difference.TYPE) > 0 || (d.base() & Difference.SIGNATURE) > 0) {
+        debug("Type or signature changed --- affecting field usages");
+        myUpdated.affectFieldUsages(field,propagated,field.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+      }
+ else       if ((d.base() & Difference.ACCESS) > 0) {
+        if ((d.addedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.removedModifiers() & Opcodes.ACC_STATIC) > 0 || (d.addedModifiers() & Opcodes.ACC_PRIVATE) > 0 || (d.addedModifiers() & Opcodes.ACC_VOLATILE) > 0) {
+          debug("Added/removed static modifier or added private/volatile modifier --- affecting field usages");
+          myUpdated.affectFieldUsages(field,propagated,field.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+        }
+ else {
+          boolean affected=false;
+          final Set<UsageRepr.Usage> usages=new HashSet<UsageRepr.Usage>();
+          if ((d.addedModifiers() & Opcodes.ACC_FINAL) > 0) {
+            debug("Added final modifier --- affecting field assign usages");
+            myUpdated.affectFieldUsages(field,propagated,field.createAssignUsage(myContext,it.name),usages,state.dependants);
+            state.affectedUsages.addAll(usages);
+            affected=true;
+          }
+          if ((d.removedModifiers() & Opcodes.ACC_PUBLIC) > 0) {
+            debug("Removed public modifier, affecting field usages with appropriate constraint");
+            if (!affected) {
+              myUpdated.affectFieldUsages(field,propagated,field.createUsage(myContext,it.name),usages,state.dependants);
+              state.affectedUsages.addAll(usages);
+            }
+            for (            final UsageRepr.Usage usage : usages) {
+              if ((d.addedModifiers() & Opcodes.ACC_PROTECTED) > 0) {
+                state.usageConstraints.put(usage,myUpdated.new InheritanceConstraint(it.name));
+              }
+ else {
+                state.usageConstraints.put(usage,myUpdated.new PackageConstraint(it.getPackageName()));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  debug("End of changed fields processing");
+  return true;
+}

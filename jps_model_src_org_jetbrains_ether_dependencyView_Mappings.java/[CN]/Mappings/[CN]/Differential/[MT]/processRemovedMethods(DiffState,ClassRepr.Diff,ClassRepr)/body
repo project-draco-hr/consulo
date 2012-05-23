@@ -1,0 +1,74 @@
+{
+  debug("Processing removed methods:");
+  for (  final MethodRepr m : diff.methods().removed()) {
+    debug("Method ",m.name);
+    final Collection<Pair<MethodRepr,ClassRepr>> overridenMethods=myUpdated.findOverridenMethods(m,it);
+    final TIntHashSet propagated=myUpdated.propagateMethodAccess(m.name,it.name);
+    if (overridenMethods.size() == 0) {
+      debug("No overridden methods found, affecting method usages");
+      myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+    }
+ else {
+      boolean clear=true;
+      loop:       for (      final Pair<MethodRepr,ClassRepr> overriden : overridenMethods) {
+        final MethodRepr mm=overriden.first;
+        if (mm == myMockMethod || !mm.type.equals(m.type) || !empty(mm.signature) || !empty(m.signature)) {
+          clear=false;
+          break loop;
+        }
+      }
+      if (!clear) {
+        debug("No clearly overridden methods found, affecting method usages");
+        myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),state.affectedUsages,state.dependants);
+      }
+    }
+    final Collection<Pair<MethodRepr,ClassRepr>> overriding=myUpdated.findOverridingMethods(m,it,false);
+    for (    final Pair<MethodRepr,ClassRepr> p : overriding) {
+      final int fName=myClassToSourceFile.get(p.second.name);
+      debug("Affecting file by overriding: ",fName);
+      myAffectedFiles.add(new File(myContext.getValue(fName)));
+    }
+    if ((m.access & Opcodes.ACC_ABSTRACT) == 0) {
+      propagated.forEach(new TIntProcedure(){
+        @Override public boolean execute(        int p){
+          if (p != it.name) {
+            final ClassRepr s=myUpdated.reprByName(p);
+            if (s != null) {
+              final Collection<Pair<MethodRepr,ClassRepr>> overridenInS=myUpdated.findOverridenMethods(m,s);
+              overridenInS.addAll(overridenMethods);
+              boolean allAbstract=true;
+              boolean visited=false;
+              for (              final Pair<MethodRepr,ClassRepr> pp : overridenInS) {
+                final ClassRepr cc=pp.second;
+                if (cc == myMockClass) {
+                  visited=true;
+                  continue;
+                }
+                if (cc.name == it.name) {
+                  continue;
+                }
+                visited=true;
+                allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((cc.access & Opcodes.ACC_INTERFACE) > 0);
+                if (!allAbstract) {
+                  break;
+                }
+              }
+              if (allAbstract && visited) {
+                final int source=myClassToSourceFile.get(p);
+                if (source > 0) {
+                  final String f=myContext.getValue(source);
+                  debug("Removed method is not abstract & overrides some abstract method which is not then over-overriden in subclass ",p);
+                  debug("Affecting subclass source file ",f);
+                  myAffectedFiles.add(new File(f));
+                }
+              }
+            }
+          }
+          return true;
+        }
+      }
+);
+    }
+  }
+  debug("End of removed methods processing");
+}
