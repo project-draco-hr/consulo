@@ -1,16 +1,16 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
-  final boolean useServer=useOutOfProcessBuild();
+  final boolean useExtProcessBuild=useOutOfProcessBuild();
   final String contentName=forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make");
   final boolean compileInBackground=true;
   final CompilerTask compileTask=new CompilerTask(myProject,compileInBackground,contentName,ApplicationManager.getApplication().isUnitTestMode());
   StatusBar.Info.set("",myProject,"Compiler");
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
   FileDocumentManager.getInstance().saveAllDocuments();
-  final DependencyCache dependencyCache=useServer ? null : createDependencyCache();
+  final DependencyCache dependencyCache=useExtProcessBuild ? null : createDependencyCache();
   final CompileContextImpl compileContext=new CompileContextImpl(myProject,compileTask,scope,dependencyCache,!isRebuild && !forceCompile,isRebuild);
   compileContext.putUserData(COMPILATION_START_TIMESTAMP,LocalTimeCounter.currentTime());
-  if (!useServer) {
+  if (!useExtProcessBuild) {
     for (    Map.Entry<Pair<IntermediateOutputCompiler,Module>,Pair<VirtualFile,VirtualFile>> entry : myGenerationCompilerModuleToOutputDirMap.entrySet()) {
       final Pair<VirtualFile,VirtualFile> outputs=entry.getValue();
       final Pair<IntermediateOutputCompiler,Module> key=entry.getKey();
@@ -21,21 +21,18 @@
     attachAnnotationProcessorsOutputDirectories(compileContext);
   }
   final Runnable compileWork;
-  if (useServer) {
+  if (useExtProcessBuild) {
     compileWork=new Runnable(){
       public void run(){
         final ProgressIndicator indicator=compileContext.getProgressIndicator();
-        if (indicator.isCanceled()) {
+        if (indicator.isCanceled() || myProject.isDisposed()) {
           if (callback != null) {
             callback.finished(true,0,0,compileContext);
           }
           return;
         }
-        long start=System.currentTimeMillis();
+        final long start=System.currentTimeMillis();
         try {
-          if (myProject.isDisposed()) {
-            return;
-          }
           LOG.info("COMPILATION STARTED " + (CompilerWorkspaceConfiguration.useServerlessOutOfProcessBuild() ? "(BUILD PROCESS)" : "(COMPILE SERVER)"));
           if (message != null) {
             compileContext.addMessage(message);
@@ -43,7 +40,7 @@
           final Collection<String> paths=fetchFiles(compileContext);
           final List<Module> modules=paths.isEmpty() ? Arrays.asList(compileContext.getCompileScope().getAffectedModules()) : Collections.<Module>emptyList();
           final Set<Artifact> artifacts=ArtifactCompileScope.getArtifactsToBuild(myProject,compileContext.getCompileScope(),true);
-          final RequestFuture future=compileOnServer(compileContext,modules,artifacts,paths,callback);
+          final RequestFuture future=compileInExternalProcess(compileContext,modules,artifacts,paths,callback);
           if (future != null) {
             while (!future.waitFor(200L,TimeUnit.MILLISECONDS)) {
               if (indicator.isCanceled()) {
@@ -55,7 +52,7 @@
             callback.finished(false,compileContext.getMessageCount(CompilerMessageCategory.ERROR),compileContext.getMessageCount(CompilerMessageCategory.WARNING),compileContext);
           }
         }
- catch (        Exception e) {
+ catch (        Throwable e) {
           LOG.error(e);
           callback.finished(false,compileContext.getMessageCount(CompilerMessageCategory.ERROR),compileContext.getMessageCount(CompilerMessageCategory.WARNING),compileContext);
         }
