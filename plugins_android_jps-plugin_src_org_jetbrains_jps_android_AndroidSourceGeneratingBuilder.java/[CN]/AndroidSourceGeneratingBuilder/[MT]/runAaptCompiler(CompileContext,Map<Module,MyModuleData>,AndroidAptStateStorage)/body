@@ -49,19 +49,34 @@
         }
       }
       context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.aapt",module.getName())));
-      if (!clearDirectory(aptOutputDirectory,context,ANDROID_APT_COMPILER)) {
-        success=false;
-        continue;
-      }
-      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,aptOutputDirectory.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),generateNonFinalFields);
-      AndroidJpsUtil.addMessages(context,messages,ANDROID_APT_COMPILER,module.getName());
-      if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
-        success=false;
-        storage.update(module.getName(),null);
-      }
+      File tmpOutputDir=null;
+      try {
+        tmpOutputDir=FileUtil.createTempDirectory("android_apt_output","tmp");
+        final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidApt.compile(target,-1,manifestFile.getPath(),packageName,tmpOutputDir.getPath(),resPaths,ArrayUtil.toStringArray(depLibPackagesSet),generateNonFinalFields);
+        AndroidJpsUtil.addMessages(context,messages,ANDROID_APT_COMPILER,module.getName());
+        if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
+          success=false;
+          storage.update(module.getName(),null);
+        }
  else {
-        storage.update(module.getName(),newState);
-        markDirtyRecursively(aptOutputDirectory,context,ANDROID_APT_COMPILER);
+          if (!AndroidCommonUtils.directoriesContainSameContent(tmpOutputDir,aptOutputDirectory,JavaFilesFilter.INSTANCE)) {
+            if (!deleteAndMarkRecursively(aptOutputDirectory,context,ANDROID_APT_COMPILER)) {
+              success=false;
+              continue;
+            }
+            if (!FileUtil.moveDirWithContent(tmpOutputDir,aptOutputDirectory)) {
+              context.processMessage(new CompilerMessage(ANDROID_APT_COMPILER,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.cannot.move.content",tmpOutputDir.getPath(),aptOutputDirectory.getPath())));
+              continue;
+            }
+            markDirtyRecursively(aptOutputDirectory,context,ANDROID_APT_COMPILER);
+          }
+          storage.update(module.getName(),newState);
+        }
+      }
+  finally {
+        if (tmpOutputDir != null) {
+          FileUtil.delete(tmpOutputDir);
+        }
       }
     }
  catch (    IOException e) {
