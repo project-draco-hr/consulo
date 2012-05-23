@@ -1,49 +1,50 @@
 {
   if (myProject.isDefault())   return null;
-  final Set<String> rootPaths=new HashSet<String>();
-  Module[] modules=ModuleManager.getInstance(myProject).getModules();
-  for (  Module module : modules) {
-    final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
-    final String[] contentRootUrls=moduleRootManager.getContentRootUrls();
-    rootPaths.addAll(getRootsToTrack(contentRootUrls));
-    if (includeSourceRoots) {
-      final String[] sourceRootUrls=moduleRootManager.getSourceRootUrls();
-      rootPaths.addAll(getRootsToTrack(sourceRootUrls));
+  final Set<String> recursive=new HashSet<String>();
+  final Set<String> flat=new HashSet<String>();
+  final String projectFilePath=myProject.getProjectFilePath();
+  final File projectDirFile=new File(projectFilePath).getParentFile();
+  if (projectDirFile != null && projectDirFile.getName().equals(Project.DIRECTORY_STORE_FOLDER)) {
+    recursive.add(projectDirFile.getAbsolutePath());
+  }
+ else {
+    flat.add(projectFilePath);
+    final VirtualFile workspaceFile=myProject.getWorkspaceFile();
+    if (workspaceFile != null) {
+      flat.add(workspaceFile.getPath());
     }
-    rootPaths.add(module.getModuleFilePath());
   }
   for (  WatchedRootsProvider extension : Extensions.getExtensions(WatchedRootsProvider.EP_NAME,myProject)) {
-    rootPaths.addAll(extension.getRootsToWatch());
+    recursive.addAll(extension.getRootsToWatch());
   }
-  final String projectFile=myProject.getProjectFilePath();
-  rootPaths.add(projectFile);
-  final VirtualFile baseDir=myProject.getBaseDir();
-  if (baseDir != null) {
-    rootPaths.add(baseDir.getPath());
-  }
+  final Module[] modules=ModuleManager.getInstance(myProject).getModules();
   for (  Module module : modules) {
     final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
+    addRootsToTrack(moduleRootManager.getContentRootUrls(),recursive,flat);
+    if (includeSourceRoots) {
+      addRootsToTrack(moduleRootManager.getSourceRootUrls(),recursive,flat);
+    }
+    flat.add(module.getModuleFilePath());
     final OrderEntry[] orderEntries=moduleRootManager.getOrderEntries();
     for (    OrderEntry entry : orderEntries) {
       if (entry instanceof LibraryOrderEntry) {
         final Library library=((LibraryOrderEntry)entry).getLibrary();
-        for (        OrderRootType orderRootType : OrderRootType.getAllTypes()) {
-          rootPaths.addAll(getRootsToTrack(library,orderRootType));
+        if (library != null) {
+          for (          OrderRootType orderRootType : OrderRootType.getAllTypes()) {
+            addRootsToTrack(library.getUrls(orderRootType),recursive,flat);
+          }
         }
       }
  else       if (entry instanceof JdkOrderEntry) {
         for (        OrderRootType orderRootType : OrderRootType.getAllTypes()) {
-          rootPaths.addAll(getRootsToTrack(entry,orderRootType));
+          addRootsToTrack(entry.getUrls(orderRootType),recursive,flat);
         }
       }
     }
-  }
-  for (  Module module : modules) {
-    final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
     final String explodedDirectory=moduleRootManager.getExplodedDirectoryUrl();
     if (explodedDirectory != null) {
-      rootPaths.add(extractLocalPath(explodedDirectory));
+      recursive.add(extractLocalPath(explodedDirectory));
     }
   }
-  return rootPaths;
+  return Pair.create(recursive,flat);
 }
