@@ -40,6 +40,8 @@
       includeSystemProguardCfg=facet.isIncludeSystemProguardCfgFile();
     }
     final Set<String> fileSet;
+    final Set<String> jars;
+    final Set<String> outputDirs;
     try {
       if (proguardCfgPath != null) {
         final String outputJarPath=FileUtil.toSystemDependentName(dexOutputDir.getPath() + '/' + AndroidCommonUtils.PROGUARD_OUTPUT_JAR_NAME);
@@ -47,29 +49,58 @@
           success=false;
           continue;
         }
-        fileSet=Collections.singleton(outputJarPath);
+        fileSet=jars=Collections.singleton(outputJarPath);
+        outputDirs=Collections.emptySet();
       }
  else {
         fileSet=new HashSet<String>();
+        jars=new HashSet<String>();
+        outputDirs=new HashSet<String>();
         AndroidJpsUtil.addSubdirectories(classesDir,fileSet);
+        outputDirs.add(classesDir.getPath());
         fileSet.addAll(externalLibraries);
-        for (        String filePath : AndroidJpsUtil.getClassdirsOfDependentModulesAndPackagesLibraries(projectPaths,module)) {
-          if (!classesDir.getPath().equals(filePath)) {
-            fileSet.add(filePath);
+        jars.addAll(externalLibraries);
+        AndroidJpsUtil.processClasspath(projectPaths,module,new AndroidDependencyProcessor(){
+          @Override public void processExternalLibrary(          @NotNull File file){
+            fileSet.add(file.getPath());
+            jars.add(file.getPath());
+          }
+          @Override public void processAndroidLibraryPackage(          @NotNull File file){
+            fileSet.add(file.getPath());
+            jars.add(file.getPath());
+          }
+          @Override public void processJavaModuleOutputDirectory(          @NotNull File dir){
+            fileSet.add(dir.getPath());
+            outputDirs.add(dir.getPath());
+          }
+          @Override public boolean isToProcess(          @NotNull AndroidDependencyType type){
+            return type == AndroidDependencyType.JAVA_MODULE_OUTPUT_DIR || type == AndroidDependencyType.ANDROID_LIBRARY_PACKAGE || type == AndroidDependencyType.EXTERNAL_LIBRARY;
           }
         }
+);
         if (facet.isPackTestCode()) {
           final File testsClassDir=projectPaths.getModuleOutputDir(module,true);
           if (testsClassDir != null && testsClassDir.isDirectory()) {
             AndroidJpsUtil.addSubdirectories(testsClassDir,fileSet);
+            outputDirs.add(testsClassDir.getPath());
           }
         }
       }
-      final AndroidFileSetState newState=new AndroidFileSetState(fileSet,AndroidJpsUtil.CLASSES_AND_JARS_FILTER,true);
+      final AndroidFileSetState newState=new AndroidFileSetState(jars,AndroidJpsUtil.CLASSES_AND_JARS_FILTER,true);
       if (context.isMake()) {
         final AndroidFileSetState oldState=dexStateStorage.getState(module.getName());
         if (oldState != null && oldState.equalsTo(newState)) {
-          continue;
+          final Set<String> dirtyOutputDirs=context.getUserData(DIRTY_OUTPUT_DIRS);
+          boolean outputDirsDirty=false;
+          for (          String outputDir : outputDirs) {
+            if (dirtyOutputDirs.contains(outputDir)) {
+              outputDirsDirty=true;
+              break;
+            }
+          }
+          if (!outputDirsDirty) {
+            continue;
+          }
         }
       }
       if (fileSet.size() == 0) {
