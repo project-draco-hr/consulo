@@ -3,7 +3,7 @@
   final Project project=myVcs.getProject();
   new Task.Backgroundable(project,VcsBundle.message("show.diff.progress.title")){
     @Override public void run(    @NotNull ProgressIndicator indicator){
-      LocalHistoryAction action=file != null ? startLocalHistoryAction(revision) : LocalHistoryAction.NULL;
+      final LocalHistoryAction action=file != null ? startLocalHistoryAction(revision) : LocalHistoryAction.NULL;
       final byte[] revisionContent;
       try {
         revisionContent=VcsHistoryUtil.loadRevisionContent(revision);
@@ -31,40 +31,33 @@ catch (      final VcsException e) {
 catch (      ProcessCanceledException ex) {
         return;
       }
-      try {
-        UIUtil.invokeAndWaitIfNeeded(new Runnable(){
-          @Override public void run(){
-            ApplicationManager.getApplication().runWriteAction(new Runnable(){
-              public void run(){
-                CommandProcessor.getInstance().executeCommand(project,new Runnable(){
-                  public void run(){
-                    if (file != null && !file.isWritable()) {
-                      if (ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(file).hasReadonlyFiles()) {
-                        return;
-                      }
-                    }
-                    try {
-                      write(revisionContent);
-                    }
- catch (                    IOException e) {
-                      Messages.showMessageDialog(VcsBundle.message("message.text.cannot.save.content",e.getLocalizedMessage()),VcsBundle.message("message.title.get.revision.content"),Messages.getErrorIcon());
-                    }
-                  }
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        @Override public void run(){
+          try {
+            new WriteCommandAction.Simple(project){
+              @Override protected void run() throws Throwable {
+                if (file != null && !file.isWritable() && ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(file).hasReadonlyFiles()) {
+                  return;
                 }
-,createGetActionTitle(revision),null);
+                try {
+                  write(revisionContent);
+                }
+ catch (                IOException e) {
+                  Messages.showMessageDialog(VcsBundle.message("message.text.cannot.save.content",e.getLocalizedMessage()),VcsBundle.message("message.title.get.revision.content"),Messages.getErrorIcon());
+                }
               }
             }
-);
+.execute();
+            if (file != null) {
+              VcsDirtyScopeManager.getInstance(project).fileDirty(file);
+            }
+          }
+  finally {
+            action.finish();
           }
         }
+      }
 );
-        if (file != null) {
-          VcsDirtyScopeManager.getInstance(project).fileDirty(file);
-        }
-      }
-  finally {
-        action.finish();
-      }
     }
   }
 .queue();
