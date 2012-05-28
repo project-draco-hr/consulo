@@ -1,35 +1,38 @@
 {
-  ArrayList<IdeaPluginDescriptor> plugins=null;
+  BuildNumber buildNumber=ApplicationInfo.getInstance().getBuild();
+  @NonNls String url=getListUrl() + "?build=" + buildNumber.asString();
+  if (indicator != null) {
+    indicator.setText2(IdeBundle.message("progress.connecting.to.plugin.manager",getRepositoryHost()));
+  }
+  HttpConfigurable.getInstance().setAuthenticator();
+  HttpURLConnection connection=(HttpURLConnection)new URL(url).openConnection();
+  connection.setRequestProperty("Accept-Encoding","gzip");
+  if (indicator != null) {
+    indicator.setText2(IdeBundle.message("progress.waiting.for.reply.from.plugin.manager",getRepositoryHost()));
+  }
+  connection.connect();
   try {
-    BuildNumber buildNumber=ApplicationInfo.getInstance().getBuild();
-    @NonNls String url=getListUrl() + "?build=" + buildNumber.asString();
     if (indicator != null) {
-      indicator.setText2(IdeBundle.message("progress.connecting.to.plugin.manager",getRepositoryHost()));
+      indicator.checkCanceled();
     }
-    HttpConfigurable.getInstance().prepareURL(getRepositoryHost());
-{
-      RepositoryContentHandler handler=new RepositoryContentHandler();
-      HttpURLConnection connection=(HttpURLConnection)new URL(url).openConnection();
+    String encoding=connection.getContentEncoding();
+    InputStream is=connection.getInputStream();
+    try {
+      if ("gzip".equalsIgnoreCase(encoding)) {
+        is=new GZIPInputStream(is);
+      }
       if (indicator != null) {
-        indicator.setText2(IdeBundle.message("progress.waiting.for.reply.from.plugin.manager",getRepositoryHost()));
+        indicator.setText2(IdeBundle.message("progress.downloading.list.of.plugins"));
       }
-      InputStream is=getConnectionInputStream(connection);
-      if (is != null) {
-        if (indicator != null) {
-          indicator.setText2(IdeBundle.message("progress.downloading.list.of.plugins"));
-        }
-        readPluginsStream(is,handler,indicator,extPluginsFile);
-        plugins=handler.getPluginsList();
-      }
+      RepositoryContentHandler handler=new RepositoryContentHandler();
+      readPluginsStream(is,handler,indicator,extPluginsFile);
+      return handler.getPluginsList();
+    }
+  finally {
+      is.close();
     }
   }
- catch (  ProcessCanceledException e) {
-    throw e;
+  finally {
+    connection.disconnect();
   }
-catch (  RuntimeException e) {
-    e.printStackTrace();
-    if (e.getCause() == null || !(e.getCause() instanceof InterruptedException)) {
-    }
-  }
-  return plugins;
 }
