@@ -4,16 +4,17 @@
     if (toCompile.isEmpty()) {
       return ExitCode.NOTHING_DONE;
     }
-    String moduleOutput=getModuleOutput(context,chunk);
-    String compilerOutput=getCompilerOutput(moduleOutput);
+    Map<Module,String> finalOutputs=getCanonicalModuleOutputs(context,chunk);
+    Map<Module,String> generationOutputs=getGenerationOutputs(chunk,finalOutputs);
     final Set<String> toCompilePaths=new LinkedHashSet<String>();
     for (    File file : toCompile) {
       toCompilePaths.add(FileUtil.toSystemIndependentName(file.getPath()));
     }
-    Map<String,String> class2Src=buildClassToSourceMap(chunk,context,toCompilePaths,moduleOutput);
+    Map<String,String> class2Src=buildClassToSourceMap(chunk,context,toCompilePaths,finalOutputs);
     final String encoding=context.getProjectDescriptor().getEncodingConfiguration().getPreferredModuleChunkEncoding(chunk);
     List<String> patchers=Collections.emptyList();
-    final File tempFile=GroovycOSProcessHandler.fillFileWithGroovycParameters(compilerOutput,toCompilePaths,FileUtil.toSystemDependentName(moduleOutput),class2Src,encoding,patchers);
+    String compilerOutput=generationOutputs.get(chunk.representativeModule());
+    final File tempFile=GroovycOSProcessHandler.fillFileWithGroovycParameters(compilerOutput,toCompilePaths,FileUtil.toSystemDependentName(finalOutputs.get(chunk.representativeModule())),class2Src,encoding,patchers);
     final List<String> cmd=ExternalProcessUtil.buildJavaCommandLine(getJavaExecutable(chunk),"org.jetbrains.groovy.compiler.rt.GroovycRunner",Collections.<String>emptyList(),new ArrayList<String>(generateClasspath(context,chunk)),Arrays.asList("-Xmx384m","-Dfile.encoding=" + CharsetToolkit.getDefaultSystemCharset().name()),Arrays.<String>asList(myForStubs ? "stubs" : "groovyc",tempFile.getPath()));
     final Process process=Runtime.getRuntime().exec(ArrayUtil.toStringArray(cmd));
     GroovycOSProcessHandler handler=GroovycOSProcessHandler.runGroovyc(process,new Consumer<String>(){
@@ -32,12 +33,20 @@
       }
     }
     if (myForStubs) {
-      JavaBuilder.addTempSourcePathRoot(context,new File(compilerOutput));
+      for (      Module module : generationOutputs.keySet()) {
+        File root=new File(generationOutputs.get(module));
+        context.getRootsIndex().associateRoot(root,module,context.isCompilingTests(),true);
+        JavaBuilder.addTempSourcePathRoot(context,root);
+      }
     }
     for (    CompilerMessage message : handler.getCompilerMessages()) {
       context.processMessage(message);
     }
-    if (!myForStubs && updateDependencies(context,chunk,toCompile,moduleOutput,handler.getSuccessfullyCompiled())) {
+    List<GroovycOSProcessHandler.OutputItem> compiled=new ArrayList<GroovycOSProcessHandler.OutputItem>();
+    for (    GroovycOSProcessHandler.OutputItem item : handler.getSuccessfullyCompiled()) {
+      compiled.add(ensureCorrectOutput(context,chunk,item,generationOutputs,compilerOutput));
+    }
+    if (!myForStubs && updateDependencies(context,chunk,toCompile,generationOutputs,compiled)) {
       return ExitCode.ADDITIONAL_PASS_REQUIRED;
     }
     return ExitCode.OK;
