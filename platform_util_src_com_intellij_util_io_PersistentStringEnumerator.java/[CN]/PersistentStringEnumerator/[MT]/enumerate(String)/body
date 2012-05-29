@@ -1,20 +1,48 @@
 {
   int valueHashCode=-1;
+  int stripe=-1;
   if (myHashcodeToIdCache != null && value != null) {
-    Integer cachedId=myHashcodeToIdCache.get(valueHashCode=value.hashCode());
+    valueHashCode=value.hashCode();
+    stripe=Math.abs(valueHashCode) & STRIPE_MASK;
+    Integer cachedId;
+    myStripeLocks[stripe].lock();
+    try {
+      cachedId=myHashcodeToIdCache[stripe].get(valueHashCode);
+    }
+  finally {
+      myStripeLocks[stripe].unlock();
+    }
     if (cachedId != null) {
-      String s=myIdToStringCache.get(cachedId);
-      if (s != null && value.equals(s))       return cachedId.intValue();
+      int stripe2=idStripe(cachedId.intValue());
+      myStripeLocks[stripe2].lock();
+      try {
+        String s=myIdToStringCache[stripe2].get(cachedId);
+        if (s != null && value.equals(s))         return cachedId.intValue();
+      }
+  finally {
+        myStripeLocks[stripe2].unlock();
+      }
     }
   }
   int enumerate=super.enumerate(value);
-  Integer enumeratedInteger=null;
-  if (myHashcodeToIdCache != null) {
-    enumeratedInteger=enumerate;
-    if (value != null)     myHashcodeToIdCache.put(valueHashCode,enumeratedInteger);
-  }
-  if (myIdToStringCache != null) {
-    myIdToStringCache.put(enumeratedInteger,value);
+  if (stripe != -1) {
+    Integer enumeratedInteger;
+    myStripeLocks[stripe].lock();
+    try {
+      enumeratedInteger=enumerate;
+      myHashcodeToIdCache[stripe].put(valueHashCode,enumeratedInteger);
+    }
+  finally {
+      myStripeLocks[stripe].unlock();
+    }
+    int stripe2=idStripe(enumerate);
+    myStripeLocks[stripe2].lock();
+    try {
+      myIdToStringCache[stripe2].put(enumeratedInteger,value);
+    }
+  finally {
+      myStripeLocks[stripe2].unlock();
+    }
   }
   return enumerate;
 }

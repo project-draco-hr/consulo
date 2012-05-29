@@ -1,0 +1,123 @@
+{
+  final JPanel panel=new JPanel(new BorderLayout());
+  DataManager.registerDataProvider(panel,new DataProvider(){
+    @Override public Object getData(    @NonNls String dataId){
+      final TreePath path=myTree.getSelectionPath();
+      if (path != null) {
+        Object component=path.getLastPathComponent();
+        VirtualFile file=null;
+        if (component instanceof MyFileNode) {
+          component=((MyFileNode)component).getParent();
+        }
+        if (component instanceof MyDuplicatesNode) {
+          file=((MyDuplicatesNode)component).getUserObject().iterator().next();
+        }
+        if (PlatformDataKeys.VIRTUAL_FILE.is(dataId)) {
+          return file;
+        }
+        if (PlatformDataKeys.VIRTUAL_FILE_ARRAY.is(dataId) && file != null) {
+          return new VirtualFile[]{file};
+        }
+      }
+      return null;
+    }
+  }
+);
+  final JBList list=new JBList(new ResourceModules().getModuleNames());
+  final NotNullFunction<Object,JComponent> modulesRenderer=new NotNullFunction<Object,JComponent>(){
+    @NotNull @Override public JComponent fun(    Object dom){
+      return new JLabel(dom instanceof Module ? ((Module)dom).getName() : dom.toString(),PlatformIcons.SOURCE_FOLDERS_ICON,SwingConstants.LEFT);
+    }
+  }
+;
+  list.installCellRenderer(modulesRenderer);
+  final JPanel modulesPanel=ToolbarDecorator.createDecorator(list).setAddAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      final Module[] all=ModuleManager.getInstance(myProject).getModules();
+      Arrays.sort(all,new Comparator<Module>(){
+        @Override public int compare(        Module o1,        Module o2){
+          return o1.getName().compareTo(o2.getName());
+        }
+      }
+);
+      final JBList modules=new JBList(all);
+      modules.installCellRenderer(modulesRenderer);
+      JBPopupFactory.getInstance().createListPopupBuilder(modules).setTitle("Add Resource Module").setFilteringEnabled(new Function<Object,String>(){
+        @Override public String fun(        Object o){
+          return ((Module)o).getName();
+        }
+      }
+).setItemChoosenCallback(new Runnable(){
+        @Override public void run(){
+          final Object value=modules.getSelectedValue();
+          if (value instanceof Module && !myResourceModules.contains((Module)value)) {
+            myResourceModules.add((Module)value);
+            ((DefaultListModel)list.getModel()).addElement(((Module)value).getName());
+          }
+          ((DefaultTreeModel)myTree.getModel()).reload();
+          TreeUtil.expandAll(myTree);
+        }
+      }
+).createPopup().show(button.getPreferredPopupPoint());
+    }
+  }
+).setRemoveAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      final Object[] values=list.getSelectedValues();
+      for (      Object value : values) {
+        myResourceModules.remove((String)value);
+        ((DefaultListModel)list.getModel()).removeElement(value);
+      }
+      ((DefaultTreeModel)myTree.getModel()).reload();
+      TreeUtil.expandAll(myTree);
+    }
+  }
+).disableDownAction().disableUpAction().createPanel();
+  modulesPanel.setPreferredSize(new Dimension(-1,60));
+  final JPanel top=new JPanel(new BorderLayout());
+  top.add(new JLabel("Image modules:"),BorderLayout.NORTH);
+  top.add(modulesPanel,BorderLayout.CENTER);
+  panel.add(top,BorderLayout.NORTH);
+  panel.add(new JBScrollPane(myTree),BorderLayout.CENTER);
+  new AnAction(){
+    @Override public void actionPerformed(    AnActionEvent e){
+      VirtualFile file=getFileFromSelection();
+      if (file != null) {
+        final PsiFile psiFile=PsiManager.getInstance(myProject).findFile(file);
+        if (psiFile != null) {
+          final ImplementationViewComponent viewComponent=new ImplementationViewComponent(new PsiElement[]{psiFile},0);
+          final TreeSelectionListener listener=new TreeSelectionListener(){
+            @Override public void valueChanged(            TreeSelectionEvent e){
+              final VirtualFile selection=getFileFromSelection();
+              if (selection != null) {
+                final PsiFile newElement=PsiManager.getInstance(myProject).findFile(selection);
+                if (newElement != null) {
+                  viewComponent.update(new PsiElement[]{newElement},0);
+                }
+              }
+            }
+          }
+;
+          myTree.addTreeSelectionListener(listener);
+          final JBPopup popup=JBPopupFactory.getInstance().createComponentPopupBuilder(viewComponent,viewComponent.getPrefferedFocusableComponent()).setRequestFocusCondition(myProject,NotLookupOrSearchCondition.INSTANCE).setProject(myProject).setDimensionServiceKey(myProject,DocumentationManager.JAVADOC_LOCATION_AND_SIZE,false).setResizable(true).setMovable(true).setRequestFocus(false).setCancelCallback(new Computable<Boolean>(){
+            @Override public Boolean compute(){
+              myTree.removeTreeSelectionListener(listener);
+              return true;
+            }
+          }
+).setTitle("Image Preview").createPopup();
+          final Window window=ImageDuplicateResultsDialog.this.getWindow();
+          popup.show(new RelativePoint(window,new Point(window.getWidth(),0)));
+          viewComponent.setHint(popup,"Image Preview");
+        }
+      }
+    }
+  }
+.registerCustomShortcutSet(CustomShortcutSet.fromString("ENTER"),panel);
+  int total=0;
+  for (  Set set : myDuplicates.values())   total+=set.size();
+  total-=myDuplicates.size();
+  final JLabel label=new JLabel("<html>Press <b>Enter</b> to preview image<br>Total images found: " + myImages.size() + ". Total duplicates found: "+ total+ "</html>");
+  panel.add(label,BorderLayout.SOUTH);
+  return panel;
+}
