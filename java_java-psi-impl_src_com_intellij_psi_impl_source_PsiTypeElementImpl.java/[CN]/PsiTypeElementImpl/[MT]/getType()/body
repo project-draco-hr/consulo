@@ -1,2 +1,69 @@
 {
+  PsiType cachedType=myCachedType;
+  if (cachedType != null) {
+    return cachedType;
+  }
+  final List<PsiAnnotation> typeAnnotations=new ArrayList<PsiAnnotation>();
+  TreeElement element=getFirstChildNode();
+  while (element != null) {
+    IElementType elementType=element.getElementType();
+    if (element.getTreeNext() == null && ElementType.PRIMITIVE_TYPE_BIT_SET.contains(elementType)) {
+      addTypeUseAnnotationsFromModifierList(getParent(),typeAnnotations);
+      final PsiAnnotation[] array=toAnnotationsArray(typeAnnotations);
+      cachedType=JavaPsiFacade.getInstance(getProject()).getElementFactory().createPrimitiveType(element.getText(),array);
+    }
+ else     if (elementType == JavaElementType.TYPE) {
+      final IElementType tailType=getLastChildNode().getElementType();
+      if (tailType == JavaTokenType.ELLIPSIS) {
+        final PsiType componentType=((PsiTypeElement)SourceTreeToPsiMap.treeToPsiNotNull(element)).getType();
+        cachedType=new PsiEllipsisType(componentType);
+      }
+ else       if (tailType == JavaTokenType.RBRACKET) {
+        final PsiType componentType=((PsiTypeElement)SourceTreeToPsiMap.treeToPsiNotNull(element)).getType();
+        cachedType=componentType.createArrayType();
+      }
+ else {
+        final List<PsiTypeElement> typeElements=PsiTreeUtil.getChildrenOfTypeAsList(this,PsiTypeElement.class);
+        final List<PsiType> types=ContainerUtil.map(typeElements,new Function<PsiTypeElement,PsiType>(){
+          @Override public PsiType fun(          final PsiTypeElement psiTypeElement){
+            return psiTypeElement.getType();
+          }
+        }
+);
+        cachedType=new PsiDisjunctionType(types,getManager());
+      }
+    }
+ else     if (elementType == JavaElementType.JAVA_CODE_REFERENCE) {
+      addTypeUseAnnotationsFromModifierList(getParent(),typeAnnotations);
+      final PsiAnnotation[] array=toAnnotationsArray(typeAnnotations);
+      final PsiJavaCodeReferenceElement reference=SourceTreeToPsiMap.treeToPsiNotNull(element);
+      cachedType=new PsiClassReferenceType(reference,null,array);
+    }
+ else     if (elementType == JavaTokenType.QUEST) {
+      cachedType=createWildcardType();
+    }
+ else     if (ElementType.JAVA_COMMENT_OR_WHITESPACE_BIT_SET.contains(elementType)) {
+      element=element.getTreeNext();
+      continue;
+    }
+ else     if (elementType == JavaElementType.ANNOTATION) {
+      final PsiElementFactory elementFactory=JavaPsiFacade.getInstance(getProject()).getElementFactory();
+      final PsiAnnotation annotation=elementFactory.createAnnotationFromText(element.getText(),this);
+      typeAnnotations.add(annotation);
+      element=element.getTreeNext();
+      continue;
+    }
+ else     if (elementType == JavaElementType.DIAMOND_TYPE) {
+      cachedType=new PsiDiamondTypeImpl(getManager(),this);
+      break;
+    }
+ else {
+      LOG.error("Unknown element type: " + elementType);
+    }
+    if (element.getTextLength() != 0)     break;
+    element=element.getTreeNext();
+  }
+  if (cachedType == null)   cachedType=PsiType.NULL;
+  myCachedType=cachedType;
+  return cachedType;
 }
