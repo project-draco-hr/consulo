@@ -1,0 +1,40 @@
+{
+  final Set<Module> modules=chunk.getModules();
+  AnnotationProcessingProfile profile=null;
+  if (modules.size() == 1) {
+    profile=context.getAnnotationProcessingProfile(modules.iterator().next());
+  }
+ else {
+    for (    Module module : modules) {
+      final AnnotationProcessingProfile prof=context.getAnnotationProcessingProfile(module);
+      if (prof.isEnabled()) {
+        String message="Annotation processing is not supported for module cycles. Please ensure that all modules from cycle [" + getChunkPresentableName(chunk) + "] are excluded from annotation processing";
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.ERROR,message));
+        return true;
+      }
+    }
+  }
+  final Map<File,Set<File>> outs=buildOutputDirectoriesMap(context,chunk);
+  final List<String> options=getCompilationOptions(context,chunk,profile);
+  final ClassProcessingConsumer classesConsumer=new ClassProcessingConsumer(context,outputSink);
+  try {
+    final boolean rc;
+    if (USE_EMBEDDED_JAVAC) {
+      rc=JavacMain.compile(options,files,classpath,platformCp,sourcePath,outs,diagnosticSink,classesConsumer,context.getCancelStatus());
+    }
+ else {
+      final JavacServerClient client=ensureJavacServerLaunched(context);
+      final RequestFuture<JavacServerResponseHandler> future=client.sendCompileRequest(options,files,classpath,platformCp,sourcePath,outs,diagnosticSink,classesConsumer);
+      while (!future.waitFor(100L,TimeUnit.MILLISECONDS)) {
+        if (context.isCanceled()) {
+          future.cancel(false);
+        }
+      }
+      rc=future.getMessageHandler().isTerminatedSuccessfully();
+    }
+    return rc;
+  }
+  finally {
+    ensurePendingTasksCompleted();
+  }
+}
