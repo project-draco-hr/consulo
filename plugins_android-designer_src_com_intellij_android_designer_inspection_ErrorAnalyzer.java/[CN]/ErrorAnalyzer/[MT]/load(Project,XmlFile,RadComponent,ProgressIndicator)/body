@@ -1,0 +1,79 @@
+{
+  ErrorInfo.clear(rootComponent);
+  AndroidLintExternalAnnotator annotator=new AndroidLintExternalAnnotator();
+  State state=annotator.collectionInformation(xmlFile);
+  if (state != null) {
+    state=annotator.doAnnotate(state);
+    for (    ProblemData problemData : state.getProblems()) {
+      Issue issue=problemData.getIssue();
+      String message=problemData.getMessage();
+      TextRange range=problemData.getTextRange();
+      if (range.getStartOffset() == range.getEndOffset()) {
+        continue;
+      }
+      Pair<AndroidLintInspectionBase,HighlightDisplayLevel> pair=AndroidLintUtil.getHighlighLevelAndInspection(issue,xmlFile);
+      if (pair == null) {
+        continue;
+      }
+      AndroidLintInspectionBase inspection=pair.getFirst();
+      if (inspection != null) {
+        HighlightDisplayKey key=HighlightDisplayKey.find(inspection.getShortName());
+        if (key != null) {
+          final PsiElement startElement=xmlFile.findElementAt(range.getStartOffset());
+          final PsiElement endElement=xmlFile.findElementAt(range.getEndOffset() - 1);
+          if (startElement != null && endElement != null && !inspection.isSuppressedFor(startElement)) {
+            Pair<RadComponent,String> componentInfo=findComponent(rootComponent,startElement);
+            ErrorInfo errorInfo=new ErrorInfo(message,componentInfo.second,pair.getSecond());
+            ErrorInfo.add(componentInfo.first,errorInfo);
+            List<QuickFix> designerFixes=errorInfo.getQuickFixes();
+            for (            final AndroidLintQuickFix fix : inspection.public_getQuickFixes(message)) {
+              if (fix.isApplicable(startElement,endElement,false)) {
+                designerFixes.add(new QuickFix(fix.getName(),AbstractQuickFixManager.ICON){
+                  @Override public void run(){
+                    fix.apply(startElement,endElement,null);
+                  }
+                }
+);
+              }
+            }
+            for (            final IntentionAction intention : inspection.getIntentions(startElement,endElement)) {
+              designerFixes.add(new QuickFix(intention.getText(),AbstractQuickFixManager.ICON){
+                @Override public void run(){
+                  intention.invoke(project,null,xmlFile);
+                }
+              }
+);
+            }
+            final DisableInspectionToolAction disableAction=new DisableInspectionToolAction(key);
+            designerFixes.add(new QuickFix("Disable inspection",disableAction.getIcon(0)){
+              @Override public void run(){
+                disableAction.invoke(project,null,xmlFile);
+              }
+            }
+);
+            final EditInspectionToolsSettingsAction editSettingsAction=new EditInspectionToolsSettingsAction(key);
+            designerFixes.add(new QuickFix("Edit '" + inspection.getDisplayName() + "' inspection settings",editSettingsAction.getIcon(0)){
+              @Override public void run(){
+                editSettingsAction.invoke(project,null,xmlFile);
+              }
+            }
+);
+            SuppressIntentionAction[] suppressActions=inspection.getSuppressActions(startElement);
+            if (suppressActions != null) {
+              for (              final SuppressIntentionAction action : suppressActions) {
+                if (action.isAvailable(xmlFile.getProject(),null,startElement)) {
+                  designerFixes.add(new QuickFix(action.getText(),action.getIcon(0)){
+                    @Override public void run(){
+                      action.invoke(project,null,startElement);
+                    }
+                  }
+);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
