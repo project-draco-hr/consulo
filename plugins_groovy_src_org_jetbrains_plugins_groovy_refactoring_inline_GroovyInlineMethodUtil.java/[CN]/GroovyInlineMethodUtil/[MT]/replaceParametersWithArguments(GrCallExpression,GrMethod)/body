@@ -1,53 +1,24 @@
 {
+  GrParameter[] parameters=method.getParameters();
+  if (parameters.length == 0)   return;
   GrArgumentList argumentList=call.getArgumentList();
   if (argumentList == null) {
     setDefaultValuesToParameters(method,null,call);
     return;
   }
-  final GrNamedArgument[] namedArguments=argumentList.getNamedArguments();
-  boolean firstParamIsMap=namedArguments.length > 0;
-  ArrayList<GrExpression> exprs=new ArrayList<GrExpression>();
-  if (firstParamIsMap) {
-    StringBuilder mapArg=new StringBuilder();
-    mapArg.append('[');
-    for (    GrNamedArgument namedArgument : namedArguments) {
-      mapArg.append(namedArgument.getText()).append(", ");
-    }
-    mapArg.delete(mapArg.length() - 2,mapArg.length());
-    mapArg.append(']');
-    exprs.add(GroovyPsiElementFactory.getInstance(call.getProject()).createExpressionFromText(mapArg.toString()));
+  Project project=call.getProject();
+  GrClosureSignature signature=GrClosureSignatureUtil.createSignature(call);
+  if (signature == null) {
+    return;
   }
-  ContainerUtil.addAll(exprs,argumentList.getExpressionArguments());
-  ContainerUtil.addAll(exprs,call.getClosureArguments());
-  GrParameter[] parameters=method.getParameters();
-  if (parameters.length == 0)   return;
-  GrParameter firstParam=parameters[0];
-  while (exprs.size() > parameters.length) {
-    exprs.remove(exprs.size() - 1);
-  }
-  int nonDefault=0;
-  for (  GrParameter parameter : parameters) {
-    if (!(firstParam == parameter && firstParamIsMap)) {
-      if (parameter.getDefaultInitializer() == null) {
-        nonDefault++;
-      }
+  GrClosureSignatureUtil.ArgInfo<PsiElement>[] infos=GrClosureSignatureUtil.mapParametersToArguments(signature,call.getNamedArguments(),call.getExpressionArguments(),call.getClosureArguments(),call,true,false);
+  if (infos == null)   return;
+  for (int i=0; i < infos.length; i++) {
+    GrClosureSignatureUtil.ArgInfo<PsiElement> argInfo=infos[i];
+    GrParameter parameter=parameters[i];
+    final GrExpression arg=inferArg(signature,parameters,parameter,argInfo,project);
+    if (arg != null) {
+      replaceAllOccurrencesWithExpression(method,call,arg,parameter);
     }
   }
-  nonDefault=exprs.size() - nonDefault - (firstParamIsMap ? 1 : 0);
-  Set<String> nameFilter=new HashSet<String>();
-  for (  GrParameter parameter : parameters) {
-    if (!(firstParam == parameter && firstParamIsMap)) {
-      GrExpression initializer=parameter.getDefaultInitializer();
-      if (initializer != null) {
-        if (nonDefault > 0) {
-          nonDefault--;
-        }
- else {
-          nameFilter.add(parameter.getName());
-        }
-      }
-    }
-  }
-  setDefaultValuesToParameters(method,nameFilter,call);
-  setValuesToParameters(method,call,exprs,nameFilter);
 }
