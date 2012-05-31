@@ -1,0 +1,88 @@
+{
+  List<String> cached=JAVAC_OPTIONS.get(context);
+  if (cached == null) {
+    loadCommonJavacOptions(context);
+    cached=JAVAC_OPTIONS.get(context);
+  }
+  final List<String> options=new ArrayList<String>(cached);
+  if (!isEncodingSet(options)) {
+    final CompilerEncodingConfiguration config=context.getProjectDescriptor().getEncodingConfiguration();
+    final String encoding=config.getPreferredModuleChunkEncoding(chunk);
+    if (config.getAllModuleChunkEncodings(chunk).size() > 1) {
+      final StringBuilder msgBuilder=new StringBuilder();
+      msgBuilder.append("Multiple encodings set for module chunk ").append(getChunkPresentableName(chunk));
+      if (encoding != null) {
+        msgBuilder.append("\n\"").append(encoding).append("\" will be used by compiler");
+      }
+      context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.INFO,msgBuilder.toString()));
+    }
+    if (encoding != null) {
+      options.add("-encoding");
+      options.add(encoding);
+    }
+  }
+  final String langlevel=chunk.getModules().iterator().next().getLanguageLevel();
+  if (!StringUtil.isEmpty(langlevel)) {
+    options.add("-source");
+    options.add(langlevel);
+  }
+  final BytecodeTargetConfiguration targetConfig=context.getProject().getCompilerConfiguration().getBytecodeTarget();
+  String bytecodeTarget=null;
+  int chunkSdkVersion=-1;
+  for (  Module module : chunk.getModules()) {
+    final Sdk sdk=module.getSdk();
+    if (sdk instanceof JavaSdk) {
+      final JavaSdk moduleSdk=(JavaSdk)sdk;
+      final int moduleSdkVersion=convertToNumber(moduleSdk.getVersion());
+      if (moduleSdkVersion != 0 && (chunkSdkVersion < 0 || chunkSdkVersion > moduleSdkVersion)) {
+        chunkSdkVersion=moduleSdkVersion;
+      }
+    }
+    final String moduleTarget=getModuleTarget(targetConfig,module);
+    if (moduleTarget == null) {
+      continue;
+    }
+    if (bytecodeTarget == null) {
+      bytecodeTarget=moduleTarget;
+    }
+ else {
+      if (moduleTarget.compareTo(bytecodeTarget) < 0) {
+        bytecodeTarget=moduleTarget;
+      }
+    }
+  }
+  if (bytecodeTarget != null) {
+    options.add("-target");
+    options.add(bytecodeTarget);
+  }
+ else {
+    if (chunkSdkVersion > 0 && getCompilerSdkVersion(context) > chunkSdkVersion) {
+      options.add("-target");
+      options.add("1." + chunkSdkVersion);
+    }
+  }
+  if (profile != null && profile.isEnabled()) {
+    if (!profile.getObtainProcessorsFromClasspath()) {
+      final String processorsPath=profile.getProcessorsPath();
+      options.add("-processorpath");
+      options.add(processorsPath == null ? "" : FileUtil.toSystemDependentName(processorsPath.trim()));
+    }
+    for (    String procFQName : profile.getProcessors()) {
+      options.add("-processor");
+      options.add(procFQName);
+    }
+    for (    Map.Entry<String,String> optionEntry : profile.getProcessorsOptions().entrySet()) {
+      options.add("-A" + optionEntry.getKey() + "="+ optionEntry.getValue());
+    }
+    final File srcOutput=context.getProjectPaths().getAnnotationProcessorGeneratedSourcesOutputDir(chunk.getModules().iterator().next(),context.isCompilingTests(),profile.getGeneratedSourcesDirName());
+    if (srcOutput != null) {
+      srcOutput.mkdirs();
+      options.add("-s");
+      options.add(srcOutput.getPath());
+    }
+  }
+ else {
+    options.add("-proc:none");
+  }
+  return options;
+}
