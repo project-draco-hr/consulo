@@ -3,7 +3,7 @@
   final PsiMethodPattern method=psiMethod().withName(methodName).definedInClass(IconLoader.class.getName());
   final PsiJavaElementPattern.Capture<PsiLiteralExpression> javaFile=literalExpression().and(psiExpression().methodCallParameter(0,method));
   final XmlAttributeValuePattern pluginXml=XmlPatterns.xmlAttributeValue().withLocalName("icon");
-  registrar.registerReferenceProvider(or(javaFile,pluginXml),new PsiReferenceProvider(){
+  registrar.registerReferenceProvider(javaFile,new PsiReferenceProvider(){
     @NotNull @Override public PsiReference[] getReferencesByElement(    @NotNull final PsiElement element,    @NotNull ProcessingContext context){
       if (!isIdeaProject(element.getProject()))       return PsiReference.EMPTY_ARRAY;
       return new FileReferenceSet(element){
@@ -25,6 +25,36 @@
         }
       }
 .getAllReferences();
+    }
+  }
+);
+  registrar.registerReferenceProvider(pluginXml,new PsiReferenceProvider(){
+    @NotNull @Override public PsiReference[] getReferencesByElement(    @NotNull final PsiElement element,    @NotNull ProcessingContext context){
+      return new PsiReference[]{new PsiReferenceBase<PsiElement>(element,false){
+        @Override public PsiElement resolve(){
+          String value=((XmlAttributeValue)element).getValue();
+          if (value.startsWith("AllIcons.")) {
+            List<String> path=StringUtil.split(value,".");
+            Project project=element.getProject();
+            PsiClass cur=JavaPsiFacade.getInstance(project).findClass("com.intellij.icons.AllIcons",GlobalSearchScope.projectScope(project));
+            if (cur == null)             return null;
+            for (int i=1; i < path.size() - 1; i++) {
+              cur=cur.findInnerClassByName(path.get(i),false);
+              if (cur == null)               return null;
+            }
+            return cur.findFieldByName(path.get(path.size() - 1),false);
+          }
+ else           if (value.startsWith("/")) {
+            FileReference lastRef=new FileReferenceSet(element).getLastReference();
+            return lastRef != null ? lastRef.resolve() : null;
+          }
+          return null;
+        }
+        @NotNull @Override public Object[] getVariants(){
+          return EMPTY_ARRAY;
+        }
+      }
+};
     }
   }
 );

@@ -1,3 +1,95 @@
 {
-  return myRootPanel;
+  myClassTree=new Tree();
+  myClassTree.setRootVisible(false);
+  myClassTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    public void valueChanged(    TreeSelectionEvent e){
+      final TreePath leadSelectionPath=e.getNewLeadSelectionPath();
+      if (leadSelectionPath == null)       return;
+      final DefaultMutableTreeNode node=(DefaultMutableTreeNode)leadSelectionPath.getLastPathComponent();
+      mySelectedClass=(Class)node.getUserObject();
+      updateSelectedProperties();
+    }
+  }
+);
+  myClassTree.setCellRenderer(new ColoredTreeCellRenderer(){
+    public void customizeCellRenderer(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+      DefaultMutableTreeNode node=(DefaultMutableTreeNode)value;
+      if (node.getUserObject() instanceof Class) {
+        Class cls=(Class)node.getUserObject();
+        if (cls != null) {
+          append(cls.getName(),SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        }
+      }
+    }
+  }
+);
+  fillClassTree();
+  myPropertiesTable=new JBTable();
+  myPropertiesTable.setModel(myTableModel);
+  mySplitter=new Splitter(false,Float.valueOf(myPropertiesComponent.getValue(SPLITTER_PROPORTION_PROPERTY,"0.5f")));
+  mySplitter.setFirstComponent(ToolbarDecorator.createDecorator(myClassTree).setAddAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      ClassNameInputDialog dlg=new ClassNameInputDialog(myProject,mySplitter);
+      dlg.show();
+      if (dlg.getExitCode() == OK_EXIT_CODE) {
+        String className=dlg.getClassName();
+        if (className.length() == 0)         return;
+        final Class aClass;
+        try {
+          aClass=Class.forName(className);
+        }
+ catch (        ClassNotFoundException ex) {
+          Messages.showErrorDialog(mySplitter,UIDesignerBundle.message("client.properties.class.not.found",className),UIDesignerBundle.message("client.properties.title"));
+          return;
+        }
+        if (!JComponent.class.isAssignableFrom(aClass)) {
+          Messages.showErrorDialog(mySplitter,UIDesignerBundle.message("client.properties.class.not.component",className),UIDesignerBundle.message("client.properties.title"));
+          return;
+        }
+        myManager.addClientPropertyClass(className);
+        fillClassTree();
+      }
+    }
+  }
+).setRemoveAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      if (mySelectedClass != null) {
+        myManager.removeClientPropertyClass(mySelectedClass);
+        fillClassTree();
+      }
+    }
+  }
+).setToolbarPosition(SystemInfo.isMac ? ActionToolbarPosition.BOTTOM : ActionToolbarPosition.RIGHT).createPanel());
+  mySplitter.setSecondComponent(ToolbarDecorator.createDecorator(myPropertiesTable).disableUpDownActions().setAddAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      AddClientPropertyDialog dlg=new AddClientPropertyDialog(myProject);
+      dlg.show();
+      if (dlg.getExitCode() == OK_EXIT_CODE) {
+        ClientPropertiesManager.ClientProperty[] props=myManager.getClientProperties(mySelectedClass);
+        for (        ClientPropertiesManager.ClientProperty prop : props) {
+          if (prop.getName().equalsIgnoreCase(dlg.getEnteredProperty().getName())) {
+            Messages.showErrorDialog(mySplitter,UIDesignerBundle.message("client.properties.already.defined",prop.getName()),UIDesignerBundle.message("client.properties.title"));
+            return;
+          }
+        }
+        myManager.addConfiguredProperty(mySelectedClass,dlg.getEnteredProperty());
+        updateSelectedProperties();
+      }
+    }
+  }
+).setRemoveAction(new AnActionButtonRunnable(){
+    @Override public void run(    AnActionButton button){
+      int row=myPropertiesTable.getSelectedRow();
+      if (row >= 0 && row < mySelectedProperties.length) {
+        myManager.removeConfiguredProperty(mySelectedClass,mySelectedProperties[row].getName());
+        updateSelectedProperties();
+        if (mySelectedProperties.length > 0) {
+          if (row >= mySelectedProperties.length)           row--;
+          myPropertiesTable.getSelectionModel().setSelectionInterval(row,row);
+        }
+      }
+    }
+  }
+).createPanel());
+  return mySplitter;
 }
