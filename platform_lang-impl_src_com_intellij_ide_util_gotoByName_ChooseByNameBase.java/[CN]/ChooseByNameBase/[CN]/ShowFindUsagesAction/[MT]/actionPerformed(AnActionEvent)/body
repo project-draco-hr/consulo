@@ -2,20 +2,25 @@
   cancelCalcElementsThread();
   cancelListUpdater();
   final UsageViewPresentation presentation=new UsageViewPresentation();
-  final String pattern=myFindUsagesTitle + " \'" + myTextField.getText().trim()+ "\'";
-  presentation.setCodeUsagesString(pattern);
-  presentation.setTabName(pattern);
-  presentation.setTabText(pattern);
-  presentation.setTargetsNodeText("Unsorted " + StringUtil.toLowerCase(pattern.toLowerCase()));
-  final PsiElement[] elements=getElements();
-  final Set<PsiElement> els=new LinkedHashSet<PsiElement>();
-  Collections.addAll(els,elements);
+  final String prefixPattern=myFindUsagesTitle + " \'" + myTextField.getText().trim()+ "\'";
+  final String nonPrefixPattern=myFindUsagesTitle + " \'*" + myTextField.getText().trim()+ "*\'";
+  presentation.setCodeUsagesString(prefixPattern);
+  presentation.setDynamicUsagesString(nonPrefixPattern);
+  presentation.setTabName(prefixPattern);
+  presentation.setTabText(prefixPattern);
+  presentation.setTargetsNodeText("Unsorted " + StringUtil.toLowerCase(prefixPattern.toLowerCase()));
+  final PsiElement[][] elements=getElements();
+  final Set<PsiElement> prefixEls=new LinkedHashSet<PsiElement>();
+  final Set<PsiElement> nonPrefixEls=new LinkedHashSet<PsiElement>();
+  Collections.addAll(prefixEls,elements[0]);
+  Collections.addAll(nonPrefixEls,elements[1]);
   if (myListModel.contains(EXTRA_ELEM)) {
     final String text=myTextField.getText();
     final boolean checkboxState=myCheckBox.isSelected();
-    final LinkedHashSet<Object> elementsArray=new LinkedHashSet<Object>();
+    final LinkedHashSet<Object> prefixMatchElementsArray=new LinkedHashSet<Object>();
+    final LinkedHashSet<Object> nonPrefixMatchElementsArray=new LinkedHashSet<Object>();
     hideHint();
-    ProgressManager.getInstance().run(new Task.Modal(myProject,pattern,true){
+    ProgressManager.getInstance().run(new Task.Modal(myProject,prefixPattern,true){
       private ChooseByNameBase.CalcElementsThread myCalcElementsThread;
       @Override public void run(      @NotNull ProgressIndicator indicator){
         ensureNamesLoaded(checkboxState);
@@ -27,23 +32,40 @@
               }
             }
 ;
-            myCalcElementsThread.addElementsByPattern(text,elementsArray,new Computable<Boolean>(){
+            boolean anyPlace=isSearchInAnyPlace();
+            setSearchInAnyPlace(false);
+            myCalcElementsThread.addElementsByPattern(text,prefixMatchElementsArray,new Computable<Boolean>(){
               @Override @NotNull public Boolean compute(){
                 return false;
               }
             }
 );
+            setSearchInAnyPlace(anyPlace);
+            if (anyPlace) {
+              myCalcElementsThread.addElementsByPattern(text,nonPrefixMatchElementsArray,new Computable<Boolean>(){
+                @Override @NotNull public Boolean compute(){
+                  return false;
+                }
+              }
+);
+              nonPrefixMatchElementsArray.removeAll(prefixMatchElementsArray);
+            }
           }
         }
 );
       }
       @Override public void onSuccess(){
-        for (        Object o : elementsArray) {
+        for (        Object o : prefixMatchElementsArray) {
           if (o instanceof PsiElement) {
-            els.add((PsiElement)o);
+            prefixEls.add((PsiElement)o);
           }
         }
-        showUsageView(els,presentation);
+        for (        Object o : nonPrefixMatchElementsArray) {
+          if (o instanceof PsiElement) {
+            nonPrefixEls.add((PsiElement)o);
+          }
+        }
+        showUsageView(prefixEls,nonPrefixEls,presentation);
       }
       @Override public void onCancel(){
         if (myCalcElementsThread != null) {
@@ -55,6 +77,6 @@
   }
  else {
     hideHint();
-    showUsageView(els,presentation);
+    showUsageView(prefixEls,nonPrefixEls,presentation);
   }
 }
