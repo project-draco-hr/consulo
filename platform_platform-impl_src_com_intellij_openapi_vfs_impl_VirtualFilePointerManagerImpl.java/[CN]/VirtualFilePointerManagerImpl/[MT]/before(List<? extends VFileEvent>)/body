@@ -1,0 +1,72 @@
+{
+  List<FilePointerPartNode> toFireEvents=new ArrayList<FilePointerPartNode>();
+  List<FilePointerPartNode> toUpdateUrl=new ArrayList<FilePointerPartNode>();
+  VirtualFilePointer[] toFirePointers;
+synchronized (this) {
+    incModificationCounter();
+    for (    VFileEvent event : events) {
+      if (event instanceof VFileDeleteEvent) {
+        final VFileDeleteEvent deleteEvent=(VFileDeleteEvent)event;
+        String path=deleteEvent.getFile().getPath();
+        addPointersUnder(path,toFireEvents);
+      }
+ else       if (event instanceof VFileCreateEvent) {
+        final VFileCreateEvent createEvent=(VFileCreateEvent)event;
+        String url=createEvent.getPath();
+        addPointersUnder(url,toFireEvents);
+      }
+ else       if (event instanceof VFileCopyEvent) {
+        final VFileCopyEvent copyEvent=(VFileCopyEvent)event;
+        String url=copyEvent.getNewParent().getPath() + "/" + copyEvent.getFile().getName();
+        addPointersUnder(url,toFireEvents);
+      }
+ else       if (event instanceof VFileMoveEvent) {
+        final VFileMoveEvent moveEvent=(VFileMoveEvent)event;
+        List<FilePointerPartNode> nodes=new ArrayList<FilePointerPartNode>();
+        addPointersUnder(moveEvent.getFile().getPath(),nodes);
+        for (        FilePointerPartNode pair : nodes) {
+          VirtualFile file=pair.leaf.getFile();
+          if (file != null) {
+            toUpdateUrl.add(pair);
+          }
+        }
+      }
+ else       if (event instanceof VFilePropertyChangeEvent) {
+        final VFilePropertyChangeEvent change=(VFilePropertyChangeEvent)event;
+        if (VirtualFile.PROP_NAME.equals(change.getPropertyName())) {
+          List<FilePointerPartNode> nodes=new ArrayList<FilePointerPartNode>();
+          addPointersUnder(change.getFile().getPath(),nodes);
+          for (          FilePointerPartNode pair : nodes) {
+            VirtualFile file=pair.leaf.getFile();
+            if (file != null) {
+              toUpdateUrl.add(pair);
+            }
+          }
+        }
+      }
+    }
+    myEvents=new ArrayList<EventDescriptor>();
+    toFirePointers=toPointers(toFireEvents);
+    for (    final VirtualFilePointerListener listener : myPointers.keySet()) {
+      if (listener == null)       continue;
+      List<VirtualFilePointer> filtered=ContainerUtil.filter(toFirePointers,new Condition<VirtualFilePointer>(){
+        @Override public boolean value(        VirtualFilePointer pointer){
+          return ((VirtualFilePointerImpl)pointer).getListener() == listener;
+        }
+      }
+);
+      if (!filtered.isEmpty()) {
+        EventDescriptor event=new EventDescriptor(listener,filtered.toArray(new VirtualFilePointer[filtered.size()]));
+        myEvents.add(event);
+      }
+    }
+  }
+  for (  EventDescriptor descriptor : myEvents) {
+    descriptor.fireBefore();
+  }
+  if (!toFireEvents.isEmpty()) {
+    myBus.syncPublisher(VirtualFilePointerListener.TOPIC).beforeValidityChanged(toFirePointers);
+  }
+  myPointersToFire=toFireEvents;
+  myPointersToUpdateUrl=toUpdateUrl;
+}

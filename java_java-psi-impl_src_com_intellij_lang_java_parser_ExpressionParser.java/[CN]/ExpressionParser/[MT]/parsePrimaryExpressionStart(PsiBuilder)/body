@@ -24,10 +24,19 @@
   if (tokenType == JavaTokenType.LBRACE) {
     return parseArrayInitializer(builder);
   }
+  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType) || tokenType == JavaTokenType.IDENTIFIER) {
+    final boolean primitive=tokenType != JavaTokenType.IDENTIFIER;
+    final PsiBuilder.Marker mark=builder.mark();
+    final ReferenceParser.TypeInfo typeInfo=myParser.getReferenceParser().parseTypeInfo(builder,0);
+    if (typeInfo != null && (primitive || !typeInfo.hasErrors && typeInfo.isParameterized)) {
+      final PsiBuilder.Marker result=continueClassAccessOrMethodReference(builder,mark,primitive);
+      if (result != null)       return result;
+    }
+    mark.rollbackTo();
+  }
   PsiBuilder.Marker annotation=null;
-  final PsiBuilder.Marker beforeAnnotation=builder.mark();
   if (tokenType == JavaTokenType.AT) {
-    annotation=myDeclarationParser.parseAnnotations(builder);
+    annotation=myParser.getDeclarationParser().parseAnnotations(builder);
     tokenType=builder.getTokenType();
   }
   if (tokenType == JavaTokenType.IDENTIFIER) {
@@ -43,20 +52,16 @@
     }
     builder.advanceLexer();
     refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
-    beforeAnnotation.drop();
     return refExpr;
   }
   if (annotation != null) {
-    beforeAnnotation.rollbackTo();
+    annotation.rollbackTo();
     tokenType=builder.getTokenType();
-  }
- else {
-    beforeAnnotation.drop();
   }
   PsiBuilder.Marker expr=null;
   if (tokenType == JavaTokenType.LT) {
     expr=builder.mark();
-    if (!myReferenceParser.parseReferenceParameterList(builder,false,false)) {
+    if (!myParser.getReferenceParser().parseReferenceParameterList(builder,false,false)) {
       expr.rollbackTo();
       return null;
     }
@@ -77,9 +82,6 @@
   }
   if (tokenType == JavaTokenType.NEW_KEYWORD) {
     return parseNew(builder,null);
-  }
-  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
-    return parseClassObjectAccess(builder);
   }
   return null;
 }
