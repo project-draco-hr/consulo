@@ -1,11 +1,5 @@
 {
-  PsiField field=(PsiField)element;
-  if (!CommonRefactoringUtil.checkReadOnlyStatus(project,field))   return;
-  if (!field.hasModifierProperty(PsiModifier.FINAL)) {
-    String message=RefactoringBundle.message("0.refactoring.is.supported.only.for.final.fields",REFACTORING_NAME);
-    CommonRefactoringUtil.showErrorHint(project,editor,message,REFACTORING_NAME,HelpID.INLINE_FIELD);
-    return;
-  }
+  final PsiField field=(PsiField)element;
   if (!field.hasInitializer()) {
     String message=RefactoringBundle.message("no.initializer.present.for.the.field");
     CommonRefactoringUtil.showErrorHint(project,editor,message,REFACTORING_NAME,HelpID.INLINE_FIELD);
@@ -21,14 +15,33 @@
     CommonRefactoringUtil.showErrorHint(project,editor,message,REFACTORING_NAME,HelpID.INLINE_FIELD);
     return;
   }
+  if (!field.hasModifierProperty(PsiModifier.FINAL)) {
+    final Ref<Boolean> hasWriteUsages=new Ref<Boolean>(false);
+    if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
+      @Override public void run(){
+        for (        PsiReference reference : ReferencesSearch.search(field)) {
+          final PsiElement referenceElement=reference.getElement();
+          if (!(referenceElement instanceof PsiExpression && PsiUtil.isAccessedForReading((PsiExpression)referenceElement))) {
+            hasWriteUsages.set(true);
+            break;
+          }
+        }
+      }
+    }
+,"Check if inline is possible...",true,project)) {
+      return;
+    }
+    if (hasWriteUsages.get()) {
+      String message=RefactoringBundle.message("0.refactoring.is.supported.only.for.final.fields",REFACTORING_NAME);
+      CommonRefactoringUtil.showErrorHint(project,editor,message,REFACTORING_NAME,HelpID.INLINE_FIELD);
+      return;
+    }
+  }
   PsiReference reference=editor != null ? TargetElementUtilBase.findReference(editor,editor.getCaretModel().getOffset()) : null;
   if (reference != null && !field.equals(reference.resolve())) {
     reference=null;
   }
-  final boolean invokedOnReference=(reference != null);
-  if (!invokedOnReference) {
-    if (!CommonRefactoringUtil.checkReadOnlyStatus(project,field))     return;
-  }
+  if (!CommonRefactoringUtil.checkReadOnlyStatus(project,field))   return;
   PsiReferenceExpression refExpression=reference instanceof PsiReferenceExpression ? (PsiReferenceExpression)reference : null;
   InlineFieldDialog dialog=new InlineFieldDialog(project,field,refExpression);
   dialog.show();
