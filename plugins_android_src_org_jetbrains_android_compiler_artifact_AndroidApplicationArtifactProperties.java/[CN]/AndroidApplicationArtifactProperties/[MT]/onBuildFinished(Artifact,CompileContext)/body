@@ -1,0 +1,65 @@
+{
+  if (!(artifact.getArtifactType() instanceof AndroidApplicationArtifactType) || mySigningMode != AndroidArtifactSigningMode.RELEASE_SIGNED) {
+    return;
+  }
+  final AndroidFacet facet=AndroidArtifactUtil.getPackagedFacet(context.getProject(),artifact);
+  if (facet == null) {
+    return;
+  }
+  final String messagePrefix="[Artifact '" + artifact.getName() + "'] ";
+  final Module module=facet.getModule();
+  final AndroidPlatform platform=AndroidPlatform.getInstance(module);
+  if (platform == null) {
+    context.addMessage(CompilerMessageCategory.ERROR,messagePrefix + AndroidBundle.message("android.compilation.error.specify.platform",module.getName()),null,-1,-1);
+    return;
+  }
+  final Pair<PrivateKey,X509Certificate> pair=getPrivateKeyAndCertificate(context,messagePrefix);
+  if (pair == null) {
+    return;
+  }
+  final String artifactFilePath=artifact.getOutputFilePath();
+  final String prefix="Cannot sign artifact " + artifact.getName() + ": ";
+  if (artifactFilePath == null) {
+    context.addMessage(CompilerMessageCategory.ERROR,prefix + "output path is not specified",null,-1,-1);
+    return;
+  }
+  final File artifactFile=new File(artifactFilePath);
+  if (!artifactFile.exists()) {
+    context.addMessage(CompilerMessageCategory.ERROR,prefix + "file " + artifactFilePath+ " hasn't been generated",null,-1,-1);
+    return;
+  }
+  final String zipAlignPath=FileUtil.toSystemDependentName(platform.getSdkData().getLocation() + '/' + AndroidCommonUtils.toolPath(SdkConstants.FN_ZIPALIGN));
+  final boolean runZipAlign=new File(zipAlignPath).isFile();
+  File tmpDir=null;
+  try {
+    tmpDir=FileUtil.createTempDirectory("android_artifact","tmp");
+    final File tmpArtifact=new File(tmpDir,"tmpArtifact.apk");
+    if (runZipAlign) {
+      final String errorMessage=AndroidArtifactUtil.executeZipAlign(zipAlignPath,artifactFile,tmpArtifact);
+      if (errorMessage != null) {
+        context.addMessage(CompilerMessageCategory.ERROR,messagePrefix + "zip-align: " + errorMessage,null,-1,-1);
+        return;
+      }
+    }
+ else {
+      context.addMessage(CompilerMessageCategory.WARNING,messagePrefix + AndroidBundle.message("cannot.find.zip.align"),null,-1,-1);
+      FileUtil.copy(artifactFile,tmpArtifact);
+    }
+    if (!FileUtil.delete(artifactFile)) {
+      context.addMessage(CompilerMessageCategory.ERROR,"Cannot delete file " + artifactFile.getPath(),null,-1,-1);
+      return;
+    }
+    AndroidCommonUtils.signApk(tmpArtifact,artifactFile,pair.getFirst(),pair.getSecond());
+  }
+ catch (  IOException e) {
+    context.addMessage(CompilerMessageCategory.ERROR,prefix + "I/O error: " + e.getMessage(),null,-1,-1);
+  }
+catch (  GeneralSecurityException e) {
+    AndroidCompileUtil.reportException(context,prefix,e);
+  }
+ finally {
+    if (tmpDir != null) {
+      FileUtil.delete(tmpDir);
+    }
+  }
+}

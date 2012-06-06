@@ -2,35 +2,37 @@
   final GrExpression left=expression.getLeftOperand();
   final GrExpression right=expression.getRightOperand();
   final IElementType opType=expression.getOperationTokenType();
-  final ConditionInstruction cond;
-  if (opType == mLOR || opType == mLAND) {
-    cond=addNodeAndCheckPending(new ConditionInstruction(expression,myInstructionNumber++));
-    registerCondition(cond);
+  if (opType != mLOR && opType != mLAND) {
+    left.accept(this);
+    if (right != null) {
+      right.accept(this);
+    }
+    visitCall(expression);
+    return;
+  }
+  ConditionInstruction condition=new ConditionInstruction(expression,myInstructionNumber++);
+  addNodeAndCheckPending(condition);
+  registerCondition(condition);
+  left.accept(this);
+  if (right == null)   return;
+  final List<GotoInstruction> negations=collectAndRemoveAllPendingNegations(expression);
+  visitCall(expression);
+  if (opType == mLAND) {
+    for (    GotoInstruction negation : negations) {
+      addPendingEdge(expression,negation);
+    }
+    if (negations.isEmpty()) {
+      InstructionImpl head=myHead;
+      NegatingGotoInstruction negation=addNode(new NegatingGotoInstruction(expression,myInstructionNumber++,condition));
+      addPendingEdge(expression,negation);
+      myHead=head;
+    }
   }
  else {
-    cond=null;
+    addNodeAndCheckPending(new InstructionImpl(expression,myInstructionNumber++));
+    addPendingEdge(expression,myHead);
+    myHead=reduceAllNegationsIntoInstruction(expression,negations);
   }
-  left.accept(this);
-  if (cond != null) {
-    myConditions.removeFirstOccurrence(cond);
-  }
-  NegatingGotoInstruction first=null;
-  if (right != null) {
-    if (cond != null) {
-      final InstructionImpl head=myHead;
-      if (opType == mLAND) {
-        first=addNodeAndCheckPending(new NegatingGotoInstruction(expression,myInstructionNumber++,cond));
-      }
-      addPendingEdge(expression,myHead);
-      myHead=head;
-      if (opType == mLOR) {
-        myNegatingStack.push(addNodeAndCheckPending(new NegatingGotoInstruction(expression,myInstructionNumber++,cond)));
-      }
-    }
-    right.accept(this);
-  }
-  visitCall(expression);
-  if (first != null) {
-    myNegatingStack.push(first);
-  }
+  myConditions.removeFirstOccurrence(condition);
+  right.accept(this);
 }

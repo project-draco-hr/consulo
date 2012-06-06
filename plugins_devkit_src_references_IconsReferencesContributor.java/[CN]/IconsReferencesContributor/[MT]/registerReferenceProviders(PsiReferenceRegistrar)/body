@@ -3,7 +3,7 @@
   final PsiMethodPattern method=psiMethod().withName(methodName).definedInClass(IconLoader.class.getName());
   final PsiJavaElementPattern.Capture<PsiLiteralExpression> javaFile=literalExpression().and(psiExpression().methodCallParameter(0,method));
   final XmlAttributeValuePattern pluginXml=XmlPatterns.xmlAttributeValue().withLocalName("icon");
-  registrar.registerReferenceProvider(or(javaFile,pluginXml),new PsiReferenceProvider(){
+  registrar.registerReferenceProvider(javaFile,new PsiReferenceProvider(){
     @NotNull @Override public PsiReference[] getReferencesByElement(    @NotNull final PsiElement element,    @NotNull ProcessingContext context){
       if (!isIdeaProject(element.getProject()))       return PsiReference.EMPTY_ARRAY;
       return new FileReferenceSet(element){
@@ -25,6 +25,67 @@
         }
       }
 .getAllReferences();
+    }
+  }
+);
+  registrar.registerReferenceProvider(pluginXml,new PsiReferenceProvider(){
+    @NotNull @Override public PsiReference[] getReferencesByElement(    @NotNull final PsiElement element,    @NotNull ProcessingContext context){
+      return new PsiReference[]{new PsiReferenceBase<PsiElement>(element,true){
+        @Override public PsiElement resolve(){
+          String value=((XmlAttributeValue)element).getValue();
+          if (value.startsWith("AllIcons.")) {
+            List<String> path=StringUtil.split(value,".");
+            Project project=element.getProject();
+            PsiClass cur=JavaPsiFacade.getInstance(project).findClass("com.intellij.icons.AllIcons",GlobalSearchScope.projectScope(project));
+            if (cur == null)             return null;
+            for (int i=1; i < path.size() - 1; i++) {
+              cur=cur.findInnerClassByName(path.get(i),false);
+              if (cur == null)               return null;
+            }
+            return cur.findFieldByName(path.get(path.size() - 1),false);
+          }
+ else           if (value.startsWith("/")) {
+            FileReference lastRef=new FileReferenceSet(element).getLastReference();
+            return lastRef != null ? lastRef.resolve() : null;
+          }
+          return null;
+        }
+        @Override public PsiElement handleElementRename(        String newElementName) throws IncorrectOperationException {
+          PsiElement element=resolve();
+          if (element instanceof PsiFile) {
+            FileReference lastRef=new FileReferenceSet(element).getLastReference();
+            return lastRef.handleElementRename(newElementName);
+          }
+ else           if (element instanceof PsiField) {
+            String fqn=((PsiField)element).getContainingClass().getQualifiedName();
+            if (fqn.startsWith("com.intellij.icons.")) {
+              XmlAttribute parent=(XmlAttribute)getElement().getParent();
+              parent.setValue(fqn.substring("com.intellij.icons.".length()) + "." + newElementName);
+              return parent.getValueElement();
+            }
+          }
+          return super.handleElementRename(newElementName);
+        }
+        @Override public PsiElement bindToElement(        @NotNull PsiElement element) throws IncorrectOperationException {
+          if (element instanceof PsiFile) {
+            FileReference lastRef=new FileReferenceSet(element).getLastReference();
+            return lastRef.bindToElement(element);
+          }
+ else           if (element instanceof PsiField) {
+            String fqn=((PsiField)element).getContainingClass().getQualifiedName();
+            if (fqn.startsWith("com.intellij.icons.")) {
+              XmlAttribute parent=(XmlAttribute)getElement().getParent();
+              parent.setValue(fqn.substring("com.intellij.icons.".length()) + "." + ((PsiField)element).getName());
+              return parent.getValueElement();
+            }
+          }
+          return super.bindToElement(element);
+        }
+        @NotNull @Override public Object[] getVariants(){
+          return EMPTY_ARRAY;
+        }
+      }
+};
     }
   }
 );

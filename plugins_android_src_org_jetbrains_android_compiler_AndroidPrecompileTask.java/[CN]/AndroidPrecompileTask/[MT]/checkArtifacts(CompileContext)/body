@@ -1,0 +1,67 @@
+{
+  final Project project=context.getProject();
+  if (!ProjectFacetManager.getInstance(project).hasFacets(AndroidFacet.ID)) {
+    return true;
+  }
+  final Set<Artifact> artifacts=ArtifactCompileScope.getArtifactsToBuild(project,context.getCompileScope(),false);
+  if (artifacts == null) {
+    return true;
+  }
+  final Set<Artifact> debugArtifacts=new HashSet<Artifact>();
+  final Set<Artifact> releaseArtifacts=new HashSet<Artifact>();
+  final Map<AndroidFacet,List<Artifact>> facet2artifacts=new HashMap<AndroidFacet,List<Artifact>>();
+  for (  final Artifact artifact : artifacts) {
+    final ArtifactProperties<?> properties=artifact.getProperties(AndroidArtifactPropertiesProvider.getInstance());
+    if (properties instanceof AndroidApplicationArtifactProperties) {
+      final AndroidArtifactSigningMode mode=((AndroidApplicationArtifactProperties)properties).getSigningMode();
+      if (mode == AndroidArtifactSigningMode.DEBUG) {
+        debugArtifacts.add(artifact);
+      }
+ else {
+        releaseArtifacts.add(artifact);
+      }
+    }
+    final AndroidFacet facet=ApplicationManager.getApplication().runReadAction(new Computable<AndroidFacet>(){
+      @Nullable @Override public AndroidFacet compute(){
+        return AndroidArtifactUtil.getPackagedFacet(project,artifact);
+      }
+    }
+);
+    if (facet != null) {
+      List<Artifact> list=facet2artifacts.get(facet);
+      if (list == null) {
+        list=new ArrayList<Artifact>();
+        facet2artifacts.put(facet,list);
+      }
+      list.add(artifact);
+    }
+  }
+  boolean success=true;
+  if (debugArtifacts.size() > 0 && releaseArtifacts.size() > 0) {
+    final String message="Cannot build debug and release Android artifacts in the same session\n" + "Debug artifacts: " + toString(debugArtifacts) + "\n"+ "Release artifacts: "+ toString(releaseArtifacts);
+    context.addMessage(CompilerMessageCategory.ERROR,message,null,-1,-1);
+    success=false;
+  }
+  if (releaseArtifacts.size() > 0 && CompileStepBeforeRun.getRunConfiguration(context) != null) {
+    final String message="Cannot build release Android artifacts in the 'make before run' session\n" + "Release artifacts: " + toString(releaseArtifacts);
+    context.addMessage(CompilerMessageCategory.ERROR,message,null,-1,-1);
+    success=false;
+  }
+  for (  Map.Entry<AndroidFacet,List<Artifact>> entry : facet2artifacts.entrySet()) {
+    final List<Artifact> list=entry.getValue();
+    final String moduleName=entry.getKey().getModule().getName();
+    if (list.size() > 1) {
+      final Artifact firstArtifact=list.get(0);
+      final Object[] firstArtifactProGuardOptions=getProGuardOptions(firstArtifact);
+      for (int i=1; i < list.size(); i++) {
+        final Artifact artifact=list.get(i);
+        if (!Arrays.equals(getProGuardOptions(artifact),firstArtifactProGuardOptions)) {
+          context.addMessage(CompilerMessageCategory.ERROR,"Artifacts related to the same module '" + moduleName + "' have different ProGuard options: "+ firstArtifact.getName()+ ", "+ artifact.getName(),null,-1,-1);
+          success=false;
+          break;
+        }
+      }
+    }
+  }
+  return success;
+}

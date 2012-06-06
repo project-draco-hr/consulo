@@ -8,6 +8,16 @@
   }
   if (tokenType == JavaTokenType.LPARENTH) {
     final PsiBuilder.Marker parenth=builder.mark();
+    final IElementType nextToken1=builder.lookAhead(1);
+    final IElementType nextToken2=builder.lookAhead(2);
+    if (nextToken1 == JavaTokenType.IDENTIFIER) {
+      if (nextToken2 == JavaTokenType.COMMA || nextToken2 == JavaTokenType.RPARENTH && builder.lookAhead(3) == JavaTokenType.ARROW) {
+        return parseLambdaExpression(builder,parenth,false);
+      }
+    }
+ else     if (nextToken1 == JavaTokenType.RPARENTH && nextToken2 == JavaTokenType.ARROW) {
+      return parseLambdaExpression(builder,parenth,false);
+    }
     builder.advanceLexer();
     final PsiBuilder.Marker inner=parse(builder);
     if (inner == null) {
@@ -24,13 +34,24 @@
   if (tokenType == JavaTokenType.LBRACE) {
     return parseArrayInitializer(builder);
   }
+  if (TYPE_START.contains(tokenType)) {
+    final PsiBuilder.Marker mark=builder.mark();
+    final ReferenceParser.TypeInfo typeInfo=myParser.getReferenceParser().parseTypeInfo(builder,0);
+    if (typeInfo != null && (typeInfo.isPrimitive || !typeInfo.hasErrors && typeInfo.isParameterized)) {
+      final PsiBuilder.Marker result=continueClassAccessOrMethodReference(builder,mark,typeInfo.isPrimitive);
+      if (result != null)       return result;
+    }
+    mark.rollbackTo();
+  }
   PsiBuilder.Marker annotation=null;
-  final PsiBuilder.Marker beforeAnnotation=builder.mark();
   if (tokenType == JavaTokenType.AT) {
-    annotation=myDeclarationParser.parseAnnotations(builder);
+    annotation=myParser.getDeclarationParser().parseAnnotations(builder);
     tokenType=builder.getTokenType();
   }
   if (tokenType == JavaTokenType.IDENTIFIER) {
+    if (builder.lookAhead(1) == JavaTokenType.ARROW) {
+      return parseLambdaExpression(builder,builder.mark(),false);
+    }
     final PsiBuilder.Marker refExpr;
     if (annotation != null) {
       final PsiBuilder.Marker refParam=annotation.precede();
@@ -43,30 +64,26 @@
     }
     builder.advanceLexer();
     refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
-    beforeAnnotation.drop();
     return refExpr;
   }
   if (annotation != null) {
-    beforeAnnotation.rollbackTo();
+    annotation.rollbackTo();
     tokenType=builder.getTokenType();
-  }
- else {
-    beforeAnnotation.drop();
   }
   PsiBuilder.Marker expr=null;
   if (tokenType == JavaTokenType.LT) {
     expr=builder.mark();
-    if (!myReferenceParser.parseReferenceParameterList(builder,false,false)) {
+    if (!myParser.getReferenceParser().parseReferenceParameterList(builder,false,false)) {
       expr.rollbackTo();
       return null;
     }
     tokenType=builder.getTokenType();
-    if (!CONSTRUCTOR_CALL.contains(tokenType)) {
+    if (!THIS_OR_SUPER.contains(tokenType)) {
       expr.rollbackTo();
       return null;
     }
   }
-  if (CONSTRUCTOR_CALL.contains(tokenType)) {
+  if (THIS_OR_SUPER.contains(tokenType)) {
     if (expr == null) {
       expr=builder.mark();
       builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
@@ -77,9 +94,6 @@
   }
   if (tokenType == JavaTokenType.NEW_KEYWORD) {
     return parseNew(builder,null);
-  }
-  if (ElementType.PRIMITIVE_TYPE_BIT_SET.contains(tokenType)) {
-    return parseClassObjectAccess(builder);
   }
   return null;
 }
