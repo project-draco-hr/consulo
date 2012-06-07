@@ -1,27 +1,36 @@
 {
-  int hash, probe, index;
+  int hash, index;
   final int length=btree.hashPageCapacity;
-  hash=hash(value) & 0x7fffffff;
+  hash=value & 0x7fffffff;
   index=hash % length;
-  int state=hashGetState(index);
+  int keyAtIndex=keyAt(index);
   int total=0;
   btree.hashSearchRequests++;
-  if (state != HASH_FREE && (state == HASH_REMOVED || keyAt(index) != value)) {
-    probe=1 + (hash % (length - 2));
-    do {
-      index-=probe;
-      if (index < 0) {
-        index+=length;
+  if (useDoubleHash) {
+    if (keyAtIndex != value && keyAtIndex != HASH_FREE) {
+      final int probe=1 + (hash % (length - 2));
+      do {
+        index-=probe;
+        if (index < 0)         index+=length;
+        keyAtIndex=keyAt(index);
+        ++total;
+        if (total > length) {
+          throw new IllegalStateException("Index corrupted");
+        }
       }
-      state=hashGetState(index);
-      ++total;
-      if (total > length) {
-        throw new IllegalStateException("Index corrupted");
-      }
+ while (keyAtIndex != value && keyAtIndex != HASH_FREE);
     }
- while (state != HASH_FREE && (state == HASH_REMOVED || keyAt(index) != value));
+  }
+ else {
+    while (keyAtIndex != value && keyAtIndex != HASH_FREE) {
+      if (index == 0)       index=length;
+      --index;
+      keyAtIndex=keyAt(index);
+      ++total;
+      if (total > length)       throw new IllegalStateException("Index corrupted");
+    }
   }
   btree.maxStepsSearchedInHash=Math.max(btree.maxStepsSearchedInHash,total);
   btree.totalHashStepsSearched+=total;
-  return state == HASH_FREE ? -index - 1 : index;
+  return keyAtIndex == HASH_FREE ? -index - 1 : index;
 }
