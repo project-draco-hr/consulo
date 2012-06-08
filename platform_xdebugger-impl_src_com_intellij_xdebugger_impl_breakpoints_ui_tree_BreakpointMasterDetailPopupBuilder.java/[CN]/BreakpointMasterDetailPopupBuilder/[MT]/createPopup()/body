@@ -1,0 +1,79 @@
+{
+  myPopupBuilder=new MasterDetailPopupBuilder(myProject);
+  if (myDetailView != null) {
+    myPopupBuilder.setDetailView(myDetailView);
+  }
+  myPopupBuilder.setAddDetailViewToEast(myAddDetailViewToEast);
+  for (  BreakpointPanelProvider provider : myBreakpointsPanelProviders) {
+    provider.createBreakpointsGroupingRules(myRulesAvailable);
+  }
+  if (!myIsViewer) {
+    for (    XBreakpointGroupingRule rule : myRulesAvailable) {
+      if (rule.isAlwaysEnabled()) {
+        myRulesEnabled.add(rule);
+      }
+    }
+  }
+  DefaultActionGroup actions=createActions();
+  myTreeController=new BreakpointItemsTreeController(getEnabledRulesList());
+  JTree tree=myIsViewer ? new BreakpointsSimpleTree(myTreeController) : new BreakpointsCheckboxTree(myTreeController);
+  if (myPlainView) {
+    tree.putClientProperty("plainView",Boolean.TRUE);
+  }
+  myTreeController.setTreeView(tree);
+  collectItems();
+  myTreeController.buildTree(myBreakpointItems);
+  final BreakpointPanelProvider.BreakpointsListener listener=new BreakpointPanelProvider.BreakpointsListener(){
+    @Override public void breakpointsChanged(){
+      collectItems();
+      myTreeController.rebuildTree(myBreakpointItems);
+    }
+  }
+;
+  for (  BreakpointPanelProvider provider : myBreakpointsPanelProviders) {
+    provider.addListener(listener,myProject);
+  }
+  final MasterDetailPopupBuilder.Delegate delegate=new MasterDetailPopupBuilder.Delegate(){
+    @Nullable @Override public String getTitle(){
+      return myIsViewer ? null : "Breakpoints";
+    }
+    @Override public void handleMnemonic(    KeyEvent e,    Project project,    JBPopup popup){
+    }
+    public JComponent createAccessoryView(    Project project){
+      return new JCheckBox();
+    }
+    @Override public Object[] getSelectedItemsInTree(){
+      final List<BreakpointItem> res=myTreeController.getSelectedBreakpoints();
+      return res.toArray(new Object[res.size()]);
+    }
+    @Override public void itemChosen(    ItemWrapper item,    Project project,    JBPopup popup){
+      if (!(item instanceof BreakpointItem)) {
+        return;
+      }
+      if (myCallback != null) {
+        myCallback.breakpointChosen(project,(BreakpointItem)item,popup);
+      }
+    }
+  }
+;
+  final JBPopup popup=myPopupBuilder.setActionsGroup(actions).setTree(tree).setDelegate(delegate).setCloseOnEnter(false).createMasterDetailPopup();
+  tree.setBorder(IdeBorderFactory.createBorder());
+  myTreeController.setDelegate(new BreakpointItemsTreeController.BreakpointItemsTreeDelegate(){
+    @Override public void execute(    BreakpointItem item){
+      delegate.itemChosen(item,myProject,popup);
+    }
+  }
+);
+  initSelection(myBreakpointItems);
+  popup.addListener(new JBPopupListener(){
+    @Override public void beforeShown(    LightweightWindowEvent event){
+    }
+    @Override public void onClosed(    LightweightWindowEvent event){
+      for (      BreakpointPanelProvider provider : myBreakpointsPanelProviders) {
+        provider.removeListener(listener);
+      }
+    }
+  }
+);
+  return popup;
+}
