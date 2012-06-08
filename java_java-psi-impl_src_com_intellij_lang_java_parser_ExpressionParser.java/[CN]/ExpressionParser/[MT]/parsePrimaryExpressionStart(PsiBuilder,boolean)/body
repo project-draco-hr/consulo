@@ -1,0 +1,114 @@
+{
+  IElementType tokenType=builder.getTokenType();
+  if (LITERALS.contains(tokenType)) {
+    final PsiBuilder.Marker literal=builder.mark();
+    builder.advanceLexer();
+    literal.done(JavaElementType.LITERAL_EXPRESSION);
+    return literal;
+  }
+  if (tokenType == JavaTokenType.LBRACE) {
+    return parseArrayInitializer(builder);
+  }
+  if (tokenType == JavaTokenType.NEW_KEYWORD) {
+    return parseNew(builder,null);
+  }
+  if (tokenType == JavaTokenType.LPARENTH) {
+    final PsiBuilder.Marker lambda=parseLambdaAfterParenth(builder,null);
+    if (lambda != null) {
+      return lambda;
+    }
+    final PsiBuilder.Marker parenth=builder.mark();
+    builder.advanceLexer();
+    final PsiBuilder.Marker inner=parse(builder);
+    if (inner == null) {
+      error(builder,JavaErrorMessages.message("expected.expression"));
+    }
+    if (!expect(builder,JavaTokenType.RPARENTH)) {
+      if (inner != null) {
+        error(builder,JavaErrorMessages.message("expected.rparen"));
+      }
+    }
+    parenth.done(JavaElementType.PARENTH_EXPRESSION);
+    return parenth;
+  }
+  if (TYPE_START.contains(tokenType)) {
+    final PsiBuilder.Marker mark=builder.mark();
+    final ReferenceParser.TypeInfo typeInfo=myParser.getReferenceParser().parseTypeInfo(builder,0);
+    if (typeInfo != null && (typeInfo.isPrimitive || !typeInfo.hasErrors && typeInfo.isParameterized)) {
+      final PsiBuilder.Marker result=continueClassAccessOrMethodReference(builder,mark,typeInfo.isPrimitive);
+      if (result != null) {
+        return result;
+      }
+    }
+    mark.rollbackTo();
+  }
+  PsiBuilder.Marker annotation=null;
+  if (tokenType == JavaTokenType.AT) {
+    annotation=myParser.getDeclarationParser().parseAnnotations(builder);
+    tokenType=builder.getTokenType();
+  }
+  if (tokenType == JavaTokenType.IDENTIFIER) {
+    if (builder.lookAhead(1) == JavaTokenType.ARROW) {
+      return parseLambdaExpression(builder,false,null);
+    }
+    final PsiBuilder.Marker refExpr;
+    if (annotation != null) {
+      final PsiBuilder.Marker refParam=annotation.precede();
+      refParam.doneBefore(JavaElementType.REFERENCE_PARAMETER_LIST,annotation);
+      refExpr=refParam.precede();
+    }
+ else {
+      refExpr=builder.mark();
+      builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
+    }
+    builder.advanceLexer();
+    refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+    return refExpr;
+  }
+  if (annotation != null) {
+    annotation.rollbackTo();
+    tokenType=builder.getTokenType();
+  }
+  PsiBuilder.Marker expr=null;
+  if (tokenType == JavaTokenType.LT) {
+    expr=builder.mark();
+    if (!afterCast) {
+      final PsiBuilder.Marker typeParams=myParser.getReferenceParser().parseTypeParameters(builder,true);
+      if (typeParams != null) {
+        tokenType=builder.getTokenType();
+        PsiBuilder.Marker lambda=null;
+        if (tokenType == JavaTokenType.LPARENTH) {
+          lambda=parseLambdaAfterParenth(builder,typeParams);
+        }
+ else         if (tokenType == JavaTokenType.IDENTIFIER && builder.lookAhead(1) == JavaTokenType.ARROW) {
+          lambda=parseLambdaExpression(builder,false,typeParams);
+        }
+        if (lambda != null) {
+          expr.drop();
+          return lambda;
+        }
+        expr.rollbackTo();
+        expr=builder.mark();
+      }
+    }
+    if (!myParser.getReferenceParser().parseReferenceParameterList(builder,false,false)) {
+      expr.rollbackTo();
+      return null;
+    }
+    tokenType=builder.getTokenType();
+    if (!THIS_OR_SUPER.contains(tokenType)) {
+      expr.rollbackTo();
+      return null;
+    }
+  }
+  if (THIS_OR_SUPER.contains(tokenType)) {
+    if (expr == null) {
+      expr=builder.mark();
+      builder.mark().done(JavaElementType.REFERENCE_PARAMETER_LIST);
+    }
+    builder.advanceLexer();
+    expr.done(builder.getTokenType() == JavaTokenType.LPARENTH ? JavaElementType.REFERENCE_EXPRESSION : tokenType == JavaTokenType.THIS_KEYWORD ? JavaElementType.THIS_EXPRESSION : JavaElementType.SUPER_EXPRESSION);
+    return expr;
+  }
+  return null;
+}
