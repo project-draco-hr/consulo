@@ -1,0 +1,162 @@
+{
+  PsiBuilder.Marker startMarker=builder.mark();
+  PsiBuilder.Marker expr=parsePrimaryExpressionStart(builder,afterCast);
+  if (expr == null) {
+    startMarker.drop();
+    return null;
+  }
+  while (true) {
+    final IElementType tokenType=builder.getTokenType();
+    if (tokenType == JavaTokenType.DOT) {
+      final PsiBuilder.Marker dotPos=builder.mark();
+      final int dotOffset=builder.getCurrentOffset();
+      builder.advanceLexer();
+      final IElementType dotTokenType=builder.getTokenType();
+      if (dotTokenType == JavaTokenType.CLASS_KEYWORD && exprType(expr) == JavaElementType.REFERENCE_EXPRESSION) {
+        if (breakPoint == BreakPoint.P1 && builder.getCurrentOffset() == breakOffset) {
+          error(builder,JavaErrorMessages.message("expected.identifier"));
+          PsiBuilderUtil.drop(startMarker,dotPos);
+          return expr;
+        }
+        final PsiBuilder.Marker copy=startMarker.precede();
+        final int offset=builder.getCurrentOffset();
+        startMarker.rollbackTo();
+        final PsiBuilder.Marker classObjAccess=parseClassAccessOrMethodReference(builder);
+        if (classObjAccess == null || builder.getCurrentOffset() < offset) {
+          copy.rollbackTo();
+          return parsePrimary(builder,BreakPoint.P1,offset,false);
+        }
+        startMarker=copy;
+        expr=classObjAccess;
+      }
+ else       if (dotTokenType == JavaTokenType.NEW_KEYWORD) {
+        dotPos.drop();
+        expr=parseNew(builder,expr);
+      }
+ else       if (THIS_OR_SUPER.contains(dotTokenType) && exprType(expr) == JavaElementType.REFERENCE_EXPRESSION) {
+        if (breakPoint == BreakPoint.P2 && builder.getCurrentOffset() == breakOffset) {
+          dotPos.rollbackTo();
+          startMarker.drop();
+          return expr;
+        }
+        final PsiBuilder.Marker copy=startMarker.precede();
+        final int offset=builder.getCurrentOffset();
+        startMarker.rollbackTo();
+        final PsiBuilder.Marker ref=myParser.getReferenceParser().parseJavaCodeReference(builder,false,true,false,false,false);
+        if (ref == null || builder.getTokenType() != JavaTokenType.DOT || builder.getCurrentOffset() != dotOffset) {
+          copy.rollbackTo();
+          return parsePrimary(builder,BreakPoint.P2,offset,false);
+        }
+        builder.advanceLexer();
+        if (builder.getTokenType() != dotTokenType) {
+          copy.rollbackTo();
+          return parsePrimary(builder,BreakPoint.P2,offset,false);
+        }
+        builder.advanceLexer();
+        startMarker=copy;
+        expr=ref.precede();
+        expr.done(dotTokenType == JavaTokenType.THIS_KEYWORD ? JavaElementType.THIS_EXPRESSION : JavaElementType.SUPER_EXPRESSION);
+      }
+ else       if (dotTokenType == JavaTokenType.SUPER_KEYWORD) {
+        dotPos.drop();
+        final PsiBuilder.Marker refExpr=expr.precede();
+        builder.advanceLexer();
+        refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+        expr=refExpr;
+      }
+ else {
+        dotPos.drop();
+        final PsiBuilder.Marker refExpr=expr.precede();
+        myParser.getReferenceParser().parseReferenceParameterList(builder,false,false);
+        if (!expectOrError(builder,JavaTokenType.IDENTIFIER,"expected.identifier")) {
+          refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+          startMarker.drop();
+          return refExpr;
+        }
+        refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+        expr=refExpr;
+      }
+    }
+ else     if (tokenType == JavaTokenType.LPARENTH) {
+      if (exprType(expr) != JavaElementType.REFERENCE_EXPRESSION) {
+        if (exprType(expr) == JavaElementType.SUPER_EXPRESSION) {
+          if (breakPoint == BreakPoint.P3) {
+            startMarker.drop();
+            return expr;
+          }
+          final PsiBuilder.Marker copy=startMarker.precede();
+          startMarker.rollbackTo();
+          final PsiBuilder.Marker qualifier=parsePrimaryExpressionStart(builder,false);
+          if (qualifier != null) {
+            final PsiBuilder.Marker refExpr=qualifier.precede();
+            if (builder.getTokenType() == JavaTokenType.DOT) {
+              builder.advanceLexer();
+              if (builder.getTokenType() == JavaTokenType.SUPER_KEYWORD) {
+                builder.advanceLexer();
+                refExpr.done(JavaElementType.REFERENCE_EXPRESSION);
+                expr=refExpr;
+                startMarker=copy;
+                continue;
+              }
+            }
+          }
+          copy.rollbackTo();
+          return parsePrimary(builder,BreakPoint.P3,-1,false);
+        }
+ else {
+          startMarker.drop();
+          return expr;
+        }
+      }
+      final PsiBuilder.Marker callExpr=expr.precede();
+      parseArgumentList(builder);
+      callExpr.done(JavaElementType.METHOD_CALL_EXPRESSION);
+      expr=callExpr;
+    }
+ else     if (tokenType == JavaTokenType.LBRACKET) {
+      if (breakPoint == BreakPoint.P4) {
+        startMarker.drop();
+        return expr;
+      }
+      builder.advanceLexer();
+      if (builder.getTokenType() == JavaTokenType.RBRACKET && exprType(expr) == JavaElementType.REFERENCE_EXPRESSION) {
+        final int pos=builder.getCurrentOffset();
+        final PsiBuilder.Marker copy=startMarker.precede();
+        startMarker.rollbackTo();
+        final PsiBuilder.Marker classObjAccess=parseClassAccessOrMethodReference(builder);
+        if (classObjAccess == null || builder.getCurrentOffset() <= pos) {
+          copy.rollbackTo();
+          return parsePrimary(builder,BreakPoint.P4,-1,false);
+        }
+        startMarker=copy;
+        expr=classObjAccess;
+      }
+ else {
+        final PsiBuilder.Marker arrayAccess=expr.precede();
+        final PsiBuilder.Marker index=parse(builder);
+        if (index == null) {
+          error(builder,JavaErrorMessages.message("expected.expression"));
+          arrayAccess.done(JavaElementType.ARRAY_ACCESS_EXPRESSION);
+          startMarker.drop();
+          return arrayAccess;
+        }
+        if (builder.getTokenType() != JavaTokenType.RBRACKET) {
+          error(builder,JavaErrorMessages.message("expected.rbracket"));
+          arrayAccess.done(JavaElementType.ARRAY_ACCESS_EXPRESSION);
+          startMarker.drop();
+          return arrayAccess;
+        }
+        builder.advanceLexer();
+        arrayAccess.done(JavaElementType.ARRAY_ACCESS_EXPRESSION);
+        expr=arrayAccess;
+      }
+    }
+ else     if (tokenType == JavaTokenType.DOUBLE_COLON) {
+      return parseMethodReference(builder,startMarker);
+    }
+ else {
+      startMarker.drop();
+      return expr;
+    }
+  }
+}

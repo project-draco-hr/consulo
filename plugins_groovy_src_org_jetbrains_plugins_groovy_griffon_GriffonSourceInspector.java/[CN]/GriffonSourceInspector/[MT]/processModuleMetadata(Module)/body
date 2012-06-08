@@ -1,0 +1,41 @@
+{
+  return CachedValuesManager.getManager(module.getProject()).getCachedValue(module,new CachedValueProvider<List<GriffonSource>>(){
+    @Override public Result<List<GriffonSource>> compute(){
+      List<GriffonSource> sources=new ArrayList<GriffonSource>();
+      List<VirtualFile> dependencies=new ArrayList<VirtualFile>();
+      ContainerUtil.addIfNotNull(dependencies,GriffonFramework.getInstance().getApplicationPropertiesFile(module));
+      String applicationName=GriffonFramework.getInstance().getApplicationName(module);
+      File sdkWorkDir=GriffonFramework.getInstance().getSdkWorkDir(module);
+      File pluginsDir=new File(sdkWorkDir,"/projects/" + applicationName + "/plugins/");
+      if (pluginsDir.exists() && pluginsDir.canRead() && pluginsDir.isDirectory()) {
+        for (        File pluginDir : pluginsDir.listFiles()) {
+          if (!pluginDir.isDirectory() || !pluginDir.canRead())           continue;
+          File srcIdeSupportDir=new File(pluginDir,"src/ide-support");
+          if (!srcIdeSupportDir.exists() || !srcIdeSupportDir.canRead())           continue;
+          File ideaSupport=new File(srcIdeSupportDir,"idea.xml");
+          VirtualFile ideaMetadata=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ideaSupport);
+          if (ideaMetadata != null) {
+            dependencies.add(ideaMetadata);
+            PsiFile psiFile=PsiManager.getInstance(module.getProject()).findFile(ideaMetadata);
+            if (psiFile instanceof XmlFile) {
+              XmlTag rootTag=((XmlFile)psiFile).getRootTag();
+              if (rootTag == null)               continue;
+              for (              XmlTag sourceRootTag : rootTag.findSubTags("source-root")) {
+                String path=sourceRootTag.getAttributeValue("path");
+                XmlTag navigationTag=sourceRootTag.findFirstSubTag("navigation");
+                String description=navigationTag == null ? "" : navigationTag.getAttributeValue("description");
+                XmlAttribute iconAttr=navigationTag == null ? null : navigationTag.getAttribute("icon");
+                XmlAttribute weightAttr=navigationTag == null ? null : navigationTag.getAttribute("weight");
+                String icon=iconAttr != null ? iconAttr.getValue() : "groovy-icon";
+                int weight=weightAttr != null ? Integer.parseInt(weightAttr.getValue()) : 75;
+                sources.add(new GriffonSource(path,new GriffonSource.Navigation(description,icon,weight)));
+              }
+            }
+          }
+        }
+      }
+      return Result.create(sources,dependencies);
+    }
+  }
+);
+}
