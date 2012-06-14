@@ -1,0 +1,123 @@
+{
+  cache=new HashMap<Integer,VcsFileRevision>();
+  ProgressManager.getInstance().run(new Task.Backgroundable(myEditor.getProject(),"Getting file history",true,PerformInBackgroundOption.ALWAYS_BACKGROUND){
+    @Override public boolean shouldStartInBackground(){
+      return true;
+    }
+    @Override public void onSuccess(){
+    }
+    private void showGutter(){
+      myEditor.getGutter().registerTextAnnotation(new ActiveAnnotationGutter(){
+        @Override public void doAction(        int lineNum){
+        }
+        @Override public Cursor getCursor(        int lineNum){
+          return Cursor.getDefaultCursor();
+        }
+        @Override public String getLineText(        int line,        Editor editor){
+          final VcsFileRevision revision=cache.get(line);
+          if (revision != null) {
+            return String.format("%" + maxDateLength + "s",DateFormatUtil.formatPrettyDate(revision.getRevisionDate())) + " " + revision.getAuthor();
+          }
+          return "";
+        }
+        @Override public String getToolTip(        int line,        Editor editor){
+          final VcsFileRevision revision=cache.get(line);
+          if (revision != null) {
+            return "<html>" + revision.getAuthor() + " "+ DateFormatUtil.formatDateTime(revision.getRevisionDate())+ "<br/>"+ revision.getCommitMessage()+ "</html>";
+          }
+          return null;
+        }
+        @Override public EditorFontType getStyle(        int line,        Editor editor){
+          return line == newestLine ? EditorFontType.BOLD : EditorFontType.PLAIN;
+        }
+        @Override public ColorKey getColor(        int line,        Editor editor){
+          return AnnotationSource.LOCAL.getColor();
+        }
+        @Override public Color getBgColor(        int line,        Editor editor){
+          return null;
+        }
+        @Override public List<AnAction> getPopupActions(        int line,        Editor editor){
+          return Collections.emptyList();
+        }
+        @Override public void gutterClosed(){
+        }
+      }
+);
+    }
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      Date newestDate=null;
+      HashMap<VirtualFile,List<Integer>> files2lines=new HashMap<VirtualFile,List<Integer>>();
+      List<VirtualFile> files=new ArrayList<VirtualFile>();
+      for (int line=0; line < myEditor.getDocument().getLineCount(); line++) {
+        indicator.checkCanceled();
+        final List<RangeHighlighter> links=myHyperlinks.findAllHyperlinksOnLine(line);
+        if (links.size() > 0) {
+          final HyperlinkInfo info=myHyperlinks.getHyperlinks().get(links.get(links.size() - 1));
+          if (info instanceof FileHyperlinkInfo) {
+            final OpenFileDescriptor fileDescriptor=((FileHyperlinkInfo)info).getDescriptor();
+            if (fileDescriptor != null) {
+              final VirtualFile file=fileDescriptor.getFile();
+              if (files2lines.containsKey(file)) {
+                files2lines.get(file).add(line);
+              }
+ else {
+                final ArrayList<Integer> lines=new ArrayList<Integer>();
+                lines.add(line);
+                files2lines.put(file,lines);
+                files.add(file);
+              }
+            }
+          }
+        }
+      }
+      for (      VirtualFile file : files) {
+        indicator.checkCanceled();
+        final AbstractVcs vcs=VcsUtil.getVcsFor(myEditor.getProject(),file);
+        FilePath filePath=VcsContextFactory.SERVICE.getInstance().createFilePathOn(file);
+        if (vcs != null) {
+          try {
+            final VcsHistoryProvider provider=vcs.getVcsHistoryProvider();
+            final VcsHistorySession session;
+            if (provider != null) {
+              session=provider.createSessionFor(filePath);
+              final List<VcsFileRevision> list;
+              if (session != null) {
+                list=session.getRevisionList();
+                final List<Integer> lines=files2lines.get(file);
+                if (list != null && !list.isEmpty()) {
+                  final VcsFileRevision revision=list.get(0);
+                  final Date date=revision.getRevisionDate();
+                  if (newestDate == null || date.after(newestDate)) {
+                    newestDate=date;
+                    newestLine=lines.get(0);
+                  }
+                  final int length=DateFormatUtil.formatPrettyDate(date).length();
+                  if (length > maxDateLength) {
+                    maxDateLength=length;
+                  }
+                  for (                  Integer line : lines) {
+                    cache.put(line,revision);
+                  }
+                  ApplicationManager.getApplication().invokeLater(new Runnable(){
+                    public void run(){
+                      if (cache.keySet().size() == 1) {
+                        showGutter();
+                      }
+ else {
+                        ((EditorGutterComponentEx)myEditor.getGutter()).revalidateMarkup();
+                      }
+                    }
+                  }
+);
+                }
+              }
+            }
+          }
+ catch (          VcsException ignored) {
+          }
+        }
+      }
+    }
+  }
+);
+}
