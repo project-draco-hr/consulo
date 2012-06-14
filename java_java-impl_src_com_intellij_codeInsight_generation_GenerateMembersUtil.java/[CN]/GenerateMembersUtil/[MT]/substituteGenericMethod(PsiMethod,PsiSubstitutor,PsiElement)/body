@@ -1,96 +1,20 @@
 {
-  Project project=method.getProject();
-  final JVMElementFactory factory;
-  if (target != null) {
-    factory=JVMElementFactories.getFactory(target.getLanguage(),method.getProject());
-  }
- else {
-    factory=JavaPsiFacade.getInstance(method.getProject()).getElementFactory();
-  }
+  final Project project=sourceMethod.getProject();
+  final JVMElementFactory factory=getFactory(sourceMethod,target);
+  final JavaCodeStyleManager codeStyleManager=JavaCodeStyleManager.getInstance(project);
+  final Module module=target != null ? ModuleUtil.findModuleForPsiElement(target) : null;
+  final GlobalSearchScope moduleScope=module != null ? GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module) : null;
   try {
-    PsiType returnType=method.getReturnType();
-    PsiMethod newMethod;
-    if (method.isConstructor()) {
-      newMethod=factory.createConstructor();
-      newMethod.setName(method.getName());
-    }
- else {
-      final PsiType substitutedReturnType=substituteType(substitutor,returnType);
-      newMethod=factory.createMethod(method.getName(),substitutedReturnType instanceof PsiWildcardType ? TypeConversionUtil.erasure(substitutedReturnType) : substitutedReturnType);
-    }
-    VisibilityUtil.setVisibility(newMethod.getModifierList(),VisibilityUtil.getVisibilityModifier(method.getModifierList()));
-    PsiElement navigationElement=method.getNavigationElement();
-    PsiDocComment docComment=((PsiDocCommentOwner)navigationElement).getDocComment();
-    if (docComment != null) {
-      newMethod.addAfter(docComment,null);
-    }
-    final Module module=target != null ? ModuleUtil.findModuleForPsiElement(target) : null;
-    final GlobalSearchScope moduleScope=module != null ? GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module) : null;
-    PsiParameter[] parameters=method.getParameterList().getParameters();
-    JavaCodeStyleManager codeStyleManager=JavaCodeStyleManager.getInstance(project);
-    Map<PsiType,Pair<String,Integer>> m=new HashMap<PsiType,Pair<String,Integer>>();
-    for (int i=0; i < parameters.length; i++) {
-      PsiParameter parameter=parameters[i];
-      final PsiType parameterType=parameter.getType();
-      PsiType substituted=substituteType(substitutor,parameterType);
-      @NonNls String paramName=parameter.getName();
-      boolean isBaseNameGenerated=true;
-      final boolean isSubstituted=substituted.equals(parameterType);
-      if (!isSubstituted && isBaseNameGenerated(codeStyleManager,TypeConversionUtil.erasure(parameterType),paramName)) {
-        isBaseNameGenerated=false;
-      }
-      if (paramName == null || isBaseNameGenerated && !isSubstituted && isBaseNameGenerated(codeStyleManager,parameterType,paramName)) {
-        Pair<String,Integer> pair=m.get(substituted);
-        if (pair != null) {
-          paramName=pair.first + pair.second;
-          m.put(substituted,Pair.create(pair.first,pair.second.intValue() + 1));
-        }
- else {
-          String[] names=codeStyleManager.suggestVariableName(VariableKind.PARAMETER,null,null,substituted).names;
-          if (names.length > 0) {
-            paramName=names[0];
-          }
- else           paramName="p" + i;
-          m.put(substituted,new Pair<String,Integer>(paramName,1));
-        }
-      }
-      if (paramName == null)       paramName="p" + i;
-      PsiParameter newParameter=factory.createParameter(paramName,substituted);
-      if (parameter.getLanguage() == newParameter.getLanguage()) {
-        PsiModifierList modifierList=newParameter.getModifierList();
-        modifierList=(PsiModifierList)modifierList.replace(parameter.getModifierList());
-        if (parameter.getLanguage() == JavaLanguage.INSTANCE) {
-          processAnnotations(project,modifierList,moduleScope);
-        }
-      }
- else {
-        GenerateConstructorHandler.copyModifierList(factory,parameter,newParameter);
-      }
-      newMethod.getParameterList().add(newParameter);
-    }
-    for (    PsiTypeParameter typeParam : method.getTypeParameters()) {
-      final PsiElement copy=typeParam.copy();
-      final Map<PsiElement,PsiElement> replacementMap=new HashMap<PsiElement,PsiElement>();
-      copy.accept(new JavaRecursiveElementVisitor(){
-        @Override public void visitReferenceElement(        PsiJavaCodeReferenceElement reference){
-          super.visitReferenceElement(reference);
-          final PsiElement resolve=reference.resolve();
-          if (resolve instanceof PsiTypeParameter) {
-            replacementMap.put(reference,factory.createReferenceElementByType((PsiClassType)substituteType(substitutor,factory.createType((PsiTypeParameter)resolve))));
-          }
-        }
-      }
-);
-      newMethod.getTypeParameterList().add(RefactoringUtil.replaceElementsWithMap(copy,replacementMap));
-    }
-    PsiClassType[] thrownTypes=method.getThrowsList().getReferencedTypes();
-    for (    PsiClassType thrownType : thrownTypes) {
-      newMethod.getThrowsList().add(factory.createReferenceElementByType((PsiClassType)substituteType(substitutor,thrownType)));
-    }
-    return newMethod;
+    final PsiMethod resultMethod=createMethod(factory,sourceMethod,substitutor);
+    copyDocComment(resultMethod,sourceMethod);
+    copyModifiers(sourceMethod.getModifierList(),resultMethod.getModifierList());
+    final PsiSubstitutor collisionResolvedSubstitutor=substituteTypeParameters(factory,sourceMethod.getTypeParameterList(),resultMethod.getTypeParameterList(),substitutor);
+    substituteParameters(project,factory,codeStyleManager,moduleScope,sourceMethod.getParameterList(),resultMethod.getParameterList(),collisionResolvedSubstitutor);
+    substituteThrows(factory,sourceMethod.getThrowsList(),resultMethod.getThrowsList(),collisionResolvedSubstitutor);
+    return resultMethod;
   }
  catch (  IncorrectOperationException e) {
     LOG.error(e);
-    return method;
+    return sourceMethod;
   }
 }
