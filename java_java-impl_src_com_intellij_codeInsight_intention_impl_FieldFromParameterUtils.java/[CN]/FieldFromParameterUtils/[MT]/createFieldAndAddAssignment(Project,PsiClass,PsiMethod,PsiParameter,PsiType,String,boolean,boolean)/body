@@ -1,0 +1,66 @@
+{
+  PsiManager psiManager=PsiManager.getInstance(project);
+  PsiElementFactory factory=JavaPsiFacade.getInstance(psiManager.getProject()).getElementFactory();
+  PsiField field=factory.createField(fieldName,fieldType);
+  PsiModifierList modifierList=field.getModifierList();
+  if (modifierList == null)   return;
+  modifierList.setModifierProperty(PsiModifier.STATIC,isStatic);
+  modifierList.setModifierProperty(PsiModifier.FINAL,isFinal);
+  final NullableNotNullManager manager=NullableNotNullManager.getInstance(project);
+  final String nullable=manager.getNullable(parameter);
+  if (nullable != null) {
+    modifierList.addAfter(factory.createAnnotationFromText("@" + nullable,field),null);
+  }
+ else   if (isFinal) {
+    final String notNull=manager.getNotNull(parameter);
+    if (notNull != null) {
+      modifierList.addAfter(factory.createAnnotationFromText("@" + notNull,field),null);
+    }
+  }
+  PsiCodeBlock methodBody=method.getBody();
+  if (methodBody == null)   return;
+  PsiStatement[] statements=methodBody.getStatements();
+  Ref<Pair<PsiField,Boolean>> anchorRef=new Ref<Pair<PsiField,Boolean>>();
+  int i=findFieldAssignmentAnchor(statements,anchorRef,targetClass,parameter);
+  Pair<PsiField,Boolean> fieldAnchor=anchorRef.get();
+  String stmtText=fieldName + " = " + parameter.getName()+ ";";
+  if (fieldName.equals(parameter.getName())) {
+    @NonNls String prefix=isStatic ? targetClass.getName() == null ? "" : targetClass.getName() + "." : "this.";
+    stmtText=prefix + stmtText;
+  }
+  PsiStatement assignmentStmt=factory.createStatementFromText(stmtText,methodBody);
+  assignmentStmt=(PsiStatement)CodeStyleManager.getInstance(project).reformat(assignmentStmt);
+  if (i == statements.length) {
+    methodBody.add(assignmentStmt);
+  }
+ else {
+    methodBody.addAfter(assignmentStmt,i > 0 ? statements[i - 1] : null);
+  }
+  if (fieldAnchor != null) {
+    PsiVariable psiVariable=fieldAnchor.getFirst();
+    psiVariable.normalizeDeclaration();
+  }
+  boolean found=false;
+  final PsiField[] fields=targetClass.getFields();
+  for (  PsiField f : fields) {
+    if (f.getName().equals(field.getName())) {
+      found=true;
+      break;
+    }
+  }
+  if (!found) {
+    if (fieldAnchor != null) {
+      Boolean insertBefore=fieldAnchor.getSecond();
+      PsiField inField=fieldAnchor.getFirst();
+      if (insertBefore.booleanValue()) {
+        targetClass.addBefore(field,inField);
+      }
+ else {
+        targetClass.addAfter(field,inField);
+      }
+    }
+ else {
+      targetClass.add(field);
+    }
+  }
+}
