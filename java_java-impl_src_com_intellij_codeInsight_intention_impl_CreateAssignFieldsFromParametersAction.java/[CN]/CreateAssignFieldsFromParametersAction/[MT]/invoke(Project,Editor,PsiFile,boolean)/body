@@ -1,0 +1,54 @@
+{
+  PsiParameter myParameter=FieldFromParameterUtils.findParameterAtCursor(file,editor);
+  if (!CodeInsightUtilBase.prepareFileForWrite(file))   return;
+  final PsiMethod method=myParameter != null ? (PsiMethod)myParameter.getDeclarationScope() : PsiTreeUtil.getParentOfType(file.findElementAt(editor.getCaretModel().getOffset()),PsiMethod.class);
+  LOG.assertTrue(method != null);
+  final Collection<SmartPsiElementPointer<PsiParameter>> unboundedParams;
+synchronized (LOCK) {
+    unboundedParams=getUnboundedParams(method);
+    if (unboundedParams.isEmpty())     return;
+    if (myParameter == null) {
+      myParameter=unboundedParams.iterator().next().getElement();
+    }
+  }
+  if (unboundedParams.size() > 1 && isInteractive) {
+    ClassMember[] members=new ClassMember[unboundedParams.size()];
+    ClassMember selection=null;
+    int i=0;
+    for (    SmartPsiElementPointer<PsiParameter> pointer : unboundedParams) {
+      final PsiParameter parameter=pointer.getElement();
+      final ParameterClassMember classMember=new ParameterClassMember(parameter);
+      members[i++]=classMember;
+      if (parameter == myParameter) {
+        selection=classMember;
+      }
+    }
+    final PsiParameterList parameterList=method.getParameterList();
+    Arrays.sort(members,new Comparator<ClassMember>(){
+      @Override public int compare(      ClassMember o1,      ClassMember o2){
+        return parameterList.getParameterIndex(((ParameterClassMember)o1).getParameter()) - parameterList.getParameterIndex(((ParameterClassMember)o2).getParameter());
+      }
+    }
+);
+    final MemberChooser<ClassMember> chooser=new MemberChooser<ClassMember>(members,false,true,project);
+    if (selection != null) {
+      chooser.selectElements(new ClassMember[]{selection});
+    }
+    chooser.setTitle("Choose " + (method.isConstructor() ? "Constructor" : "Method") + " Parameters");
+    chooser.setCopyJavadocVisible(false);
+    chooser.show();
+    if (chooser.getExitCode() != DialogWrapper.OK_EXIT_CODE)     return;
+    final List<ClassMember> selectedElements=chooser.getSelectedElements();
+    if (selectedElements == null)     return;
+    final HashSet<String> usedNames=new HashSet<String>();
+    for (    ClassMember selectedElement : selectedElements) {
+      processParameter(project,((ParameterClassMember)selectedElement).getParameter(),usedNames);
+    }
+  }
+ else {
+    processParameter(project,myParameter);
+  }
+synchronized (LOCK) {
+    unboundedParams.clear();
+  }
+}
