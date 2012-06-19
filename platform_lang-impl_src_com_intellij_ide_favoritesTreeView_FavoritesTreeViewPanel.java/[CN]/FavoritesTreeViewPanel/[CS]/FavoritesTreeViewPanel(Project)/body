@@ -1,6 +1,7 @@
 {
   super(new BorderLayout());
   myProject=project;
+  myFavoritesManager=FavoritesManager.getInstance(myProject);
   myFavoritesTreeStructure=new FavoritesTreeStructure(project);
   DefaultMutableTreeNode root=new DefaultMutableTreeNode();
   root.setUserObject(myFavoritesTreeStructure.getRootElement());
@@ -12,9 +13,26 @@
   myTree.setRootVisible(false);
   myTree.setShowsRootHandles(true);
   myTree.setLargeModel(true);
+  myTree.setRowHeight(0);
   new TreeSpeedSearch(myTree);
   ToolTipManager.sharedInstance().registerComponent(myTree);
-  myTree.setCellRenderer(new NodeRenderer(){
+  myBuilder.setNodeDescriptorComparator(new Comparator<NodeDescriptor>(){
+    @Override public int compare(    NodeDescriptor o1,    NodeDescriptor o2){
+      if (o1 instanceof FavoritesTreeNodeDescriptor && o2 instanceof FavoritesTreeNodeDescriptor) {
+        final FavoritesListNode listNode1=FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o1);
+        final FavoritesListNode listNode2=FavoritesTreeUtil.extractParentList((FavoritesTreeNodeDescriptor)o2);
+        if (listNode1.equals(listNode2)) {
+          final Comparator<FavoritesTreeNodeDescriptor> comparator=myFavoritesManager.getCustomComparator(listNode1.getName());
+          if (comparator != null) {
+            return comparator.compare((FavoritesTreeNodeDescriptor)o1,(FavoritesTreeNodeDescriptor)o2);
+          }
+        }
+      }
+      return o1.getIndex() - o2.getIndex();
+    }
+  }
+);
+  myNodeRenderer=new NodeRenderer(){
     public void customizeCellRenderer(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
       super.customizeCellRenderer(tree,value,selected,expanded,leaf,row,hasFocus);
       if (value instanceof DefaultMutableTreeNode) {
@@ -38,6 +56,33 @@
       }
     }
   }
+;
+  myTree.setCellRenderer(new TreeCellRenderer(){
+    @Override public Component getTreeCellRendererComponent(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+      if (value instanceof DefaultMutableTreeNode) {
+        final DefaultMutableTreeNode node=(DefaultMutableTreeNode)value;
+        final Object userObject=node.getUserObject();
+        if (userObject instanceof FavoritesTreeNodeDescriptor) {
+          final FavoritesTreeNodeDescriptor favoritesTreeNodeDescriptor=(FavoritesTreeNodeDescriptor)userObject;
+          AbstractTreeNode treeNode=favoritesTreeNodeDescriptor.getElement();
+          while (treeNode != null && (!(treeNode instanceof FavoritesListNode))) {
+            treeNode=treeNode.getParent();
+          }
+          if (treeNode != null) {
+            final String name=((FavoritesListNode)treeNode).getValue();
+            final TreeCellRenderer customRenderer=myFavoritesManager.getCustomRenderer(name);
+            if (customRenderer != null) {
+              final Component component=customRenderer.getTreeCellRendererComponent(tree,value,selected,expanded,leaf,row,hasFocus);
+              if (component != null) {
+                return component;
+              }
+            }
+          }
+        }
+      }
+      return myNodeRenderer.getTreeCellRendererComponent(tree,value,selected,expanded,leaf,row,hasFocus);
+    }
+  }
 );
   myTreePopupHandler=CustomizationUtil.installPopupHandler(myTree,IdeActions.GROUP_FAVORITES_VIEW_POPUP,ActionPlaces.FAVORITES_VIEW_POPUP);
   EditSourceOnDoubleClickHandler.install(myTree);
@@ -48,25 +93,93 @@
     }
   }
 ;
-  ToolbarDecorator decorator=ToolbarDecorator.createDecorator(myTree).setAddAction(new AnActionButtonRunnable(){
+  final AnActionButtonRunnable addListOrNoteAction=new AnActionButtonRunnable(){
     @Override public void run(    AnActionButton button){
+      final List<FavoritesListNode> nodes=getSelectedListsNodes();
+      if (nodes.size() == 1) {
+        final FavoritesListProvider.Operation customAdd=myFavoritesManager.getCustomAdd(nodes.get(0).getName());
+        if (customAdd != null && customAdd.willHandle(myTree)) {
+          customAdd.handle(myProject,myTree);
+          return;
+        }
+      }
       AddNewFavoritesListAction.doAddNewFavoritesList(myProject);
     }
   }
-).setLineBorder(0,0,1,0).setAddActionName("New Favorites List").disableRemoveAction().disableDownAction().disableUpAction().addExtraAction(new DeleteFromFavoritesAction(){
+;
+  CommonActionsManager actionsManager=CommonActionsManager.getInstance();
+  final AnAction exportToTextFileAction=actionsManager.createExportToTextFileAction(createTextExporter());
+  final ToolbarDecorator decorator=ToolbarDecorator.createDecorator(myTree).setAddAction(addListOrNoteAction).setLineBorder(0,0,1,0).setAddActionName(NEW_FAVORITES_LIST).disableRemoveAction().disableDownAction().disableUpAction().setAddActionUpdater(new AnActionButtonUpdater(){
+    @Override public boolean isEnabled(    AnActionEvent e){
+      e.getPresentation().setText(NEW_FAVORITES_LIST);
+      final List<FavoritesListNode> nodes=getSelectedListsNodes();
+      if (nodes.size() == 1) {
+        final FavoritesListProvider.Operation customAdd=myFavoritesManager.getCustomAdd(nodes.get(0).getName());
+        if (customAdd != null && customAdd.willHandle(myTree)) {
+          e.getPresentation().setText(customAdd.getCustomName());
+        }
+      }
+      return true;
+    }
+  }
+).addExtraAction(new DeleteFromFavoritesAction(){
 {
       getTemplatePresentation().setIcon(IconUtil.getRemoveIcon());
     }
     @Override public ShortcutSet getShortcut(){
-      return CustomShortcutSet.fromString("DELETE");
+      return CustomShortcutSet.fromString("DELETE","BACK_SPACE");
+    }
+  }
+).addExtraAction(new AnActionButton("Edit",AllIcons.Actions.Edit){
+    @Override public ShortcutSet getShortcut(){
+      return CommonShortcuts.getRename();
+    }
+    @Override public void actionPerformed(    AnActionEvent e){
+      final List<FavoritesListNode> nodes=getSelectedListsNodes();
+      if (nodes.size() == 1) {
+        final FavoritesListProvider.Operation customEdit=myFavoritesManager.getCustomEdit(nodes.get(0).getName());
+        if (customEdit != null && customEdit.willHandle(myTree)) {
+          customEdit.handle(myProject,myTree);
+        }
+      }
+    }
+    @Override public boolean isEnabled(){
+      final List<FavoritesListNode> nodes=getSelectedListsNodes();
+      if (nodes.size() == 1) {
+        final FavoritesListProvider.Operation customEdit=myFavoritesManager.getCustomEdit(nodes.get(0).getName());
+        if (customEdit != null && customEdit.willHandle(myTree)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+).addExtraAction(new AnActionButton(exportToTextFileAction.getTemplatePresentation().getText(),exportToTextFileAction.getTemplatePresentation().getIcon()){
+    @Override public void actionPerformed(    AnActionEvent e){
+      exportToTextFileAction.actionPerformed(e);
+    }
+    @Override public ShortcutSet getShortcut(){
+      return exportToTextFileAction.getShortcutSet();
+    }
+    @Override public boolean isEnabled(){
+      return true;
     }
   }
 );
-  AnAction action=ActionManager.getInstance().getAction(IdeActions.ACTION_NEW_ELEMENT);
+  final AnAction action=ActionManager.getInstance().getAction(IdeActions.ACTION_NEW_ELEMENT);
   action.registerCustomShortcutSet(action.getShortcutSet(),myTree);
   final JPanel panel=decorator.createPanel();
   panel.setBorder(IdeBorderFactory.createEmptyBorder(0));
   add(panel,BorderLayout.CENTER);
   setBorder(IdeBorderFactory.createEmptyBorder(0));
+  myAutoScrollToSourceHandler=new AutoScrollToSourceHandler(){
+    @Override protected boolean isAutoScrollMode(){
+      return myFavoritesManager.getViewSettings().isAutoScrollToSource();
+    }
+    @Override protected void setAutoScrollMode(    boolean state){
+      myFavoritesManager.getViewSettings().setAutoScrollToSource(state);
+    }
+  }
+;
   myAutoScrollToSourceHandler.install(myTree);
 }

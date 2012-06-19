@@ -8,7 +8,7 @@
     if (!h.errors().isEmpty()) {
       GitUIUtil.showOperationErrors(project,h.errors(),"git init");
       LOG.info("Failed to create empty git repo: " + h.errors());
-      return false;
+      return;
     }
     final ProgressManager manager=ProgressManager.getInstance();
     manager.runProcessWithProgressSynchronously(new Runnable(){
@@ -19,43 +19,54 @@
 ,"Committing",false,project);
   }
   if (!performFirstCommitIfRequired(project,root)) {
-    return false;
+    return;
   }
+  GitRepositoryManager repositoryManager=ServiceManager.getService(project,GitRepositoryManager.class);
+  final GitRepository repository=repositoryManager.getRepositoryForRoot(root);
+  LOG.assertTrue(repository != null,"GitRepository is null for root " + root);
   LOG.info("Adding GitHub as a remote host");
   final GitSimpleHandler addRemoteHandler=new GitSimpleHandler(project,root,GitCommand.REMOTE);
   addRemoteHandler.setNoSSH(true);
   addRemoteHandler.setSilent(true);
-  addRemoteHandler.addParameters("add","origin","git@github.com:" + login + "/"+ name+ ".git");
+  final String remoteUrl="https://github.com/" + login + "/"+ name+ ".git";
+  addRemoteHandler.addParameters("add","origin",remoteUrl);
   try {
     addRemoteHandler.run();
+    repository.update(GitRepository.TrackedTopic.CONFIG);
     if (addRemoteHandler.getExitCode() != 0) {
       Messages.showErrorDialog("Failed to add GitHub repository as remote","Failed to add GitHub repository as remote");
-      return false;
+      return;
     }
   }
  catch (  VcsException e) {
     Messages.showErrorDialog(e.getMessage(),"Failed to add GitHub repository as remote");
     LOG.info("Failed to add GitHub as remote: " + e.getMessage());
-    return false;
+    return;
   }
-  final ProgressManager manager=ProgressManager.getInstance();
-  final ArrayList<VcsException> errors=new ArrayList<VcsException>();
-  manager.runProcessWithProgressSynchronously(new Runnable(){
-    public void run(){
-      final ProgressIndicator progressIndicator=manager.getProgressIndicator();
-      if (progressIndicator != null) {
-        progressIndicator.setText("Pushing to GitHub");
-      }
-      final GitLineHandler gitPushHandler=new GitLineHandler(project,root,GitCommand.PUSH);
-      gitPushHandler.addParameters("-u","origin","master");
-      GitPushUtils.trackPushRejectedAsError(gitPushHandler,"Rejected push (" + root.getPresentableUrl() + "): ");
-      errors.addAll(GitHandlerUtil.doSynchronouslyWithExceptions(gitPushHandler));
-    }
-  }
-,GitBundle.getString("push.active.pushing"),false,project);
-  if (!errors.isEmpty()) {
-    GitUIUtil.showOperationErrors(project,errors,GitBundle.getString("push.active.pushing"));
-  }
-  RefreshAction.doRefresh(project);
-  return true;
+  new Task.Backgroundable(project,"Pushing to GitHub",false){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      GitSimplePushResult pushResult=GitHttpAdapter.push(repository,"origin",remoteUrl,"refs/heads/master:refs/heads/master");
+switch (pushResult.getType()) {
+case NOT_PUSHED:
+        showPushError(project,"Push failed: <br/>" + pushResult.getOutput());
+      break;
+case REJECT:
+    showPushError(project,"Push was rejected: <br/>" + pushResult.getOutput());
+  break;
+case CANCEL:
+Notificator.getInstance(project).notify(new Notification(GithubUtil.GITHUB_NOTIFICATION_GROUP,"Push cancelled","The project was created on GitHub but wasn't pushed yet.",NotificationType.WARNING));
+break;
+case NOT_AUTHORIZED:
+showPushError(project,"Push authorization failure: <br/>" + pushResult.getOutput());
+break;
+case ERROR:
+showPushError(project,"Push failed: <br/>" + pushResult.getOutput());
+break;
+case SUCCESS:
+Notificator.getInstance(project).notify(new Notification(GithubUtil.GITHUB_NOTIFICATION_GROUP,"Success","Successfully created project ''" + name + "'' on github",NotificationType.INFORMATION));
+break;
+}
+}
+}
+.queue();
 }
