@@ -7,8 +7,9 @@
   Runnable command=new Runnable(){
     public void run(){
       final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+      final File ioFile=new File(file.getPath()).getAbsoluteFile();
+      SVNInfo info=null;
       try {
-        final File ioFile=new File(file.getPath()).getAbsoluteFile();
         final String contents;
         if (loadExternally) {
           final ByteArrayOutputStream buffer=new ByteArrayOutputStream();
@@ -21,7 +22,7 @@
         }
         final SvnFileAnnotation result=new SvnFileAnnotation(myVcs,file,contents,revision.getRevisionNumber());
         SVNWCClient wcClient=myVcs.createWCClient();
-        SVNInfo info=wcClient.doInfo(ioFile,SVNRevision.UNDEFINED);
+        info=wcClient.doInfo(ioFile,SVNRevision.UNDEFINED);
         if (info == null) {
           exception[0]=new VcsException(new SVNException(SVNErrorMessage.create(SVNErrorCode.UNKNOWN,"File ''{0}'' is not under version control",ioFile)));
           return;
@@ -51,6 +52,24 @@
         annotation[0]=result;
       }
  catch (      SVNException e) {
+        if (SVNErrorCode.FS_NOT_FOUND.equals(e.getErrorMessage().getErrorCode())) {
+          final CommittedChangesProvider<SvnChangeList,ChangeBrowserSettings> provider=myVcs.getCommittedChangesProvider();
+          try {
+            final Pair<SvnChangeList,FilePath> pair=provider.getOneList(file,revision.getRevisionNumber());
+            if (pair != null && info != null && pair.getSecond() != null && !Comparing.equal(pair.getSecond().getIOFile(),ioFile)) {
+              annotation[0]=annotateNonExisting(pair,revision,info,file.getCharset());
+              return;
+            }
+          }
+ catch (          VcsException e1) {
+          }
+catch (          SVNException e1) {
+            exception[0]=new VcsException(e);
+          }
+catch (          IOException e1) {
+            exception[0]=new VcsException(e);
+          }
+        }
         exception[0]=new VcsException(e);
       }
 catch (      IOException e) {
