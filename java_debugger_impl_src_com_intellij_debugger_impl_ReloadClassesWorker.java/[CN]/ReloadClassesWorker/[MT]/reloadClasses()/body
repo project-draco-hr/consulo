@@ -1,0 +1,75 @@
+{
+  DebuggerManagerThreadImpl.assertIsManagerThread();
+  final Map<String,HotSwapFile> modifiedClasses=myDebuggerSession.getHotswapFiles();
+  if (modifiedClasses.isEmpty()) {
+    myProgress.addMessage(myDebuggerSession,MessageCategory.INFORMATION,DebuggerBundle.message("status.hotswap.loaded.classes.up.to.date"));
+    return;
+  }
+  final DebugProcessImpl debugProcess=getDebugProcess();
+  final VirtualMachineProxyImpl virtualMachineProxy=debugProcess.getVirtualMachineProxy();
+  if (virtualMachineProxy == null) {
+    return;
+  }
+  final Project project=debugProcess.getProject();
+  final BreakpointManager breakpointManager=(DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager();
+  breakpointManager.disableBreakpoints(debugProcess);
+  try {
+    RedefineProcessor redefineProcessor=new RedefineProcessor(virtualMachineProxy);
+    int processedClassesCount=0;
+    for (    final String qualifiedName : modifiedClasses.keySet()) {
+      processedClassesCount++;
+      if (qualifiedName != null) {
+        myProgress.setText(qualifiedName);
+        myProgress.setFraction(processedClassesCount / (double)modifiedClasses.size());
+      }
+      final HotSwapFile fileDescr=modifiedClasses.get(qualifiedName);
+      final byte[] content;
+      try {
+        content=FileUtil.loadFileBytes(fileDescr.file);
+      }
+ catch (      IOException e) {
+        reportProblem(qualifiedName,e);
+        continue;
+      }
+      redefineProcessor.processClass(qualifiedName,content);
+    }
+    redefineProcessor.processPending();
+    myProgress.setFraction(1);
+    final int partiallyRedefinedClassesCount=redefineProcessor.getPartiallyRedefinedClassesCount();
+    if (partiallyRedefinedClassesCount == 0) {
+      myProgress.addMessage(myDebuggerSession,MessageCategory.INFORMATION,DebuggerBundle.message("status.classes.reloaded",redefineProcessor.getProcessedClassesCount()));
+    }
+ else {
+      final String message=DebuggerBundle.message("status.classes.not.all.versions.reloaded",partiallyRedefinedClassesCount,redefineProcessor.getProcessedClassesCount());
+      myProgress.addMessage(myDebuggerSession,MessageCategory.WARNING,message);
+    }
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("classes reloaded");
+    }
+  }
+ catch (  Throwable e) {
+    processException(e);
+  }
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    public void run(){
+      if (project.isDisposed()) {
+        return;
+      }
+      final BreakpointManager breakpointManager=(DebuggerManagerEx.getInstanceEx(project)).getBreakpointManager();
+      breakpointManager.reloadBreakpoints();
+      debugProcess.getRequestsManager().clearWarnings();
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("requests updated");
+        LOG.debug("time stamp set");
+      }
+      myDebuggerSession.refresh(false);
+    }
+  }
+);
+  try {
+    breakpointManager.enableBreakpoints(debugProcess);
+  }
+ catch (  Exception e) {
+    processException(e);
+  }
+}

@@ -1,32 +1,19 @@
 {
-  LOG.info("updateImpl: defining updaters...");
+  Map<VirtualFile,GitUpdater> updaters;
   try {
-    for (    GitRepository repository : myRepositories) {
-      VirtualFile root=repository.getRoot();
-      final GitUpdater updater;
-      if (updateMethod == UpdateMethod.MERGE) {
-        updater=new GitMergeUpdater(myProject,myGit,root,myTrackedBranches,myProgressIndicator,myUpdatedFiles);
-      }
- else       if (updateMethod == UpdateMethod.REBASE) {
-        updater=new GitRebaseUpdater(myProject,myGit,root,myTrackedBranches,myProgressIndicator,myUpdatedFiles);
-      }
- else {
-        updater=GitUpdater.getUpdater(myProject,myGit,myTrackedBranches,root,myProgressIndicator,myUpdatedFiles);
-      }
-      if (updater.isUpdateNeeded()) {
-        myUpdaters.put(root,updater);
-      }
-      LOG.info("update| root=" + root + " ,updater="+ updater);
-    }
+    updaters=defineUpdaters(updateMethod);
   }
  catch (  VcsException e) {
     LOG.info(e);
     notifyError(myProject,"Git update failed",e.getMessage(),true,e);
     return GitUpdateResult.ERROR;
   }
-  if (myUpdaters.isEmpty())   return GitUpdateResult.NOTHING_TO_UPDATE;
+  updaters=tryFastForwardMergeForRebaseUpdaters(updaters);
+  if (updaters.isEmpty()) {
+    return GitUpdateResult.NOTHING_TO_UPDATE;
+  }
   LOG.info("updateImpl: identifying if save is needed...");
-  for (  Map.Entry<VirtualFile,GitUpdater> entry : myUpdaters.entrySet()) {
+  for (  Map.Entry<VirtualFile,GitUpdater> entry : updaters.entrySet()) {
     VirtualFile root=entry.getKey();
     GitUpdater updater=entry.getValue();
     if (updater.isSaveNeeded()) {
@@ -48,7 +35,7 @@
   GitUpdateResult compoundResult=null;
   VirtualFile currentlyUpdatedRoot=null;
   try {
-    for (    Map.Entry<VirtualFile,GitUpdater> entry : myUpdaters.entrySet()) {
+    for (    Map.Entry<VirtualFile,GitUpdater> entry : updaters.entrySet()) {
       currentlyUpdatedRoot=entry.getKey();
       GitUpdater updater=entry.getValue();
       GitUpdateResult res=updater.update();
@@ -65,6 +52,7 @@
     notifyImportantError(myProject,"Error updating " + rootName,"Updating " + rootName + " failed with an error: "+ e.getLocalizedMessage());
   }
  finally {
+    LOG.assertTrue(compoundResult != null,"Updaters were checked for non-emptiness");
     if (incomplete || !compoundResult.isSuccess()) {
       mySaver.notifyLocalChangesAreNotRestored();
     }
