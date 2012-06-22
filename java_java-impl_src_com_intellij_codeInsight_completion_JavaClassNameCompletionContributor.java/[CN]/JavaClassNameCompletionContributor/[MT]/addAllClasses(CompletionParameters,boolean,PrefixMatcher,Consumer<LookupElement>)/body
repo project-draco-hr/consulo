@@ -14,7 +14,8 @@
     filter=TrueFilter.INSTANCE;
   }
   final boolean inJavaContext=parameters.getPosition() instanceof PsiIdentifier;
-  if (AFTER_NEW.accepts(insertedElement)) {
+  final boolean afterNew=AFTER_NEW.accepts(insertedElement);
+  if (afterNew) {
     final PsiExpression expr=PsiTreeUtil.getContextOfType(insertedElement,PsiExpression.class,true);
     for (    final ExpectedTypeInfo info : ExpectedTypesProvider.getExpectedTypes(expr,true)) {
       final PsiType type=info.getType();
@@ -26,17 +27,30 @@
       if (!defaultType.equals(type)) {
         final PsiClass defClass=PsiUtil.resolveClassInType(defaultType);
         if (defClass != null) {
-          consumer.consume(createClassLookupItem(defClass,inJavaContext));
+          consumer.consume(createClassLookupItem(defClass,true));
         }
       }
     }
   }
-  final boolean lookingForAnnotations=PsiJavaPatterns.psiElement().afterLeaf("@").accepts(insertedElement);
+  final boolean lookingForAnnotations=psiElement().afterLeaf("@").accepts(insertedElement);
+  final boolean pkgContext=JavaCompletionUtil.inSomePackage(insertedElement);
   AllClassesGetter.processJavaClasses(parameters,matcher,filterByScope,new Consumer<PsiClass>(){
     @Override public void consume(    PsiClass psiClass){
       if (lookingForAnnotations && !psiClass.isAnnotationType())       return;
       if (filter.isAcceptable(psiClass,insertedElement)) {
-        consumer.consume(createClassLookupItem(psiClass,inJavaContext));
+        if (!inJavaContext) {
+          consumer.consume(AllClassesGetter.createLookupItem(psiClass,AllClassesGetter.TRY_SHORTENING));
+        }
+ else {
+          for (          JavaPsiClassReferenceElement element : createClassLookupItems(psiClass,afterNew,JavaClassNameInsertHandler.JAVA_CLASS_INSERT_HANDLER,new Condition<PsiClass>(){
+            @Override public boolean value(            PsiClass psiClass){
+              return filter.isAcceptable(psiClass,insertedElement) && AllClassesGetter.isAcceptableInContext(insertedElement,psiClass,filterByScope,pkgContext);
+            }
+          }
+)) {
+            consumer.consume(element);
+          }
+        }
       }
     }
   }
