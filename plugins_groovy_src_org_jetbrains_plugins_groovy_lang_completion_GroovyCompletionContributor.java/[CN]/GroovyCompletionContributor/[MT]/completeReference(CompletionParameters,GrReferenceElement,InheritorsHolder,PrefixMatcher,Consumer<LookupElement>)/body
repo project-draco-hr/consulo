@@ -1,27 +1,35 @@
 {
+  final Consumer<LookupElement> consumer=new Consumer<LookupElement>(){
+    final Set<LookupElement> added=hashSet();
+    @Override public void consume(    LookupElement element){
+      if (added.add(element)) {
+        _consumer.consume(element);
+      }
+    }
+  }
+;
   final PsiElement position=parameters.getPosition();
   final Map<PsiModifierListOwner,LookupElement> staticMembers=hashMap();
   final PsiElement qualifier=reference.getQualifier();
   final PsiType qualifierType=qualifier instanceof GrExpression ? ((GrExpression)qualifier).getType() : null;
-  LinkedHashSet<LookupElement> result=new LinkedHashSet<LookupElement>();
   final Set<String> unresolvedProps;
   if (reference instanceof GrReferenceExpression && (qualifier instanceof GrExpression || qualifier == null)) {
     unresolvedProps=CompleteReferenceExpression.getVariantsWithSameQualifier(matcher,(GrExpression)qualifier,(GrReferenceExpression)reference);
     for (    String string : unresolvedProps) {
-      result.add(LookupElementBuilder.create(string).withItemTextUnderlined(true));
+      consumer.consume(LookupElementBuilder.create(string).withItemTextUnderlined(true));
     }
     if (parameters.getInvocationCount() < 2 && qualifier != null && qualifierType == null && !(qualifier instanceof GrReferenceExpression && ((GrReferenceExpression)qualifier).resolve() instanceof PsiPackage)) {
       if (parameters.getInvocationCount() == 1) {
         showInfo();
       }
-      return result;
+      return EmptyRunnable.INSTANCE;
     }
   }
  else {
     unresolvedProps=Collections.emptySet();
   }
   final ElementFilter classFilter=getClassFilter(position);
-  final List<LookupElement> items=arrayList();
+  final List<LookupElement> zeroPriority=arrayList();
   reference.processVariants(matcher,parameters,new Consumer<LookupElement>(){
     public void consume(    LookupElement lookupElement){
       Object object=lookupElement.getObject();
@@ -44,28 +52,26 @@
       if ((object instanceof PsiMethod || object instanceof PsiField) && ((PsiModifierListOwner)object).hasModifierProperty(PsiModifier.STATIC)) {
         if (lookupElement.getLookupString().equals(((PsiMember)object).getName())) {
           staticMembers.put(CompletionUtil.getOriginalOrSelf((PsiModifierListOwner)object),lookupElement);
-          return;
         }
       }
       if (object instanceof PsiClass && !classFilter.isAcceptable(object,position)) {
         return;
       }
-      items.add(lookupElement);
+      PrioritizedLookupElement prio=lookupElement.as(PrioritizedLookupElement.CLASS_CONDITION_KEY);
+      if (prio == null || prio.getPriority() == 0) {
+        zeroPriority.add(lookupElement);
+      }
+ else {
+        consumer.consume(lookupElement);
+      }
     }
   }
 );
+  for (  LookupElement element : zeroPriority) {
+    consumer.consume(element);
+  }
   if (qualifier == null) {
-    addStaticMembers(parameters,matcher,staticMembers);
+    return addStaticMembers(parameters,matcher,staticMembers,consumer);
   }
-  items.addAll(staticMembers.values());
-  for (Iterator<LookupElement> iterator=items.iterator(); iterator.hasNext(); ) {
-    LookupElement element=iterator.next();
-    PrioritizedLookupElement prio=element.as(PrioritizedLookupElement.CLASS_CONDITION_KEY);
-    if (prio == null || prio.getPriority() >= 0) {
-      result.add(element);
-      iterator.remove();
-    }
-  }
-  result.addAll(items);
-  return result;
+  return EmptyRunnable.INSTANCE;
 }
