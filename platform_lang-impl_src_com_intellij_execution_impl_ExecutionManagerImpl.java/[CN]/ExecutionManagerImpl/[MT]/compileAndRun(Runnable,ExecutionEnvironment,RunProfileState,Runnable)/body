@@ -1,0 +1,45 @@
+{
+  RunProfile profile=env.getRunProfile();
+  if (profile instanceof RunConfiguration) {
+    final RunConfiguration runConfiguration=(RunConfiguration)profile;
+    final RunManagerImpl runManager=RunManagerImpl.getInstanceImpl(myProject);
+    final List<BeforeRunTask> activeTasks=new ArrayList<BeforeRunTask>();
+    activeTasks.addAll(runManager.getBeforeRunTasks(runConfiguration));
+    ConfigurationPerRunnerSettings configurationSettings=state != null ? state.getConfigurationSettings() : null;
+    final DataContext projectContext=SimpleDataContext.getProjectContext(myProject);
+    final DataContext dataContext=configurationSettings != null ? SimpleDataContext.getSimpleContext(BeforeRunTaskProvider.RUNNER_ID,configurationSettings.getRunnerId(),projectContext) : projectContext;
+    if (!activeTasks.isEmpty()) {
+      ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+        /** 
+ * @noinspection SSBasedInspection
+ */
+        public void run(){
+          for (          BeforeRunTask task : activeTasks) {
+            BeforeRunTaskProvider<BeforeRunTask> provider=BeforeRunTaskProvider.getProvider(myProject,task.getProviderId());
+            if (provider != null && !provider.executeTask(dataContext,runConfiguration,env,task)) {
+              if (onCancelRunnable != null) {
+                SwingUtilities.invokeLater(onCancelRunnable);
+              }
+              return;
+            }
+          }
+          SwingUtilities.invokeLater(new Runnable(){
+            @Override public void run(){
+              if (!myProject.isDisposed()) {
+                DumbService.getInstance(myProject).runWhenSmart(startRunnable);
+              }
+            }
+          }
+);
+        }
+      }
+);
+    }
+ else {
+      startRunnable.run();
+    }
+  }
+ else {
+    startRunnable.run();
+  }
+}
