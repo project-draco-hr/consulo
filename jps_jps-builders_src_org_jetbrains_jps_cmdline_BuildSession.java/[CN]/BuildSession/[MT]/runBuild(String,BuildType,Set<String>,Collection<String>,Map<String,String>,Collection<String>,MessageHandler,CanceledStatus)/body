@@ -1,41 +1,51 @@
 {
   boolean forceCleanCaches=false;
-  ProjectDescriptor pd;
-  final Project project=loadProject(projectPath);
-  final File dataStorageRoot=Utils.getDataStorageRoot(project);
-  if (!dataStorageRoot.exists()) {
-    buildType=BuildType.PROJECT_REBUILD;
-  }
-  final boolean inMemoryMappingsDelta=System.getProperty(GlobalOptions.USE_MEMORY_TEMP_CACHE_OPTION) != null;
-  ProjectTimestamps projectTimestamps=null;
-  BuildDataManager dataManager=null;
-  try {
-    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
-    dataManager=new BuildDataManager(dataStorageRoot,inMemoryMappingsDelta);
-    if (dataManager.versionDiffers()) {
-      forceCleanCaches=true;
-      msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Dependency data format has changed, project rebuild required"));
-    }
-  }
- catch (  Exception e) {
-    LOG.info(e);
-    if (projectTimestamps != null) {
-      projectTimestamps.close();
-    }
-    if (dataManager != null) {
-      dataManager.close();
-    }
-    forceCleanCaches=true;
-    FileUtil.delete(dataStorageRoot);
-    projectTimestamps=new ProjectTimestamps(dataStorageRoot);
-    dataManager=new BuildDataManager(dataStorageRoot,inMemoryMappingsDelta);
-    msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
+  final File dataStorageRoot=Utils.getDataStorageRoot(projectPath);
+  if (dataStorageRoot == null) {
+    msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.ERROR,"Cannot determine build data storage root for project " + projectPath));
+    return;
   }
   final BuildFSState fsState=new BuildFSState(false);
-  pd=new ProjectDescriptor(project,fsState,projectTimestamps,dataManager,BuildLoggingManager.DEFAULT);
-  myProjectDescriptor=pd;
   try {
-    loadFsState(myProjectDescriptor,dataStorageRoot,myInitialFSDelta);
+    final boolean shouldApplyEvent=loadFsState(fsState,dataStorageRoot,myInitialFSDelta);
+    if (shouldApplyEvent && !containsChanges(myInitialFSDelta) && !fsState.hasWorkToDo()) {
+      applyFSEvent(null,myInitialFSDelta);
+      return;
+    }
+    if (!dataStorageRoot.exists()) {
+      buildType=BuildType.PROJECT_REBUILD;
+    }
+    final boolean inMemoryMappingsDelta=System.getProperty(GlobalOptions.USE_MEMORY_TEMP_CACHE_OPTION) != null;
+    ProjectTimestamps projectTimestamps=null;
+    BuildDataManager dataManager=null;
+    try {
+      projectTimestamps=new ProjectTimestamps(dataStorageRoot);
+      dataManager=new BuildDataManager(dataStorageRoot,inMemoryMappingsDelta);
+      if (dataManager.versionDiffers()) {
+        forceCleanCaches=true;
+        msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Dependency data format has changed, project rebuild required"));
+      }
+    }
+ catch (    Exception e) {
+      LOG.info(e);
+      if (projectTimestamps != null) {
+        projectTimestamps.close();
+      }
+      if (dataManager != null) {
+        dataManager.close();
+      }
+      forceCleanCaches=true;
+      FileUtil.delete(dataStorageRoot);
+      projectTimestamps=new ProjectTimestamps(dataStorageRoot);
+      dataManager=new BuildDataManager(dataStorageRoot,inMemoryMappingsDelta);
+      msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.INFO,"Project rebuild forced: " + e.getMessage()));
+    }
+    final Project project=loadProject(projectPath);
+    final ProjectDescriptor pd=new ProjectDescriptor(project,fsState,projectTimestamps,dataManager,BuildLoggingManager.DEFAULT);
+    myProjectDescriptor=pd;
+    if (shouldApplyEvent) {
+      applyFSEvent(pd,myInitialFSDelta);
+    }
     myInitialFSDelta=null;
     myEventsProcessor.startProcessing();
     for (int attempt=0; attempt < 2; attempt++) {
@@ -74,6 +84,6 @@ throw e;
 }
 }
   finally {
-saveData(pd,dataStorageRoot);
+saveData(fsState,dataStorageRoot);
 }
 }
