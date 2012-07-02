@@ -1,26 +1,26 @@
 {
   debug("Processing changed classes:");
-  for (  final Pair<ClassRepr,Difference> changed : state.classDiff.changed()) {
+  for (  final Pair<ClassRepr,Difference> changed : state.myClassDiff.changed()) {
     final ClassRepr it=changed.first;
     final ClassRepr.Diff diff=(ClassRepr.Diff)changed.second;
-    myDelta.addChangedClass(it.name);
-    debug("Changed: ",it.name);
+    myDelta.addChangedClass(it.myName);
+    debug("Changed: ",it.myName);
     final int addedModifiers=diff.addedModifiers();
     final boolean superClassChanged=(diff.base() & Difference.SUPERCLASS) > 0;
     final boolean interfacesChanged=!diff.interfaces().unchanged();
     final boolean signatureChanged=(diff.base() & Difference.SIGNATURE) > 0;
     if (superClassChanged) {
-      myDelta.registerRemovedSuperClass(it.name,((TypeRepr.ClassType)it.superClass).className);
+      myDelta.registerRemovedSuperClass(it.myName,((TypeRepr.ClassType)it.getSuperClass()).className);
     }
     if (interfacesChanged) {
       for (      final TypeRepr.AbstractType typ : diff.interfaces().removed()) {
-        myDelta.registerRemovedSuperClass(it.name,((TypeRepr.ClassType)typ).className);
+        myDelta.registerRemovedSuperClass(it.myName,((TypeRepr.ClassType)typ).className);
       }
     }
     if (myEasyMode) {
       return false;
     }
-    mySelf.appendDependents(it,state.dependants);
+    mySelf.appendDependents(it,state.myDependants);
     if (superClassChanged || interfacesChanged || signatureChanged) {
       debug("Superclass changed: ",superClassChanged);
       debug("Interfaces changed: ",interfacesChanged);
@@ -29,15 +29,15 @@
       final boolean interfacesRemoved=interfacesChanged && !diff.interfaces().removed().isEmpty();
       debug("Extends changed: ",extendsChanged);
       debug("Interfaces removed: ",interfacesRemoved);
-      myUpdated.affectSubclasses(it.name,myAffectedFiles,state.affectedUsages,state.dependants,extendsChanged || interfacesRemoved || signatureChanged);
+      myUpdated.affectSubclasses(it.myName,myAffectedFiles,state.myAffectedUsages,state.myDependants,extendsChanged || interfacesRemoved || signatureChanged);
     }
     if ((diff.addedModifiers() & Opcodes.ACC_INTERFACE) > 0 || (diff.removedModifiers() & Opcodes.ACC_INTERFACE) > 0) {
       debug("Class-to-interface or interface-to-class conversion detected, added class usage to affected usages");
-      state.affectedUsages.add(it.createUsage());
+      state.myAffectedUsages.add(it.createUsage());
     }
-    if (it.isAnnotation() && it.policy == RetentionPolicy.SOURCE) {
+    if (it.isAnnotation() && it.getRetentionPolicy() == RetentionPolicy.SOURCE) {
       debug("Annotation, retention policy = SOURCE => a switch to non-incremental mode requested");
-      if (!incrementalDecision(it.outerClassName,it,myAffectedFiles,myFilter)) {
+      if (!incrementalDecision(it.getOuterClassName(),it,myAffectedFiles,myFilter)) {
         debug("End of Differentiate, returning false");
         return false;
       }
@@ -45,47 +45,48 @@
     if ((addedModifiers & Opcodes.ACC_PROTECTED) > 0) {
       debug("Introduction of 'protected' modifier detected, adding class usage + inheritance constraint to affected usages");
       final UsageRepr.Usage usage=it.createUsage();
-      state.affectedUsages.add(usage);
-      state.usageConstraints.put(usage,myUpdated.new InheritanceConstraint(it.name));
+      state.myAffectedUsages.add(usage);
+      state.myUsageConstraints.put(usage,myUpdated.new InheritanceConstraint(it.myName));
     }
     if (diff.packageLocalOn()) {
       debug("Introduction of 'package local' access detected, adding class usage + package constraint to affected usages");
       final UsageRepr.Usage usage=it.createUsage();
-      state.affectedUsages.add(usage);
-      state.usageConstraints.put(usage,myUpdated.new PackageConstraint(it.getPackageName()));
+      state.myAffectedUsages.add(usage);
+      state.myUsageConstraints.put(usage,myUpdated.new PackageConstraint(it.getPackageName()));
     }
     if ((addedModifiers & Opcodes.ACC_FINAL) > 0 || (addedModifiers & Opcodes.ACC_PRIVATE) > 0) {
       debug("Introduction of 'private' or 'final' modifier(s) detected, adding class usage to affected usages");
-      state.affectedUsages.add(it.createUsage());
+      state.myAffectedUsages.add(it.createUsage());
     }
     if ((addedModifiers & Opcodes.ACC_ABSTRACT) > 0 || (addedModifiers & Opcodes.ACC_STATIC) > 0) {
       debug("Introduction of 'abstract' or 'static' modifier(s) detected, adding class new usage to affected usages");
-      state.affectedUsages.add(UsageRepr.createClassNewUsage(myContext,it.name));
+      state.myAffectedUsages.add(UsageRepr.createClassNewUsage(myContext,it.myName));
     }
     if (it.isAnnotation()) {
       debug("Class is annotation, performing annotation-specific analysis");
       if (diff.retentionChanged()) {
         debug("Retention policy change detected, adding class usage to affected usages");
-        state.affectedUsages.add(it.createUsage());
+        state.myAffectedUsages.add(it.createUsage());
       }
  else {
         final Collection<ElemType> removedtargets=diff.targets().removed();
         if (removedtargets.contains(ElemType.LOCAL_VARIABLE)) {
           debug("Removed target contains LOCAL_VARIABLE => a switch to non-incremental mode requested");
-          if (!incrementalDecision(it.outerClassName,it,myAffectedFiles,myFilter)) {
+          if (!incrementalDecision(it.getOuterClassName(),it,myAffectedFiles,myFilter)) {
             debug("End of Differentiate, returning false");
             return false;
           }
         }
         if (!removedtargets.isEmpty()) {
           debug("Removed some annotation targets, adding annotation query");
-          state.annotationQuery.add((UsageRepr.AnnotationUsage)UsageRepr.createAnnotationUsage(myContext,TypeRepr.createClassType(myContext,it.name),null,EnumSet.copyOf(removedtargets)));
+          final UsageRepr.AnnotationUsage annotationUsage=(UsageRepr.AnnotationUsage)UsageRepr.createAnnotationUsage(myContext,TypeRepr.createClassType(myContext,it.myName),null,EnumSet.copyOf(removedtargets));
+          state.myAnnotationQuery.add(annotationUsage);
         }
         for (        final MethodRepr m : diff.methods().added()) {
           if (!m.hasValue()) {
-            debug("Added method with no default value: ",m.name);
+            debug("Added method with no default value: ",m.myName);
             debug("Adding class usage to affected usages");
-            state.affectedUsages.add(it.createUsage());
+            state.myAffectedUsages.add(it.createUsage());
           }
         }
       }
