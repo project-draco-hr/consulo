@@ -9,28 +9,27 @@ synchronized (myLock) {
         for (        final String file : removed) {
           final int fileName=myContext.get(file);
           final Set<ClassRepr> fileClasses=(Set<ClassRepr>)mySourceFileToClasses.get(fileName);
-          final Collection<UsageRepr.Cluster> fileUsages=mySourceFileToUsages.get(fileName);
           if (fileClasses != null) {
             for (            final ClassRepr aClass : fileClasses) {
-              cleanupRemovedClass(delta,aClass,fileUsages,dependenciesTrashBin);
+              cleanupRemovedClass(delta,aClass,aClass.getUsages(),dependenciesTrashBin);
             }
           }
           mySourceFileToClasses.remove(fileName);
-          mySourceFileToUsages.remove(fileName);
-          mySourceFileToAnnotationUsages.remove(fileName);
         }
       }
-      if (!delta.isRebuild()) {
-        final TIntHashSet compiledClasses=new TIntHashSet();
-        delta.myClassToSourceFile.forEachEntry(new TIntIntProcedure(){
-          @Override public boolean execute(          final int a,          final int b){
-            compiledClasses.add(a);
-            return true;
-          }
+      final TIntHashSet compiledClasses=new TIntHashSet();
+      final TIntHashSet compiledFiles=new TIntHashSet();
+      delta.myClassToSourceFile.forEachEntry(new TIntIntProcedure(){
+        @Override public boolean execute(        final int key,        final int file){
+          compiledClasses.add(key);
+          compiledFiles.add(file);
+          return true;
         }
+      }
 );
-        for (        ClassRepr repr : delta.getDeletedClasses()) {
-          cleanupRemovedClass(delta,repr,null,dependenciesTrashBin);
+      if (!delta.isRebuild()) {
+        for (        final ClassRepr repr : delta.getDeletedClasses()) {
+          cleanupRemovedClass(delta,repr,repr.getUsages(),dependenciesTrashBin);
         }
         delta.getRemovedSuperClasses().forEachEntry(new TIntObjectProcedure<TIntHashSet>(){
           @Override public boolean execute(          final int a,          final TIntHashSet b){
@@ -71,7 +70,6 @@ synchronized (myLock) {
 );
         delta.getChangedClasses().forEach(new TIntProcedure(){
           @Override public boolean execute(          final int className){
-            final TIntHashSet s=delta.myClassToSubclasses.get(className);
             final int sourceFile=delta.myClassToSourceFile.get(className);
             if (sourceFile > 0) {
               myClassToSourceFile.put(className,sourceFile);
@@ -93,20 +91,6 @@ synchronized (myLock) {
  else {
               mySourceFileToClasses.remove(fileName);
             }
-            final Collection<UsageRepr.Cluster> clusters=delta.mySourceFileToUsages.get(fileName);
-            if (clusters != null) {
-              mySourceFileToUsages.replace(fileName,clusters);
-            }
- else {
-              mySourceFileToUsages.remove(fileName);
-            }
-            final Collection<UsageRepr.Usage> usages=delta.mySourceFileToAnnotationUsages.get(fileName);
-            if (usages != null) {
-              mySourceFileToAnnotationUsages.replace(fileName,usages);
-            }
- else {
-              mySourceFileToAnnotationUsages.remove(fileName);
-            }
             return true;
           }
         }
@@ -116,8 +100,6 @@ synchronized (myLock) {
         myClassToSubclasses.putAll(delta.myClassToSubclasses);
         myClassToSourceFile.putAll(delta.myClassToSourceFile);
         mySourceFileToClasses.replaceAll(delta.mySourceFileToClasses);
-        mySourceFileToUsages.replaceAll(delta.mySourceFileToUsages);
-        mySourceFileToAnnotationUsages.replaceAll(delta.mySourceFileToAnnotationUsages);
       }
       final TIntHashSet affectedClasses=new TIntHashSet();
       addAllKeys(affectedClasses,dependenciesTrashBin);

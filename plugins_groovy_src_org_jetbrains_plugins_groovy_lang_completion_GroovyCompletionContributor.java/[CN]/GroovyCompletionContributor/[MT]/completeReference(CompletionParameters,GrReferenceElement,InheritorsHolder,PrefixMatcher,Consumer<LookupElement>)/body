@@ -1,0 +1,72 @@
+{
+  final Consumer<LookupElement> consumer=new Consumer<LookupElement>(){
+    final Set<LookupElement> added=hashSet();
+    @Override public void consume(    LookupElement element){
+      if (added.add(element)) {
+        _consumer.consume(element);
+      }
+    }
+  }
+;
+  final Map<PsiModifierListOwner,LookupElement> staticMembers=hashMap();
+  final PsiElement qualifier=reference.getQualifier();
+  final PsiType qualifierType=qualifier instanceof GrExpression ? ((GrExpression)qualifier).getType() : null;
+  final Set<String> unresolvedProps;
+  if (reference instanceof GrReferenceExpression && (qualifier instanceof GrExpression || qualifier == null)) {
+    unresolvedProps=CompleteReferenceExpression.getVariantsWithSameQualifier(matcher,(GrExpression)qualifier,(GrReferenceExpression)reference);
+    for (    String string : unresolvedProps) {
+      consumer.consume(LookupElementBuilder.create(string).withItemTextUnderlined(true));
+    }
+    if (parameters.getInvocationCount() < 2 && qualifier != null && qualifierType == null && !(qualifier instanceof GrReferenceExpression && ((GrReferenceExpression)qualifier).resolve() instanceof PsiPackage)) {
+      if (parameters.getInvocationCount() == 1) {
+        showInfo();
+      }
+      return EmptyRunnable.INSTANCE;
+    }
+  }
+ else {
+    unresolvedProps=Collections.emptySet();
+  }
+  final List<LookupElement> zeroPriority=arrayList();
+  reference.processVariants(matcher,parameters,new Consumer<LookupElement>(){
+    public void consume(    LookupElement lookupElement){
+      Object object=lookupElement.getObject();
+      if (object instanceof GroovyResolveResult) {
+        object=((GroovyResolveResult)object).getElement();
+      }
+      if (!(lookupElement instanceof LookupElementBuilder) && inheritorsHolder.alreadyProcessed(lookupElement)) {
+        return;
+      }
+      if (object instanceof GrReferenceExpression && unresolvedProps.contains(((GrReferenceExpression)object).getName())) {
+        return;
+      }
+      if (object instanceof PsiMember && JavaCompletionUtil.isInExcludedPackage((PsiMember)object,true)) {
+        return;
+      }
+      if (!(object instanceof PsiClass)) {
+        int priority=assignPriority(lookupElement,qualifierType);
+        lookupElement=JavaCompletionUtil.highlightIfNeeded(qualifierType,PrioritizedLookupElement.withPriority(lookupElement,priority),object);
+      }
+      if ((object instanceof PsiMethod || object instanceof PsiField) && ((PsiModifierListOwner)object).hasModifierProperty(PsiModifier.STATIC)) {
+        if (lookupElement.getLookupString().equals(((PsiMember)object).getName())) {
+          staticMembers.put(CompletionUtil.getOriginalOrSelf((PsiModifierListOwner)object),lookupElement);
+        }
+      }
+      PrioritizedLookupElement prio=lookupElement.as(PrioritizedLookupElement.CLASS_CONDITION_KEY);
+      if (prio == null || prio.getPriority() == 0) {
+        zeroPriority.add(lookupElement);
+      }
+ else {
+        consumer.consume(lookupElement);
+      }
+    }
+  }
+);
+  for (  LookupElement element : zeroPriority) {
+    consumer.consume(element);
+  }
+  if (qualifier == null) {
+    return addStaticMembers(parameters,matcher,staticMembers,consumer);
+  }
+  return EmptyRunnable.INSTANCE;
+}
