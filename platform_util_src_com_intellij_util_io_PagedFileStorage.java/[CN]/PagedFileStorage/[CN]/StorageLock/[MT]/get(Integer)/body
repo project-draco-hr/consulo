@@ -1,18 +1,43 @@
 {
-  ByteBufferWrapper wrapper=myMap.get(key);
-  if (wrapper != null) {
+  ByteBufferWrapper wrapper;
+  try {
+    mySegmentsAccessLock.lock();
+    wrapper=mySegments.get(key);
+    if (wrapper != null)     return wrapper;
+  }
+  finally {
+    mySegmentsAccessLock.unlock();
+  }
+  mySegmentsAllocationLock.lock();
+  try {
+    mySegmentsAccessLock.lock();
+    try {
+      wrapper=mySegments.get(key);
+      if (wrapper != null)       return wrapper;
+    }
+  finally {
+      mySegmentsAccessLock.unlock();
+    }
+    long started=IOStatistics.DEBUG ? System.currentTimeMillis() : 0;
+    wrapper=createValue(key);
+    if (IOStatistics.DEBUG) {
+      long finished=System.currentTimeMillis();
+      if (finished - started > IOStatistics.MIN_IO_TIME_TO_REPORT) {
+        IOStatistics.dump("Mapping " + wrapper.myLength + " from "+ wrapper.myPosition+ " file:"+ wrapper.myFile+ " for "+ (finished - started));
+      }
+    }
+    mySegmentsAccessLock.lock();
+    try {
+      mySegments.put(key,wrapper);
+      mySize+=wrapper.myLength;
+    }
+  finally {
+      mySegmentsAccessLock.unlock();
+    }
+    ensureSize(mySizeLimit);
     return wrapper;
   }
-  long started=IOStatistics.DEBUG ? System.currentTimeMillis() : 0;
-  wrapper=createValue(key);
-  mySize+=wrapper.myLength;
-  if (IOStatistics.DEBUG) {
-    long finished=System.currentTimeMillis();
-    if (finished - started > IOStatistics.MIN_IO_TIME_TO_REPORT) {
-      IOStatistics.dump("Mapping " + wrapper.myLength + " from "+ wrapper.myPosition+ " file:"+ wrapper.myFile+ " for "+ (finished - started));
-    }
+  finally {
+    mySegmentsAllocationLock.unlock();
   }
-  myMap.put(key,wrapper);
-  ensureSize(mySizeLimit);
-  return wrapper;
 }
