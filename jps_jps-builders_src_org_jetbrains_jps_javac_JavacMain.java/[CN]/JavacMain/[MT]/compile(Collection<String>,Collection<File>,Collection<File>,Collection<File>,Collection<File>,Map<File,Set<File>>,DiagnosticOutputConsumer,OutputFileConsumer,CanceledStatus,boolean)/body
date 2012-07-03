@@ -1,9 +1,27 @@
 {
-  final JavaCompiler compiler=ToolProvider.getSystemJavaCompiler();
+  JavaCompiler compiler=null;
+  if (useEclipseCompiler) {
+    for (    JavaCompiler javaCompiler : ServiceLoader.load(JavaCompiler.class)) {
+      compiler=javaCompiler;
+      break;
+    }
+    if (compiler == null) {
+      compiler=SYSTEM_JAVA_COMPILER;
+    }
+  }
+ else {
+    compiler=SYSTEM_JAVA_COMPILER;
+  }
+  final boolean nowUsingJavac=compiler == SYSTEM_JAVA_COMPILER;
   for (  File outputDir : outputDirToRoots.keySet()) {
     outputDir.mkdirs();
   }
   final JavacFileManager fileManager=new JavacFileManager(new ContextImpl(compiler,outConsumer,outputSink,canceledStatus));
+  if (nowUsingJavac && useEclipseCompiler) {
+    final String message="Eclipse Batch Compiler was not found in classpath, using Javac instead";
+    fileManager.getContext().reportMessage(Diagnostic.Kind.WARNING,message);
+    System.err.println(message);
+  }
   fileManager.handleOption("-bootclasspath",Collections.singleton("").iterator());
   fileManager.handleOption("-extdirs",Collections.singleton("").iterator());
   try {
@@ -42,12 +60,16 @@
   }
   final LineOutputWriter out=new LineOutputWriter(){
     protected void lineAvailable(    String line){
-      outConsumer.outputLineAvailable(line);
+      if (nowUsingJavac) {
+        outConsumer.outputLineAvailable(line);
+      }
+ else {
+      }
     }
   }
 ;
   try {
-    final Collection<String> _options=prepareOptions(options);
+    final Collection<String> _options=prepareOptions(options,compiler);
     final JavaCompiler.CompilationTask task=compiler.getTask(out,fileManager,outConsumer,_options,null,fileManager.toJavaFileObjects(sources));
     return task.call();
   }
