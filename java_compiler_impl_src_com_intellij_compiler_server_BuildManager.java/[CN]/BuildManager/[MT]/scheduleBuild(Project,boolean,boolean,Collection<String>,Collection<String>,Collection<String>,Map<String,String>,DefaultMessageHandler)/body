@@ -1,6 +1,17 @@
 {
   final String projectPath=getProjectPath(project);
   final UUID sessionId=UUID.randomUUID();
+  if (myListenPort < 0) {
+    try {
+      myListenPort=startListening();
+    }
+ catch (    Exception e) {
+      myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+      handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure(e.getMessage(),null));
+      handler.sessionTerminated();
+      return null;
+    }
+  }
   final CmdlineRemoteProto.Message.ControllerMessage params;
   CmdlineRemoteProto.Message.ControllerMessage.GlobalSettings globals=myGlobals;
   if (globals == null) {
@@ -18,6 +29,9 @@ synchronized (myProjectDataMap) {
     if (isRebuild) {
       data.dropChanges();
     }
+    if (IS_UNIT_TEST_MODE) {
+      LOG.info("Scheduling build for " + projectPath + "; CHANGED: "+ data.myChanged+ "; DELETED: "+ data.myDeleted);
+    }
     currentFSChanges=data.getAndResetRescanFlag() ? null : data.createNextEvent();
     projectTaskQueue=data.taskQueue;
   }
@@ -28,17 +42,6 @@ synchronized (myProjectDataMap) {
     params=isMake ? CmdlineProtoUtil.createMakeRequest(projectPath,modules,artifacts,userData,globals,currentFSChanges) : CmdlineProtoUtil.createForceCompileRequest(projectPath,modules,artifacts,paths,userData,globals,currentFSChanges);
   }
   myMessageDispatcher.registerBuildMessageHandler(sessionId,handler,params);
-  if (myListenPort < 0) {
-    try {
-      myListenPort=startListening();
-    }
- catch (    Exception e) {
-      myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
-      handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure(e.getMessage(),null));
-      handler.sessionTerminated();
-      return null;
-    }
-  }
   final RequestFuture<BuilderMessageHandler> future=new RequestFuture<BuilderMessageHandler>(handler,sessionId,new RequestFuture.CancelAction<BuilderMessageHandler>(){
     @Override public void cancel(    RequestFuture<BuilderMessageHandler> future) throws Exception {
       myMessageDispatcher.cancelSession(future.getRequestID());
