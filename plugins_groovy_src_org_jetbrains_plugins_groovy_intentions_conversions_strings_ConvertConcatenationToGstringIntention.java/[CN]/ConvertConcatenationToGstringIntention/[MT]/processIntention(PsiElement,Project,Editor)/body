@@ -1,21 +1,32 @@
 {
-  if (!(element instanceof GrExpression))   return;
-  boolean isMultiline=containsMultilineStrings((GrExpression)element);
-  StringBuilder builder=new StringBuilder(element.getTextLength());
-  if (element instanceof GrBinaryExpression) {
-    performIntention((GrBinaryExpression)element,builder,isMultiline);
+  final PsiFile file=element.getContainingFile();
+  final int offset=editor.getCaretModel().getOffset();
+  final AccessToken accessToken=ReadAction.start();
+  final List<GrExpression> expressions;
+  try {
+    expressions=collectExpressions(file,editor,offset);
   }
- else   if (element instanceof GrLiteral) {
-    getOperandText((GrExpression)element,builder,isMultiline);
+  finally {
+    accessToken.finish();
   }
- else {
-    return;
+  if (expressions.size() == 1) {
+    invokeImpl(expressions.get(0));
   }
-  String text=builder.toString();
-  final GroovyPsiElementFactory factory=GroovyPsiElementFactory.getInstance(element.getProject());
-  final GrExpression newExpr=factory.createExpressionFromText(GrStringUtil.addQuotes(text,true));
-  final GrExpression expression=((GrExpression)element).replaceWithExpression(newExpr,true);
-  if (expression instanceof GrString) {
-    GrStringUtil.removeUnnecessaryBracesInGString((GrString)expression);
+ else   if (expressions.size() > 0) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      invokeImpl(expressions.get(expressions.size() - 1));
+      return;
+    }
+    IntroduceTargetChooser.showChooser(editor,expressions,new Pass<GrExpression>(){
+      public void pass(      final GrExpression selectedValue){
+        invokeImpl(selectedValue);
+      }
+    }
+,new Function<GrExpression,String>(){
+      @Override public String fun(      GrExpression grExpression){
+        return grExpression.getText();
+      }
+    }
+);
   }
 }
