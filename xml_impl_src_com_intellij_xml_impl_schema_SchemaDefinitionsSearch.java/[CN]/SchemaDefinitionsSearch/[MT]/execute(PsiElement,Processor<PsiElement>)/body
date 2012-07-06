@@ -1,0 +1,69 @@
+{
+  if (queryParameters instanceof XmlTagImpl) {
+    final XmlTagImpl xml=(XmlTagImpl)queryParameters;
+    if (isTypeElement(xml)) {
+      final Collection<SchemaTypeInfo> infos=ApplicationManager.getApplication().runReadAction(new Computable<Collection<SchemaTypeInfo>>(){
+        @Override public Collection<SchemaTypeInfo> compute(){
+          return gatherInheritors(xml);
+        }
+      }
+);
+      if (infos != null && !infos.isEmpty()) {
+        final Project project=XmlUtil.getContainingFile(xml).getProject();
+        final Module module=ModuleUtil.findModuleForPsiElement(queryParameters);
+        final XmlFile file=XmlUtil.getContainingFile(xml);
+        final VirtualFile vf=file.getVirtualFile();
+        String thisNs=XmlNamespaceIndex.getNamespace(vf,project);
+        thisNs=thisNs == null ? getDefaultNs(file) : thisNs;
+        if (thisNs == null)         return false;
+        final ArrayList<SchemaTypeInfo> infosLst=new ArrayList<SchemaTypeInfo>(infos);
+        Collections.sort(infosLst);
+        final Map<String,Set<XmlFile>> nsMap=new HashMap<String,Set<XmlFile>>();
+        for (        final SchemaTypeInfo info : infosLst) {
+          Set<XmlFile> targetFiles=nsMap.get(info.getNamespaceUri());
+          if (targetFiles == null) {
+            targetFiles=new HashSet<XmlFile>();
+            if (Comparing.equal(info.getNamespaceUri(),thisNs)) {
+              targetFiles.add(file);
+            }
+            final Collection<XmlFile> files=ApplicationManager.getApplication().runReadAction(new Computable<Collection<XmlFile>>(){
+              @Override public Collection<XmlFile> compute(){
+                return XmlUtil.findNSFilesByURI(info.getNamespaceUri(),project,module);
+              }
+            }
+);
+            if (files != null) {
+              targetFiles.addAll(files);
+            }
+            nsMap.put(info.getNamespaceUri(),targetFiles);
+          }
+          if (!targetFiles.isEmpty()) {
+            for (            final XmlFile targetFile : targetFiles) {
+              ApplicationManager.getApplication().runReadAction(new Runnable(){
+                @Override public void run(){
+                  final String prefixByURI=XmlUtil.findNamespacePrefixByURI(targetFile,info.getNamespaceUri());
+                  if (prefixByURI == null)                   return;
+                  final PsiElementProcessor processor=new PsiElementProcessor(){
+                    @Override public boolean execute(                    @NotNull PsiElement element){
+                      if (element instanceof XmlTagImpl) {
+                        if (isCertainTypeElement((XmlTagImpl)element,info.getTagName(),prefixByURI) || isElementWithEmbeddedType((XmlTagImpl)element,info.getTagName(),prefixByURI)) {
+                          consumer.process(element);
+                          return false;
+                        }
+                      }
+                      return true;
+                    }
+                  }
+;
+                  XmlUtil.processXmlElements(targetFile,processor,true);
+                }
+              }
+);
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
