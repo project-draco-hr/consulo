@@ -1,0 +1,28 @@
+{
+  final File wasFile=pair.getSecond().getIOFile();
+  final File root=getCommonAncestor(wasFile,info.getFile());
+  if (root == null)   throw new VcsException("Can not find relative path for " + wasFile.getPath() + "@"+ revision.getRevisionNumber().asString());
+  final String relativePath=FileUtil.getRelativePath(root.getPath(),wasFile.getPath(),File.separatorChar);
+  if (relativePath == null)   throw new VcsException("Can not find relative path for " + wasFile.getPath() + "@"+ revision.getRevisionNumber().asString());
+  SVNWCClient wcClient=myVcs.createWCClient();
+  SVNInfo wcRootInfo=wcClient.doInfo(root,SVNRevision.UNDEFINED);
+  if (wcRootInfo == null || wcRootInfo.getURL() == null) {
+    throw new VcsException("Can not find relative path for " + wasFile.getPath() + "@"+ revision.getRevisionNumber().asString());
+  }
+  SVNURL wasUrl=wcRootInfo.getURL();
+  final String[] strings=relativePath.replace('\\','/').split("/");
+  for (  String string : strings) {
+    wasUrl=wasUrl.appendPath(string,true);
+  }
+  final ByteArrayOutputStream buffer=new ByteArrayOutputStream();
+  final SVNRevision svnRevision=((SvnRevisionNumber)revision.getRevisionNumber()).getRevision();
+  myVcs.createWCClient().doGetFileContents(wasUrl,svnRevision,svnRevision,true,buffer);
+  final String contents=LoadTextUtil.getTextByBinaryPresentation(buffer.toByteArray(),charset == null ? CharsetToolkit.UTF8_CHARSET : charset).toString();
+  SVNLogClient client=myVcs.createLogClient();
+  setLogClientOptions(client);
+  final SvnRemoteFileAnnotation result=new SvnRemoteFileAnnotation(myVcs,contents,revision.getRevisionNumber(),pair.getFirst(),pair.getSecond().getPath(),current);
+  final ISVNAnnotateHandler annotateHandler=createAnnotationHandler(ProgressManager.getInstance().getProgressIndicator(),result);
+  final boolean calculateMergeinfo=SvnConfiguration.getInstance(myVcs.getProject()).SHOW_MERGE_SOURCES_IN_ANNOTATE && SvnUtil.checkRepositoryVersion15(myVcs,wasUrl.toString());
+  client.doAnnotate(wasUrl,svnRevision,SVNRevision.create(1),svnRevision,true,calculateMergeinfo,annotateHandler,null);
+  return result;
+}

@@ -1,0 +1,50 @@
+{
+  final SvnVcs vcs=SvnVcs.getInstance(project);
+  try {
+    final SVNURL svnurl=SVNURL.parseURIEncoded(url);
+    final File ioFile=new File(vf.getPath());
+    final SVNWCClient wcClient=vcs.createWCClient();
+    final SVNPropertyData propertyData=wcClient.doGetProperty(ioFile,SvnPropertyKeys.SVN_EXTERNALS,SVNRevision.UNDEFINED,SVNRevision.UNDEFINED);
+    String newValue;
+    if (propertyData != null && propertyData.getValue() != null && !StringUtil.isEmptyOrSpaces(propertyData.getValue().getString())) {
+      final SVNExternal[] externals=SVNExternal.parseExternals("Create External",propertyData.getValue().getString());
+      for (      SVNExternal external : externals) {
+        if (Comparing.equal(external.getPath(),target)) {
+          AbstractVcsHelper.getInstance(project).showError(new VcsException("Selected destination conflicts with existing: " + external.toString()),"Create External");
+          return;
+        }
+      }
+      final String string=createExternalDefinitionString(url,target);
+      newValue=propertyData.getValue().getString() + "\n" + string;
+    }
+ else {
+      newValue=createExternalDefinitionString(url,target);
+    }
+    wcClient.doSetProperty(ioFile,SvnPropertyKeys.SVN_EXTERNALS,SVNPropertyValue.create(newValue),false,SVNDepth.EMPTY,null,null);
+    final VcsDirtyScopeManager dirtyScopeManager=VcsDirtyScopeManager.getInstance(project);
+    final FilePathImpl filePath=new FilePathImpl(ioFile,true);
+    dirtyScopeManager.fileDirty(filePath);
+    if (checkout) {
+      final SVNUpdateClient client=vcs.createUpdateClient();
+      client.setEventHandler(new ISVNEventHandler(){
+        @Override public void handleEvent(        SVNEvent event,        double progress) throws SVNException {
+        }
+        @Override public void checkCancelled() throws SVNCancelException {
+          final ProgressIndicator pi=ProgressManager.getInstance().getProgressIndicator();
+          if (pi != null && pi.isCanceled())           throw new SVNCancelException();
+        }
+      }
+);
+      client.doUpdate(ioFile,SVNRevision.HEAD,SVNDepth.UNKNOWN,false,false);
+      vf.refresh(true,true,new Runnable(){
+        @Override public void run(){
+          dirtyScopeManager.dirDirtyRecursively(filePath);
+        }
+      }
+);
+    }
+  }
+ catch (  SVNException e1) {
+    AbstractVcsHelper.getInstance(project).showError(new VcsException(e1),"Create External");
+  }
+}
