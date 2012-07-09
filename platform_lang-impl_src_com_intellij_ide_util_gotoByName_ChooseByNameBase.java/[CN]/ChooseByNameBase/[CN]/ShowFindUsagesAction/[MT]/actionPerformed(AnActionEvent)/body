@@ -9,11 +9,11 @@
   presentation.setTabName(prefixPattern);
   presentation.setTabText(prefixPattern);
   presentation.setTargetsNodeText("Unsorted " + StringUtil.toLowerCase(prefixPattern.toLowerCase()));
-  final PsiElement[][] elements=getElements();
-  final Set<PsiElement> prefixEls=new LinkedHashSet<PsiElement>();
-  final Set<PsiElement> nonPrefixEls=new LinkedHashSet<PsiElement>();
-  Collections.addAll(prefixEls,elements[0]);
-  Collections.addAll(nonPrefixEls,elements[1]);
+  final Object[][] elements=getElements();
+  final List<PsiElement> targets=new ArrayList<PsiElement>();
+  final List<Usage> usages=new ArrayList<Usage>();
+  fillUsages(Arrays.asList(elements[0]),usages,targets,false);
+  fillUsages(Arrays.asList(elements[1]),usages,targets,true);
   if (myListModel.contains(EXTRA_ELEM)) {
     final String text=myTextField.getText();
     final boolean checkboxState=myCheckBox.isSelected();
@@ -22,12 +22,21 @@
     hideHint();
     ProgressManager.getInstance().run(new Task.Modal(myProject,prefixPattern,true){
       private ChooseByNameBase.CalcElementsThread myCalcElementsThread;
-      @Override public void run(      @NotNull ProgressIndicator indicator){
+      @Override public void run(      @NotNull final ProgressIndicator indicator){
         ensureNamesLoaded(checkboxState);
+        indicator.setIndeterminate(true);
         ApplicationManager.getApplication().runReadAction(new Runnable(){
           @Override public void run(){
+            final boolean[] overFlow=new boolean[]{false};
             myCalcElementsThread=new CalcElementsThread(text,checkboxState,null,ModalityState.NON_MODAL,true){
               @Override protected boolean isOverflow(              @NotNull Set<Object> elementsArray){
+                if (elementsArray.size() > UsageLimitUtil.USAGES_LIMIT - myMaximumListSizeLimit) {
+                  final int ret=UsageLimitUtil.showTooManyUsagesWarning(myProject,UsageViewBundle.message("find.excessive.usage.count.prompt",elementsArray.size() + myMaximumListSizeLimit));
+                  if (ret != 0) {
+                    overFlow[0]=true;
+                    return true;
+                  }
+                }
                 return false;
               }
             }
@@ -41,7 +50,7 @@
             }
 );
             setSearchInAnyPlace(anyPlace);
-            if (anyPlace) {
+            if (anyPlace && !overFlow[0]) {
               myCalcElementsThread.addElementsByPattern(text,nonPrefixMatchElementsArray,new Computable<Boolean>(){
                 @Override @NotNull public Boolean compute(){
                   return false;
@@ -50,22 +59,15 @@
 );
               nonPrefixMatchElementsArray.removeAll(prefixMatchElementsArray);
             }
+            indicator.setText("Prepare...");
+            fillUsages(prefixMatchElementsArray,usages,targets,false);
+            fillUsages(nonPrefixMatchElementsArray,usages,targets,true);
           }
         }
 );
       }
       @Override public void onSuccess(){
-        for (        Object o : prefixMatchElementsArray) {
-          if (o instanceof PsiElement) {
-            prefixEls.add((PsiElement)o);
-          }
-        }
-        for (        Object o : nonPrefixMatchElementsArray) {
-          if (o instanceof PsiElement) {
-            nonPrefixEls.add((PsiElement)o);
-          }
-        }
-        showUsageView(prefixEls,nonPrefixEls,presentation);
+        showUsageView(targets,usages,presentation);
       }
       @Override public void onCancel(){
         if (myCalcElementsThread != null) {
@@ -77,6 +79,6 @@
   }
  else {
     hideHint();
-    showUsageView(prefixEls,nonPrefixEls,presentation);
+    showUsageView(targets,usages,presentation);
   }
 }
