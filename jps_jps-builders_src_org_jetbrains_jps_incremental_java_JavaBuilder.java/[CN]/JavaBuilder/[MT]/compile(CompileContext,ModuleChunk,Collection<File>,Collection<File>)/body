@@ -1,24 +1,25 @@
 {
   ExitCode exitCode=ExitCode.NOTHING_DONE;
   final boolean hasSourcesToCompile=!files.isEmpty() || !forms.isEmpty();
-  if (!hasSourcesToCompile && !context.hasRemovedSources()) {
+  if (!hasSourcesToCompile && !Utils.hasRemovedSources(context)) {
     return exitCode;
   }
   final ProjectPaths paths=context.getProjectPaths();
-  final boolean addNotNullAssertions=context.getProject().getCompilerConfiguration().isAddNotNullAssertions();
+  final ProjectDescriptor pd=context.getProjectDescriptor();
+  final boolean addNotNullAssertions=pd.project.getCompilerConfiguration().isAddNotNullAssertions();
   final Collection<File> classpath=paths.getCompilationClasspath(chunk,context.isCompilingTests(),false);
   final Collection<File> platformCp=paths.getPlatformCompilationClasspath(chunk,context.isCompilingTests(),false);
   final DiagnosticSink diagnosticSink=new DiagnosticSink(context);
   final OutputFilesSink outputSink=new OutputFilesSink(context);
-  final Mappings delta=context.createDelta();
+  final Mappings delta=pd.dataManager.getMappings().createDelta();
   DELTA_MAPPINGS_CALLBACK_KEY.set(context,delta.getCallback());
   try {
     if (hasSourcesToCompile) {
       exitCode=ExitCode.OK;
       final Set<File> tempRootsSourcePath=new HashSet<File>();
-      final ModuleRootsIndex index=context.getRootsIndex();
+      final ModuleRootsIndex index=pd.rootsIndex;
       for (      Module module : chunk.getModules()) {
-        for (        RootDescriptor rd : index.getModuleRoots(module)) {
+        for (        RootDescriptor rd : index.getModuleRoots(context,module)) {
           if (rd.isTemp) {
             tempRootsSourcePath.add(rd.root);
           }
@@ -41,7 +42,7 @@
             try {
               context.processMessage(new ProgressMessage("Instrumenting forms [" + chunkName + "]"));
               instrumentForms(context,chunk,chunkSourcePath,finder,forms,outputSink);
-              if (context.getProject().getUiDesignerConfiguration().isCopyFormsRuntimeToOutput() && !context.isCompilingTests()) {
+              if (pd.project.getUiDesignerConfiguration().isCopyFormsRuntimeToOutput() && !context.isCompilingTests()) {
                 for (                Module module : chunk.getModules()) {
                   final File outputDir=paths.getModuleOutputDir(module,false);
                   if (outputDir != null) {
@@ -73,7 +74,7 @@
       if (!compiledOk && diagnosticSink.getErrorCount() == 0) {
         diagnosticSink.report(new PlainMessageDiagnostic(Diagnostic.Kind.ERROR,"Compilation failed: internal java compiler error"));
       }
-      if (!context.isProceedOnErrors() && diagnosticSink.getErrorCount() > 0) {
+      if (!Utils.PROCEED_ON_ERROR_KEY.get(context,Boolean.FALSE) && diagnosticSink.getErrorCount() > 0) {
         if (!compiledOk) {
           diagnosticSink.report(new PlainMessageDiagnostic(Diagnostic.Kind.OTHER,"Errors occurred while compiling module '" + chunkName + "'"));
         }
