@@ -1,0 +1,40 @@
+{
+  final ClassLoader loader=delegate.getClass().getClassLoader();
+  final UserDataHolderBase localDataHolder=new UserDataHolderBase();
+  final Set deletedKeysSet=new ConcurrentHashSet();
+  final Class<UserDataHolder> dataHolderinterface=UserDataHolder.class;
+  final Class<MessageHandler> messageHandlerinterface=MessageHandler.class;
+  return (CompileContext)Proxy.newProxyInstance(loader,new Class[]{CompileContext.class},new InvocationHandler(){
+    @Override public Object invoke(    Object proxy,    Method method,    Object[] args) throws Throwable {
+      final Class<?> declaringClass=method.getDeclaringClass();
+      if (dataHolderinterface.equals(declaringClass)) {
+        final boolean isWriteOperation=args.length == 2;
+        if (isWriteOperation) {
+          if (args[1] == null) {
+            deletedKeysSet.add(args[0]);
+          }
+ else {
+            deletedKeysSet.remove(args[0]);
+          }
+        }
+ else {
+          if (deletedKeysSet.contains(args[0])) {
+            return null;
+          }
+        }
+        final Object result=method.invoke(localDataHolder,args);
+        if (isWriteOperation || result != null) {
+          return result;
+        }
+      }
+ else       if (messageHandlerinterface.equals(declaringClass)) {
+        final BuildMessage msg=(BuildMessage)args[0];
+        if (msg.getKind() == BuildMessage.Kind.ERROR) {
+          Utils.ERRORS_DETECTED_KEY.set(localDataHolder,Boolean.TRUE);
+        }
+      }
+      return method.invoke(delegate,args);
+    }
+  }
+);
+}

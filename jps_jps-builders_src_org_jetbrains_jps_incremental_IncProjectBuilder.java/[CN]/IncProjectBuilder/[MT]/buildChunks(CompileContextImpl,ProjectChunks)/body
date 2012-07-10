@@ -1,0 +1,61 @@
+{
+  final CompileScope scope=context.getScope();
+  if (PARALLEL_BUILD_ENABLED) {
+    final List<ChunkGroup> chunkGroups=buildChunkGroups(context,chunks);
+    for (    ChunkGroup group : chunkGroups) {
+      final List<ModuleChunk> groupChunks=group.getChunks();
+      final int chunkCount=groupChunks.size();
+      if (chunkCount == 1) {
+        _buildChunk(createContextWrapper(context),scope,groupChunks.iterator().next());
+      }
+ else {
+        final CountDownLatch latch=new CountDownLatch(chunkCount);
+        final Ref<Throwable> exRef=new Ref<Throwable>(null);
+        for (        final ModuleChunk chunk : groupChunks) {
+          final CompileContext chunkLocalContext=createContextWrapper(context);
+          SharedThreadPool.INSTANCE.submitBuildTask(new Runnable(){
+            @Override public void run(){
+              try {
+                _buildChunk(chunkLocalContext,scope,chunk);
+              }
+ catch (              Throwable e) {
+synchronized (exRef) {
+                  if (exRef.isNull()) {
+                    exRef.set(e);
+                  }
+ else {
+                    LOG.info(exRef.get());
+                  }
+                }
+              }
+ finally {
+                latch.countDown();
+              }
+            }
+          }
+);
+        }
+        try {
+          latch.await();
+        }
+ catch (        InterruptedException e) {
+          LOG.info(e);
+        }
+        final Throwable exception=exRef.get();
+        if (exception != null) {
+          if (exception instanceof ProjectBuildException) {
+            throw (ProjectBuildException)exception;
+          }
+ else {
+            throw new ProjectBuildException(exception);
+          }
+        }
+      }
+    }
+  }
+ else {
+    for (    ModuleChunk chunk : chunks.getChunkList()) {
+      _buildChunk(context,scope,chunk);
+    }
+  }
+}
