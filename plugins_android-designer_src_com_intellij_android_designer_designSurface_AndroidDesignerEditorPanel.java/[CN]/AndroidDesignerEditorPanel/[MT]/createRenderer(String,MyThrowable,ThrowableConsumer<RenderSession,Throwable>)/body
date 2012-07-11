@@ -1,0 +1,85 @@
+{
+  disposeRenderer();
+  ApplicationManager.getApplication().saveAll();
+  mySessionAlarm.addRequest(new Runnable(){
+    @Override public void run(){
+      if (mySession == null) {
+        showProgress("Create RenderLib");
+      }
+    }
+  }
+,500);
+  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+    @Override public void run(){
+      try {
+        long time=System.currentTimeMillis();
+        myProfileLastVersion=myProfileAction.getVersion();
+        AndroidPlatform platform=AndroidPlatform.getInstance(getModule());
+        if (platform == null) {
+          throw new AndroidSdkNotConfiguredException();
+        }
+        AndroidFacet facet=AndroidFacet.getInstance(getModule());
+        ProfileManager manager=myProfileAction.getProfileManager();
+        LayoutDeviceConfiguration deviceConfiguration=manager.getSelectedDeviceConfiguration();
+        if (deviceConfiguration == null) {
+          throw new RenderingException("Device is not specified");
+        }
+        FolderConfiguration config=new FolderConfiguration();
+        config.set(deviceConfiguration.getConfiguration());
+        config.setUiModeQualifier(new UiModeQualifier(manager.getSelectedDockMode()));
+        config.setNightModeQualifier(new NightModeQualifier(manager.getSelectedNightMode()));
+        LocaleData locale=manager.getSelectedLocale();
+        if (locale == null) {
+          throw new RenderingException("Locale is not specified");
+        }
+        config.setLanguageQualifier(new LanguageQualifier(locale.getLanguage()));
+        config.setRegionQualifier(new RegionQualifier(locale.getRegion()));
+        float xdpi=deviceConfiguration.getDevice().getXDpi();
+        float ydpi=deviceConfiguration.getDevice().getYDpi();
+        IAndroidTarget target=manager.getSelectedTarget();
+        ThemeData theme=manager.getSelectedTheme();
+        if (target == null || theme == null) {
+          throw new RenderingException();
+        }
+        RenderingResult result=RenderUtil.renderLayout(getModule(),layoutXmlText,myFile,null,target,facet,config,xdpi,ydpi,theme,10000,true);
+        if (ApplicationManagerEx.getApplicationEx().isInternal()) {
+          System.out.println("Render time: " + (System.currentTimeMillis() - time));
+        }
+        if (result == null) {
+          throw new RenderingException();
+        }
+        final RenderSession session=mySession=result.getSession();
+        mySessionAlarm.cancelAllRequests();
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            try {
+              if (!getProject().isDisposed()) {
+                hideProgress();
+                runnable.consume(session);
+              }
+            }
+ catch (            Throwable e) {
+              myPSIChangeListener.clear();
+              showError("Parsing error",throwable.wrap(e));
+              myParseTime=false;
+            }
+          }
+        }
+);
+      }
+ catch (      final Throwable e) {
+        myPSIChangeListener.clear();
+        mySessionAlarm.cancelAllRequests();
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            myPSIChangeListener.clear();
+            showError("Render error",throwable.wrap(e));
+            myParseTime=false;
+          }
+        }
+);
+      }
+    }
+  }
+);
+}
