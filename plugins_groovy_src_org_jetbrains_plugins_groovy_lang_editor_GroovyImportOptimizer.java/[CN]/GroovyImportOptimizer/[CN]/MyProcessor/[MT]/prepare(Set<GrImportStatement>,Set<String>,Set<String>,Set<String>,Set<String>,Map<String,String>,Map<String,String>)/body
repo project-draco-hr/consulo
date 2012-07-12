@@ -5,12 +5,15 @@
   TObjectIntHashMap<String> packageCountMap=new TObjectIntHashMap<String>();
   TObjectIntHashMap<String> classCountMap=new TObjectIntHashMap<String>();
   for (  String importedClass : importedClasses) {
-    if (implicitlyImported.contains(importedClass) || innerClasses.contains(importedClass))     continue;
+    if (implicitlyImported.contains(importedClass) || innerClasses.contains(importedClass) || aliased.containsKey(importedClass)|| annotations.containsKey(importedClass)) {
+      continue;
+    }
     final String packageName=StringUtil.getPackageName(importedClass);
     if (!packageCountMap.containsKey(packageName))     packageCountMap.put(packageName,0);
     packageCountMap.increment(packageName);
   }
   for (  String importedMember : staticallyImportedMembers) {
+    if (aliased.containsKey(importedMember) || annotations.containsKey(importedMember))     continue;
     final String className=StringUtil.getPackageName(importedMember);
     if (!classCountMap.containsKey(className))     classCountMap.put(className,0);
     classCountMap.increment(className);
@@ -19,8 +22,13 @@
   final List<GrImportStatement> result=new ArrayList<GrImportStatement>();
   packageCountMap.forEachEntry(new TObjectIntProcedure<String>(){
     public boolean execute(    String s,    int i){
-      if (i >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND) {
-        result.add(factory.createImportStatementFromText(s,false,true,null));
+      if (i >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND || settings.PACKAGES_TO_USE_IMPORT_ON_DEMAND.contains(s)) {
+        final GrImportStatement imp=factory.createImportStatementFromText(s,false,true,null);
+        String annos=annotations.get(s + ".*");
+        if (annos != null) {
+          imp.getAnnotationList().replace(factory.createModifierList(annos));
+        }
+        result.add(imp);
         final PsiPackage aPackage=JavaPsiFacade.getInstance(myFile.getProject()).findPackage(s);
         if (aPackage != null) {
           for (          PsiClass clazz : aPackage.getClasses(myFile.getResolveScope())) {
@@ -35,7 +43,12 @@
   classCountMap.forEachEntry(new TObjectIntProcedure<String>(){
     public boolean execute(    String s,    int i){
       if (i >= settings.NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND) {
-        result.add(factory.createImportStatementFromText(s,true,true,null));
+        final GrImportStatement imp=factory.createImportStatementFromText(s,true,true,null);
+        String annos=annotations.get(s + ".*");
+        if (annos != null) {
+          imp.getAnnotationList().replace(factory.createModifierList(annos));
+        }
+        result.add(imp);
       }
       return true;
     }
@@ -44,37 +57,39 @@
   List<GrImportStatement> explicated=CollectionFactory.arrayList();
   for (  String importedClass : importedClasses) {
     final String parentName=StringUtil.getPackageName(importedClass);
-    if (packageCountMap.get(parentName) >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND)     continue;
-    if (implicitlyImported.contains(importedClass) && !onDemandImportedSimpleClassNames.contains(StringUtil.getShortName(importedClass))) {
-      continue;
+    if (!annotations.containsKey(importedClass) && !aliased.containsKey(importedClass)) {
+      if (packageCountMap.get(parentName) >= settings.CLASS_COUNT_TO_USE_IMPORT_ON_DEMAND || settings.PACKAGES_TO_USE_IMPORT_ON_DEMAND.contains(parentName)) {
+        continue;
+      }
+      if (implicitlyImported.contains(importedClass) && !onDemandImportedSimpleClassNames.contains(StringUtil.getShortName(importedClass))) {
+        continue;
+      }
     }
-    explicated.add(factory.createImportStatementFromText(importedClass,false,false,null));
+    final GrImportStatement imp=factory.createImportStatementFromText(importedClass,false,false,null);
+    String annos=annotations.get(importedClass);
+    if (annos != null) {
+      imp.getAnnotationList().replace(factory.createModifierList(annos));
+    }
+    explicated.add(imp);
   }
   for (  String importedMember : staticallyImportedMembers) {
     final String className=StringUtil.getPackageName(importedMember);
-    if (classCountMap.get(className) >= settings.NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND)     continue;
+    if (!annotations.containsKey(importedMember) && !aliased.containsKey(importedMember)) {
+      if (classCountMap.get(className) >= settings.NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND)       continue;
+    }
     result.add(factory.createImportStatementFromText(importedMember,true,false,null));
   }
-  final Comparator<GrImportStatement> comparator=new Comparator<GrImportStatement>(){
-    public int compare(    GrImportStatement statement1,    GrImportStatement statement2){
-      if (settings.LAYOUT_STATIC_IMPORTS_SEPARATELY) {
-        if (statement1.isStatic() && !statement2.isStatic())         return 1;
-        if (statement2.isStatic() && !statement1.isStatic())         return -1;
+  for (  GrImportStatement anImport : usedImports) {
+    if (anImport.isAliasedImport() || isAnnotatedImport(anImport)) {
+      if (anImport.isStatic()) {
+        result.add(anImport);
       }
-      if (!statement1.isStatic() && !statement2.isStatic()) {
-        if (isImportToJavaOrJavax(statement1) && !isImportToJavaOrJavax(statement2))         return 1;
-        if (!isImportToJavaOrJavax(statement1) && isImportToJavaOrJavax(statement2))         return -1;
+ else {
+        explicated.add(anImport);
       }
-      final GrCodeReferenceElement ref1=statement1.getImportReference();
-      final GrCodeReferenceElement ref2=statement2.getImportReference();
-      String name1=ref1 != null ? PsiUtil.getQualifiedReferenceText(ref1) : null;
-      String name2=ref2 != null ? PsiUtil.getQualifiedReferenceText(ref2) : null;
-      if (name1 == null)       return name2 == null ? 0 : -1;
-      if (name2 == null)       return 1;
-      return name1.compareTo(name2);
     }
   }
-;
+  final Comparator<GrImportStatement> comparator=getComparator(settings);
   Collections.sort(result,comparator);
   Collections.sort(explicated,comparator);
   explicated.addAll(result);
