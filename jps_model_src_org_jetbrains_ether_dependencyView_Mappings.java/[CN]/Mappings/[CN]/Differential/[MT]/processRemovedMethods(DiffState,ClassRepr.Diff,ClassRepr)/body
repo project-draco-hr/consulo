@@ -1,37 +1,38 @@
 {
   debug("Processing removed methods:");
+  final TIntHashSet affectedFiles=new TIntHashSet(DEFAULT_SET_CAPACITY,DEFAULT_SET_LOAD_FACTOR);
   for (  final MethodRepr m : diff.methods().removed()) {
-    debug("Method ",m.myName);
+    debug("Method ",m.name);
     final Collection<Pair<MethodRepr,ClassRepr>> overridenMethods=myUpdated.findOverridenMethods(m,it);
-    final TIntHashSet propagated=myUpdated.propagateMethodAccess(m.myName,it.myName);
+    final TIntHashSet propagated=myUpdated.propagateMethodAccess(m.name,it.name);
     if (overridenMethods.size() == 0) {
       debug("No overridden methods found, affecting method usages");
-      myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.myName),state.myAffectedUsages,state.myDependants);
+      myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),state.myAffectedUsages,state.myDependants);
     }
  else {
       boolean clear=true;
       loop:       for (      final Pair<MethodRepr,ClassRepr> overriden : overridenMethods) {
         final MethodRepr mm=overriden.first;
-        if (mm == myMockMethod || !mm.myType.equals(m.myType) || !empty(mm.mySignature) || !empty(m.mySignature)) {
+        if (mm == MOCK_METHOD || !mm.myType.equals(m.myType) || !isEmpty(mm.signature) || !isEmpty(m.signature)) {
           clear=false;
           break loop;
         }
       }
       if (!clear) {
         debug("No clearly overridden methods found, affecting method usages");
-        myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.myName),state.myAffectedUsages,state.myDependants);
+        myUpdated.affectMethodUsages(m,propagated,m.createUsage(myContext,it.name),state.myAffectedUsages,state.myDependants);
       }
     }
     final Collection<Pair<MethodRepr,ClassRepr>> overriding=myUpdated.findOverridingMethods(m,it,false);
     for (    final Pair<MethodRepr,ClassRepr> p : overriding) {
-      final int fName=myClassToSourceFile.get(p.second.myName);
+      final int fName=myClassToSourceFile.get(p.second.name);
+      affectedFiles.add(fName);
       debug("Affecting file by overriding: ",fName);
-      myAffectedFiles.add(new File(myContext.getValue(fName)));
     }
-    if ((m.myAccess & Opcodes.ACC_ABSTRACT) == 0) {
+    if ((m.access & Opcodes.ACC_ABSTRACT) == 0) {
       propagated.forEach(new TIntProcedure(){
         @Override public boolean execute(        int p){
-          if (p != it.myName) {
+          if (p != it.name) {
             final ClassRepr s=myUpdated.reprByName(p);
             if (s != null) {
               final Collection<Pair<MethodRepr,ClassRepr>> overridenInS=myUpdated.findOverridenMethods(m,s);
@@ -40,15 +41,15 @@
               boolean visited=false;
               for (              final Pair<MethodRepr,ClassRepr> pp : overridenInS) {
                 final ClassRepr cc=pp.second;
-                if (cc == myMockClass) {
+                if (cc == MOCK_CLASS) {
                   visited=true;
                   continue;
                 }
-                if (cc.myName == it.myName) {
+                if (cc.name == it.name) {
                   continue;
                 }
                 visited=true;
-                allAbstract=((pp.first.myAccess & Opcodes.ACC_ABSTRACT) > 0) || ((cc.myAccess & Opcodes.ACC_INTERFACE) > 0);
+                allAbstract=((pp.first.access & Opcodes.ACC_ABSTRACT) > 0) || ((cc.access & Opcodes.ACC_INTERFACE) > 0);
                 if (!allAbstract) {
                   break;
                 }
@@ -56,10 +57,9 @@
               if (allAbstract && visited) {
                 final int source=myClassToSourceFile.get(p);
                 if (source > 0) {
-                  final String f=myContext.getValue(source);
+                  affectedFiles.add(source);
                   debug("Removed method is not abstract & overrides some abstract method which is not then over-overriden in subclass ",p);
-                  debug("Affecting subclass source file ",f);
-                  myAffectedFiles.add(new File(f));
+                  debug("Affecting subclass source file ",source);
                 }
               }
             }
@@ -70,5 +70,13 @@
 );
     }
   }
+  affectedFiles.forEach(new TIntProcedure(){
+    @Override public boolean execute(    int file){
+      final String f=myContext.getValue(file);
+      myAffectedFiles.add(new File(f));
+      return true;
+    }
+  }
+);
   debug("End of removed methods processing");
 }
