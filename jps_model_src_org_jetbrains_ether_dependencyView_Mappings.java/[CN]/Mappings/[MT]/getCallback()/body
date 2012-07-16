@@ -5,59 +5,56 @@ synchronized (myLock) {
         final int classFileNameS=myContext.get(classFileName);
         final Pair<ClassRepr,Set<UsageRepr.Usage>> result=new ClassfileAnalyzer(myContext).analyze(classFileNameS,cr);
         final ClassRepr repr=result.first;
-        final Set<UsageRepr.Usage> localUsages=result.second;
-        final int sourceFileNameS=myContext.get(sourceFileName);
         if (repr != null) {
-          final int className=repr.myName;
-          myClassToSourceFile.put(repr.myName,sourceFileNameS);
+          final Set<UsageRepr.Usage> localUsages=result.second;
+          final int sourceFileNameS=myContext.get(sourceFileName);
+          final int className=repr.name;
+          myClassToSourceFile.put(className,sourceFileNameS);
           mySourceFileToClasses.put(sourceFileNameS,repr);
           for (          final int s : repr.getSupers()) {
-            myClassToSubclasses.put(s,repr.myName);
+            myClassToSubclasses.put(s,className);
           }
           for (          final UsageRepr.Usage u : localUsages) {
             final int owner=u.getOwner();
             if (owner != className) {
-              final int ownerSourceFile=myClassToSourceFile.get(owner);
-              if (ownerSourceFile > 0) {
-                if (ownerSourceFile != sourceFileNameS) {
-                  myClassToClassDependency.put(owner,className);
-                }
-              }
- else {
-                myClassToClassDependency.put(owner,className);
-              }
+              myClassToClassDependency.put(owner,className);
             }
           }
         }
       }
     }
     @Override public void registerImports(    final String className,    final Collection<String> imports,    Collection<String> staticImports){
+      final List<String> allImports=new ArrayList<String>();
+      for (      String anImport : imports) {
+        if (!anImport.endsWith("*")) {
+          allImports.add(anImport);
+        }
+      }
       for (      final String s : staticImports) {
         int i=s.length() - 1;
         for (; s.charAt(i) != '.'; i--)         ;
-        imports.add(s.substring(0,i));
+        final String anImport=s.substring(0,i);
+        if (!anImport.endsWith("*")) {
+          allImports.add(anImport);
+        }
       }
-      addPostPass(new PostPass(){
-        public void perform(){
-          final int rootClassName=myContext.get(className.replace(".","/"));
-          final int fileName=myClassToSourceFile.get(rootClassName);
-          for (          final String i : imports) {
-            if (i.endsWith("*")) {
-              continue;
-            }
-            final int iname=myContext.get(i.replace(".","/"));
-            myClassToClassDependency.put(iname,rootClassName);
-            final ClassRepr repr=getReprByName(rootClassName);
-            if (repr != null && fileName != 0) {
-              if (repr.addUsage(UsageRepr.createClassUsage(myContext,iname))) {
+      if (!allImports.isEmpty()) {
+        addPostPass(new PostPass(){
+          public void perform(){
+            final int rootClassName=myContext.get(className.replace(".","/"));
+            final int fileName=myClassToSourceFile.get(rootClassName);
+            final ClassRepr repr=fileName > 0 ? getReprByName(rootClassName) : null;
+            for (            final String i : allImports) {
+              final int iname=myContext.get(i.replace(".","/"));
+              myClassToClassDependency.put(iname,rootClassName);
+              if (repr != null && repr.addUsage(UsageRepr.createClassUsage(myContext,iname))) {
                 mySourceFileToClasses.put(fileName,repr);
               }
-              ;
             }
           }
         }
-      }
 );
+      }
     }
   }
 ;
