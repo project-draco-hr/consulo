@@ -1,22 +1,44 @@
 {
-  String keyStoreLocation=myKeystoreLocationField.getText().trim();
+  final String keyStoreLocation=myKeyStorePathField.getText().trim();
   if (keyStoreLocation.length() == 0) {
     throw new CommitStepException(AndroidBundle.message("android.export.package.specify.keystore.location.error"));
   }
-  File file=new File(keyStoreLocation);
-  if (myNewKeystoreButton.isSelected()) {
-    checkNewKeystoreOptions(file);
+  final char[] keyStorePassword=myKeyStorePasswordField.getPassword();
+  if (keyStorePassword.length == 0) {
+    throw new CommitStepException(AndroidBundle.message("android.export.package.specify.key.store.password.error"));
   }
- else {
-    KeyStore keyStore=checkExistingKeystoreOptionsAndCreateKeystore(file);
-    if (keyStore != null) {
-      myWizard.setKeystore(keyStore);
+  final String keyAlias=myKeyAliasField.getText().trim();
+  if (keyAlias.length() == 0) {
+    throw new CommitStepException(AndroidBundle.message("android.export.package.specify.key.alias.error"));
+  }
+  final char[] keyPassword=myKeyPasswordField.getPassword();
+  if (keyPassword.length == 0) {
+    throw new CommitStepException(AndroidBundle.message("android.export.package.specify.key.password.error"));
+  }
+  final KeyStore keyStore=loadKeyStore(new File(keyStoreLocation));
+  if (keyStore == null) {
+    throw new CommitStepException(AndroidBundle.message("android.export.package.keystore.error.title"));
+  }
+  loadKeyAndSaveToWizard(keyStore,keyAlias,keyPassword);
+  final Project project=myWizard.getProject();
+  final GenerateSignedApkSettings settings=GenerateSignedApkSettings.getInstance(project);
+  settings.KEY_STORE_PATH=keyStoreLocation;
+  settings.KEY_ALIAS=keyAlias;
+  final boolean rememberPasswords=myRememberPasswordCheckBox.isSelected();
+  settings.REMEMBER_PASSWORDS=rememberPasswords;
+  final PasswordSafe passwordSafe=PasswordSafe.getInstance();
+  try {
+    if (rememberPasswords) {
+      passwordSafe.storePassword(project,KeystoreStep.class,KEY_STORE_PASSWORD_KEY,new String(keyStorePassword));
+      passwordSafe.storePassword(project,KeystoreStep.class,KEY_PASSWORD_KEY,new String(keyPassword));
     }
  else {
-      throw new CommitStepException(AndroidBundle.message("android.export.package.keystore.error.title"));
+      passwordSafe.removePassword(project,KeystoreStep.class,KEY_STORE_PASSWORD_KEY);
+      passwordSafe.removePassword(project,KeystoreStep.class,KEY_PASSWORD_KEY);
     }
-    PropertiesComponent.getInstance(myWizard.getProject()).setValue(DEFAULT_KEYSTORE_LOCATION,keyStoreLocation);
   }
-  myWizard.setKeystoreLocation(keyStoreLocation);
-  myWizard.setKeystorePassword(myKeystorePasswordField.getPassword());
+ catch (  PasswordSafeException e) {
+    LOG.debug(e);
+    throw new CommitStepException("Cannot store passwords: " + e.getMessage());
+  }
 }
