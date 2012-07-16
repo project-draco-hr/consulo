@@ -2,6 +2,7 @@
   if (!CodeInsightSettings.getInstance().INDENT_TO_CARET_ON_PASTE) {
     return;
   }
+  if (value.getOffset() == editor.getCaretModel().getOffset())   return;
   final Document document=editor.getDocument();
   final PsiFile psiFile=PsiDocumentManager.getInstance(project).getPsiFile(document);
   if (psiFile == null || !acceptFileType(psiFile.getFileType())) {
@@ -12,19 +13,32 @@
       String pastedText=document.getText(TextRange.create(bounds));
       int startLine=document.getLineNumber(bounds.getStartOffset());
       int endLine=document.getLineNumber(bounds.getEndOffset());
-      if (!StringUtil.startsWithWhitespace(pastedText) && !StringUtil.endsWithLineBreak(pastedText) && !(StringUtil.splitByLines(pastedText).length > 1))       return;
-      int startLineStart=document.getLineStartOffset(startLine);
-      final String textBeforeFirstLine=document.getText(new TextRange(startLineStart,bounds.getStartOffset()));
-      final int caretOffset=editor.getCaretModel().getOffset();
-      int realCaretColumn=caretOffset - document.getLineStartOffset(document.getLineNumber(caretOffset));
-      if (realCaretColumn == 0 && !pastedText.startsWith(" "))       return;
-      if (textBeforeFirstLine.trim().length() == 0) {
-        EditorActionUtil.indentLine(project,editor,startLine,-value.getFirstLineLeadingSpaces());
+      int fromIndent=StringUtil.findFirst(pastedText,CharFilter.NOT_WHITESPACE_FILTER);
+      if (fromIndent < 0)       fromIndent=0;
+      String initialText=document.getText(TextRange.create(0,bounds.getStartOffset())) + document.getText(TextRange.create(bounds.getEndOffset(),document.getTextLength()));
+      final DocumentImpl initialDocument=new DocumentImpl(initialText);
+      final int lineNumber=initialDocument.getLineNumber(caretOffset);
+      final int offset=getLineStartSafeOffset(initialDocument,lineNumber);
+      final int caretColumn=caretOffset - offset;
+      String toString=initialDocument.getText(TextRange.create(offset,initialDocument.getLineEndOffset(lineNumber)));
+      int toIndent=StringUtil.findFirst(toString,new CharFilter(){
+        @Override public boolean accept(        char ch){
+          return ch != ' ';
+        }
       }
-      final List<String> strings=StringUtil.split(pastedText,"\n");
-      if (realCaretColumn >= value.getIndent() && !strings.isEmpty() && StringUtil.isEmptyOrSpaces(strings.get(strings.size() - 1)))       endLine-=1;
-      for (int i=startLine + 1; i <= endLine; i++) {
-        int indent=realCaretColumn - value.getIndent();
+);
+      if (toIndent < 0 || toString.startsWith("\n")) {
+        if (StringUtil.isEmptyOrSpaces(toString) && toString.length() > 0) {
+          toIndent=toString.length();
+        }
+ else {
+          toIndent=caretColumn;
+        }
+      }
+      int indent=toIndent - fromIndent;
+      if (!StringUtil.startsWithWhitespace(pastedText) && !StringUtil.endsWithLineBreak(pastedText) && !(StringUtil.splitByLines(pastedText).length > 1))       return;
+      if (pastedText.endsWith("\n"))       endLine-=1;
+      for (int i=startLine; i <= endLine; i++) {
         EditorActionUtil.indentLine(project,editor,i,indent);
       }
       indented.set(Boolean.TRUE);
