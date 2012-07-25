@@ -1,0 +1,69 @@
+{
+  if (files.size() > 0) {
+    context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.renderscript")));
+  }
+  boolean success=true;
+  for (  Map.Entry<File,JpsModule> entry : files.entrySet()) {
+    final File file=entry.getKey();
+    final JpsModule module=entry.getValue();
+    final MyModuleData moduleData=moduleDataMap.get(module);
+    if (!LOG.assertTrue(moduleData != null)) {
+      context.processMessage(new CompilerMessage(ANDROID_RENDERSCRIPT_COMPILER,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.internal.error")));
+      success=false;
+      continue;
+    }
+    final BuildDataManager dataManager=context.getProjectDescriptor().dataManager;
+    final File generatedSourcesDir=AndroidJpsUtil.getGeneratedSourcesStorage(module,dataManager);
+    final File rsOutputDirectory=new File(generatedSourcesDir,AndroidJpsUtil.RENDERSCRIPT_GENERATED_SOURCE_ROOT_NAME);
+    if (!rsOutputDirectory.exists() && !rsOutputDirectory.mkdirs()) {
+      context.processMessage(new CompilerMessage(ANDROID_RENDERSCRIPT_COMPILER,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.cannot.create.directory",rsOutputDirectory.getPath())));
+      success=false;
+      continue;
+    }
+    final File generatedResourcesDir=AndroidJpsUtil.getGeneratedResourcesStorage(module,dataManager);
+    final File rawDir=new File(generatedResourcesDir,"raw");
+    if (!rawDir.exists() && !rawDir.mkdirs()) {
+      context.processMessage(new CompilerMessage(ANDROID_RENDERSCRIPT_COMPILER,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.cannot.create.directory",rawDir.getPath())));
+      success=false;
+      continue;
+    }
+    final AndroidPlatform platform=moduleData.getPlatform();
+    final IAndroidTarget target=platform.getTarget();
+    final String sdkLocation=platform.getSdk().getProperties().getHomePath();
+    final String filePath=file.getPath();
+    File tmpOutputDirectory=null;
+    try {
+      tmpOutputDirectory=FileUtil.createTempDirectory("generated-rs-temp",null);
+      final String depFolderPath=getDependencyFolder(context,file,tmpOutputDirectory);
+      final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidRenderscript.execute(sdkLocation,target,filePath,tmpOutputDirectory.getPath(),depFolderPath,rawDir.getPath());
+      addMessages(context,messages,filePath,ANDROID_RENDERSCRIPT_COMPILER);
+      if (messages.get(AndroidCompilerMessageKind.ERROR).size() > 0) {
+        success=false;
+      }
+ else {
+        final List<File> newFiles=new ArrayList<File>();
+        AndroidCommonUtils.moveAllFiles(tmpOutputDirectory,rsOutputDirectory,newFiles);
+        final File bcFile=new File(rawDir,FileUtil.getNameWithoutExtension(file) + ".bc");
+        if (bcFile.exists()) {
+          newFiles.add(bcFile);
+        }
+        final List<String> newFilePaths=Arrays.asList(AndroidJpsUtil.toPaths(newFiles.toArray(new File[newFiles.size()])));
+        final SourceToOutputMapping sourceToOutputMap=dataManager.getSourceToOutputMap(module.getName(),false);
+        sourceToOutputMap.update(filePath,newFilePaths);
+        for (        File newFile : newFiles) {
+          FSOperations.markDirty(context,newFile);
+        }
+      }
+    }
+ catch (    IOException e) {
+      AndroidJpsUtil.reportExceptionError(context,filePath,e,ANDROID_RENDERSCRIPT_COMPILER);
+      success=false;
+    }
+ finally {
+      if (tmpOutputDirectory != null) {
+        FileUtil.delete(tmpOutputDirectory);
+      }
+    }
+  }
+  return success;
+}

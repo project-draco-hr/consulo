@@ -1,0 +1,67 @@
+{
+  RunManagerImpl runManager=RunManagerImpl.getInstanceImpl(project);
+  final RunManagerConfig config=runManager.getConfig();
+  final List<ProcessHandler> allHandlers=new ArrayList<ProcessHandler>();
+  final List<ProcessHandler> handlersToStop=new ArrayList<ProcessHandler>();
+  final List<Pair<RunContentDescriptor,Executor>> pairs=getRunningDescriptors(configuration);
+  if (configuration.isSingleton()) {
+    for (    Pair<RunContentDescriptor,Executor> pair : pairs) {
+      allHandlers.add(pair.getFirst().getProcessHandler());
+    }
+  }
+ else   if (handler != null) {
+    allHandlers.add(handler);
+  }
+  if (!allHandlers.isEmpty()) {
+    for (    Pair<RunContentDescriptor,Executor> pair : pairs) {
+      ProcessHandler processHandler=pair.getFirst().getProcessHandler();
+      if (processHandler == null || !allHandlers.contains(processHandler)) {
+        continue;
+      }
+      if (!processHandler.isProcessTerminated()) {
+        if (config.isRestartRequiresConfirmation()) {
+          DialogWrapper.DoNotAskOption option=new DialogWrapper.DoNotAskOption(){
+            @Override public boolean isToBeShown(){
+              return config.isRestartRequiresConfirmation();
+            }
+            @Override public void setToBeShown(            boolean value,            int exitCode){
+              config.setRestartRequiresConfirmation(value);
+            }
+            @Override public boolean canBeHidden(){
+              return true;
+            }
+            @Override public boolean shouldSaveOptionsOnCancel(){
+              return false;
+            }
+            @Override public String getDoNotShowMessage(){
+              return CommonBundle.message("dialog.options.do.not.show");
+            }
+          }
+;
+          if (Messages.OK != Messages.showOkCancelDialog(ExecutionBundle.message("rerun.confirmation.message",configuration.getName()),ExecutionBundle.message("rerun.confirmation.title") + " (" + pair.getSecond().getId()+ ")",CommonBundle.message("button.ok"),CommonBundle.message("button.cancel"),Messages.getQuestionIcon(),option)) {
+            return;
+          }
+        }
+        handlersToStop.add(processHandler);
+        stop(pair.getFirst());
+      }
+    }
+  }
+  if (handlersToStop.isEmpty()) {
+    ProgramRunnerUtil.executeConfiguration(project,configuration,executor,target);
+    return;
+  }
+  Runnable runnable=new Runnable(){
+    @Override public void run(){
+      for (      ProcessHandler processHandler : handlersToStop) {
+        if (!processHandler.isProcessTerminated()) {
+          awaitingTerminationAlarm.addRequest(this,100);
+          return;
+        }
+      }
+      ProgramRunnerUtil.executeConfiguration(project,configuration,executor,target);
+    }
+  }
+;
+  awaitingTerminationAlarm.addRequest(runnable,100);
+}

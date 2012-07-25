@@ -1,5 +1,5 @@
 {
-  final Map<Module,MyModuleData> moduleDataMap=computeModuleDatas(chunk.getModules(),context);
+  final Map<JpsModule,MyModuleData> moduleDataMap=computeModuleDatas(chunk.getModules(),context);
   if (moduleDataMap == null || moduleDataMap.size() == 0) {
     return ExitCode.ABORT;
   }
@@ -12,33 +12,34 @@
       return ExitCode.ABORT;
     }
   }
-  final Map<File,Module> idlFilesToCompile=new HashMap<File,Module>();
-  final Map<File,Module> rsFilesToCompile=new HashMap<File,Module>();
+  final Map<File,JpsModule> idlFilesToCompile=new HashMap<File,JpsModule>();
+  final Map<File,JpsModule> rsFilesToCompile=new HashMap<File,JpsModule>();
   FSOperations.processFilesToRecompile(context,chunk,new FileProcessor(){
-    @Override public boolean apply(    Module module,    File file,    String sourceRoot) throws IOException {
-      final AndroidFacet facet=AndroidJpsUtil.getFacet(module);
-      if (facet == null) {
+    @Override public boolean apply(    JpsModule module,    File file,    String sourceRoot) throws IOException {
+      final JpsAndroidModuleExtension extension=AndroidJpsUtil.getExtension(module);
+      if (extension == null) {
         return true;
       }
       final String ext=FileUtil.getExtension(file.getName());
       if (AIDL_EXTENSION.equals(ext)) {
-        idlFilesToCompile.put(file,facet.getModule());
+        idlFilesToCompile.put(file,module);
       }
  else       if (RENDERSCRIPT_EXTENSION.equals(ext)) {
-        rsFilesToCompile.put(file,facet.getModule());
+        rsFilesToCompile.put(file,module);
       }
       return true;
     }
   }
 );
   boolean success=true;
+  final BuildDataManager dataManager=context.getProjectDescriptor().dataManager;
   if (context.isProjectRebuild()) {
-    for (    Module module : moduleDataMap.keySet()) {
-      final File generatedSourcesStorage=AndroidJpsUtil.getGeneratedSourcesStorage(module);
+    for (    JpsModule module : moduleDataMap.keySet()) {
+      final File generatedSourcesStorage=AndroidJpsUtil.getGeneratedSourcesStorage(module,dataManager);
       if (generatedSourcesStorage.exists() && !deleteAndMarkRecursively(generatedSourcesStorage,context,BUILDER_NAME)) {
         success=false;
       }
-      final File generatedResourcesStorage=AndroidJpsUtil.getGeneratedResourcesStorage(module);
+      final File generatedResourcesStorage=AndroidJpsUtil.getGeneratedResourcesStorage(module,dataManager);
       if (generatedResourcesStorage.exists() && !deleteAndMarkRecursively(generatedResourcesStorage,context,BUILDER_NAME)) {
         success=false;
       }
@@ -53,7 +54,7 @@
   if (!runRenderscriptCompiler(context,rsFilesToCompile,moduleDataMap)) {
     success=false;
   }
-  final File dataStorageRoot=context.getProjectDescriptor().dataManager.getDataStorageRoot();
+  final File dataStorageRoot=dataManager.getDataStorageRoot();
   final AndroidAptStateStorage aptStorage=new AndroidAptStateStorage(dataStorageRoot);
   try {
     if (!runAaptCompiler(context,moduleDataMap,aptStorage)) {

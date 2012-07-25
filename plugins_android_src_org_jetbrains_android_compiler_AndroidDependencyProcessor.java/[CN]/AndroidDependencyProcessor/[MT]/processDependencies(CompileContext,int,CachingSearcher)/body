@@ -1,0 +1,42 @@
+{
+  if (!(context instanceof CompileContextEx)) {
+    return;
+  }
+  final Project project=context.getProject();
+  if (!ProjectFacetManager.getInstance(project).hasFacets(AndroidFacet.ID)) {
+    return;
+  }
+  final DependencyCache depCache=((CompileContextEx)context).getDependencyCache();
+  final Cache cache=depCache.getCache();
+  final String path=cache.getPath(classQualifiedName);
+  final String classFileName=new File(path).getName();
+  if (!AndroidCommonUtils.R_PATTERN.matcher(classFileName).matches()) {
+    return;
+  }
+  final String qName=depCache.resolve(classQualifiedName);
+  final int idx=qName.indexOf('$');
+  final String topLevelClassName=idx < 0 ? qName : qName.substring(0,idx);
+  final Set<String> qNamesToMark=new HashSet<String>();
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    @Override public void run(){
+      final PsiClass[] classes=JavaPsiFacade.getInstance(project).findClasses(topLevelClassName,GlobalSearchScope.allScope(project));
+      for (      PsiClass aClass : classes) {
+        final Collection<PsiReference> references=searcher.findReferences(aClass,true);
+        for (        PsiReference reference : references) {
+          final PsiClass ownerClass=getOwnerClass(reference.getElement());
+          if (ownerClass != null && !ownerClass.equals(aClass)) {
+            final String ownerClassQName=ownerClass.getQualifiedName();
+            if (ownerClassQName != null) {
+              qNamesToMark.add(ownerClassQName);
+            }
+          }
+        }
+      }
+    }
+  }
+);
+  for (  String toMark : qNamesToMark) {
+    final int qualifiedName=depCache.getSymbolTable().getId(toMark);
+    depCache.markClass(qualifiedName);
+  }
+}
