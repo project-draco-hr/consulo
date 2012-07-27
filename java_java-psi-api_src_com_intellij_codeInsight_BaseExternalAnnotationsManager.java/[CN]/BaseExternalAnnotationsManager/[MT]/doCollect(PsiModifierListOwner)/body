@@ -3,51 +3,18 @@
   if (files == null) {
     return Collections.emptyMap();
   }
-  final Map<String,PsiAnnotation> result=new HashMap<String,PsiAnnotation>();
+  Map<String,PsiAnnotation> result=new HashMap<String,PsiAnnotation>();
+  String externalName=getExternalName(listOwner,false);
+  String oldExternalName=getNormalizedExternalName(listOwner);
   for (  PsiFile file : files) {
     if (!file.isValid())     continue;
-    final Document document;
-    try {
-      VirtualFile virtualFile=file.getVirtualFile();
-      if (virtualFile == null)       continue;
-      document=JDOMUtil.loadDocument(escapeAttributes(StreamUtil.readText(virtualFile.getInputStream())));
-    }
- catch (    IOException e) {
-      LOG.error(e);
-      continue;
-    }
-catch (    JDOMException e) {
-      LOG.error(e);
-      continue;
-    }
-    if (document == null)     continue;
-    final Element rootElement=document.getRootElement();
-    if (rootElement == null)     continue;
-    final String externalName=getExternalName(listOwner,false);
-    final String oldExternalName=getNormalizedExternalName(listOwner);
-    for (    final Element element : (List<Element>)rootElement.getChildren()) {
-      final String className=element.getAttributeValue("name");
-      if (!Comparing.strEqual(className,externalName) && !Comparing.strEqual(className,oldExternalName)) {
-        continue;
+    MultiMap<String,AnnotationData> fileData=getDataFromFile(file);
+    for (    AnnotationData annotationData : ContainerUtil.concat(fileData.get(externalName),fileData.get(oldExternalName))) {
+      try {
+        result.put(annotationData.annotationClassFqName,JavaPsiFacade.getInstance(myPsiManager.getProject()).getElementFactory().createAnnotationFromText(annotationData.annotationText,null));
       }
-      for (      Element annotationElement : (List<Element>)element.getChildren()) {
-        final String annotationFQN=annotationElement.getAttributeValue("name");
-        final StringBuilder buf=new StringBuilder();
-        for (        Element annotationParameter : (List<Element>)annotationElement.getChildren()) {
-          buf.append(",");
-          final String nameValue=annotationParameter.getAttributeValue("name");
-          if (nameValue != null) {
-            buf.append(nameValue).append("=");
-          }
-          buf.append(annotationParameter.getAttributeValue("val"));
-        }
-        final String annotationText="@" + annotationFQN + (buf.length() > 0 ? "(" + StringUtil.trimStart(buf.toString(),",") + ")" : "");
-        try {
-          result.put(annotationFQN,JavaPsiFacade.getInstance(myPsiManager.getProject()).getElementFactory().createAnnotationFromText(annotationText,null));
-        }
- catch (        IncorrectOperationException e) {
-          LOG.error(e);
-        }
+ catch (      IncorrectOperationException e) {
+        LOG.error(e);
       }
     }
   }
