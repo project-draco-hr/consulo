@@ -1,8 +1,8 @@
 {
   final PsiBuilder.Marker fileMarker=builder.mark();
   final PsiBuilder.Marker documentMarker=builder.mark();
-  final Stack<Pair<Integer,PsiBuilder.Marker>> stack=new Stack<Pair<Integer,PsiBuilder.Marker>>();
-  stack.push(Pair.create(0,builder.mark()));
+  final Stack<BlockInfo> stack=new Stack<BlockInfo>();
+  stack.push(new BlockInfo(0,builder.mark(),builder.getTokenType()));
   PsiBuilder.Marker startLineMarker=null;
   int currentIndent=0;
   boolean eolSeen=false;
@@ -19,7 +19,7 @@
         currentIndent=builder.getTokenText().length();
       }
  else {
-        if (!eolSeen && !stack.isEmpty() && currentIndent > 0 && currentIndent < stack.peek().first) {
+        if (!eolSeen && !stack.isEmpty() && currentIndent > 0 && currentIndent < stack.peek().getIndent()) {
           eolSeen=true;
         }
         if (eolSeen) {
@@ -27,17 +27,19 @@
             startLineMarker.rollbackTo();
             startLineMarker=null;
           }
-          while (!stack.isEmpty() && currentIndent < stack.peek().first) {
-            closeBlock(builder,stack.pop().second);
+          while (!stack.isEmpty() && currentIndent < stack.peek().getIndent()) {
+            final BlockInfo blockInfo=stack.pop();
+            closeBlock(builder,blockInfo.getMarker(),blockInfo.getStartTokenType());
           }
           if (!stack.isEmpty()) {
-            final Pair<Integer,PsiBuilder.Marker> pair=stack.peek();
-            if (currentIndent >= pair.first) {
-              if (currentIndent == pair.first) {
-                closeBlock(builder,stack.pop().second);
+            final BlockInfo blockInfo=stack.peek();
+            if (currentIndent >= blockInfo.getIndent()) {
+              if (currentIndent == blockInfo.getIndent()) {
+                final BlockInfo info=stack.pop();
+                closeBlock(builder,info.getMarker(),info.getStartTokenType());
               }
               passEOLsAndIndents(builder);
-              stack.push(Pair.create(currentIndent,builder.mark()));
+              stack.push(new BlockInfo(currentIndent,builder.mark(),type));
             }
           }
           eolSeen=false;
@@ -51,7 +53,8 @@
     startLineMarker.drop();
   }
   while (!stack.isEmpty()) {
-    closeBlock(builder,stack.pop().second);
+    final BlockInfo blockInfo=stack.pop();
+    closeBlock(builder,blockInfo.getMarker(),blockInfo.getStartTokenType());
   }
   documentMarker.done(myDocumentType);
   fileMarker.done(root);

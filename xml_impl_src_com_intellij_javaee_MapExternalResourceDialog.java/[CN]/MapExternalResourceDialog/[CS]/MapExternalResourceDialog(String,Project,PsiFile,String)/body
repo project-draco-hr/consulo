@@ -1,0 +1,82 @@
+{
+  super(project);
+  setTitle("Map External Resource");
+  myUri.setText(uri);
+  DefaultMutableTreeNode root=new DefaultMutableTreeNode();
+  mySchemasTree.setModel(new DefaultTreeModel(root));
+  ConfigFileSearcher searcher=new ConfigFileSearcher(file == null ? null : ModuleUtilCore.findModuleForPsiElement(file),project){
+    @Override public Set<PsiFile> search(    @Nullable Module module,    @NotNull Project project){
+      List<IndexedRelevantResource<String,XsdNamespaceBuilder>> resources=XmlNamespaceIndex.getAllResources(module,project,null);
+      HashSet<PsiFile> files=new HashSet<PsiFile>();
+      PsiManager psiManager=PsiManager.getInstance(project);
+      for (      IndexedRelevantResource<String,XsdNamespaceBuilder> resource : resources) {
+        VirtualFile file=resource.getFile();
+        PsiFile psiFile=psiManager.findFile(file);
+        ContainerUtil.addIfNotNull(files,psiFile);
+      }
+      return files;
+    }
+  }
+;
+  searcher.search();
+  new ConfigFilesTreeBuilder(mySchemasTree).buildTree(searcher,root);
+  TreeUtil.expandAll(mySchemasTree);
+  mySchemasTree.setRootVisible(false);
+  mySchemasTree.setShowsRootHandles(true);
+  ColoredTreeCellRenderer renderer=new ColoredTreeCellRenderer(){
+    @Override public void customizeCellRenderer(    JTree tree,    Object value,    boolean selected,    boolean expanded,    boolean leaf,    int row,    boolean hasFocus){
+      ConfigFilesTreeBuilder.renderNode(value,expanded,this);
+    }
+  }
+;
+  renderer.setFont(EditorColorsManager.getInstance().getGlobalScheme().getFont(EditorFontType.PLAIN));
+  mySchemasTree.setCellRenderer(renderer);
+  MouseAdapter mouseAdapter=new MouseAdapter(){
+    @Override public void mouseClicked(    MouseEvent e){
+      if (e.getClickCount() > 1 && isOKActionEnabled()) {
+        doOKAction();
+      }
+    }
+  }
+;
+  mySchemasTree.addMouseListener(mouseAdapter);
+  myUri.getDocument().addDocumentListener(new DocumentAdapter(){
+    @Override protected void textChanged(    DocumentEvent e){
+      validateInput();
+    }
+  }
+);
+  mySchemasTree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener(){
+    @Override public void valueChanged(    TreeSelectionEvent e){
+      validateInput();
+    }
+  }
+);
+  myExplorer=new FileSystemTreeImpl(project,new FileChooserDescriptor(true,false,false,false,true,false));
+  myExplorer.addListener(new FileSystemTree.Listener(){
+    @Override public void selectionChanged(    List<VirtualFile> selection){
+      validateInput();
+    }
+  }
+,myExplorer);
+  myExplorer.getTree().addMouseListener(mouseAdapter);
+  myExplorerPanel.add(ScrollPaneFactory.createScrollPane(myExplorer.getTree()),BorderLayout.CENTER);
+  PsiFile schema=null;
+  if (file != null) {
+    schema=XmlUtil.findNamespaceByLocation(file,uri);
+  }
+ else   if (location != null) {
+    VirtualFile virtualFile=VfsUtil.findRelativeFile(location,null);
+    if (virtualFile != null) {
+      schema=PsiManager.getInstance(project).findFile(virtualFile);
+    }
+  }
+  if (schema != null) {
+    DefaultMutableTreeNode node=TreeUtil.findNodeWithObject(root,schema);
+    if (node != null) {
+      TreeUtil.selectNode(mySchemasTree,node);
+    }
+    myExplorer.select(schema.getVirtualFile(),null);
+  }
+  init();
+}

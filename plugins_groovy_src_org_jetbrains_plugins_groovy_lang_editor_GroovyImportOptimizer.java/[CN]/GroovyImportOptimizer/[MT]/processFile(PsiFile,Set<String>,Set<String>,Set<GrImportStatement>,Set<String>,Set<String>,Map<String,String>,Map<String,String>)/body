@@ -1,13 +1,11 @@
 {
   if (!(file instanceof GroovyFile))   return;
-  ((GroovyFile)file).accept(new GroovyRecursiveElementVisitor(){
-    public void visitCodeReferenceElement(    GrCodeReferenceElement refElement){
-      visitRefElement(refElement);
-      super.visitCodeReferenceElement(refElement);
-    }
-    public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
-      visitRefElement(referenceExpression);
-      super.visitReferenceExpression(referenceExpression);
+  ((GroovyFile)file).accept(new PsiRecursiveElementWalkingVisitor(){
+    @Override public void visitElement(    PsiElement element){
+      super.visitElement(element);
+      if (element instanceof GrReferenceElement) {
+        visitRefElement((GrReferenceElement)element);
+      }
     }
     private void visitRefElement(    GrReferenceElement refElement){
       final GroovyResolveResult[] resolveResults=refElement.multiResolve(false);
@@ -17,8 +15,11 @@
         if (element == null)         return;
         if (context instanceof GrImportStatement) {
           final GrImportStatement importStatement=(GrImportStatement)context;
-          if (usedImports != null) {
+          if (usedImports != null && isImportUsed(refElement,element)) {
             usedImports.add(importStatement);
+          }
+          if (isImplicitlyImported(element,refElement.getReferenceName(),(GroovyFile)file)) {
+            addImplicitClass(element);
           }
           if (!importStatement.isAliasedImport() && !isAnnotatedImport(importStatement)) {
             String importedName=null;
@@ -77,17 +78,33 @@
           }
         }
  else         if (context == null && !(refElement.getParent() instanceof GrImportStatement) && refElement.getQualifier() == null) {
-          final String qname=getTargetQualifiedName(element);
-          if (qname != null) {
-            if (implicitlyImported != null) {
-              implicitlyImported.add(qname);
-            }
-            if (importedClasses != null) {
-              importedClasses.add(qname);
-            }
-          }
+          addImplicitClass(element);
         }
       }
+    }
+    private void addImplicitClass(    PsiElement element){
+      final String qname=getTargetQualifiedName(element);
+      if (qname != null) {
+        if (implicitlyImported != null) {
+          implicitlyImported.add(qname);
+        }
+        if (importedClasses != null) {
+          importedClasses.add(qname);
+        }
+      }
+    }
+    /** 
+ * checks if import for implicitly imported class is needed
+ */
+    private boolean isImportUsed(    GrReferenceElement refElement,    PsiElement element){
+      if (isImplicitlyImported(element,refElement.getReferenceName(),(GroovyFile)file)) {
+        final ClassResolverProcessor processor=new ClassResolverProcessor(refElement.getReferenceName(),refElement,ResolverProcessor.RESOLVE_KINDS_CLASS);
+        processImports(ResolveState.initial(),null,refElement,processor,((GroovyFile)file).getImportStatements(),true);
+        if (!processor.hasCandidates()) {
+          return false;
+        }
+      }
+      return true;
     }
   }
 );

@@ -7,6 +7,29 @@
     @Override public void onSuccess(){
     }
     private void showGutter(){
+      final EditorGutterAction action=new EditorGutterAction(){
+        @Override public void doAction(        int lineNum){
+          final VcsFileRevision revision=cache.get(lineNum);
+          final List<RangeHighlighter> links=myHyperlinks.findAllHyperlinksOnLine(lineNum);
+          if (!links.isEmpty()) {
+            HyperlinkInfo info=myHyperlinks.getHyperlinks().get(links.get(links.size() - 1));
+            if (info instanceof FileHyperlinkInfo) {
+              final VirtualFile file=((FileHyperlinkInfo)info).getDescriptor().getFile();
+              final Project project=getProject();
+              final AbstractVcs vcs=ProjectLevelVcsManagerEx.getInstanceEx(project).getVcsFor(file);
+              if (vcs != null) {
+                final VcsRevisionNumber number=revision.getRevisionNumber();
+                final VcsKey vcsKey=vcs.getKeyInstanceMethod();
+                ShowAllAffectedGenericAction.showSubmittedFiles(project,number,file,vcsKey);
+              }
+            }
+          }
+        }
+        @Override public Cursor getCursor(        int lineNum){
+          return Cursor.getPredefinedCursor(Cursor.HAND_CURSOR);
+        }
+      }
+;
       myEditor.getGutter().registerTextAnnotation(new ActiveAnnotationGutter(){
         @Override public void doAction(        int lineNum){
         }
@@ -40,13 +63,14 @@
           return Collections.emptyList();
         }
         @Override public void gutterClosed(){
+          myGutterShowed=false;
         }
       }
-);
+,action);
+      myGutterShowed=true;
     }
     @Override public void run(    @NotNull ProgressIndicator indicator){
       Date newestDate=null;
-      HashMap<VirtualFile,List<Integer>> files2lines=new HashMap<VirtualFile,List<Integer>>();
       List<VirtualFile> files=new ArrayList<VirtualFile>();
       for (int line=0; line < myEditor.getDocument().getLineCount(); line++) {
         indicator.checkCanceled();
@@ -100,7 +124,7 @@
                   }
                   ApplicationManager.getApplication().invokeLater(new Runnable(){
                     public void run(){
-                      if (cache.keySet().size() == 1) {
+                      if (!myGutterShowed) {
                         showGutter();
                       }
  else {
@@ -114,6 +138,7 @@
             }
           }
  catch (          VcsException ignored) {
+            ignored.printStackTrace();
           }
         }
       }
