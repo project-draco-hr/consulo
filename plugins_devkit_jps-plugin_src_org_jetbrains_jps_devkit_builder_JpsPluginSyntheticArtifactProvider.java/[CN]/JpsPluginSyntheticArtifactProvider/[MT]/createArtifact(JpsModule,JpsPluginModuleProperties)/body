@@ -1,0 +1,58 @@
+{
+  JpsPackagingElementFactory factory=JpsPackagingElementFactory.getInstance();
+  JpsCompositePackagingElement root=factory.createArtifactRoot();
+  String pluginXmlUrl=properties.getPluginXmlUrl();
+  if (pluginXmlUrl != null) {
+    String pluginXmlPath=JpsPathUtil.urlToPath(pluginXmlUrl);
+    JpsCompositePackagingElement metaInfDir=factory.getOrCreateDirectory(root,"META-INF");
+    metaInfDir.addChild(factory.createFileCopy(pluginXmlPath,null));
+    File pluginXmlFile=JpsPathUtil.urlToFile(pluginXmlUrl);
+    if (pluginXmlFile.exists()) {
+      try {
+        Element rootElement=JDOMUtil.loadDocument(pluginXmlFile).getRootElement();
+        for (        Element dependsElement : JDOMUtil.getChildren(rootElement,"depends")) {
+          String relativePath=dependsElement.getAttributeValue("config-file");
+          if (relativePath != null) {
+            File dependencyFile=new File(pluginXmlFile.getParent(),FileUtil.toSystemDependentName(relativePath));
+            String dependencyPath=FileUtil.toSystemIndependentName(dependencyFile.getAbsolutePath());
+            metaInfDir.addChild(factory.createFileCopy(dependencyPath,null));
+          }
+        }
+      }
+ catch (      JDOMException e) {
+        LOG.info(e);
+      }
+catch (      IOException e) {
+        LOG.info(e);
+      }
+    }
+  }
+  JpsJavaDependenciesEnumerator enumerator=JpsJavaExtensionService.dependencies(module).recursively().includedIn(JpsJavaClasspathKind.PRODUCTION_RUNTIME);
+  JpsCompositePackagingElement classesDir=factory.getOrCreateDirectory(root,"classes");
+  for (  JpsModule depModule : enumerator.getModules()) {
+    if (depModule.getModuleType().equals(JpsJavaModuleType.INSTANCE)) {
+      classesDir.addChild(JpsJavaExtensionService.getInstance().createProductionModuleOutput(depModule.createReference()));
+    }
+  }
+  classesDir.addChild(JpsJavaExtensionService.getInstance().createProductionModuleOutput(module.createReference()));
+  for (  JpsLibrary library : enumerator.getLibraries()) {
+    JpsCompositePackagingElement parent;
+    if (hasDirsOnly(library)) {
+      parent=classesDir;
+    }
+ else {
+      parent=factory.getOrCreateDirectory(root,"lib");
+    }
+    parent.addChild(factory.createLibraryElement(library.createReference()));
+  }
+  String name=module.getName() + ":plugin";
+  JpsArtifact artifact=JpsArtifactService.getInstance().createArtifact(name,root,DirectoryArtifactType.INSTANCE);
+  JpsTypedLibrary<JpsIdeaSdkProperties> sdk=module.getSdk(JpsIdeaSdkType.INSTANCE);
+  if (sdk != null) {
+    String sandboxHome=sdk.getProperties().getSandboxHome();
+    if (sandboxHome != null) {
+      artifact.setOutputPath(sandboxHome + "/plugins/" + module.getName());
+    }
+  }
+  return artifact;
+}
