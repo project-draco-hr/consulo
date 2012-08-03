@@ -3,107 +3,70 @@
   Property property=(Property)value;
   Color background=table.getBackground();
   boolean isDefault=true;
+  Component focusOwner=KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+  boolean tableHasFocus=focusOwner != null && SwingUtilities.isDescendingFrom(focusOwner,table);
   try {
     isDefault=isDefault(property);
   }
- catch (  Throwable e) {
+ catch (  Exception e) {
     LOG.debug(e);
   }
-  if (isDefault) {
-    background=Gray._240;
-  }
+  myRenderer.clear();
   if (column == 0) {
-    myPropertyNameRenderer.getTableCellRendererComponent(table,value,selected,hasFocus,row,column);
-    if (!selected) {
-      myPropertyNameRenderer.setBackground(background);
+    myRenderer.getTableCellRendererComponent(table,value,selected,cellHasFocus,row,column);
+    myRenderer.setBackground(selected ? UIUtil.getTreeSelectionBackground(tableHasFocus) : background);
+    SimpleTextAttributes attr=SimpleTextAttributes.REGULAR_ATTRIBUTES;
+    if (!selected && !isDefault) {
+      attr=attr.derive(-1,FileStatus.MODIFIED.getColor(),null,null);
     }
-    SimpleTextAttributes attributes=SimpleTextAttributes.REGULAR_ATTRIBUTES;
     if (property.isImportant()) {
-      attributes=SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES;
+      attr=attr.derive(attr.getStyle() | SimpleTextAttributes.STYLE_BOLD,null,null,null);
     }
- else     if (property.isExpert()) {
-      attributes=SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES;
+    if (property.isExpert()) {
+      attr=attr.derive(attr.getStyle() | SimpleTextAttributes.STYLE_ITALIC,null,null,null);
+    }
+    if (property.isDeprecated()) {
+      attr=attr.derive(attr.getStyle() | SimpleTextAttributes.STYLE_STRIKEOUT,null,null,null);
     }
     ErrorInfo errorInfo=getErrorInfoForRow(row);
     if (errorInfo != null) {
-      Map<HighlightSeverity,SimpleTextAttributes> cache=myRegularAttributes;
-      if (property.isImportant()) {
-        cache=myBoldAttributes;
-      }
- else       if (property.isExpert()) {
-        cache=myItalicAttributes;
-      }
-      HighlightSeverity severity=errorInfo.getLevel().getSeverity();
-      SimpleTextAttributes errorAttributes=cache.get(severity);
-      if (errorAttributes == null) {
-        TextAttributesKey attributesKey=getErrorAttributes(severity);
-        TextAttributes textAttributes=EditorColorsManager.getInstance().getGlobalScheme().getAttributes(attributesKey);
-        if (property.isImportant()) {
-          textAttributes=textAttributes.clone();
-          textAttributes.setFontType(textAttributes.getFontType() | Font.BOLD);
-        }
- else         if (property.isExpert()) {
-          textAttributes=textAttributes.clone();
-          textAttributes.setFontType(textAttributes.getFontType() | Font.ITALIC);
-        }
-        errorAttributes=SimpleTextAttributes.fromTextAttributes(textAttributes);
-        cache.put(severity,errorAttributes);
-      }
-      attributes=errorAttributes;
+      SimpleTextAttributes template=SimpleTextAttributes.fromTextAttributes(EditorColorsManager.getInstance().getGlobalScheme().getAttributes(getErrorAttributes(errorInfo.getLevel().getSeverity())));
+      int style=((template.getStyle() & SimpleTextAttributes.STYLE_WAVED) != 0 ? SimpleTextAttributes.STYLE_WAVED : 0) | ((template.getStyle() & SimpleTextAttributes.STYLE_UNDERLINE) != 0 ? SimpleTextAttributes.STYLE_UNDERLINE : 0);
+      attr=attr.derive(attr.getStyle() | style,template.getFgColor(),template.getBgColor(),template.getWaveColor());
     }
-    if (property.isDeprecated()) {
-      attributes=new SimpleTextAttributes(attributes.getBgColor(),attributes.getFgColor(),attributes.getWaveColor(),attributes.getStyle() | SimpleTextAttributes.STYLE_STRIKEOUT);
-    }
-    myPropertyNameRenderer.append(property.getName(),attributes);
-    if (!getChildren(property).isEmpty()) {
-      if (property.getParent() == null) {
-        if (isExpanded(property)) {
-          myPropertyNameRenderer.setIcon(myCollapseIcon);
-        }
- else {
-          myPropertyNameRenderer.setIcon(myExpandIcon);
-        }
-      }
- else {
-        if (isExpanded(property)) {
-          myPropertyNameRenderer.setIcon(myIndentedCollapseIcon);
-        }
- else {
-          myPropertyNameRenderer.setIcon(myIndentedExpandIcon);
-        }
-      }
+    myRenderer.append(property.getName(),attr);
+    Icon icon=UIUtil.getTreeNodeIcon(isExpanded(property),selected,tableHasFocus);
+    boolean hasChildren=!getChildren(property).isEmpty();
+    myRenderer.setIcon(hasChildren ? icon : null);
+    int nodeIndent=UIUtil.getTreeLeftChildIndent() + UIUtil.getTreeRightChildIndent();
+    int totalIndent=nodeIndent * getDepth(property);
+    if (hasChildren) {
+      int leftIconOffset=Math.max(0,UIUtil.getTreeLeftChildIndent() - (icon.getIconWidth() / 2));
+      totalIndent+=leftIconOffset;
+      myRenderer.setIconTextGap(Math.max(0,nodeIndent - leftIconOffset - icon.getIconWidth()));
     }
  else {
-      myPropertyNameRenderer.setIcon(myIndentIcons[property.getIndent()]);
+      totalIndent+=nodeIndent;
     }
-    if (!selected) {
-      if (isDefault) {
-        myPropertyNameRenderer.setForeground(property.isExpert() ? Color.LIGHT_GRAY : table.getForeground());
-      }
- else {
-        myPropertyNameRenderer.setForeground(FileStatus.MODIFIED.getColor());
-      }
-    }
-    return myPropertyNameRenderer;
+    myRenderer.setIpad(new Insets(0,totalIndent,0,0));
+    return myRenderer;
   }
  else {
     try {
       PropertyRenderer renderer=property.getRenderer();
-      JComponent component=renderer.getComponent(getCurrentComponent(),getPropertyContext(),getValue(property),selected,hasFocus);
-      if (!selected) {
-        component.setBackground(background);
-      }
+      JComponent component=renderer.getComponent(getCurrentComponent(),getPropertyContext(),getValue(property),selected,tableHasFocus);
+      component.setBackground(selected ? UIUtil.getTreeSelectionBackground(tableHasFocus) : background);
       component.setFont(table.getFont());
       if (component instanceof JCheckBox) {
         component.putClientProperty("JComponent.sizeVariant",UIUtil.isUnderAquaLookAndFeel() ? "small" : null);
       }
       return component;
     }
- catch (    Throwable e) {
+ catch (    Exception e) {
       LOG.debug(e);
-      myErrorRenderer.clear();
-      myErrorRenderer.append(formatErrorGettingValueMesage(e.getMessage()),SimpleTextAttributes.ERROR_ATTRIBUTES);
-      return myErrorRenderer;
+      myRenderer.getTableCellRendererComponent(table,value,selected,cellHasFocus,row,column);
+      myRenderer.append(formatErrorGettingValueMesage(e.getMessage()),SimpleTextAttributes.ERROR_ATTRIBUTES);
+      return myRenderer;
     }
   }
 }

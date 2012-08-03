@@ -1,0 +1,69 @@
+{
+  final List<ASTNode> children=new ArrayList<ASTNode>();
+  final List<StringBuilder> childrenText=new ArrayList<StringBuilder>();
+  Pair<String,TextRange> pair=parse(initial);
+  final String text=pair.first;
+  int start=0;
+  boolean inWhiteSpace=initial.charAt(0) == ' ' || initial.charAt(0) == '\t';
+  for (int i=1; i <= text.length(); i++) {
+    if (i == text.length() || ((StringUtil.isWhiteSpace(text.charAt(i))) ^ inWhiteSpace)) {
+      final int childIndex=children.size();
+      final int startOffset=start;
+      childrenText.add(new StringBuilder(text.substring(start,i)));
+      final ASTNode child=myMockery.mock(ASTNode.class,"child" + childIndex);
+      children.add(child);
+      final IElementType type=inWhiteSpace ? TokenType.WHITE_SPACE : TokenType.CODE_FRAGMENT;
+      myMockery.checking(new Expectations(){
+{
+          allowing(child).getElementType();
+          will(returnValue(type));
+          allowing(child).getChars();
+          will(returnValue(childrenText.get(childIndex)));
+          allowing(child).getTextLength();
+          will(returnValue(childrenText.get(childIndex).length()));
+          allowing(child).getStartOffset();
+          will(returnValue(startOffset));
+        }
+      }
+);
+      inWhiteSpace=!inWhiteSpace;
+      start=i;
+    }
+  }
+  final ASTNode root=myMockery.mock(ASTNode.class);
+  myMockery.checking(new Expectations(){
+{
+      allowing(root).getFirstChildNode();
+      will(returnValue(children.get(0)));
+      allowing(root).getTextLength();
+      will(returnValue(text.length()));
+      allowing(root).getStartOffset();
+      will(returnValue(0));
+    }
+  }
+);
+  TabPostFormatProcessor.TreeHelper helper=new TabPostFormatProcessor.TreeHelper(){
+    @Override public ASTNode prevLeaf(    @NotNull ASTNode current){
+      int i=children.indexOf(current);
+      return i > 0 ? children.get(i - 1) : null;
+    }
+    @Override public ASTNode nextLeaf(    @NotNull ASTNode current){
+      int i=children.indexOf(current);
+      return i < children.size() - 1 ? children.get(i + 1) : null;
+    }
+    @Override public ASTNode firstLeaf(    @NotNull ASTNode startNode){
+      return root == startNode ? children.get(0) : null;
+    }
+    @Override public void replace(    @NotNull String newText,    @NotNull TextRange range,    @NotNull ASTNode leaf){
+      int i=children.indexOf(leaf);
+      childrenText.get(i).replace(range.getStartOffset() - leaf.getStartOffset(),range.getEndOffset() - leaf.getStartOffset(),newText);
+    }
+  }
+;
+  TabPostFormatProcessor.processViaPsi(root,pair.second,helper,useTabs,smartTabs,tabWidth);
+  StringBuilder actual=new StringBuilder();
+  for (  ASTNode child : children) {
+    actual.append(child.getChars());
+  }
+  assertEquals(expected,actual.toString());
+}
