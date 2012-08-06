@@ -1,0 +1,50 @@
+{
+  SVNJNAUtil.setJNAEnabled(false);
+  final TestListener listener=new TestListener(mySynchObject);
+  myAuthenticationManager.addListener(listener);
+  final SavedOnceListener savedOnceListener=new SavedOnceListener();
+  myAuthenticationManager.addListener(savedOnceListener);
+  myTestInteraction.setPlaintextAnswer(false);
+  final SVNURL url=SVNURL.parseURIEncoded("http://some.host.com/repo");
+  final SVNURL url2=SVNURL.parseURIEncoded("http://some.other.host.com/repo");
+  final SVNException[] exception=new SVNException[1];
+  final Boolean[] result=new Boolean[1];
+  synchronousBackground(new Runnable(){
+    @Override public void run(){
+      try {
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.persistent,url,Type.request));
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.interactive,url,Type.request));
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.persistent,url,Type.without_pasword_save));
+        commonScheme(url,false,null);
+        long start=System.currentTimeMillis();
+        waitListenerStep(start,listener,3);
+        Assert.assertEquals(1,myTestInteraction.getNumPlaintextPrompt());
+        savedOnceListener.assertSaved(url,ISVNAuthenticationManager.PASSWORD);
+        savedOnceListener.reset();
+        myTestInteraction.reset();
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.persistent,url2,Type.request));
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.interactive,url2,Type.request));
+        listener.addStep(new Trinity<ProviderType,SVNURL,Type>(ProviderType.persistent,url2,Type.without_pasword_save));
+        commonScheme(url2,false,"anotherRealm");
+        start=System.currentTimeMillis();
+        waitListenerStep(start,listener,6);
+        Assert.assertEquals(1,myTestInteraction.getNumPlaintextPrompt());
+      }
+ catch (      SVNException e) {
+        exception[0]=e;
+      }
+      result[0]=true;
+    }
+  }
+);
+  Assert.assertTrue(result[0]);
+  Assert.assertEquals(1,myTestInteraction.getNumPlaintextPrompt());
+  Assert.assertEquals(6,listener.getCnt());
+  listener.assertForAwt();
+  savedOnceListener.assertForAwt();
+  savedOnceListener.assertNotSaved(url,ISVNAuthenticationManager.PASSWORD);
+  if (exception[0] != null) {
+    throw exception[0];
+  }
+  SVNJNAUtil.setJNAEnabled(true);
+}
