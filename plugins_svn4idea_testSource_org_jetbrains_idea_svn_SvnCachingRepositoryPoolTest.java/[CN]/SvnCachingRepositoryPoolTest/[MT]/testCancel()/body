@@ -1,0 +1,69 @@
+{
+  final SvnIdeaRepositoryPoolManager poolManager=new SvnIdeaRepositoryPoolManager(true,null,null,1,1);
+  final SVNURL url=SVNURL.parseURIEncoded("http://a.b.c");
+  poolManager.setCreator(new ThrowableConvertor<SVNURL,SVNRepository,SVNException>(){
+    @Override public SVNRepository convert(    SVNURL svnurl) throws SVNException {
+      return new MockSvnRepository(svnurl,ISVNSession.DEFAULT);
+    }
+  }
+);
+  final MockSvnRepository repository1=(MockSvnRepository)poolManager.createRepository(url,true);
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  poolManager.setCreator(new ThrowableConvertor<SVNURL,SVNRepository,SVNException>(){
+    @Override public SVNRepository convert(    SVNURL svnurl) throws SVNException {
+      semaphore.waitFor();
+      return new MockSvnRepository(svnurl,ISVNSession.DEFAULT);
+    }
+  }
+);
+  final SVNException[] exc=new SVNException[1];
+  final Runnable target=new Runnable(){
+    @Override public void run(){
+      try {
+        final MockSvnRepository repository=(MockSvnRepository)poolManager.createRepository(url,true);
+        repository.fireConnectionClosed();
+      }
+ catch (      SVNException e) {
+        e.printStackTrace();
+        exc[0]=e;
+      }
+    }
+  }
+;
+  final EmptyProgressIndicator indicator=new EmptyProgressIndicator(){
+    @Override public void cancel(){
+      super.cancel();
+      ProgressManagerImpl.canceled();
+    }
+  }
+;
+  Thread thread=new Thread(new Runnable(){
+    @Override public void run(){
+      ((ProgressManagerImpl)ProgressManager.getInstance()).executeProcessUnderProgress(target,indicator);
+    }
+  }
+);
+  thread.start();
+  try {
+    Thread.sleep(10);
+  }
+ catch (  InterruptedException e) {
+  }
+  Assert.assertTrue(thread.isAlive());
+  indicator.cancel();
+  final Object obj=new Object();
+  while (!timeout(System.currentTimeMillis()) && thread.isAlive()) {
+synchronized (obj) {
+      try {
+        obj.wait(300);
+      }
+ catch (      InterruptedException e) {
+      }
+    }
+  }
+  Assert.assertTrue(!thread.isAlive());
+  Assert.assertNotNull(exc[0]);
+  poolManager.dispose();
+  checkAfterDispose(poolManager);
+}
