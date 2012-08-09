@@ -2,9 +2,7 @@
   super.visitMethodCallExpression(expression);
   final PsiReferenceExpression methodExpression=expression.getMethodExpression();
   final String referenceName=methodExpression.getReferenceName();
-  final Log4jPriority priority=log4jLogMethodNames.get(referenceName);
-  final UtilLoggingLevel level=utilLogMethodNames.get(referenceName);
-  if (priority == null && level == null) {
+  if (!loggingLevels.contains(referenceName)) {
     return;
   }
   final PsiMethod method=expression.resolveMethod();
@@ -12,20 +10,7 @@
     return;
   }
   final PsiClass containingClass=method.getContainingClass();
-  final String qualifiedName=containingClass.getQualifiedName();
-  boolean log4j=false;
-  boolean javaUtilLogging=false;
-  boolean commonsLogging=false;
-  if ("org.apache.log4j.Logger".equals(qualifiedName) || "org.apache.log4j.Category".equals(qualifiedName)) {
-    log4j=true;
-  }
- else   if ("java.util.logging.Logger".equals(qualifiedName)) {
-    javaUtilLogging=true;
-  }
- else   if ("org.apache.commons.logging.Log".equals(qualifiedName)) {
-    commonsLogging=true;
-  }
- else {
+  if (containingClass == null) {
     return;
   }
   final PsiElement parent=expression.getParent();
@@ -51,8 +36,28 @@
  else {
     return;
   }
-  final PsiExpression condition=ifStatement.getCondition();
-  if (!(condition instanceof PsiMethodCallExpression)) {
+  PsiExpression condition=ifStatement.getCondition();
+  if (condition instanceof PsiMethodCallExpression) {
+    final PsiStatement thenBranch=ifStatement.getThenBranch();
+    if (!PsiTreeUtil.isAncestor(thenBranch,expression,false)) {
+      return;
+    }
+  }
+ else   if (condition instanceof PsiPrefixExpression) {
+    final PsiPrefixExpression prefixExpression=(PsiPrefixExpression)condition;
+    if (!JavaTokenType.EXCL.equals(prefixExpression.getOperationTokenType())) {
+      return;
+    }
+    final PsiStatement elseBranch=ifStatement.getElseBranch();
+    if (!PsiTreeUtil.isAncestor(elseBranch,expression,false)) {
+      return;
+    }
+    condition=prefixExpression.getOperand();
+    if (!(condition instanceof PsiMethodCallExpression)) {
+      return;
+    }
+  }
+ else {
     return;
   }
   final PsiExpression qualifier=methodExpression.getQualifierExpression();
@@ -75,13 +80,9 @@
   if (!target.equals(conditionTarget)) {
     return;
   }
-  if (commonsLogging && !hasCommonsLoggingProblem(priority,methodCallExpression)) {
-    return;
-  }
- else   if (log4j && !hasLog4jProblem(priority,methodCallExpression)) {
-    return;
-  }
- else   if (javaUtilLogging && !hasUtilLoggingProblem(level,methodCallExpression)) {
+  final String qualifiedName=containingClass.getQualifiedName();
+  final LoggingProblemChecker problemChecker=problemCheckers.get(qualifiedName);
+  if (problemChecker == null || !problemChecker.hasLoggingProblem(referenceName,methodCallExpression)) {
     return;
   }
   registerMethodCallError(methodCallExpression,referenceName);

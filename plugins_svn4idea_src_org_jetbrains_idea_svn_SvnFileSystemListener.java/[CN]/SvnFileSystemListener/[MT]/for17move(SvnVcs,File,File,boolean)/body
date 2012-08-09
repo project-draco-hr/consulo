@@ -1,23 +1,47 @@
 {
   if (undo) {
-    final SVNWCClient wcClient=vcs.createWCClient();
     myUndoingMove=true;
+    final SVNWCClient wcClient=vcs.createWCClient();
     new RepeatSvnActionThroughBusy(){
       @Override protected void executeImpl() throws SVNException {
         wcClient.doRevert(dst,true);
       }
     }
 .execute();
-    new RepeatSvnActionThroughBusy(){
-      @Override protected void executeImpl() throws SVNException {
-        wcClient.doRevert(src,true);
-      }
+    copyUnversionedMembersOfDirectory(src,dst);
+    final SVNStatus srcStatus=getFileStatus(src);
+    if (srcStatus == null || SvnVcs.svnStatusIsUnversioned(srcStatus)) {
+      FileUtil.delete(src);
     }
+ else {
+      new RepeatSvnActionThroughBusy(){
+        @Override protected void executeImpl() throws SVNException {
+          wcClient.doRevert(src,true);
+        }
+      }
 .execute();
+    }
     restoreFromUndoStorage(dst);
   }
  else {
     if (doUsualMove(vcs,src))     return true;
+    final SVNStatus dstParentStatus=getFileStatus(dst.getParentFile());
+    if (dstParentStatus == null || SvnVcs.svnStatusIsUnversioned(dstParentStatus)) {
+      try {
+        copyFileOrDir(src,dst);
+      }
+ catch (      IOException e) {
+        throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR),e);
+      }
+      final SVNWCClient wcClient=vcs.createWCClient();
+      new RepeatSvnActionThroughBusy(){
+        @Override protected void executeImpl() throws SVNException {
+          wcClient.doDelete(src,true,false);
+        }
+      }
+.execute();
+      return false;
+    }
     final SVNCopyClient copyClient=vcs.createCopyClient();
     final SVNCopySource svnCopySource=new SVNCopySource(SVNRevision.UNDEFINED,SVNRevision.WORKING,src);
     new RepeatSvnActionThroughBusy(){
