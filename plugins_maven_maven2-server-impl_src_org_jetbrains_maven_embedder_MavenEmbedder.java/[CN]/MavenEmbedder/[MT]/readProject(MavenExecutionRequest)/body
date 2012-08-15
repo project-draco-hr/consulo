@@ -1,0 +1,48 @@
+{
+  ProfileManager globalProfileManager=request.getGlobalProfileManager();
+  globalProfileManager.loadSettingsProfiles(request.getSettings());
+  MavenProject rootProject=null;
+  final List<Exception> exceptions=new ArrayList<Exception>();
+  Object result=null;
+  try {
+    final File pomFile=new File(request.getPomFile());
+    if (!pomFile.exists()) {
+      throw new FileNotFoundException("File doesn't exist: " + pomFile.getPath());
+    }
+    final Method getProjectsMethod=DefaultMaven.class.getDeclaredMethod("getProjects",MavenExecutionRequest.class);
+    getProjectsMethod.setAccessible(true);
+    Maven maven=getComponent(Maven.class);
+    result=getProjectsMethod.invoke(maven,request);
+  }
+ catch (  NoSuchMethodException e) {
+    throw new RuntimeException(e);
+  }
+catch (  IllegalAccessException e) {
+    throw new RuntimeException(e);
+  }
+catch (  InvocationTargetException e) {
+    return handleException(e.getTargetException());
+  }
+catch (  Exception e) {
+    return handleException(e);
+  }
+  if (result != null) {
+    MavenProjectBuilder builder=getComponent(MavenProjectBuilder.class);
+    for (    Object p : (List)result) {
+      MavenProject project=(MavenProject)p;
+      try {
+        builder.calculateConcreteState(project,request.getProjectBuilderConfiguration(),false);
+      }
+ catch (      ModelInterpolationException e) {
+        exceptions.add(e);
+      }
+      if (project.isExecutionRoot()) {
+        rootProject=project;
+      }
+    }
+    if (rootProject == null && exceptions.isEmpty()) {
+      throw new RuntimeException("Could't build project for unknown reason");
+    }
+  }
+  return new MavenExecutionResult(rootProject,exceptions);
+}
