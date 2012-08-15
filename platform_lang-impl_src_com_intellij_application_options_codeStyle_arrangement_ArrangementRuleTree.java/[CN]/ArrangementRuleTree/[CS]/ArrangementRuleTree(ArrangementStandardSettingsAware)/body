@@ -3,28 +3,47 @@
   myDisplayManager=new ArrangementNodeDisplayManager(filter);
   myFactory=new ArrangementNodeComponentFactory(myDisplayManager);
   DefaultMutableTreeNode root=new DefaultMutableTreeNode();
-  myTreeModel=new DefaultTreeModel(root);
-  myTree=new Tree(myTreeModel){
+  DefaultTreeModel treeModel=new DefaultTreeModel(root);
+  myTree=new Tree(treeModel){
     @Override protected void setExpandedState(    TreePath path,    boolean state){
       if (state) {
         super.setExpandedState(path,state);
       }
     }
+    @Override protected boolean isAlwaysPaintRowBackground(){
+      return false;
+    }
+    @Override protected void processMouseEvent(    MouseEvent e){
+      mySkipSelectionChange=e.getClickCount() > 0 && getNodeComponentAt(e.getLocationOnScreen()) == null;
+      try {
+        super.processMouseEvent(e);
+        if (mySkipSelectionChange) {
+          notifyEditingListeners(null);
+        }
+      }
+  finally {
+        mySkipSelectionChange=false;
+      }
+    }
   }
 ;
-  myTree.setSelectionModel(null);
-  myTree.addMouseMotionListener(new MouseAdapter(){
-    @Override public void mouseMoved(    MouseEvent e){
-      onMouseMoved(e);
+  myTree.setSelectionModel(mySelectionModel);
+  mySelectionModel.addTreeSelectionListener(new TreeSelectionListener(){
+    @Override public void valueChanged(    TreeSelectionEvent e){
+      setSelection(e.getOldLeadSelectionPath(),false);
+      setSelection(e.getNewLeadSelectionPath(),true);
+    }
+  }
+);
+  myTree.addMouseListener(new MouseAdapter(){
+    @Override public void mouseClicked(    MouseEvent e){
+      onMouseClicked(e);
     }
   }
 );
   myTree.putClientProperty(DataManager.CLIENT_PROPERTY_DATA_PROVIDER,new DataProvider(){
     @Override public Object getData(    @NonNls String dataId){
-      if (ArrangementSettingsUtil.NODE_COMPONENT.is(dataId)) {
-        return myPrevComponentUnderMouse;
-      }
- else       if (ArrangementSettingsUtil.DISPLAY_MANAGER.is(dataId)) {
+      if (ArrangementSettingsUtil.DISPLAY_MANAGER.is(dataId)) {
         return myDisplayManager;
       }
  else       if (ArrangementSettingsUtil.FILTER.is(dataId)) {
@@ -37,19 +56,20 @@
     }
   }
 );
-  List<ArrangementSettingsNode> children=new ArrayList<ArrangementSettingsNode>();
-  children.add(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.PUBLIC));
-  children.add(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.STATIC));
-  children.add(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.FINAL));
-  HierarchicalArrangementSettingsNode settingsNode=new HierarchicalArrangementSettingsNode(new ArrangementSettingsAtomNode(ArrangementSettingType.TYPE,ArrangementEntryType.FIELD));
-  ArrangementSettingsCompositeNode modifiers=new ArrangementSettingsCompositeNode(ArrangementSettingsCompositeNode.Operator.AND);
-  for (  ArrangementSettingsNode child : children) {
-    modifiers.addOperand(child);
-  }
-  settingsNode.addChild(new HierarchicalArrangementSettingsNode(modifiers));
-  if (settingsNode != null) {
-    map(root,settingsNode);
-  }
+  ArrangementSettingsCompositeNode constants=new ArrangementSettingsCompositeNode(ArrangementSettingsCompositeNode.Operator.AND);
+  constants.addOperand(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.PUBLIC));
+  constants.addOperand(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.STATIC));
+  constants.addOperand(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.FINAL));
+  ArrangementSettingsCompositeNode privateFields=new ArrangementSettingsCompositeNode(ArrangementSettingsCompositeNode.Operator.AND);
+  privateFields.addOperand(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.PRIVATE));
+  HierarchicalArrangementSettingsNode fields=new HierarchicalArrangementSettingsNode(new ArrangementSettingsAtomNode(ArrangementSettingType.TYPE,ArrangementEntryType.FIELD));
+  fields.addChild(new HierarchicalArrangementSettingsNode(constants));
+  fields.addChild(new HierarchicalArrangementSettingsNode(privateFields));
+  int row=map(root,fields,null,0);
+  HierarchicalArrangementSettingsNode methods=new HierarchicalArrangementSettingsNode(new ArrangementSettingsAtomNode(ArrangementSettingType.TYPE,ArrangementEntryType.METHOD));
+  methods.addChild(new HierarchicalArrangementSettingsNode(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.PUBLIC)));
+  methods.addChild(new HierarchicalArrangementSettingsNode(new ArrangementSettingsAtomNode(ArrangementSettingType.MODIFIER,ArrangementModifier.PRIVATE)));
+  map(root,methods,null,row);
   expandAll(myTree,new TreePath(root));
   myTree.setRootVisible(false);
   myTree.setShowsRootHandles(false);
