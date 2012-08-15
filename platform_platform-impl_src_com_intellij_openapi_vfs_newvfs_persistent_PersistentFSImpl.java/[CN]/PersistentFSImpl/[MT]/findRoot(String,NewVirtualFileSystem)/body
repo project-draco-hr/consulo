@@ -1,53 +1,62 @@
 {
   final String rootUrl=fs.getProtocol() + "://" + basePath;
-synchronized (LOCK) {
+  myRootsLock.readLock().lock();
+  try {
+    final VirtualFileSystemEntry root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
+    if (root != null)     return root;
+  }
+  finally {
+    myRootsLock.readLock().unlock();
+  }
+  myRootsLock.writeLock().lock();
+  try {
     VirtualFileSystemEntry root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
-    if (root == null) {
-      try {
-        final int rootId=FSRecords.findRootRecord(rootUrl);
-        if (basePath.isEmpty()) {
-          root=new VirtualDirectoryImpl("",null,fs,rootId){
-            @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod") @Override @NotNull public VirtualFile[] getChildren(){
-              return getRoots(getFileSystem());
-            }
-            @Override public VirtualFileSystemEntry findChild(            @NotNull String name){
-              if (name.isEmpty())               return null;
-              return findRoot(name,getFileSystem());
-            }
-          }
+    if (root != null)     return root;
+    final int rootId=FSRecords.findRootRecord(rootUrl);
+    if (basePath.isEmpty()) {
+      root=new VirtualDirectoryImpl("",null,fs,rootId){
+        @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod") @Override @NotNull public VirtualFile[] getChildren(){
+          return getRoots(getFileSystem());
+        }
+        @Override public VirtualFileSystemEntry findChild(        @NotNull String name){
+          if (name.isEmpty())           return null;
+          return findRoot(name,getFileSystem());
+        }
+      }
 ;
-        }
- else         if (fs instanceof JarFileSystem) {
-          String parentPath=basePath.substring(0,basePath.indexOf(JarFileSystem.JAR_SEPARATOR));
-          final VirtualFile parentLocalFile=LocalFileSystem.getInstance().findFileByPath(parentPath);
-          if (parentLocalFile == null)           return null;
-          root=new JarRoot(fs,rootId,parentLocalFile);
-        }
+    }
+ else     if (fs instanceof JarFileSystem) {
+      String parentPath=basePath.substring(0,basePath.indexOf(JarFileSystem.JAR_SEPARATOR));
+      final VirtualFile parentLocalFile=LocalFileSystem.getInstance().findFileByPath(parentPath);
+      if (parentLocalFile == null)       return null;
+      root=new JarRoot(fs,rootId,parentLocalFile);
+    }
  else {
-          root=new VirtualDirectoryImpl(basePath,null,fs,rootId);
-        }
-        final FileAttributes attributes=fs.getAttributes(root);
-        if (attributes == null) {
-          return null;
-        }
-        final boolean newRoot=copyRecordFromDelegateFS(rootId,0,root,fs,attributes);
-        if (!newRoot) {
-          if (attributes.lastModified != FSRecords.getTimestamp(rootId)) {
-            root.markDirtyRecursively();
-          }
-        }
-      }
- catch (      IOException e) {
-        throw new RuntimeException(e);
-      }
-      if (basePath.isEmpty()) {
-        myFakeRoot=root;
-      }
- else {
-        myRoots.put(rootUrl,root);
-        myRootsById.put(root.getId(),root);
+      root=new VirtualDirectoryImpl(basePath,null,fs,rootId);
+    }
+    final FileAttributes attributes=fs.getAttributes(root);
+    if (attributes == null) {
+      return null;
+    }
+    final boolean newRoot=copyRecordFromDelegateFS(rootId,0,root,fs,attributes);
+    if (!newRoot) {
+      if (attributes.lastModified != FSRecords.getTimestamp(rootId)) {
+        root.markDirtyRecursively();
       }
     }
+    if (basePath.isEmpty()) {
+      myFakeRoot=root;
+    }
+ else {
+      myRoots.put(rootUrl,root);
+      myRootsById.put(root.getId(),root);
+    }
     return root;
+  }
+ catch (  IOException e) {
+    throw new RuntimeException(e);
+  }
+ finally {
+    myRootsLock.writeLock().unlock();
   }
 }
