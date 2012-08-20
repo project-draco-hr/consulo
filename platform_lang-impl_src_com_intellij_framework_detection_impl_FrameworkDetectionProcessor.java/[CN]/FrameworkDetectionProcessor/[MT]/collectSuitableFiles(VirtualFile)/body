@@ -1,28 +1,41 @@
 {
-  if (myProgressIndicator.isCanceled() || !myProcessedFiles.add(file))   return;
-  if (file.isDirectory()) {
-    file.getChildren();
-    file.refresh(false,false);
-    VirtualFile[] children=file.getChildren();
-    for (    VirtualFile child : children) {
-      collectSuitableFiles(child);
-    }
-    return;
+class CancelledException extends RuntimeException {
   }
-  final FileType fileType=file.getFileType();
-  if (!myDetectorsByFileType.containsKey(fileType)) {
-    return;
-  }
-  myProgressIndicator.setText2(file.getPresentableUrl());
   try {
-    FileContent fileContent=new FileContentImpl(file,file.contentsToByteArray(false));
-    for (    FrameworkDetectorData detector : myDetectorsByFileType.get(fileType)) {
-      if (detector.myFilePattern.accepts(fileContent)) {
-        detector.mySuitableFiles.add(file);
+    VfsUtilCore.visitChildrenRecursively(file,new VirtualFileVisitor(){
+      @Override public boolean visitFile(      @NotNull VirtualFile file){
+        if (myProgressIndicator.isCanceled()) {
+          throw new CancelledException();
+        }
+        if (!myProcessedFiles.add(file)) {
+          return false;
+        }
+        if (file.isDirectory()) {
+          file.getChildren();
+          file.refresh(false,false);
+        }
+ else {
+          final FileType fileType=file.getFileType();
+          if (myDetectorsByFileType.containsKey(fileType)) {
+            myProgressIndicator.setText2(file.getPresentableUrl());
+            try {
+              final FileContent fileContent=new FileContentImpl(file,file.contentsToByteArray(false));
+              for (              FrameworkDetectorData detector : myDetectorsByFileType.get(fileType)) {
+                if (detector.myFilePattern.accepts(fileContent)) {
+                  detector.mySuitableFiles.add(file);
+                }
+              }
+            }
+ catch (            IOException e) {
+              LOG.info(e);
+            }
+          }
+        }
+        return true;
       }
     }
+);
   }
- catch (  IOException e) {
-    LOG.info(e);
+ catch (  CancelledException ignored) {
   }
 }

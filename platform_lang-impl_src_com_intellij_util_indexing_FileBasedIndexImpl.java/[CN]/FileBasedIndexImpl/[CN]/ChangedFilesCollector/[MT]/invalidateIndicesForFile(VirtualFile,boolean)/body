@@ -1,0 +1,56 @@
+{
+  cleanProcessedFlag(file);
+  IndexingStamp.flushCache(file);
+  final List<ID<?,?>> affectedIndices=new ArrayList<ID<?,?>>(myIndices.size());
+  for (  final ID<?,?> indexId : myIndices.keySet()) {
+    try {
+      if (!needsFileContentLoading(indexId)) {
+        if (shouldUpdateIndex(file,indexId)) {
+          updateSingleIndex(indexId,file,null);
+        }
+      }
+ else {
+        if (shouldUpdateIndex(file,indexId)) {
+          affectedIndices.add(indexId);
+        }
+      }
+    }
+ catch (    StorageException e) {
+      LOG.info(e);
+      requestRebuild(indexId);
+    }
+  }
+  if (!affectedIndices.isEmpty()) {
+    if (markForReindex && !isTooLarge(file)) {
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        @Override public void run(){
+          for (          ID<?,?> indexId : affectedIndices) {
+            IndexingStamp.update(file,indexId,IndexInfrastructure.INVALID_STAMP2);
+          }
+        }
+      }
+);
+      scheduleForUpdate(file);
+    }
+ else {
+      myFutureInvalidations.offer(new InvalidationTask(file){
+        @Override public void run(){
+          removeFileDataFromIndices(affectedIndices,file);
+        }
+      }
+);
+    }
+  }
+  if (!markForReindex) {
+    final boolean removedFromUpdateQueue=myFilesToUpdate.remove(file);
+    if (removedFromUpdateQueue && affectedIndices.isEmpty()) {
+      myFutureInvalidations.offer(new InvalidationTask(file){
+        @Override public void run(){
+          removeFileDataFromIndices(myRequiringContentIndices,file);
+        }
+      }
+);
+    }
+  }
+  IndexingStamp.flushCache(file);
+}

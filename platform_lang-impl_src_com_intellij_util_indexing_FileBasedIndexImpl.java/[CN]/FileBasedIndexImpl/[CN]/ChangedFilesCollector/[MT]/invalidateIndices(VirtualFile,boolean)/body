@@ -1,69 +1,22 @@
 {
-  if (isUnderConfigOrSystem(file)) {
-    return;
-  }
-  if (file.isDirectory()) {
-    if (isMock(file) || myManagingFS.wereChildrenAccessed(file)) {
-      final Iterable<VirtualFile> children=file instanceof NewVirtualFile ? ((NewVirtualFile)file).iterInDbChildren() : Arrays.asList(file.getChildren());
-      for (      VirtualFile child : children) {
-        invalidateIndices(child,markForReindex);
+  VfsUtilCore.visitChildrenRecursively(file,new VirtualFileVisitor(){
+    @Override public boolean visitFile(    @NotNull VirtualFile file){
+      if (isUnderConfigOrSystem(file)) {
+        return false;
       }
-    }
-  }
- else {
-    cleanProcessedFlag(file);
-    IndexingStamp.flushCache(file);
-    final List<ID<?,?>> affectedIndices=new ArrayList<ID<?,?>>(myIndices.size());
-    for (    final ID<?,?> indexId : myIndices.keySet()) {
-      try {
-        if (!needsFileContentLoading(indexId)) {
-          if (shouldUpdateIndex(file,indexId)) {
-            updateSingleIndex(indexId,file,null);
-          }
+      if (file.isDirectory()) {
+        if (!isMock(file) && !myManagingFS.wereChildrenAccessed(file)) {
+          return false;
         }
- else {
-          if (shouldUpdateIndex(file,indexId)) {
-            affectedIndices.add(indexId);
-          }
-        }
-      }
- catch (      StorageException e) {
-        LOG.info(e);
-        requestRebuild(indexId);
-      }
-    }
-    if (!affectedIndices.isEmpty()) {
-      if (markForReindex && !isTooLarge(file)) {
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          @Override public void run(){
-            for (            ID<?,?> indexId : affectedIndices) {
-              IndexingStamp.update(file,indexId,IndexInfrastructure.INVALID_STAMP2);
-            }
-          }
-        }
-);
-        scheduleForUpdate(file);
       }
  else {
-        myFutureInvalidations.offer(new InvalidationTask(file){
-          @Override public void run(){
-            removeFileDataFromIndices(affectedIndices,file);
-          }
-        }
-);
+        invalidateIndicesForFile(file,markForReindex);
       }
+      return true;
     }
-    if (!markForReindex) {
-      final boolean removedFromUpdateQueue=myFilesToUpdate.remove(file);
-      if (removedFromUpdateQueue && affectedIndices.isEmpty()) {
-        myFutureInvalidations.offer(new InvalidationTask(file){
-          @Override public void run(){
-            removeFileDataFromIndices(myRequiringContentIndices,file);
-          }
-        }
-);
-      }
+    @Override public Iterable<VirtualFile> getChildrenIterable(    @NotNull VirtualFile file){
+      return file instanceof NewVirtualFile ? ((NewVirtualFile)file).iterInDbChildren() : Arrays.asList(file.getChildren());
     }
-    IndexingStamp.flushCache(file);
   }
+);
 }
