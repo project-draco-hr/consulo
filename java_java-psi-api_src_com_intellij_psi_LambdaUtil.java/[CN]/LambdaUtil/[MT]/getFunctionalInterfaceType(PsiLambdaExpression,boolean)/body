@@ -1,0 +1,63 @@
+{
+  PsiElement parent=expression.getParent();
+  while (parent instanceof PsiParenthesizedExpression) {
+    parent=parent.getParent();
+  }
+  if (parent instanceof PsiTypeCastExpression) {
+    return ((PsiTypeCastExpression)parent).getType();
+  }
+ else   if (parent instanceof PsiVariable) {
+    return ((PsiVariable)parent).getType();
+  }
+ else   if (parent instanceof PsiAssignmentExpression) {
+    final PsiExpression lExpression=((PsiAssignmentExpression)parent).getLExpression();
+    return lExpression.getType();
+  }
+ else   if (parent instanceof PsiExpressionList) {
+    final PsiExpressionList expressionList=(PsiExpressionList)parent;
+    final int lambdaIdx=getLambdaIdx(expressionList,expression);
+    if (lambdaIdx > -1) {
+      if (!tryToSubstitute) {
+        final Map<PsiElement,PsiMethod> currentMethodCandidates=MethodCandidateInfo.CURRENT_CANDIDATE.get();
+        final PsiMethod method=currentMethodCandidates != null ? currentMethodCandidates.get(parent) : null;
+        if (method != null) {
+          final PsiParameter[] parameters=method.getParameterList().getParameters();
+          return lambdaIdx < parameters.length ? parameters[lambdaIdx].getType() : null;
+        }
+      }
+      final PsiElement gParent=expressionList.getParent();
+      if (gParent instanceof PsiMethodCallExpression) {
+        final PsiMethodCallExpression contextCall=(PsiMethodCallExpression)gParent;
+        final JavaResolveResult resolveResult=contextCall.resolveMethodGenerics();
+        final PsiElement resolve=resolveResult.getElement();
+        if (resolve instanceof PsiMethod) {
+          final PsiParameter[] parameters=((PsiMethod)resolve).getParameterList().getParameters();
+          if (lambdaIdx < parameters.length) {
+            if (!tryToSubstitute) {
+              return parameters[lambdaIdx].getType();
+            }
+            return PsiResolveHelper.ourGuard.doPreventingRecursion(expression,true,new Computable<PsiType>(){
+              @Override public PsiType compute(){
+                return resolveResult.getSubstitutor().substitute(parameters[lambdaIdx].getType());
+              }
+            }
+);
+          }
+        }
+      }
+    }
+  }
+ else   if (parent instanceof PsiReturnStatement) {
+    final PsiMethod method=PsiTreeUtil.getParentOfType(parent,PsiMethod.class);
+    if (method != null) {
+      return method.getReturnType();
+    }
+  }
+ else   if (parent instanceof PsiLambdaExpression) {
+    final PsiType parentInterfaceType=((PsiLambdaExpression)parent).getFunctionalInterfaceType();
+    if (parentInterfaceType != null) {
+      return getFunctionalInterfaceReturnType(parentInterfaceType);
+    }
+  }
+  return null;
+}
