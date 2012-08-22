@@ -1,0 +1,37 @@
+{
+  final PsiLambdaExpression lambdaExpression=PsiTreeUtil.getParentOfType(element,PsiLambdaExpression.class);
+  LOG.assertTrue(lambdaExpression != null);
+  final PsiType functionalInterfaceType=lambdaExpression.getFunctionalInterfaceType();
+  LOG.assertTrue(functionalInterfaceType != null);
+  final PsiMethod method=LambdaUtil.getFunctionalInterfaceMethod(functionalInterfaceType);
+  LOG.assertTrue(method != null);
+  final String blockText=getBodyText(lambdaExpression);
+  if (blockText == null)   return;
+  final PsiElementFactory psiElementFactory=JavaPsiFacade.getElementFactory(element.getProject());
+  PsiNewExpression newExpression=(PsiNewExpression)psiElementFactory.createExpressionFromText("new " + functionalInterfaceType.getCanonicalText() + "(){}",lambdaExpression);
+  newExpression=(PsiNewExpression)lambdaExpression.replace(newExpression);
+  final PsiAnonymousClass anonymousClass=newExpression.getAnonymousClass();
+  LOG.assertTrue(anonymousClass != null);
+  final List<PsiGenerationInfo<PsiMethod>> infos=OverrideImplementUtil.overrideOrImplement(anonymousClass,method);
+  if (infos != null && infos.size() == 1) {
+    final PsiMethod member=infos.get(0).getPsiMember();
+    final PsiCodeBlock codeBlock=member.getBody();
+    LOG.assertTrue(codeBlock != null);
+    codeBlock.replace(psiElementFactory.createCodeBlockFromText(blockText,null));
+    for (    PsiParameter parameter : member.getParameterList().getParameters()) {
+      if (parameter.hasModifierProperty(PsiModifier.FINAL))       continue;
+      boolean declareFinal=false;
+      for (      PsiReference reference : ReferencesSearch.search(parameter)) {
+        final PsiClass innerClass=HighlightControlFlowUtil.getInnerClassVariableReferencedFrom(parameter,reference.getElement());
+        if (innerClass != null) {
+          declareFinal=true;
+          break;
+        }
+      }
+      if (declareFinal) {
+        PsiUtil.setModifierProperty(parameter,PsiModifier.FINAL,true);
+      }
+    }
+    GenerateMembersUtil.positionCaret(editor,member,true);
+  }
+}
