@@ -1,28 +1,39 @@
 {
-  if (file.isDirectory()) {
-    final VirtualFile[] files=file.getChildren();
-    for (    VirtualFile child : files) {
-      collectItems(child,StringUtil.getQualifiedName(fullName,child.getName()));
+  VfsUtilCore.visitChildrenRecursively(file,new VirtualFileVisitor(){
+{
+      set(FULL_NAME,fullName);
     }
-    return;
-  }
-  if (StdFileTypes.CLASS.equals(file.getFileType())) {
-    final VirtualFile sourceFile=myContext.getSourceFileByOutputFile(file);
-    if (sourceFile != null && myFacet.shouldRunEnhancerFor(sourceFile)) {
-      String className=StringUtil.trimEnd(fullName,".class");
-      int classId=mySymbolTable.getId(className);
-      List<VirtualFile> dependencies=new SmartList<VirtualFile>();
-      while (classId != Cache.UNKNOWN) {
-        final String path=myCache.getPath(classId);
-        if (!StringUtil.isEmpty(path)) {
-          final VirtualFile classFile=myLocalFileSystem.findFileByPath(FileUtil.toSystemIndependentName(path));
-          if (classFile != null) {
-            dependencies.add(classFile);
+    @Override public boolean visitFile(    @NotNull VirtualFile file){
+      try {
+        final String fullName=get(FULL_NAME);
+        if (file.isDirectory()) {
+          set(FULL_NAME,StringUtil.getQualifiedName(fullName,file.getName()));
+        }
+ else         if (StdFileTypes.CLASS.equals(file.getFileType())) {
+          final VirtualFile sourceFile=myContext.getSourceFileByOutputFile(file);
+          if (sourceFile != null && myFacet.shouldRunEnhancerFor(sourceFile)) {
+            String className=StringUtil.trimEnd(fullName,".class");
+            int classId=mySymbolTable.getId(className);
+            List<VirtualFile> dependencies=new SmartList<VirtualFile>();
+            while (classId != Cache.UNKNOWN) {
+              final String path=myCache.getPath(classId);
+              if (!StringUtil.isEmpty(path)) {
+                final VirtualFile classFile=myLocalFileSystem.findFileByPath(FileUtil.toSystemIndependentName(path));
+                if (classFile != null) {
+                  dependencies.add(classFile);
+                }
+              }
+              classId=myCache.getSuperQualifiedName(classId);
+            }
+            myItems.add(new ClassFileItem(file,sourceFile,dependencies));
           }
         }
-        classId=myCache.getSuperQualifiedName(classId);
+        return true;
       }
-      myItems.add(new ClassFileItem(file,sourceFile,dependencies));
+ catch (      CacheCorruptedException e) {
+        throw new VisitorException(e);
+      }
     }
   }
+,CacheCorruptedException.class);
 }
