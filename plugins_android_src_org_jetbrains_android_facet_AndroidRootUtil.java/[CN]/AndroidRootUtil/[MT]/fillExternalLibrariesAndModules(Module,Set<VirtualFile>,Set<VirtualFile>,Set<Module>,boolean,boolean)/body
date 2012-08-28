@@ -1,0 +1,68 @@
+{
+  if (!visited.add(module)) {
+    return;
+  }
+  ApplicationManager.getApplication().runReadAction(new Runnable(){
+    public void run(){
+      ModuleRootManager manager=ModuleRootManager.getInstance(module);
+      for (      OrderEntry entry : manager.getOrderEntries()) {
+        if (!(entry instanceof ExportableOrderEntry) || ((ExportableOrderEntry)entry).getScope() != DependencyScope.COMPILE) {
+          continue;
+        }
+        if (libraries != null && entry instanceof LibraryOrderEntry) {
+          final LibraryOrderEntry libraryOrderEntry=(LibraryOrderEntry)entry;
+          final Library library=libraryOrderEntry.getLibrary();
+          if (library != null && (!exportedLibrariesOnly || libraryOrderEntry.isExported())) {
+            for (            VirtualFile file : library.getFiles(OrderRootType.CLASSES)) {
+              if (!file.exists()) {
+                continue;
+              }
+              if (file.getFileType() instanceof ArchiveFileType) {
+                if (file.getFileSystem() instanceof JarFileSystem) {
+                  VirtualFile localFile=JarFileSystem.getInstance().getVirtualFileForJar(file);
+                  if (localFile != null) {
+                    libraries.add(localFile);
+                  }
+                }
+ else {
+                  libraries.add(file);
+                }
+              }
+ else               if (file.isDirectory() && !(file.getFileSystem() instanceof JarFileSystem)) {
+                collectClassFilesAndJars(file,libraries,new HashSet<VirtualFile>());
+              }
+            }
+          }
+        }
+ else         if (entry instanceof ModuleOrderEntry) {
+          Module depModule=((ModuleOrderEntry)entry).getModule();
+          if (depModule == null) {
+            continue;
+          }
+          final AndroidFacet facet=AndroidFacet.getInstance(depModule);
+          final boolean libraryProject=facet != null && facet.getConfiguration().LIBRARY_PROJECT;
+          CompilerModuleExtension extension=CompilerModuleExtension.getInstance(depModule);
+          if (extension != null) {
+            VirtualFile classDir=extension.getCompilerOutputPath();
+            if (libraryProject) {
+              final VirtualFile tmpArtifactsDir=AndroidDexCompiler.getOutputDirectoryForDex(depModule);
+              if (tmpArtifactsDir != null) {
+                final VirtualFile packedClassesJar=tmpArtifactsDir.findChild(AndroidCommonUtils.CLASSES_JAR_FILE_NAME);
+                if (packedClassesJar != null) {
+                  outputDirs.add(packedClassesJar);
+                }
+              }
+            }
+ else             if (facet == null && !outputDirs.contains(classDir) && classDir != null && classDir.exists()) {
+              outputDirs.add(classDir);
+            }
+          }
+          if (recursive) {
+            fillExternalLibrariesAndModules(depModule,outputDirs,libraries,visited,!libraryProject || exportedLibrariesOnly,recursive);
+          }
+        }
+      }
+    }
+  }
+);
+}
