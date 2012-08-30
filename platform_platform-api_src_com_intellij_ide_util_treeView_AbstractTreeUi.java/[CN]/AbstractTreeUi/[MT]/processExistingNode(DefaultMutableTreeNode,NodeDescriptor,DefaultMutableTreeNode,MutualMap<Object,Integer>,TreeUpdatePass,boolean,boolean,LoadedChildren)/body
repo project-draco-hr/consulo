@@ -1,14 +1,12 @@
 {
-  final ActionCallback result=new ActionCallback();
   if (pass.isExpired()) {
     return new ActionCallback.Rejected();
   }
-  final Ref<NodeDescriptor> childDesc=new Ref<NodeDescriptor>(childDescriptor);
-  if (childDesc.get() == null) {
+  if (childDescriptor == null) {
     pass.expire();
     return new ActionCallback.Rejected();
   }
-  final Object oldElement=getElementFromDescriptor(childDesc.get());
+  final Object oldElement=getElementFromDescriptor(childDescriptor);
   if (oldElement == null) {
     pass.expire();
     return new ActionCallback.Rejected();
@@ -18,17 +16,21 @@
     update.setDone(parentPreloadedChildren.isUpdated(oldElement));
   }
  else {
-    update=update(childDesc.get(),false);
+    update=update(childDescriptor,false);
   }
+  final ActionCallback result=new ActionCallback();
+  final Ref<NodeDescriptor> childDesc=new Ref<NodeDescriptor>(childDescriptor);
   update.doWhenDone(new AsyncResult.Handler<Boolean>(){
     @Override public void run(    Boolean isChanged){
-      final Ref<Boolean> changes=new Ref<Boolean>(isChanged);
-      final Ref<Boolean> forceRemapping=new Ref<Boolean>(false);
+      final AtomicBoolean changes=new AtomicBoolean(isChanged);
+      final AtomicBoolean forceRemapping=new AtomicBoolean();
       final Ref<Object> newElement=new Ref<Object>(getElementFromDescriptor(childDesc.get()));
-      final Integer index=newElement.get() != null ? elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get())) : null;
+      final Integer index=newElement.get() == null ? null : elementToIndexMap.getValue(getBuilder().getTreeStructureElement(childDesc.get()));
       final AsyncResult<Boolean> updateIndexDone=new AsyncResult<Boolean>();
-      final ActionCallback indexReady=new ActionCallback();
-      if (index != null) {
+      if (index == null) {
+        updateIndexDone.setDone();
+      }
+ else {
         final Object elementFromMap=elementToIndexMap.getKey(index);
         if (elementFromMap != newElement.get() && elementFromMap.equals(newElement.get())) {
           if (isInStructure(elementFromMap) && isInStructure(newElement.get())) {
@@ -64,13 +66,9 @@
               changes.set(true);
             }
             childDesc.get().setIndex(index.intValue());
-            indexReady.setDone();
           }
         }
 );
-      }
- else {
-        updateIndexDone.setDone();
       }
       updateIndexDone.doWhenDone(new Runnable(){
         @Override public void run(){
@@ -101,12 +99,13 @@
             removeNodeFromParent(childNode,selectedIndex >= 0);
             disposeNode(childNode);
             adjustSelectionOnChildRemove(parentNode,selectedIndex,disposedElement);
+            result.setDone();
           }
  else {
             elementToIndexMap.remove(getBuilder().getTreeStructureElement(childDesc.get()));
-            updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true,true);
+            ActionCallback callback=updateNodeChildren(childNode,pass,null,false,canSmartExpand,forceUpdate,true,true);
+            callback.doWhenDone(result.createSetDoneRunnable());
           }
-          result.setDone();
         }
       }
 );
