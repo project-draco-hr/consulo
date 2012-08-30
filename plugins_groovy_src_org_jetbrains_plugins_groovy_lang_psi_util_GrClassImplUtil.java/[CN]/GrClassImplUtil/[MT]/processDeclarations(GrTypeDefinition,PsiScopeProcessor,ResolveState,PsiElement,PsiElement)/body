@@ -1,2 +1,79 @@
 {
+  for (  final PsiTypeParameter typeParameter : grType.getTypeParameters()) {
+    if (!ResolveUtil.processElement(processor,typeParameter,state))     return false;
+  }
+  NameHint nameHint=processor.getHint(NameHint.KEY);
+  String name=nameHint == null ? null : nameHint.getName(state);
+  ClassHint classHint=processor.getHint(ClassHint.KEY);
+  final PsiSubstitutor substitutor=state.get(PsiSubstitutor.KEY);
+  final PsiElementFactory factory=JavaPsiFacade.getElementFactory(place.getProject());
+  LanguageLevel level=PsiUtil.getLanguageLevel(place);
+  if (classHint == null || classHint.shouldProcess(ClassHint.ResolveKind.PROPERTY)) {
+    Map<String,CandidateInfo> fieldsMap=CollectClassMembersUtil.getAllFields(grType);
+    if (name != null) {
+      CandidateInfo fieldInfo=fieldsMap.get(name);
+      if (fieldInfo != null) {
+        final PsiField field=(PsiField)fieldInfo.getElement();
+        if (!isSameDeclaration(place,field)) {
+          final PsiSubstitutor finalSubstitutor=PsiClassImplUtil.obtainFinalSubstitutor(field.getContainingClass(),fieldInfo.getSubstitutor(),grType,substitutor,factory,level);
+          if (!processor.execute(field,state.put(PsiSubstitutor.KEY,finalSubstitutor)))           return false;
+        }
+      }
+    }
+ else {
+      for (      CandidateInfo info : fieldsMap.values()) {
+        final PsiField field=(PsiField)info.getElement();
+        if (!isSameDeclaration(place,field)) {
+          final PsiSubstitutor finalSubstitutor=PsiClassImplUtil.obtainFinalSubstitutor(field.getContainingClass(),info.getSubstitutor(),grType,substitutor,factory,level);
+          if (!processor.execute(field,state.put(PsiSubstitutor.KEY,finalSubstitutor)))           return false;
+        }
+      }
+    }
+  }
+  if (classHint == null || classHint.shouldProcess(ClassHint.ResolveKind.METHOD)) {
+    Map<String,List<CandidateInfo>> methodsMap=CollectClassMembersUtil.getAllMethods(grType,true);
+    boolean isPlaceGroovy=place.getLanguage() == GroovyFileType.GROOVY_LANGUAGE;
+    if (name == null) {
+      for (      List<CandidateInfo> list : methodsMap.values()) {
+        for (        CandidateInfo info : list) {
+          PsiMethod method=(PsiMethod)info.getElement();
+          if (!isSameDeclaration(place,method) && isMethodVisible(isPlaceGroovy,method)) {
+            final PsiSubstitutor finalSubstitutor=PsiClassImplUtil.obtainFinalSubstitutor(method.getContainingClass(),info.getSubstitutor(),grType,substitutor,factory,level);
+            if (!processor.execute(method,state.put(PsiSubstitutor.KEY,finalSubstitutor))) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+ else {
+      List<CandidateInfo> byName=methodsMap.get(name);
+      if (byName != null) {
+        for (        CandidateInfo info : byName) {
+          PsiMethod method=(PsiMethod)info.getElement();
+          if (!isSameDeclaration(place,method) && isMethodVisible(isPlaceGroovy,method)) {
+            final PsiSubstitutor finalSubstitutor=PsiClassImplUtil.obtainFinalSubstitutor(method.getContainingClass(),info.getSubstitutor(),grType,substitutor,factory,level);
+            if (!processor.execute(method,state.put(PsiSubstitutor.KEY,finalSubstitutor))) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+  }
+  final GrTypeDefinitionBody body=grType.getBody();
+  if (body != null) {
+    if (classHint == null || classHint.shouldProcess(ClassHint.ResolveKind.CLASS)) {
+      for (      PsiClass innerClass : getInnerClassesForResolve(grType,lastParent)) {
+        final String innerClassName=innerClass.getName();
+        if (nameHint != null && !innerClassName.equals(nameHint.getName(state))) {
+          continue;
+        }
+        if (!processor.execute(innerClass,state)) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
 }
