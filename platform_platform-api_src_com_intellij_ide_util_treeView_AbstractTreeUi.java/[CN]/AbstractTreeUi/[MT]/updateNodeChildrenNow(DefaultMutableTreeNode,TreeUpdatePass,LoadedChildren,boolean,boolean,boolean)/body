@@ -1,0 +1,68 @@
+{
+  if (isUpdatingChildrenNow(node))   return;
+  if (!canInitiateNewActivity()) {
+    throw new ProcessCanceledException();
+  }
+  final NodeDescriptor descriptor=getDescriptorFrom(node);
+  final MutualMap<Object,Integer> elementToIndexMap=loadElementsFromStructure(descriptor,preloadedChildren);
+  final LoadedChildren loadedChildren=preloadedChildren != null ? preloadedChildren : new LoadedChildren(elementToIndexMap.getKeys().toArray());
+  addToUpdatingChildren(node);
+  pass.setCurrentNode(node);
+  final boolean canSmartExpand=canSmartExpand(node,toSmartExpand);
+  removeFromUnbuilt(node);
+  processExistingNodes(node,elementToIndexMap,pass,canSmartExpand(node,toSmartExpand),forceUpdate,wasExpanded,preloadedChildren).doWhenDone(new Runnable(){
+    @Override public void run(){
+      if (isDisposed(node)) {
+        removeFromUpdatingChildren(node);
+        return;
+      }
+      removeLoading(node,false);
+      final boolean expanded=isExpanded(node,wasExpanded);
+      if (expanded) {
+        myWillBeExpanded.add(node);
+      }
+ else {
+        myWillBeExpanded.remove(node);
+      }
+      collectNodesToInsert(descriptor,elementToIndexMap,node,expanded,loadedChildren).doWhenDone(new AsyncResult.Handler<ArrayList<TreeNode>>(){
+        @Override public void run(        @NotNull ArrayList<TreeNode> nodesToInsert){
+          insertNodesInto(nodesToInsert,node);
+          updateNodesToInsert(nodesToInsert,pass,canSmartExpand,isChildNodeForceUpdate(node,forceUpdate,expanded));
+          removeLoading(node,false);
+          removeFromUpdatingChildren(node);
+          if (node.getChildCount() > 0) {
+            if (expanded) {
+              expand(node,canSmartExpand);
+            }
+          }
+          if (!canInitiateNewActivity()) {
+            throw new ProcessCanceledException();
+          }
+          final Object element=getElementFor(node);
+          addNodeAction(element,new NodeAction(){
+            @Override public void onReady(            @NotNull final DefaultMutableTreeNode node){
+              removeLoading(node,false);
+            }
+          }
+,false);
+          processNodeActionsIfReady(node);
+        }
+      }
+).doWhenProcessed(new Runnable(){
+        @Override public void run(){
+          myWillBeExpanded.remove(node);
+          removeFromUpdatingChildren(node);
+          processNodeActionsIfReady(node);
+        }
+      }
+);
+    }
+  }
+).doWhenRejected(new Runnable(){
+    @Override public void run(){
+      removeFromUpdatingChildren(node);
+      processNodeActionsIfReady(node);
+    }
+  }
+);
+}

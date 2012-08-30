@@ -1,5 +1,5 @@
 {
-  WebProjectGenerator generator=myCurrentGenerator;
+  final WebProjectGenerator generator=myCurrentGenerator;
   if (generator == null) {
     throw new RuntimeException("Current generator should be not-null");
   }
@@ -7,13 +7,40 @@
   if (peer == null) {
     throw new RuntimeException("Peer should be not-null for " + myCurrentGenerator.getName());
   }
-  Object settings=peer.getSettings();
+  final Object settings=peer.getSettings();
   File dir=new File(myModuleBuilder.getModuleFileDirectory());
-  VirtualFile moduleDir=LocalFileSystem.getInstance().findFileByIoFile(dir);
-  if (moduleDir == null || !moduleDir.isValid()) {
-    moduleDir=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(dir);
-  }
+  final VirtualFile moduleDir=VfsUtil.findFileByIoFile(dir,true);
   if (moduleDir != null && moduleDir.isValid()) {
-    generator.generateProject(null,moduleDir,settings,null);
+    myModuleBuilder.addListener(new ModuleBuilderListener(){
+      @Override public void moduleCreated(      @NotNull final Module module){
+        myModuleBuilder.removeListener(this);
+        final Project project=module.getProject();
+        final Runnable task=new Runnable(){
+          @Override public void run(){
+            generator.generateProject(project,moduleDir,settings,module);
+          }
+        }
+;
+        final boolean scheduledAsPostStartupActivity;
+        StartupManagerEx startupManager=StartupManagerEx.getInstanceEx(project);
+synchronized (startupManager) {
+          scheduledAsPostStartupActivity=!startupManager.postStartupActivityPassed();
+          if (scheduledAsPostStartupActivity) {
+            startupManager.registerPostStartupActivity(task);
+          }
+        }
+        if (!scheduledAsPostStartupActivity) {
+          UIUtil.invokeLaterIfNeeded(new Runnable(){
+            public void run(){
+              if (!project.isDisposed()) {
+                task.run();
+              }
+            }
+          }
+);
+        }
+      }
+    }
+);
   }
 }
