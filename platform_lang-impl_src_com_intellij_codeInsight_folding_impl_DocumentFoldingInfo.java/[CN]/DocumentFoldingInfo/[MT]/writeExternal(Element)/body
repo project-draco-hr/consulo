@@ -1,42 +1,47 @@
 {
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-  if (myPsiElementsOrRangeMarkers.isEmpty()) {
+  if (myPsiElements.isEmpty() && myRangeMarkers.isEmpty()) {
     throw new WriteExternalException();
   }
+  for (  SmartPsiElementPointer<PsiElement> ptr : myPsiElements) {
+    PsiElement psiElement=ptr.getElement();
+    if (psiElement == null || !psiElement.isValid()) {
+      continue;
+    }
+    FoldingInfo fi=psiElement.getUserData(FOLDING_INFO_KEY);
+    boolean state=fi != null && fi.expanded;
+    String signature=FoldingPolicy.getSignature(psiElement);
+    if (signature == null) {
+      continue;
+    }
+    PsiElement restoredElement=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature);
+    if (!psiElement.equals(restoredElement)) {
+      StringBuilder trace=new StringBuilder();
+      PsiElement restoredAgain=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature,trace);
+      LOG.error("element: " + psiElement + "("+ psiElement.getText()+ "); restoredElement: "+ restoredElement+ "; signature: '"+ signature+ "'; file: "+ psiElement.getContainingFile()+ "; restored again: "+ restoredAgain+ "; restore produces same results: "+ (restoredAgain == restoredElement)+ "; trace:\n"+ trace);
+    }
+    Element e=new Element(ELEMENT_TAG);
+    e.setAttribute(SIGNATURE_ATT,signature);
+    e.setAttribute(EXPANDED_ATT,Boolean.toString(state));
+    element.addContent(e);
+  }
   String date=null;
-  for (int i=0; i < myPsiElementsOrRangeMarkers.size(); i++) {
-    Object o=myPsiElementsOrRangeMarkers.get(i);
-    Boolean state=myExpandedStates.get(i);
-    if (o instanceof PsiElement) {
-      PsiElement psiElement=(PsiElement)o;
-      if (!psiElement.isValid())       continue;
-      String signature=FoldingPolicy.getSignature(psiElement);
-      if (signature == null)       continue;
-      PsiElement restoredElement=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature);
-      if (!psiElement.equals(restoredElement)) {
-        StringBuilder trace=new StringBuilder();
-        PsiElement restoredAgain=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature,trace);
-        LOG.error("element: " + psiElement + "("+ psiElement.getText()+ "); restoredElement: "+ restoredElement+ "; signature: '"+ signature+ "'; file: "+ psiElement.getContainingFile()+ "; restored again: "+ restoredAgain+ "; restore produces same results: "+ (restoredAgain == restoredElement)+ "; trace:\n"+ trace);
-      }
-      Element e=new Element(ELEMENT_TAG);
-      e.setAttribute(SIGNATURE_ATT,signature);
-      e.setAttribute(EXPANDED_ATT,state.toString());
-      element.addContent(e);
+  for (  RangeMarker marker : myRangeMarkers) {
+    FoldingInfo fi=marker.getUserData(FOLDING_INFO_KEY);
+    boolean state=fi != null && fi.expanded;
+    Element e=new Element(MARKER_TAG);
+    if (date == null) {
+      date=getTimeStamp();
     }
- else {
-      RangeMarker marker=(RangeMarker)o;
-      Element e=new Element(MARKER_TAG);
-      if (date == null) {
-        date=getTimeStamp();
-      }
-      if (date.isEmpty())       continue;
-      e.setAttribute(DATE_ATT,date);
-      e.setAttribute(EXPANDED_ATT,state.toString());
-      String signature=Integer.valueOf(marker.getStartOffset()) + ":" + Integer.valueOf(marker.getEndOffset());
-      e.setAttribute(SIGNATURE_ATT,signature);
-      String placeHolderText=myPlaceholderTexts.get(marker);
-      e.setAttribute(PLACEHOLDER_ATT,placeHolderText);
-      element.addContent(e);
+    if (date.isEmpty()) {
+      continue;
     }
+    e.setAttribute(DATE_ATT,date);
+    e.setAttribute(EXPANDED_ATT,Boolean.toString(state));
+    String signature=Integer.valueOf(marker.getStartOffset()) + ":" + Integer.valueOf(marker.getEndOffset());
+    e.setAttribute(SIGNATURE_ATT,signature);
+    String placeHolderText=fi == null ? DEFAULT_PLACEHOLDER : fi.placeHolder;
+    e.setAttribute(PLACEHOLDER_ATT,placeHolderText);
+    element.addContent(e);
   }
 }
