@@ -1,44 +1,17 @@
 {
-  PsiElement lastParent=null;
-  PsiElement run=place;
-  final Project project=place.getProject();
-  PsiElementFactory factory=JavaPsiFacade.getElementFactory(project);
-  boolean doProcessNonCodeMembers=false;
-  boolean isJavaResolver=false;
-  while (run != null) {
-    if (!isJavaResolver && run.getLanguage() != GroovyFileType.GROOVY_LANGUAGE) {
-      isJavaResolver=true;
-      if (processor.getHint(NameHint.KEY) != null) {
-        processor=new JavaResolverProcessor(processor);
-      }
-    }
-    if (!run.processDeclarations(processor,ResolveState.initial(),lastParent,place))     return false;
-    if (processNonCodeMethods) {
-      if (!doProcessNonCodeMembers) {
-        if (run instanceof GrCodeBlock)         doProcessNonCodeMembers=true;
- else         if (run instanceof GrStatement && run.getContext() instanceof GroovyFile)         doProcessNonCodeMembers=true;
-      }
-      if (doProcessNonCodeMembers) {
-        if (run instanceof GrTypeDefinition) {
-          if (!processNonCodeMembers(factory.createType(((GrTypeDefinition)run)),processor,place,ResolveState.initial()))           return false;
-        }
- else         if ((run instanceof GroovyFileBase) && ((GroovyFileBase)run).isScript()) {
-          final PsiClass psiClass=((GroovyFileBase)run).getScriptClass();
-          if (psiClass != null) {
-            if (!processNonCodeMembers(factory.createType(psiClass),processor,place,ResolveState.initial()))             return false;
-          }
-        }
- else         if (run instanceof GrClosableBlock) {
-          PsiClass superClass=getLiteralSuperClass((GrClosableBlock)run);
-          if (superClass != null && !superClass.processDeclarations(processor,ResolveState.initial(),null,place))           return false;
-          if (!GdkMethodUtil.categoryIteration((GrClosableBlock)run,processor,ResolveState.initial()))           return false;
-          if (!GdkMethodUtil.withIteration((GrClosableBlock)run,processor))           return false;
-        }
-      }
-    }
-    lastParent=run;
-    run=run.getContext();
-    processor.handleEvent(JavaScopeProcessorEvent.CHANGE_LEVEL,null);
+  ClassHint hint=processor.getHint(ClassHint.KEY);
+  if (hint != null) {
+    return new DeclarationCacheKey(getNameHint(processor),hint,processNonCodeMethods).processCachedDeclarations(place,processor);
   }
-  return true;
+  final PsiScopeProcessor nonCodeProcessor=processNonCodeMethods ? processor : null;
+  return PsiTreeUtil.treeWalkUp(place,null,new PairProcessor<PsiElement,PsiElement>(){
+    @Override public boolean process(    PsiElement scope,    PsiElement lastParent){
+      if (!doProcessDeclarations(place,lastParent,scope,substituteProcessor(processor,scope),nonCodeProcessor)) {
+        return false;
+      }
+      issueLevelChangeEvents(processor,scope);
+      return true;
+    }
+  }
+);
 }
