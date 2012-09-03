@@ -1,36 +1,29 @@
 {
-  final Collection<JpsModule> modulesToClean=context.getProjectDescriptor().jpsProject.getModules();
-  final Map<File,Set<Pair<String,Boolean>>> rootsToDelete=new HashMap<File,Set<Pair<String,Boolean>>>();
+  final MultiMap<File,ModuleBuildTarget> rootsToDelete=new MultiMapBasedOnSet<File,ModuleBuildTarget>();
   final Set<File> annotationOutputs=new HashSet<File>();
   final Set<File> allSourceRoots=new HashSet<File>();
   final ProjectPaths paths=context.getProjectPaths();
-  for (  JpsModule module : modulesToClean) {
-    final File out=paths.getModuleOutputDir(module,false);
+  for (  ModuleBuildTarget target : context.getChunks().getAllTargets()) {
+    final File out=paths.getModuleOutputDir(target.getModule(),target.isTests());
     if (out != null) {
-      appendRootInfo(rootsToDelete,out,module,false);
+      rootsToDelete.putValue(out,target);
     }
-    final File testOut=paths.getModuleOutputDir(module,true);
-    if (testOut != null) {
-      appendRootInfo(rootsToDelete,testOut,module,true);
-    }
-    final AnnotationProcessingProfile profile=context.getAnnotationProcessingProfile(module);
+    final AnnotationProcessingProfile profile=context.getAnnotationProcessingProfile(target.getModule());
     if (profile.isEnabled()) {
-      File annotationOut=paths.getAnnotationProcessorGeneratedSourcesOutputDir(module,false,profile.getGeneratedSourcesDirName());
-      if (annotationOut != null) {
-        annotationOutputs.add(annotationOut);
-      }
-      annotationOut=paths.getAnnotationProcessorGeneratedSourcesOutputDir(module,true,profile.getGeneratedSourcesDirName());
+      File annotationOut=paths.getAnnotationProcessorGeneratedSourcesOutputDir(target.getModule(),target.isTests(),profile.getGeneratedSourcesDirName());
       if (annotationOut != null) {
         annotationOutputs.add(annotationOut);
       }
     }
+  }
+  for (  JpsModule module : context.getProjectDescriptor().jpsProject.getModules()) {
     final List<RootDescriptor> moduleRoots=context.getProjectDescriptor().rootsIndex.getModuleRoots(context,module);
     for (    RootDescriptor d : moduleRoots) {
       allSourceRoots.add(d.root);
     }
   }
   final List<File> filesToDelete=new ArrayList<File>();
-  for (  Map.Entry<File,Set<Pair<String,Boolean>>> entry : rootsToDelete.entrySet()) {
+  for (  Map.Entry<File,Collection<ModuleBuildTarget>> entry : rootsToDelete.entrySet()) {
     context.checkCanceled();
     boolean okToDelete=true;
     final File outputRoot=entry.getKey();
@@ -47,23 +40,17 @@
       }
     }
     if (okToDelete) {
-      final File[] children=outputRoot.listFiles();
-      if (children != null) {
-        filesToDelete.addAll(Arrays.asList(children));
-      }
+      filesToDelete.add(outputRoot);
     }
  else {
       context.processMessage(new CompilerMessage(BUILD_NAME,BuildMessage.Kind.WARNING,"Output path " + outputRoot.getPath() + " intersects with a source root. The output cannot be cleaned."));
-      for (      Pair<String,Boolean> info : entry.getValue()) {
-        clearOutputFiles(context,info.first,info.second);
+      for (      ModuleBuildTarget target : entry.getValue()) {
+        clearOutputFiles(context,target);
       }
     }
   }
   for (  File annotationOutput : annotationOutputs) {
-    final File[] children=annotationOutput.listFiles();
-    if (children != null) {
-      filesToDelete.addAll(Arrays.asList(children));
-    }
+    filesToDelete.add(annotationOutput);
   }
   context.processMessage(new ProgressMessage("Cleaning output directories..."));
   myAsyncTasks.add(FileUtil.asyncDelete(filesToDelete));

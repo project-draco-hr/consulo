@@ -2,44 +2,41 @@
   if (chunks != null) {
     return;
   }
-  final GraphGenerator<JpsModule> graph=GraphGenerator.create(CachingSemiGraph.create(new GraphGenerator.SemiGraph<JpsModule>(){
-    @Override public Collection<JpsModule> getNodes(){
-      return project.getModules();
+  myAllTargets=new ArrayList<ModuleBuildTarget>(myProject.getModules().size() * 2);
+  for (  JpsModule module : myProject.getModules()) {
+    myAllTargets.add(new ModuleBuildTarget(module,JavaModuleBuildTargetType.PRODUCTION));
+    myAllTargets.add(new ModuleBuildTarget(module,JavaModuleBuildTargetType.TEST));
+  }
+  myTargetDependencies=new HashMap<ModuleBuildTarget,Collection<ModuleBuildTarget>>();
+  for (  ModuleBuildTarget target : myAllTargets) {
+    myTargetDependencies.put(target,target.computeDependencies());
+  }
+  GraphGenerator<ModuleBuildTarget> graph=GraphGenerator.create(CachingSemiGraph.create(new GraphGenerator.SemiGraph<ModuleBuildTarget>(){
+    @Override public Collection<ModuleBuildTarget> getNodes(){
+      return myAllTargets;
     }
-    @Override public Iterator<JpsModule> getIn(    JpsModule n){
-      List<JpsModule> deps=new ArrayList<JpsModule>();
-      for (      JpsDependencyElement element : n.getDependenciesList().getDependencies()) {
-        if (element instanceof JpsModuleDependency) {
-          final JpsJavaDependencyExtension extension=JpsJavaExtensionService.getInstance().getDependencyExtension(element);
-          if (extension == null || extension.getScope().isIncludedIn(classpathKind)) {
-            ContainerUtil.addIfNotNull(deps,((JpsModuleDependency)element).getModule());
-          }
-        }
-      }
-      return deps.iterator();
+    @Override public Iterator<ModuleBuildTarget> getIn(    ModuleBuildTarget n){
+      return myTargetDependencies.get(n).iterator();
     }
   }
 ));
-  final DFSTBuilder<JpsModule> builder=new DFSTBuilder<JpsModule>(graph);
+  final DFSTBuilder<ModuleBuildTarget> builder=new DFSTBuilder<ModuleBuildTarget>(graph);
   final TIntArrayList sccs=builder.getSCCs();
   chunks=new ArrayList<ModuleChunk>(sccs.size());
   sccs.forEach(new TIntProcedure(){
     int myTNumber=0;
     public boolean execute(    int size){
-      final Set<JpsModule> chunkNodes=new LinkedHashSet<JpsModule>();
+      final Set<ModuleBuildTarget> chunkNodes=new LinkedHashSet<ModuleBuildTarget>();
+      boolean test=false;
       for (int j=0; j < size; j++) {
-        final JpsModule node=builder.getNodeByTNumber(myTNumber + j);
+        final ModuleBuildTarget node=builder.getNodeByTNumber(myTNumber + j);
+        test=node.isTests();
         chunkNodes.add(node);
       }
-      chunks.add(new ModuleChunk(chunkNodes,myTest));
+      chunks.add(new ModuleChunk(chunkNodes,test));
       myTNumber+=size;
       return true;
     }
   }
 );
-  for (  ModuleChunk chunk : chunks) {
-    for (    JpsModule module : chunk.getModules()) {
-      mapping.put(module,chunk);
-    }
-  }
 }
