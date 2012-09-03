@@ -13,8 +13,25 @@
   PsiCodeBlock blockFromText=psiElementFactory.createCodeBlockFromText(blockText,lambdaExpression);
   ChangeContextUtil.encodeContextInfo(blockFromText,true);
   PsiNewExpression newExpression=(PsiNewExpression)psiElementFactory.createExpressionFromText("new " + functionalInterfaceType.getCanonicalText() + "(){}",lambdaExpression);
-  PsiClass thisClass=PsiTreeUtil.getParentOfType(lambdaExpression,PsiClass.class,true);
-  ChangeContextUtil.decodeContextInfo(blockFromText,thisClass,RefactoringUtil.createThisExpression(lambdaExpression.getManager(),thisClass));
+  final PsiClass thisClass=PsiTreeUtil.getParentOfType(lambdaExpression,PsiClass.class,true);
+  final String thisClassName=thisClass.getName();
+  if (thisClassName != null) {
+    final PsiThisExpression thisAccessExpr=thisClass instanceof PsiAnonymousClass ? null : RefactoringUtil.createThisExpression(lambdaExpression.getManager(),thisClass);
+    ChangeContextUtil.decodeContextInfo(blockFromText,thisClass,thisAccessExpr);
+    final Map<PsiElement,PsiElement> replacements=new HashMap<PsiElement,PsiElement>();
+    blockFromText.accept(new JavaRecursiveElementWalkingVisitor(){
+      @Override public void visitSuperExpression(      PsiSuperExpression expression){
+        super.visitSuperExpression(expression);
+        if (expression.getQualifier() == null) {
+          replacements.put(expression,psiElementFactory.createExpressionFromText(thisClassName + "." + expression.getText(),expression));
+        }
+      }
+    }
+);
+    for (    PsiElement psiElement : replacements.keySet()) {
+      psiElement.replace(replacements.get(psiElement));
+    }
+  }
   blockFromText=psiElementFactory.createCodeBlockFromText(blockFromText.getText(),null);
   newExpression=(PsiNewExpression)lambdaExpression.replace(newExpression);
   final PsiAnonymousClass anonymousClass=newExpression.getAnonymousClass();
