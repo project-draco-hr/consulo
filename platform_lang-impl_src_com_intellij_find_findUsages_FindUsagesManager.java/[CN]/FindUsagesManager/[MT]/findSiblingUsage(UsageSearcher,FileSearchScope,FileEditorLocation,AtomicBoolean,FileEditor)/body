@@ -3,36 +3,35 @@
     dir=dir == FileSearchScope.AFTER_CARET ? FileSearchScope.FROM_START : FileSearchScope.FROM_END;
   }
   final FileSearchScope direction=dir;
-  final Usage[] foundUsage={null};
+  final AtomicReference<Usage> foundUsage=new AtomicReference<Usage>();
   usageSearcher.generate(new Processor<Usage>(){
     @Override public boolean process(    Usage usage){
-      usagesWereFound[0]=true;
+      usagesWereFound.set(true);
       if (direction == FileSearchScope.FROM_START) {
-        foundUsage[0]=usage;
+        foundUsage.compareAndSet(null,usage);
         return false;
       }
       if (direction == FileSearchScope.FROM_END) {
-        foundUsage[0]=usage;
+        foundUsage.set(usage);
       }
  else       if (direction == FileSearchScope.AFTER_CARET) {
         if (Comparing.compare(usage.getLocation(),currentLocation) > 0) {
-          foundUsage[0]=usage;
+          foundUsage.set(usage);
           return false;
         }
       }
  else       if (direction == FileSearchScope.BEFORE_CARET) {
-        if (Comparing.compare(usage.getLocation(),currentLocation) < 0) {
-          if (foundUsage[0] != null) {
-            if (foundUsage[0].getLocation().compareTo(usage.getLocation()) < 0) {
-              foundUsage[0]=usage;
-            }
-          }
- else {
-            foundUsage[0]=usage;
-          }
-        }
- else {
+        if (Comparing.compare(usage.getLocation(),currentLocation) >= 0) {
           return false;
+        }
+        while (true) {
+          Usage found=foundUsage.get();
+          if (found == null) {
+            if (foundUsage.compareAndSet(null,usage))             break;
+          }
+ else {
+            if (Comparing.compare(found.getLocation(),usage.getLocation()) < 0 && foundUsage.compareAndSet(found,usage))             break;
+          }
         }
       }
       return true;
@@ -40,5 +39,5 @@
   }
 );
   fileEditor.putUserData(KEY_START_USAGE_AGAIN,null);
-  return foundUsage[0];
+  return foundUsage.get();
 }
