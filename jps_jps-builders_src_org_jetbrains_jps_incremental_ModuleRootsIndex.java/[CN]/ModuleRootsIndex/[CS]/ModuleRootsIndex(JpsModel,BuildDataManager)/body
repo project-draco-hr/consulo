@@ -1,0 +1,68 @@
+{
+  myIgnoredFilePatterns=new IgnoredFilePatterns(model.getGlobal().getFileTypesConfiguration().getIgnoredPatternString());
+  final Collection<JpsModule> allModules=model.getProject().getModules();
+  myTotalModuleCount=allModules.size();
+  final Iterable<AdditionalRootsProviderService> rootsProviders=JpsServiceManager.getInstance().getExtensions(AdditionalRootsProviderService.class);
+  for (  final JpsModule module : allModules) {
+    final String moduleName=module.getName();
+    myNameToModuleMap.put(moduleName,module);
+    final List<File> moduleExcludes=new ArrayList<File>();
+    myModuleToExcludesMap.put(module,moduleExcludes);
+    List<RootDescriptor> moduleRoots=myModuleToRootsMap.get(module);
+    if (moduleRoots == null) {
+      moduleRoots=new ArrayList<RootDescriptor>();
+      myModuleToRootsMap.put(module,moduleRoots);
+    }
+    for (    JpsModuleSourceRoot sourceRoot : module.getSourceRoots()) {
+      final File root=JpsPathUtil.urlToFile(sourceRoot.getUrl());
+      final boolean testRoot=JavaSourceRootType.TEST_SOURCE.equals(sourceRoot.getRootType());
+      final RootDescriptor descriptor=new RootDescriptor(moduleName,root,new ModuleBuildTarget(module,JavaModuleBuildTargetType.getInstance(testRoot)),testRoot,false,false);
+      myRootToDescriptorMap.put(root,descriptor);
+      moduleRoots.add(descriptor);
+    }
+    for (    AdditionalRootsProviderService provider : rootsProviders) {
+      final List<String> roots=provider.getAdditionalSourceRoots(module,dataManager);
+      for (      String path : roots) {
+        File root=new File(path);
+        final RootDescriptor descriptor=new RootDescriptor(moduleName,root,new ModuleBuildTarget(module,JavaModuleBuildTargetType.PRODUCTION),false,true,false);
+        moduleRoots.add(descriptor);
+        myRootToDescriptorMap.put(root,descriptor);
+      }
+    }
+    for (    String url : module.getExcludeRootsList().getUrls()) {
+      final File root=JpsPathUtil.urlToFile(url);
+      myExcludedRoots.add(root);
+      moduleExcludes.add(root);
+    }
+  }
+  Map<File,JpsModule> contentToModule=new HashMap<File,JpsModule>();
+  for (  JpsModule module : allModules) {
+    for (    String contentUrl : module.getContentRootsList().getUrls()) {
+      File contentRoot=JpsPathUtil.urlToFile(contentUrl);
+      contentToModule.put(contentRoot,module);
+    }
+  }
+  List<File> parents=new ArrayList<File>();
+  for (  JpsModule module : allModules) {
+    for (    String contentUrl : module.getContentRootsList().getUrls()) {
+      File contentRoot=JpsPathUtil.urlToFile(contentUrl);
+      File parent=contentRoot.getParentFile();
+      JpsModule parentModule=null;
+      parents.clear();
+      while (parent != null) {
+        parents.add(parent);
+        if (contentToModule.containsKey(parent)) {
+          parentModule=contentToModule.get(parent);
+          break;
+        }
+        parent=parent.getParentFile();
+      }
+      if (parentModule != null) {
+        myModuleToExcludesMap.get(parentModule).add(contentRoot);
+      }
+      for (      File file : parents) {
+        contentToModule.put(file,parentModule);
+      }
+    }
+  }
+}

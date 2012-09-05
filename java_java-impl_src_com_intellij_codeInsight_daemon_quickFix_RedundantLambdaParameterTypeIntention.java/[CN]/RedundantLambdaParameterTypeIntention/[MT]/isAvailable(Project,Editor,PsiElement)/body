@@ -1,0 +1,44 @@
+{
+  final PsiParameterList parameterList=PsiTreeUtil.getParentOfType(element,PsiParameterList.class);
+  if (parameterList == null)   return false;
+  final PsiElement parent=parameterList.getParent();
+  if (!(parent instanceof PsiLambdaExpression))   return false;
+  final PsiLambdaExpression expression=(PsiLambdaExpression)parent;
+  final PsiParameter[] parameters=parameterList.getParameters();
+  for (  PsiParameter parameter : parameters) {
+    if (parameter.getTypeElement() == null)     return false;
+  }
+  if (parameters.length == 0)   return false;
+  final PsiType functionalInterfaceType=LambdaUtil.getFunctionalInterfaceType(expression,false);
+  if (functionalInterfaceType != null) {
+    final PsiElement lambdaParent=expression.getParent();
+    if (lambdaParent instanceof PsiExpressionList) {
+      final PsiElement gParent=lambdaParent.getParent();
+      if (gParent instanceof PsiCallExpression && ((PsiCallExpression)gParent).getTypeArguments().length == 0) {
+        final PsiMethod method=((PsiCallExpression)gParent).resolveMethod();
+        if (method == null)         return false;
+        final int idx=LambdaUtil.getLambdaIdx((PsiExpressionList)lambdaParent,expression);
+        if (idx < 0)         return false;
+        final PsiTypeParameter[] typeParameters=method.getTypeParameters();
+        final PsiExpression[] arguments=((PsiExpressionList)lambdaParent).getExpressions();
+        final JavaPsiFacade javaPsiFacade=JavaPsiFacade.getInstance(project);
+        arguments[idx]=javaPsiFacade.getElementFactory().createExpressionFromText("(" + StringUtil.join(expression.getParameterList().getParameters(),new Function<PsiParameter,String>(){
+          @Override public String fun(          PsiParameter parameter){
+            return parameter.getName();
+          }
+        }
+,", ") + ") -> {}",expression);
+        final PsiSubstitutor substitutor=javaPsiFacade.getResolveHelper().inferTypeArguments(typeParameters,method.getParameterList().getParameters(),arguments,PsiSubstitutor.EMPTY,gParent,DefaultParameterTypeInferencePolicy.INSTANCE);
+        for (        PsiTypeParameter parameter : typeParameters) {
+          final PsiType psiType=substitutor.substitute(parameter);
+          if (psiType == null || LambdaUtil.dependsOnTypeParams(psiType,expression,parameter))           return false;
+        }
+      }
+    }
+ else     if (!LambdaUtil.isLambdaFullyInferred(expression,functionalInterfaceType)) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
