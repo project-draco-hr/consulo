@@ -1,0 +1,48 @@
+{
+  if (expression instanceof PsiCallExpression && ((PsiCallExpression)expression).getTypeArguments().length > 0)   return true;
+  if (expression instanceof PsiNewExpression) {
+    final PsiJavaCodeReferenceElement classReference=((PsiNewExpression)expression).getClassOrAnonymousClassReference();
+    if (classReference != null) {
+      final PsiReferenceParameterList parameterList=classReference.getParameterList();
+      if (parameterList != null) {
+        final PsiTypeElement[] typeParameterElements=parameterList.getTypeParameterElements();
+        if (typeParameterElements.length > 0) {
+          if (!(typeParameterElements[0].getType() instanceof PsiDiamondType)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  final PsiParameter[] lambdaParams=lambdaExpression.getParameterList().getParameters();
+  if (lambdaParams.length != methodParameters.length)   return false;
+  final boolean[] independent=new boolean[]{true};
+  expression.accept(new JavaRecursiveElementWalkingVisitor(){
+    @Override public void visitConditionalExpression(    PsiConditionalExpression expression){
+      final PsiExpression thenExpression=expression.getThenExpression();
+      if (thenExpression != null) {
+        thenExpression.accept(this);
+      }
+      final PsiExpression elseExpression=expression.getElseExpression();
+      if (elseExpression != null) {
+        elseExpression.accept(this);
+      }
+    }
+    @Override public void visitReferenceExpression(    PsiReferenceExpression expression){
+      super.visitReferenceExpression(expression);
+      int usedParamIdx=-1;
+      for (int i=0; i < lambdaParams.length; i++) {
+        PsiParameter param=lambdaParams[i];
+        if (expression.isReferenceTo(param)) {
+          usedParamIdx=i;
+          break;
+        }
+      }
+      if (usedParamIdx > -1 && dependsOnTypeParams(subst.substitute(methodParameters[usedParamIdx].getType()),functionalInterfaceType,lambdaExpression,typeParam)) {
+        independent[0]=false;
+      }
+    }
+  }
+);
+  return independent[0];
+}
