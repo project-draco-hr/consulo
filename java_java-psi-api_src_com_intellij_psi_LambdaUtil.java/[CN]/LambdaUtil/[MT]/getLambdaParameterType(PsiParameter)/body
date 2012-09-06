@@ -4,27 +4,35 @@
     final int parameterIndex=((PsiParameterList)paramParent).getParameterIndex(param);
     if (parameterIndex > -1) {
       final PsiLambdaExpression lambdaExpression=PsiTreeUtil.getParentOfType(param,PsiLambdaExpression.class);
-      PsiType type=getFunctionalInterfaceType(lambdaExpression,true);
-      if (type == null) {
-        type=getFunctionalInterfaceType(lambdaExpression,false);
-      }
-      final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(type);
-      if (resolveResult != null) {
-        final PsiMethod method=getFunctionalInterfaceMethod(type);
-        if (method != null) {
-          final PsiParameter[] parameters=method.getParameterList().getParameters();
-          if (parameterIndex < parameters.length) {
-            final PsiType psiType=resolveResult.getSubstitutor().substitute(parameters[parameterIndex].getType());
-            if (!dependsOnTypeParams(psiType,lambdaExpression)) {
-              if (psiType instanceof PsiWildcardType) {
-                final PsiType bound=((PsiWildcardType)psiType).getBound();
-                if (bound != null) {
-                  return bound;
+      if (lambdaExpression != null) {
+        Set<PsiParameterList> currentStack=ourParams.get();
+        if (currentStack == null) {
+          currentStack=new HashSet<PsiParameterList>();
+          ourParams.set(currentStack);
+        }
+        final PsiParameterList parameterList=lambdaExpression.getParameterList();
+        try {
+          currentStack.add(parameterList);
+          PsiType type=getFunctionalInterfaceType(lambdaExpression,true);
+          if (type == null) {
+            type=getFunctionalInterfaceType(lambdaExpression,false);
+          }
+          final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(type);
+          if (resolveResult != null) {
+            final PsiMethod method=getFunctionalInterfaceMethod(type);
+            if (method != null) {
+              final PsiParameter[] parameters=method.getParameterList().getParameters();
+              if (parameterIndex < parameters.length) {
+                final PsiType psiType=getSubstitutor(method,resolveResult).substitute(parameters[parameterIndex].getType());
+                if (!dependsOnTypeParams(psiType,type,lambdaExpression,null)) {
+                  return GenericsUtil.eliminateWildcards(psiType);
                 }
               }
-              return psiType;
             }
           }
+        }
+  finally {
+          currentStack.remove(parameterList);
         }
       }
     }

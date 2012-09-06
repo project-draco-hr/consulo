@@ -1,0 +1,66 @@
+{
+  final Project project=context.getProject();
+  if (!CompilerWorkspaceConfiguration.getInstance(project).useOutOfProcessBuild()) {
+    return true;
+  }
+  try {
+    final FileProcessingCompiler.ProcessingItem[] items=myCompiler.getProcessingItems(context);
+    if (items.length == 0) {
+      return true;
+    }
+    final List<FileProcessingCompiler.ProcessingItem> toProcess=new ArrayList<FileProcessingCompiler.ProcessingItem>();
+    final Ref<IOException> ex=new Ref<IOException>(null);
+    DumbService.getInstance(project).waitForSmartMode();
+    final FileProcessingCompilerStateCache cache=CompilerCacheManager.getInstance(project).getFileProcessingCompilerCache(myCompiler);
+    final boolean isMake=context.isMake();
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        try {
+          for (          FileProcessingCompiler.ProcessingItem item : items) {
+            final VirtualFile file=item.getFile();
+            final String url=file.getUrl();
+            if (isMake && cache.getTimestamp(url) == file.getTimeStamp()) {
+              final ValidityState state=cache.getExtState(url);
+              final ValidityState itemState=item.getValidityState();
+              if (state != null ? state.equalsTo(itemState) : itemState == null) {
+                continue;
+              }
+            }
+            toProcess.add(item);
+          }
+        }
+ catch (        IOException e) {
+          ex.set(e);
+        }
+      }
+    }
+);
+    if (ex.get() != null) {
+      throw ex.get();
+    }
+    if (toProcess.isEmpty()) {
+      return true;
+    }
+    final FileProcessingCompiler.ProcessingItem[] processed=myCompiler.process(context,toProcess.toArray(new FileProcessingCompiler.ProcessingItem[toProcess.size()]));
+    if (processed.length == 0) {
+      return true;
+    }
+    CompilerUtil.runInContext(context,CompilerBundle.message("progress.updating.caches"),new ThrowableRunnable<IOException>(){
+      public void run() throws IOException {
+        final List<VirtualFile> vFiles=new ArrayList<VirtualFile>(processed.length);
+        for (        FileProcessingCompiler.ProcessingItem item : processed) {
+          vFiles.add(item.getFile());
+        }
+        LocalFileSystem.getInstance().refreshFiles(vFiles);
+        for (        FileProcessingCompiler.ProcessingItem item : processed) {
+          cache.update(item.getFile(),item.getValidityState());
+        }
+      }
+    }
+);
+  }
+ catch (  IOException e) {
+    throw new RuntimeException(e);
+  }
+  return true;
+}

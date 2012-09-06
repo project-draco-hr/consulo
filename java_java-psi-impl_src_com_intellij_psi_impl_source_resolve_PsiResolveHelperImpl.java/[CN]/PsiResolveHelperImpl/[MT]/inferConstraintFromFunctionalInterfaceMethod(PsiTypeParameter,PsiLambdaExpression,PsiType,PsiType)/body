@@ -1,24 +1,27 @@
 {
   final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
-  final PsiMethod method=LambdaUtil.getFunctionalInterfaceMethod(functionalInterfaceType);
+  final PsiMethod method=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
   if (method != null) {
-    final Pair<PsiType,ConstraintType> constraintFromFormalParams=inferConstraintFromLambdaFormalParams(typeParam,resolveResult,method,lambdaExpression);
+    final PsiSubstitutor subst=LambdaUtil.getSubstitutor(method,resolveResult);
+    final Pair<PsiType,ConstraintType> constraintFromFormalParams=inferConstraintFromLambdaFormalParams(typeParam,subst,method,lambdaExpression);
     if (constraintFromFormalParams != null)     return constraintFromFormalParams;
     final PsiParameter[] methodParameters=method.getParameterList().getParameters();
-    final PsiSubstitutor subst=TypeConversionUtil.getSuperClassSubstitutor(method.getContainingClass(),resolveResult.getElement(),resolveResult.getSubstitutor());
-    final boolean methodParamsDependOnTypeParams=methodParamsDependOnTypeParams(lambdaExpression,methodParameters,subst,typeParam);
+    if (methodParamsDependOn(typeParam,lambdaExpression,functionalInterfaceType,methodParameters,subst)) {
+      if (lowerBound != PsiType.NULL) {
+        return null;
+      }
+      return getFailedInferenceConstraint(typeParam);
+    }
+    final Set<PsiParameterList> lists=LambdaUtil.ourParams.get();
+    if (lists != null && lists.contains(lambdaExpression.getParameterList())) {
+      return null;
+    }
     final PsiType returnType=subst.substitute(method.getReturnType());
     if (returnType != null && returnType != PsiType.VOID) {
       Pair<PsiType,ConstraintType> constraint=null;
       final List<PsiExpression> expressions=lambdaExpression.getReturnExpressions();
       for (      final PsiExpression expression : expressions) {
-        final boolean independent=LambdaUtil.isFreeFromTypeInferenceArgs(methodParameters,lambdaExpression,expression);
-        if (independent && methodParamsDependOnTypeParams) {
-          if (lowerBound != PsiType.NULL) {
-            return null;
-          }
-          return FAILED_INFERENCE;
-        }
+        final boolean independent=LambdaUtil.isFreeFromTypeInferenceArgs(methodParameters,lambdaExpression,expression,subst,functionalInterfaceType,typeParam);
         if (!independent) {
           if (lowerBound != PsiType.NULL) {
             return null;
@@ -39,7 +42,7 @@
         if (exprType == null) {
           return FAILED_INFERENCE;
         }
-        final Pair<PsiType,ConstraintType> returnExprConstraint=getSubstitutionForTypeParameterConstraint(typeParam,returnType,exprType,true,PsiUtil.getLanguageLevel(method));
+        final Pair<PsiType,ConstraintType> returnExprConstraint=getSubstitutionForTypeParameterConstraint(typeParam,GenericsUtil.eliminateWildcards(returnType),exprType,true,PsiUtil.getLanguageLevel(method));
         if (returnExprConstraint != null) {
           if (returnExprConstraint == FAILED_INFERENCE)           return returnExprConstraint;
           if (constraint != null) {
@@ -53,7 +56,6 @@
       }
       if (constraint != null)       return constraint;
     }
-    if (methodParamsDependOnTypeParams)     return getFailedInferenceConstraint(typeParam);
   }
   return null;
 }

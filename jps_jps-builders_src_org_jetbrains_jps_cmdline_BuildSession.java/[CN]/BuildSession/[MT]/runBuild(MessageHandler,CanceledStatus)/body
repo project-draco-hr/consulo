@@ -4,19 +4,38 @@
     msgHandler.processMessage(new CompilerMessage("build",BuildMessage.Kind.ERROR,"Cannot determine build data storage root for project " + myProjectPath));
     return;
   }
-  final BuildFSState fsState=new BuildFSState(false);
-  try {
-    if (!dataStorageRoot.exists()) {
-      myBuildType=BuildType.PROJECT_REBUILD;
+  if (!dataStorageRoot.exists()) {
+    myBuildType=BuildType.PROJECT_REBUILD;
+  }
+  final DataInputStream fsStateStream=createFSDataStream(dataStorageRoot);
+  if (fsStateStream != null) {
+    final boolean hasWorkToDo=fsStateStream.readBoolean();
+    if (myBuildType == BuildType.MAKE && !hasWorkToDo && !containsChanges(myInitialFSDelta)) {
+      updateFsStateOnDisk(dataStorageRoot,fsStateStream,myInitialFSDelta.getOrdinal());
+      return;
     }
-    final ProjectDescriptor pd=myBuildRunner.load(msgHandler,dataStorageRoot,fsState);
-    myProjectDescriptor=pd;
-    loadFsState(fsState,dataStorageRoot,myInitialFSDelta,pd);
-    myInitialFSDelta=null;
-    myEventsProcessor.startProcessing();
-    myBuildRunner.runBuild(pd,cs,myConstantSearch,msgHandler,true,myBuildType);
   }
+  final BuildFSState fsState=new BuildFSState(false);
+  final ProjectDescriptor pd=myBuildRunner.load(msgHandler,dataStorageRoot,fsState);
+  myProjectDescriptor=pd;
+  if (fsStateStream != null) {
+    try {
+      try {
+        fsState.load(fsStateStream,pd);
+        applyFSEvent(pd,myInitialFSDelta);
+      }
   finally {
-    saveData(fsState,dataStorageRoot);
+        fsStateStream.close();
+      }
+    }
+ catch (    Throwable e) {
+      LOG.error(e);
+      fsState.clearAll();
+    }
   }
+  myLastEventOrdinal=myInitialFSDelta != null ? myInitialFSDelta.getOrdinal() : 0L;
+  myInitialFSDelta=null;
+  myEventsProcessor.startProcessing();
+  myBuildRunner.runBuild(pd,cs,myConstantSearch,msgHandler,true,myBuildType);
+  saveData(fsState,dataStorageRoot);
 }
