@@ -32,6 +32,10 @@
   final TextRange textRange=movedParent.getTextRange();
   if (movedParent instanceof XmlTag) {
     final XmlTag tag=(XmlTag)movedParent;
+    PsiElement parent=tag.getParent();
+    if (!(parent instanceof XmlTag) && PsiTreeUtil.getChildrenOfType(parent,XmlTag.class).length < 2) {
+      return info.prohibitMove();
+    }
     final TextRange valueRange=tag.getValue().getTextRange();
     final int valueStart=valueRange.getStartOffset();
     if (movedLineStart < valueStart && valueStart + 1 < document.getTextLength()) {
@@ -52,7 +56,7 @@
     if (parent != null) {
       final TextRange valueRange=parent.getValue().getTextRange();
       if ((down && moveDestinationRange.getEndOffset() >= valueRange.getStartOffset()) || (!down && moveDestinationRange.getStartOffset() <= parent.getTextRange().getStartOffset())) {
-        info.toMove2=null;
+        return info.prohibitMove();
       }
     }
   }
@@ -60,18 +64,18 @@
     PsiElement updatedElement=file.findElementAt(moveDestinationRange.getEndOffset());
     if (updatedElement instanceof PsiWhiteSpace)     updatedElement=PsiTreeUtil.prevLeaf(updatedElement);
     if (updatedElement != null) {
-      final PsiNamedElement namedParent=PsiTreeUtil.getParentOfType(updatedElement,movedParent.getClass());
-      if (namedParent instanceof XmlTag) {
-        if (checkParents(info,movedParent,namedParent,file,document))         return true;
-        final XmlTag tag=(XmlTag)namedParent;
+      final PsiNamedElement targetParent=PsiTreeUtil.getParentOfType(updatedElement,movedParent.getClass());
+      if (targetParent instanceof XmlTag) {
+        if (moveTags(info,(XmlTag)movedParent,(XmlTag)targetParent,down,document))         return true;
+        final XmlTag tag=(XmlTag)targetParent;
         final int offset=tag.isEmpty() ? tag.getTextRange().getStartOffset() : tag.getValue().getTextRange().getStartOffset();
         updatedMovedIntoEnd(document,info,offset);
         if (tag.isEmpty()) {
-          info.toMove2=new LineRange(namedParent);
+          info.toMove2=new LineRange(targetParent);
         }
       }
- else       if (namedParent instanceof XmlAttribute) {
-        updatedMovedIntoEnd(document,info,namedParent.getTextRange().getEndOffset());
+ else       if (targetParent instanceof XmlAttribute) {
+        updatedMovedIntoEnd(document,info,targetParent.getTextRange().getEndOffset());
       }
     }
   }
@@ -89,7 +93,7 @@
           final LineRange toMove2=info.toMove2;
           info.toMove2=new LineRange(Math.min(line,toMove2.startLine),toMove2.endLine);
         }
-        checkParents(info,movedParent,namedParent,file,document);
+        if (moveTags(info,(XmlTag)movedParent,(XmlTag)namedParent,down,document))         return true;
       }
  else       if (namedParent instanceof XmlAttribute) {
         final int line=document.getLineNumber(namedParent.getTextRange().getStartOffset());
@@ -97,6 +101,9 @@
         info.toMove2=new LineRange(Math.min(line,toMove2.startLine),toMove2.endLine);
       }
     }
+  }
+  if (movedParent instanceof XmlTag) {
+    info.toMove=new LineRange(movedParent);
   }
   return true;
 }
