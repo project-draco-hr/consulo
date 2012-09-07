@@ -1,6 +1,6 @@
 {
   ArrayList<PsiReferenceExpression> refsVector=new ArrayList<PsiReferenceExpression>();
-  ArrayList<PsiBlockStatement> addedBracesVector=new ArrayList<PsiBlockStatement>();
+  ArrayList<PsiCodeBlock> addedBracesVector=new ArrayList<PsiCodeBlock>();
   myAddedClassInitializers=new HashMap<PsiField,PsiClassInitializer>();
   for (  PsiReferenceExpression ref : refs) {
     ref.putCopyableUserData(MARK_KEY,"");
@@ -19,10 +19,29 @@
           blockStatement=(PsiBlockStatement)parent.replace(blockStatement);
           PsiElement newStatement=blockStatement.getCodeBlock().getStatements()[0];
           addMarkedElements(refsVector,newStatement);
-          addedBracesVector.add(blockStatement);
+          addedBracesVector.add(blockStatement.getCodeBlock());
           continue RefLoop;
         }
         parent=parent.getParent();
+      }
+      final PsiElement lambdaExpr=parentStatement.getParent();
+      if (lambdaExpr instanceof PsiLambdaExpression) {
+        final PsiLambdaExpression newLambdaExpr=(PsiLambdaExpression)myFactory.createExpressionFromText(((PsiLambdaExpression)lambdaExpr).getParameterList().getText() + " -> " + "{\n}",lambdaExpr);
+        final PsiStatement statementFromText;
+        if (LambdaUtil.getFunctionalInterfaceReturnType((PsiLambdaExpression)lambdaExpr) == PsiType.VOID) {
+          statementFromText=myFactory.createStatementFromText("a;",lambdaExpr);
+          ((PsiExpressionStatement)statementFromText).getExpression().replace(parentStatement);
+        }
+ else {
+          statementFromText=myFactory.createStatementFromText("return a;",lambdaExpr);
+          ((PsiReturnStatement)statementFromText).getReturnValue().replace(parentStatement);
+        }
+        newLambdaExpr.getBody().add(statementFromText);
+        final PsiCodeBlock body=(PsiCodeBlock)((PsiLambdaExpression)lambdaExpr.replace(newLambdaExpr)).getBody();
+        PsiElement newStatement=body.getStatements()[0];
+        addMarkedElements(refsVector,newStatement);
+        addedBracesVector.add(body);
+        continue;
       }
     }
  else {
@@ -58,6 +77,6 @@
   for (  PsiReferenceExpression ref : refs) {
     ref.putCopyableUserData(MARK_KEY,null);
   }
-  myAddedBraces=addedBracesVector.toArray(new PsiBlockStatement[addedBracesVector.size()]);
+  myAddedBraces=addedBracesVector.toArray(new PsiCodeBlock[addedBracesVector.size()]);
   return refsVector.toArray(new PsiReferenceExpression[refsVector.size()]);
 }
