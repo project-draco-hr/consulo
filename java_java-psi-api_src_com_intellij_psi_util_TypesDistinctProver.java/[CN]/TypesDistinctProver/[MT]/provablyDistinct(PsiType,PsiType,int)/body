@@ -1,0 +1,61 @@
+{
+  if (type1 instanceof PsiClassType && ((PsiClassType)type1).resolve() instanceof PsiTypeParameter)   return false;
+  if (type2 instanceof PsiClassType && ((PsiClassType)type2).resolve() instanceof PsiTypeParameter)   return false;
+  if (type1 instanceof PsiWildcardType) {
+    if (type2 instanceof PsiWildcardType) {
+      return provablyDistinct((PsiWildcardType)type1,(PsiWildcardType)type2);
+    }
+    if (type2 instanceof PsiCapturedWildcardType) {
+      return ((PsiWildcardType)type1).isExtends() && level > 0 || provablyDistinct((PsiWildcardType)type1,((PsiCapturedWildcardType)type2).getWildcard());
+    }
+    if (type2 instanceof PsiClassType) {
+      final PsiClass psiClass2=PsiUtil.resolveClassInType(type2);
+      if (psiClass2 == null)       return false;
+      if (((PsiWildcardType)type1).isExtends()) {
+        final PsiType extendsBound=((PsiWildcardType)type1).getExtendsBound();
+        if (extendsBound instanceof PsiArrayType && proveArrayTypeDistinct(((PsiWildcardType)type1).getManager().getProject(),(PsiArrayType)extendsBound,type2))         return true;
+        final PsiClass boundClass1=PsiUtil.resolveClassInType(extendsBound);
+        if (boundClass1 == null)         return false;
+        return proveExtendsBoundsDistinct(type1,type2,boundClass1,psiClass2);
+      }
+      if (((PsiWildcardType)type1).isSuper()) {
+        final PsiType superBound=((PsiWildcardType)type1).getSuperBound();
+        if (superBound instanceof PsiArrayType && proveArrayTypeDistinct(((PsiWildcardType)type1).getManager().getProject(),(PsiArrayType)superBound,type2))         return true;
+        final PsiClass boundClass1=PsiUtil.resolveClassInType(superBound);
+        if (boundClass1 == null || boundClass1 instanceof PsiTypeParameter)         return false;
+        return !InheritanceUtil.isInheritorOrSelf(boundClass1,psiClass2,true);
+      }
+      final PsiType bound=((PsiWildcardType)type1).getBound();
+      return bound != null && !bound.equals(psiClass2);
+    }
+    if (type2 instanceof PsiArrayType) {
+      return proveArrayTypeDistinct(((PsiWildcardType)type1).getManager().getProject(),(PsiArrayType)type2,type1);
+    }
+  }
+  if (type1 instanceof PsiCapturedWildcardType)   return provablyDistinct(((PsiCapturedWildcardType)type1).getWildcard(),type2,level + 1);
+  if (type2 instanceof PsiWildcardType || type2 instanceof PsiCapturedWildcardType)   return provablyDistinct(type2,type1,level + 1);
+  final PsiClassType.ClassResolveResult classResolveResult1=PsiUtil.resolveGenericsClassInType(type1);
+  final PsiClassType.ClassResolveResult classResolveResult2=PsiUtil.resolveGenericsClassInType(type2);
+  if (Comparing.equal(TypeConversionUtil.erasure(type1),TypeConversionUtil.erasure(type2))) {
+    final PsiSubstitutor substitutor1=classResolveResult1.getSubstitutor();
+    final PsiSubstitutor substitutor2=classResolveResult2.getSubstitutor();
+    for (    PsiTypeParameter parameter : substitutor1.getSubstitutionMap().keySet()) {
+      final PsiType substitutedType1=substitutor1.substitute(parameter);
+      final PsiType substitutedType2=substitutor2.substitute(parameter);
+      if (substitutedType1 == null && substitutedType2 == null)       return false;
+      if (substitutedType1 == null || substitutedType2 == null) {
+        for (        PsiClassType type : parameter.getExtendsListTypes()) {
+          if (!TypeConversionUtil.isAssignable(type,substitutedType1 != null ? substitutedType1 : substitutedType2,false))           return true;
+        }
+      }
+ else {
+        if (provablyDistinct(substitutedType1,substitutedType2,level + 1))         return true;
+        if (substitutedType1 instanceof PsiWildcardType && !((PsiWildcardType)substitutedType1).isBounded())         return true;
+      }
+    }
+    return false;
+  }
+  final PsiClass boundClass1=classResolveResult1.getElement();
+  final PsiClass boundClass2=classResolveResult2.getElement();
+  return type2 != null && type1 != null && !type1.equals(type2) && (!InheritanceUtil.isInheritorOrSelf(boundClass1,boundClass2,true) || !InheritanceUtil.isInheritorOrSelf(boundClass2,boundClass1,true));
+}
