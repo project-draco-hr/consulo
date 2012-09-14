@@ -1,5 +1,6 @@
 {
-  if (!reference.isQualified()) {
+  final PsiElement qualifier=reference.getQualifier();
+  if (!(qualifier instanceof PsiJavaCodeReferenceElement)) {
     return;
   }
   final PsiElement parent=reference.getParent();
@@ -20,31 +21,38 @@
   if (!(containingFile instanceof PsiJavaFile)) {
     return;
   }
-  final PsiElement psiElement=reference.resolve();
-  if (!(psiElement instanceof PsiClass)) {
+  final PsiElement target=reference.resolve();
+  if (!(target instanceof PsiClass)) {
     return;
   }
-  PsiClass aClass=(PsiClass)psiElement;
-  final Project project=aClass.getProject();
-  final CodeStyleSettings styleSettings=CodeStyleSettingsManager.getSettings(project);
-  if (!styleSettings.INSERT_INNER_CLASS_IMPORTS) {
-    aClass=ClassUtils.getOutermostContainingClass(aClass);
-  }
-  final String fqName=aClass.getQualifiedName();
-  if (fqName == null) {
+  final PsiJavaCodeReferenceElement qualifierReference=(PsiJavaCodeReferenceElement)qualifier;
+  final PsiElement qualifierTarget=qualifierReference.resolve();
+  if (!(qualifierTarget instanceof PsiPackage)) {
     return;
   }
-  final String referenceText=reference.getText();
-  final String text=StringUtils.stripAngleBrackets(referenceText);
-  if (!text.equals(fqName)) {
-    return;
+  final List<PsiJavaCodeReferenceElement> references=new ArrayList(2);
+  references.add(reference);
+  final CodeStyleSettings styleSettings=CodeStyleSettingsManager.getSettings(reference.getProject());
+  if (styleSettings.INSERT_INNER_CLASS_IMPORTS) {
+    collectInnerClassNames(reference,references);
   }
-  if (!ImportUtils.nameCanBeImported(fqName,reference)) {
-    return;
+  Collections.reverse(references);
+  for (int i=0, size=references.size(); i < size; i++) {
+    final PsiJavaCodeReferenceElement aReference=references.get(i);
+    final PsiElement referenceTarget=aReference.resolve();
+    if (!(referenceTarget instanceof PsiClass)) {
+      continue;
+    }
+    final PsiClass aClass=(PsiClass)referenceTarget;
+    final String qualifiedName=aClass.getQualifiedName();
+    if (qualifiedName == null) {
+      continue;
+    }
+    if (!ImportUtils.nameCanBeImported(qualifiedName,reference)) {
+      continue;
+    }
+    final boolean inSameFile=aClass.getContainingFile() == containingFile;
+    registerError(aReference,Boolean.valueOf(inSameFile));
+    break;
   }
-  final PsiJavaFile javaFile=(PsiJavaFile)containingFile;
-  final String packageName=javaFile.getPackageName();
-  final String elementPackageName=ClassUtil.extractPackageName(text);
-  final boolean inSameFile=elementPackageName.equals(packageName);
-  registerError(reference,Boolean.valueOf(inSameFile));
 }
