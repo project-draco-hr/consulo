@@ -1,0 +1,91 @@
+{
+  final ProjectDescriptor pd=context.getProjectDescriptor();
+  try {
+    final ArtifactSourceFilesState state=pd.dataManager.getArtifactsBuildData().getOrCreateState(target,pd);
+    state.ensureFsStateInitialized(pd.dataManager,context);
+    final Collection<String> deletedFiles=pd.fsState.getAndClearDeletedPaths(target);
+    final Map<BuildRootDescriptor,Set<File>> filesToRecompile=pd.fsState.getSourcesToRecompile(context,target);
+    if (deletedFiles.isEmpty() && filesToRecompile.isEmpty()) {
+      state.markUpToDate(context);
+      return;
+    }
+    context.processMessage(new ProgressMessage("Building artifact '" + target.getArtifact().getName() + "'..."));
+    final ArtifactSourceToOutputMapping srcOutMapping=state.getOrCreateSrcOutMapping();
+    final ArtifactOutputToSourceMapping outSrcMapping=state.getOrCreateOutSrcMapping();
+    final TIntObjectHashMap<Set<String>> filesToProcess=new TIntObjectHashMap<Set<String>>();
+    MultiMap<String,String> filesToDelete=new MultiMap<String,String>();
+    for (    String sourcePath : deletedFiles) {
+      final List<String> outputPaths=srcOutMapping.getState(sourcePath);
+      if (outputPaths != null) {
+        for (        String outputPath : outputPaths) {
+          filesToDelete.putValue(outputPath,sourcePath);
+          final List<ArtifactOutputToSourceMapping.SourcePathAndRootIndex> sources=outSrcMapping.getState(outputPath);
+          if (sources != null) {
+            for (            ArtifactOutputToSourceMapping.SourcePathAndRootIndex source : sources) {
+              addFileToProcess(filesToProcess,source.getRootIndex(),source.getPath(),deletedFiles);
+            }
+          }
+        }
+      }
+    }
+    Set<String> changedOutputPaths=new THashSet<String>();
+    for (    Map.Entry<BuildRootDescriptor,Set<File>> entry : filesToRecompile.entrySet()) {
+      int rootIndex=((ArtifactRootDescriptor)entry.getKey()).getRootIndex();
+      for (      File file : entry.getValue()) {
+        String sourcePath=file.getPath();
+        addFileToProcess(filesToProcess,rootIndex,sourcePath,deletedFiles);
+        final List<String> outputPaths=srcOutMapping.getState(sourcePath);
+        if (outputPaths != null) {
+          changedOutputPaths.addAll(outputPaths);
+          for (          String outputPath : outputPaths) {
+            final List<ArtifactOutputToSourceMapping.SourcePathAndRootIndex> sources=outSrcMapping.getState(outputPath);
+            if (sources != null) {
+              for (              ArtifactOutputToSourceMapping.SourcePathAndRootIndex source : sources) {
+                addFileToProcess(filesToProcess,source.getRootIndex(),source.getPath(),deletedFiles);
+              }
+            }
+          }
+        }
+      }
+    }
+    for (    Set<File> files : filesToRecompile.values()) {
+      for (      File file : files) {
+        srcOutMapping.remove(file.getPath());
+      }
+    }
+    for (    String outputPath : changedOutputPaths) {
+      outSrcMapping.remove(outputPath);
+    }
+    deleteOutdatedFiles(filesToDelete,context,srcOutMapping,outSrcMapping);
+    context.checkCanceled();
+    final ArtifactInstructionsBuilder instructions=pd.getArtifactRootsIndex().getInstructionsBuilder(target.getArtifact());
+    final Set<JarInfo> changedJars=new THashSet<JarInfo>();
+    instructions.processRoots(new ArtifactRootProcessor(){
+      @Override public boolean process(      ArtifactRootDescriptor descriptor,      DestinationInfo destination) throws IOException {
+        if (context.getCancelStatus().isCanceled())         return false;
+        final Set<String> sourcePaths=filesToProcess.get(descriptor.getRootIndex());
+        if (sourcePaths == null)         return true;
+        for (        String sourcePath : sourcePaths) {
+          if (destination instanceof ExplodedDestinationInfo) {
+            descriptor.copyFromRoot(sourcePath,descriptor.getRootIndex(),destination.getOutputPath(),context,srcOutMapping,outSrcMapping);
+          }
+ else           if (outSrcMapping.getState(destination.getOutputFilePath()) == null) {
+            outSrcMapping.update(destination.getOutputFilePath(),Collections.<ArtifactOutputToSourceMapping.SourcePathAndRootIndex>emptyList());
+            changedJars.add(((JarDestinationInfo)destination).getJarInfo());
+          }
+        }
+        return true;
+      }
+    }
+);
+    context.checkCanceled();
+    JarsBuilder builder=new JarsBuilder(changedJars,context,srcOutMapping,outSrcMapping,instructions);
+    final boolean processed=builder.buildJars();
+    if (processed && !Utils.errorsDetected(context) && !context.getCancelStatus().isCanceled()) {
+      state.markUpToDate(context);
+    }
+  }
+ catch (  IOException e) {
+    throw new ProjectBuildException(e);
+  }
+}
