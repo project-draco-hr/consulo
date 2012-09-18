@@ -1,17 +1,24 @@
 {
   myProject=project;
   myDaemonCodeAnalyzer=daemonCodeAnalyzer;
+  myPsiDocumentManager=psiDocumentManager;
+  myFileEditorManager=fileEditorManager;
+  myUndoManager=undoManager;
+  myProjectLevelVcsManager=projectLevelVcsManager;
+  myVcsDirtyScopeManager=vcsDirtyScopeManager;
+  myFileStatusManager=fileStatusManager;
+  myActionManager=actionManagerEx;
   boolean replaced=((UserDataHolderEx)myProject).replace(DAEMON_INITIALIZED,null,Boolean.TRUE);
   LOG.assertTrue(replaced,"Daemon listeners already initialized for the project " + myProject);
   MessageBus messageBus=myProject.getMessageBus();
   myDaemonEventPublisher=messageBus.syncPublisher(DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC);
   final MessageBusConnection connection=messageBus.connect();
-  EditorEventMulticaster eventMulticaster=EditorFactory.getInstance().getEventMulticaster();
+  EditorEventMulticaster eventMulticaster=editorFactory.getEventMulticaster();
   eventMulticaster.addDocumentListener(new DocumentAdapter(){
     @Override public void beforeDocumentChange(    final DocumentEvent e){
       if (isUnderIgnoredAction(null))       return;
       Document document=e.getDocument();
-      VirtualFile virtualFile=FileDocumentManager.getInstance().getFile(document);
+      VirtualFile virtualFile=fileDocumentManager.getFile(document);
       Project project=virtualFile == null ? null : ProjectUtil.guessProjectForFile(virtualFile);
       if (!worthBothering(document,project)) {
         return;
@@ -24,7 +31,7 @@
   eventMulticaster.addCaretListener(new CaretListener(){
     @Override public void caretPositionChanged(    CaretEvent e){
       Editor editor=e.getEditor();
-      if (!editor.getComponent().isShowing() && !ApplicationManager.getApplication().isUnitTestMode() || !worthBothering(editor.getDocument(),editor.getProject())) {
+      if (!editor.getComponent().isShowing() && !application.isUnitTestMode() || !worthBothering(editor.getDocument(),editor.getProject())) {
         return;
       }
       stopDaemon(true);
@@ -33,12 +40,12 @@
   }
 ,this);
   eventMulticaster.addEditorMouseMotionListener(new MyEditorMouseMotionListener(),this);
-  eventMulticaster.addEditorMouseListener(new MyEditorMouseListener(),this);
-  myEditorTracker=editorTracker;
+  myTooltipController=tooltipController;
+  eventMulticaster.addEditorMouseListener(new MyEditorMouseListener(myTooltipController),this);
   EditorTrackerListener editorTrackerListener=new EditorTrackerListener(){
     private List<Editor> myActiveEditors=Collections.emptyList();
     @Override public void activeEditorsChanged(    @NotNull List<Editor> editors){
-      List<Editor> activeEditors=getActiveEditors();
+      List<Editor> activeEditors=editorTracker.getActiveEditors();
       if (myActiveEditors.equals(activeEditors)) {
         return;
       }
@@ -50,7 +57,7 @@
     }
   }
 ;
-  myEditorTracker.addEditorTrackerListener(editorTrackerListener,this);
+  editorTracker.addEditorTrackerListener(editorTrackerListener,this);
   EditorFactoryListener editorFactoryListener=new EditorFactoryListener(){
     @Override public void editorCreated(    @NotNull EditorFactoryEvent event){
       Editor editor=event.getEditor();
@@ -73,16 +80,16 @@
     }
   }
 ;
-  EditorFactory.getInstance().addEditorFactoryListener(editorFactoryListener,this);
-  PsiDocumentManagerImpl documentManager=(PsiDocumentManagerImpl)PsiDocumentManager.getInstance(myProject);
-  PsiChangeHandler changeHandler=new PsiChangeHandler(myProject,documentManager,EditorFactory.getInstance(),connection,daemonCodeAnalyzer.getFileStatusMap());
+  editorFactory.addEditorFactoryListener(editorFactoryListener,this);
+  PsiDocumentManagerImpl documentManager=(PsiDocumentManagerImpl)psiDocumentManager;
+  PsiChangeHandler changeHandler=new PsiChangeHandler(myProject,documentManager,editorFactory,connection,daemonCodeAnalyzer.getFileStatusMap());
   Disposer.register(this,changeHandler);
-  PsiManager.getInstance(myProject).addPsiTreeChangeListener(changeHandler,changeHandler);
+  psiManager.addPsiTreeChangeListener(changeHandler,changeHandler);
   connection.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootAdapter(){
     @Override public void rootsChanged(    ModuleRootEvent event){
-      final FileEditor[] editors=FileEditorManager.getInstance(myProject).getSelectedEditors();
+      final FileEditor[] editors=fileEditorManager.getSelectedEditors();
       if (editors.length == 0)       return;
-      ApplicationManager.getApplication().invokeLater(new Runnable(){
+      application.invokeLater(new Runnable(){
         @Override public void run(){
           if (myProject.isDisposed())           return;
           for (          FileEditor fileEditor : editors) {
@@ -111,23 +118,22 @@
     }
   }
 );
-  CommandProcessor.getInstance().addCommandListener(new MyCommandListener(),this);
-  ApplicationListener applicationListener=new MyApplicationListener();
-  ApplicationManager.getApplication().addApplicationListener(applicationListener,this);
-  EditorColorsManager.getInstance().addEditorColorsListener(new MyEditorColorsListener(),this);
-  InspectionProfileManager.getInstance().addProfileChangeListener(new MyProfileChangeListener(),this);
-  InspectionProjectProfileManager.getInstance(project).addProfilesListener(new MyProfileChangeListener(),this);
-  TodoConfiguration.getInstance().addPropertyChangeListener(new MyTodoListener(),this);
-  ActionManagerEx.getInstanceEx().addAnActionListener(new MyAnActionListener(),this);
-  VirtualFileManager.getInstance().addVirtualFileListener(new VirtualFileAdapter(){
+  commandProcessor.addCommandListener(new MyCommandListener(),this);
+  application.addApplicationListener(new MyApplicationListener(),this);
+  editorColorsManager.addEditorColorsListener(new MyEditorColorsListener(),this);
+  inspectionProfileManager.addProfileChangeListener(new MyProfileChangeListener(),this);
+  inspectionProjectProfileManager.addProfilesListener(new MyProfileChangeListener(),this);
+  todoConfiguration.addPropertyChangeListener(new MyTodoListener(),this);
+  actionManagerEx.addAnActionListener(new MyAnActionListener(),this);
+  virtualFileManager.addVirtualFileListener(new VirtualFileAdapter(){
     @Override public void propertyChanged(    VirtualFilePropertyEvent event){
       String propertyName=event.getPropertyName();
       if (VirtualFile.PROP_NAME.equals(propertyName)) {
         stopDaemonAndRestartAllFiles();
         VirtualFile virtualFile=event.getFile();
-        PsiFile psiFile=((PsiManagerEx)PsiManager.getInstance(myProject)).getFileManager().getCachedPsiFile(virtualFile);
+        PsiFile psiFile=((PsiManagerEx)psiManager).getFileManager().getCachedPsiFile(virtualFile);
         if (psiFile != null && !myDaemonCodeAnalyzer.isHighlightingAvailable(psiFile)) {
-          Document document=FileDocumentManager.getInstance().getCachedDocument(virtualFile);
+          Document document=fileDocumentManager.getCachedDocument(virtualFile);
           if (document != null) {
             final EditorColorsScheme editorColorScheme=null;
             UpdateHighlightersUtil.setHighlightersToEditor(myProject,document,0,document.getTextLength(),Collections.<HighlightInfo>emptyList(),editorColorScheme,Pass.UPDATE_ALL);
@@ -141,10 +147,12 @@
   }
 ,this);
   ((EditorEventMulticasterEx)eventMulticaster).addErrorStripeListener(new ErrorStripeHandler(myProject),this);
-  final NamedScopesHolder[] holders=NamedScopesHolder.getAllNamedScopeHolders(project);
+  Set<NamedScopesHolder> holders=new THashSet<NamedScopesHolder>(Arrays.asList(NamedScopesHolder.getAllNamedScopeHolders(project)));
+  holders.add(namedScopeManager);
+  holders.add(dependencyValidationManager);
   NamedScopesHolder.ScopeListener scopeListener=new NamedScopesHolder.ScopeListener(){
     @Override public void scopesChanged(){
-      myDaemonCodeAnalyzer.reloadScopes();
+      myDaemonCodeAnalyzer.reloadScopes(dependencyValidationManager,namedScopeManager);
     }
   }
 ;
