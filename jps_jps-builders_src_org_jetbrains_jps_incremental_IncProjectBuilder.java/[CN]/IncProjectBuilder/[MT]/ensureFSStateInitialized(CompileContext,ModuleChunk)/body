@@ -2,21 +2,33 @@
   final ProjectDescriptor pd=context.getProjectDescriptor();
   final Timestamps timestamps=pd.timestamps.getStorage();
   for (  ModuleBuildTarget target : chunk.getTargets()) {
-    if (context.isProjectRebuild()) {
-      FSOperations.markDirtyFiles(context,target,timestamps,true,target.isTests() ? FSOperations.DirtyMarkScope.TESTS : FSOperations.DirtyMarkScope.PRODUCTION,null);
+    final BuildTargetConfiguration configuration=pd.getTargetsState().getTargetConfiguration(target);
+    if (context.isProjectRebuild() || configuration.isTargetDirty()) {
+      FSOperations.markDirtyFiles(context,target,timestamps,true,null);
       updateOutputRootsLayout(context,target);
+      configuration.save();
     }
  else {
       if (context.isMake()) {
         if (pd.fsState.markInitialScanPerformed(target)) {
-          initModuleFSState(context,target);
-          updateOutputRootsLayout(context,target);
+          boolean forceMarkDirty=false;
+          final File currentOutput=context.getProjectPaths().getModuleOutputDir(target.getModule(),target.isTests());
+          if (currentOutput != null) {
+            final Pair<String,String> outputsPair=pd.dataManager.getOutputRootsLayout().getState(target.getModuleName());
+            if (outputsPair != null) {
+              final String previousPath=target.isTests() ? outputsPair.second : outputsPair.first;
+              forceMarkDirty=StringUtil.isEmpty(previousPath) || !FileUtil.filesEqual(currentOutput,new File(previousPath));
+            }
+ else {
+              forceMarkDirty=true;
+            }
+          }
+          initModuleFSState(context,target,forceMarkDirty);
         }
       }
  else {
         if (context.getScope().isRecompilationForced(target)) {
-          FSOperations.markDirtyFiles(context,target,timestamps,true,target.isTests() ? FSOperations.DirtyMarkScope.TESTS : FSOperations.DirtyMarkScope.PRODUCTION,null);
-          updateOutputRootsLayout(context,target);
+          initModuleFSState(context,target,true);
         }
       }
     }
