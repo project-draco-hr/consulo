@@ -43,14 +43,36 @@
             return;
           }
           final Collection<String> paths=fetchFiles(compileContext);
-          final List<Module> modules=paths.isEmpty() && !isRebuild && !allProjectModulesAffected(compileContext) ? Arrays.asList(compileContext.getCompileScope().getAffectedModules()) : Collections.<Module>emptyList();
-          final Set<Artifact> artifacts=new ReadAction<Set<Artifact>>(){
-            protected void run(            final Result<Set<Artifact>> result){
-              result.setResult(ArtifactCompileScope.getArtifactsToBuild(myProject,compileContext.getCompileScope(),true));
+          final List<TargetTypeBuildScope> scopes=new ArrayList<TargetTypeBuildScope>();
+          if (paths.isEmpty()) {
+            if (!isRebuild && !allProjectModulesAffected(compileContext)) {
+              Module[] affectedModules=compileContext.getCompileScope().getAffectedModules();
+              for (              JavaModuleBuildTargetType type : JavaModuleBuildTargetType.ALL_TYPES) {
+                TargetTypeBuildScope.Builder builder=TargetTypeBuildScope.newBuilder().setTypeId(type.getTypeId());
+                for (                Module module : affectedModules) {
+                  builder.addTargetId(module.getName());
+                }
+                scopes.add(builder.build());
+              }
+            }
+ else {
+              scopes.addAll(CmdlineProtoUtil.createAllModulesScopes());
             }
           }
-.execute().getResultObject();
-          final RequestFuture future=compileInExternalProcess(compileContext,modules,artifacts,paths,callback);
+          new ReadAction(){
+            protected void run(            final Result result){
+              Set<Artifact> artifacts=ArtifactCompileScope.getArtifactsToBuild(myProject,compileContext.getCompileScope(),true);
+              if (!artifacts.isEmpty()) {
+                TargetTypeBuildScope.Builder builder=TargetTypeBuildScope.newBuilder().setTypeId(ArtifactBuildTargetType.INSTANCE.getTypeId());
+                for (                Artifact artifact : artifacts) {
+                  builder.addTargetId(artifact.getName());
+                }
+                scopes.add(builder.build());
+              }
+            }
+          }
+.execute();
+          final RequestFuture future=compileInExternalProcess(compileContext,scopes,paths,callback);
           if (future != null) {
             while (!future.waitFor(200L,TimeUnit.MILLISECONDS)) {
               if (indicator.isCanceled()) {
