@@ -1,9 +1,46 @@
 {
   final PsiClass anInterface=(PsiClass)element.getParent();
-  final boolean success=moveSubClassImplementsToExtends(anInterface);
-  if (!success) {
-    return;
+  final SearchScope searchScope=anInterface.getUseScope();
+  final Query<PsiClass> query=ClassInheritorsSearch.search(anInterface,searchScope,false);
+  final MultiMap<PsiElement,String> conflicts=new MultiMap();
+  query.forEach(new Processor<PsiClass>(){
+    @Override public boolean process(    PsiClass aClass){
+      final PsiReferenceList extendsList=aClass.getExtendsList();
+      if (extendsList == null) {
+        return true;
+      }
+      final PsiJavaCodeReferenceElement[] referenceElements=extendsList.getReferenceElements();
+      if (referenceElements.length > 0) {
+        final PsiElement target=referenceElements[0].resolve();
+        if (target != null) {
+          conflicts.putValue(aClass,IntentionPowerPackBundle.message("0.already.extends.1.and.will.not.compile.after.converting.2.to.a.class",RefactoringUIUtil.getDescription(aClass,true),RefactoringUIUtil.getDescription(target,true),RefactoringUIUtil.getDescription(anInterface,false)));
+        }
+      }
+      return true;
+    }
   }
-  changeInterfaceToClass(anInterface);
-  moveExtendsToImplements(anInterface);
+);
+  final boolean conflictsDialogOK;
+  if (conflicts.isEmpty()) {
+    conflictsDialogOK=true;
+  }
+ else {
+    final ConflictsDialog conflictsDialog=new ConflictsDialog(anInterface.getProject(),conflicts,new Runnable(){
+      @Override public void run(){
+        final AccessToken token=WriteAction.start();
+        try {
+          convertInterfaceToClass(anInterface);
+        }
+  finally {
+          token.finish();
+        }
+      }
+    }
+);
+    conflictsDialog.show();
+    conflictsDialogOK=conflictsDialog.isOK();
+  }
+  if (conflictsDialogOK) {
+    convertInterfaceToClass(anInterface);
+  }
 }
