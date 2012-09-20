@@ -1,0 +1,45 @@
+{
+  super(project);
+  if (!myProject.isDefault()) {
+    startupManager.runWhenProjectIsInitialized(new Runnable(){
+      @Override public void run(){
+        DocumentListener listener=new DocumentAdapter(){
+          @Override public void documentChanged(          DocumentEvent e){
+            final Document document=e.getDocument();
+            final VirtualFile virtualFile=fileDocumentManager.getFile(document);
+            if (virtualFile == null)             return;
+            if (!NewFileTracker.getInstance().poll(virtualFile))             return;
+            if (!fileTypeUtil.isSupportedFile(virtualFile))             return;
+            final Module module=projectRootManager.getFileIndex().getModuleForFile(virtualFile);
+            if (module == null)             return;
+            final PsiFile file=psiManager.findFile(virtualFile);
+            if (file == null)             return;
+            application.invokeLater(new Runnable(){
+              @Override public void run(){
+                if (myProject.isDisposed())                 return;
+                if (file.isValid() && file.isWritable()) {
+                  final CopyrightProfile opts=getCopyrightOptions(file);
+                  if (opts != null) {
+                    new UpdateCopyrightProcessor(myProject,module,file).run();
+                  }
+                }
+              }
+            }
+,ModalityState.NON_MODAL,myProject.getDisposed());
+          }
+        }
+;
+        editorFactory.getEventMulticaster().addDocumentListener(listener,myProject);
+      }
+    }
+);
+  }
+  if (application.isUnitTestMode()) {
+    Disposer.register(myProject,new Disposable(){
+      @Override public void dispose(){
+        NewFileTracker.getInstance().clear();
+      }
+    }
+);
+  }
+}
