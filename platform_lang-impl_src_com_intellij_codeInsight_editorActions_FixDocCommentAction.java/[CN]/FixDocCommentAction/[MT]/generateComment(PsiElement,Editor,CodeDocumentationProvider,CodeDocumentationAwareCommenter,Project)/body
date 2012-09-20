@@ -1,0 +1,65 @@
+{
+  Document document=editor.getDocument();
+  int commentStartOffset=anchor.getTextRange().getStartOffset();
+  int lineStartOffset=document.getLineStartOffset(document.getLineNumber(commentStartOffset));
+  if (lineStartOffset > 0 && lineStartOffset < commentStartOffset) {
+    int nonWhiteSpaceOffset=CharArrayUtil.shiftBackward(document.getCharsSequence(),commentStartOffset - 1," \t");
+    commentStartOffset=Math.max(nonWhiteSpaceOffset,lineStartOffset);
+  }
+  int commentBodyRelativeOffset=0;
+  int caretOffsetToSet=-1;
+  StringBuilder buffer=new StringBuilder();
+  String commentPrefix=commenter.getDocumentationCommentPrefix();
+  if (commentPrefix != null) {
+    buffer.append(commentPrefix).append("\n");
+    commentBodyRelativeOffset+=commentPrefix.length() + 1;
+  }
+  String linePrefix=commenter.getDocumentationCommentLinePrefix();
+  if (linePrefix != null) {
+    buffer.append(linePrefix);
+    commentBodyRelativeOffset+=linePrefix.length();
+    caretOffsetToSet=commentStartOffset + commentBodyRelativeOffset;
+  }
+  buffer.append("\n");
+  commentBodyRelativeOffset++;
+  String commentSuffix=commenter.getDocumentationCommentSuffix();
+  if (commentSuffix != null) {
+    buffer.append(commentSuffix).append("\n");
+  }
+  if (buffer.length() <= 0) {
+    return;
+  }
+  document.insertString(commentStartOffset,buffer);
+  PsiDocumentManager docManager=PsiDocumentManager.getInstance(project);
+  docManager.commitDocument(document);
+  Pair<PsiElement,PsiComment> pair=documentationProvider.parseContext(anchor);
+  if (pair == null || pair.second == null) {
+    return;
+  }
+  String stub=documentationProvider.generateDocumentationContentStub(pair.second);
+  CaretModel caretModel=editor.getCaretModel();
+  if (stub != null) {
+    int insertionOffset=commentStartOffset + commentBodyRelativeOffset;
+    document.insertString(insertionOffset,stub);
+    docManager.commitDocument(document);
+    pair=documentationProvider.parseContext(anchor);
+  }
+  if (caretOffsetToSet >= 0) {
+    caretModel.moveToOffset(caretOffsetToSet);
+  }
+  if (pair == null || pair.second == null) {
+    return;
+  }
+  int start=Math.min(calcStartReformatOffset(pair.first),calcStartReformatOffset(pair.second));
+  int end=pair.second.getTextRange().getEndOffset();
+  CodeStyleManager codeStyleManager=CodeStyleManager.getInstance(project);
+  codeStyleManager.reformatText(anchor.getContainingFile(),start,end);
+  int caretOffset=caretModel.getOffset();
+  if (caretOffset > 0 && caretOffset <= document.getTextLength()) {
+    char c=document.getCharsSequence().charAt(caretOffset - 1);
+    if (!StringUtil.isWhiteSpace(c)) {
+      document.insertString(caretOffset," ");
+      caretModel.moveToOffset(caretOffset + 1);
+    }
+  }
+}
