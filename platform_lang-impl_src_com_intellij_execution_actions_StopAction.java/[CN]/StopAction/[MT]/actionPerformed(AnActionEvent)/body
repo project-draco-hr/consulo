@@ -1,35 +1,47 @@
 {
   final DataContext dataContext=e.getDataContext();
-  ProcessHandler processHandler=getHandler(dataContext);
-  if ((processHandler == null || processHandler.isProcessTerminated()) && ActionPlaces.MAIN_MENU.equals(e.getPlace())) {
-    final Collection<HandlerItem> handlerItems=getItemsList(getActiveDescriptors(dataContext));
-    if (!handlerItems.isEmpty()) {
-      final JBList list=new JBList(handlerItems);
-      list.installCellRenderer(new NotNullFunction<HandlerItem,JComponent>(){
-        final JLabel label=new JLabel();
-        @NotNull public JComponent fun(        HandlerItem item){
-          label.setIcon(item.icon);
-          label.setIconTextGap(6);
-          label.setText(item.displayName);
-          return label;
-        }
-      }
-);
-      final PopupChooserBuilder builder=JBPopupFactory.getInstance().createListPopupBuilder(list);
-      final String title=handlerItems.size() == 1 ? "Confirm process stop" : "Select process to stop";
-      final JBPopup popup=builder.setTitle(title).setItemChoosenCallback(new Runnable(){
-        public void run(){
-          final HandlerItem item=(HandlerItem)list.getSelectedValue();
-          if (item != null) {
-            performAction(item.handler);
-          }
-        }
-      }
-).setRequestFocus(true).createPopup();
-      popup.showInBestPositionFor(dataContext);
+  ProcessHandler activeProcessHandler=getHandler(dataContext);
+  List<Pair<TaskInfo,ProgressIndicator>> backgroundTasks=getCancellableProcesses(e.getProject());
+  if (ActionPlaces.MAIN_MENU.equals(e.getPlace())) {
+    if (activeProcessHandler != null && !activeProcessHandler.isProcessTerminating() && !activeProcessHandler.isProcessTerminated() && backgroundTasks.isEmpty()) {
+      stopProcess(activeProcessHandler);
+      return;
     }
+    Pair<List<HandlerItem>,HandlerItem> handlerItems=getItemsList(backgroundTasks,getActiveDescriptors(dataContext),activeProcessHandler);
+    if (handlerItems.first.isEmpty())     return;
+    final JBList list=new JBList(handlerItems.first);
+    if (handlerItems.second != null)     list.setSelectedValue(handlerItems.second,true);
+    list.setCellRenderer(new GroupedItemsListRenderer(new ListItemDescriptor(){
+      @Nullable @Override public String getTextFor(      Object value){
+        return value instanceof HandlerItem ? ((HandlerItem)value).displayName : null;
+      }
+      @Nullable @Override public String getTooltipFor(      Object value){
+        return null;
+      }
+      @Nullable @Override public Icon getIconFor(      Object value){
+        return value instanceof HandlerItem ? ((HandlerItem)value).icon : null;
+      }
+      @Override public boolean hasSeparatorAboveOf(      Object value){
+        return value instanceof HandlerItem && ((HandlerItem)value).hasSeparator;
+      }
+      @Nullable @Override public String getCaptionAboveOf(      Object value){
+        return null;
+      }
+    }
+));
+    final PopupChooserBuilder builder=JBPopupFactory.getInstance().createListPopupBuilder(list);
+    final JBPopup popup=builder.setMovable(true).setTitle(handlerItems.first.size() == 1 ? "Confirm process stop" : "Stop process").setItemChoosenCallback(new Runnable(){
+      public void run(){
+        HandlerItem item=(HandlerItem)list.getSelectedValue();
+        if (item != null)         item.stop();
+      }
+    }
+).setRequestFocus(true).createPopup();
+    popup.showCenteredInCurrentWindow(e.getProject());
   }
-  if (processHandler != null) {
-    performAction(processHandler);
+ else {
+    if (activeProcessHandler != null) {
+      stopProcess(activeProcessHandler);
+    }
   }
 }
