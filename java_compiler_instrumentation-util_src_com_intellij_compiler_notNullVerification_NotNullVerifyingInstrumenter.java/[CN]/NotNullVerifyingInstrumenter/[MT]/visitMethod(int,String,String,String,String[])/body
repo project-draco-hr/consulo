@@ -1,79 +1,78 @@
 {
   final Type[] args=Type.getArgumentTypes(desc);
   final Type returnType=Type.getReturnType(desc);
-  MethodVisitor v=cv.visitMethod(access,name,desc,signature,exceptions);
+  final MethodVisitor v=cv.visitMethod(access,name,desc,signature,exceptions);
   return new MethodVisitor(Opcodes.ASM4,v){
-    private final ArrayList myNotNullParams=new ArrayList();
+    private final List<Integer> myNotNullParams=new ArrayList<Integer>();
     private int mySyntheticCount=0;
     private boolean myIsNotNull=false;
     private Label myStartGeneratedCodeLabel;
     public AnnotationVisitor visitParameterAnnotation(    final int parameter,    final String anno,    final boolean visible){
       AnnotationVisitor av;
       av=mv.visitParameterAnnotation(parameter,anno,visible);
-      if (isReferenceType(args[parameter]) && anno.equals(NOT_NULL_ANNO)) {
+      if (isReferenceType(args[parameter]) && anno.equals(NOT_NULL_TYPE)) {
         myNotNullParams.add(new Integer(parameter));
       }
- else       if (anno.equals("Ljava/lang/Synthetic;")) {
+ else       if (anno.equals(SYNTHETIC_TYPE)) {
         mySyntheticCount++;
       }
       return av;
     }
-    public AnnotationVisitor visitAnnotation(    String anno,    boolean isRuntime){
+    @Override public AnnotationVisitor visitAnnotation(    String anno,    boolean isRuntime){
       final AnnotationVisitor av=mv.visitAnnotation(anno,isRuntime);
-      if (isReferenceType(returnType) && anno.equals(NOT_NULL_ANNO)) {
+      if (isReferenceType(returnType) && anno.equals(NOT_NULL_TYPE)) {
         myIsNotNull=true;
       }
       return av;
     }
-    public void visitCode(){
+    @Override public void visitCode(){
       if (myNotNullParams.size() > 0) {
         myStartGeneratedCodeLabel=new Label();
         mv.visitLabel(myStartGeneratedCodeLabel);
       }
-      for (int p=0; p < myNotNullParams.size(); ++p) {
+      for (      Integer param : myNotNullParams) {
         int var=((access & ACC_STATIC) == 0) ? 1 : 0;
-        int param=((Integer)myNotNullParams.get(p)).intValue();
         for (int i=0; i < param; ++i) {
           var+=args[i].getSize();
         }
         mv.visitVarInsn(ALOAD,var);
         Label end=new Label();
         mv.visitJumpInsn(IFNONNULL,end);
-        generateThrow(IAE_CLASS_NAME,"Argument " + (param - mySyntheticCount) + " for @NotNull parameter of "+ myClassName+ "."+ name+ " must not be null",end);
+        generateThrow(IAE_CLASS_NAME,String.format(NULL_ARG_MESSAGE,param - mySyntheticCount,myClassName,name),end);
       }
     }
-    public void visitLocalVariable(    final String name,    final String desc,    final String signature,    final Label start,    final Label end,    final int index){
+    @Override public void visitLocalVariable(    String name,    String desc,    String signature,    Label start,    Label end,    int index){
       final boolean isStatic=(access & ACC_STATIC) != 0;
       final boolean isParameter=isStatic ? index < args.length : index <= args.length;
-      mv.visitLocalVariable(name,desc,signature,(isParameter && myStartGeneratedCodeLabel != null) ? myStartGeneratedCodeLabel : start,end,index);
+      final Label label=(isParameter && myStartGeneratedCodeLabel != null) ? myStartGeneratedCodeLabel : start;
+      mv.visitLocalVariable(name,desc,signature,label,end,index);
     }
-    public void visitInsn(    int opcode){
+    @Override public void visitInsn(    int opcode){
       if (opcode == ARETURN) {
         if (myIsNotNull) {
           mv.visitInsn(DUP);
           final Label skipLabel=new Label();
           mv.visitJumpInsn(IFNONNULL,skipLabel);
-          generateThrow(ISE_CLASS_NAME,"@NotNull method " + myClassName + "."+ name+ " must not return null",skipLabel);
+          generateThrow(ISE_CLASS_NAME,String.format(NULL_RESULT_MESSAGE,myClassName,name),skipLabel);
         }
       }
       mv.visitInsn(opcode);
     }
     private void generateThrow(    final String exceptionClass,    final String descr,    final Label end){
-      String exceptionParamClass="(Ljava/lang/String;)V";
       mv.visitTypeInsn(NEW,exceptionClass);
       mv.visitInsn(DUP);
       mv.visitLdcInsn(descr);
-      mv.visitMethodInsn(INVOKESPECIAL,exceptionClass,CONSTRUCTOR_NAME,exceptionParamClass);
+      mv.visitMethodInsn(INVOKESPECIAL,exceptionClass,CONSTRUCTOR_NAME,EXCEPTION_INIT_SIGNATURE);
       mv.visitInsn(ATHROW);
       mv.visitLabel(end);
       myIsModification=true;
     }
-    public void visitMaxs(    final int maxStack,    final int maxLocals){
+    @Override public void visitMaxs(    final int maxStack,    final int maxLocals){
       try {
         super.visitMaxs(maxStack,maxLocals);
       }
  catch (      ArrayIndexOutOfBoundsException e) {
-        throw new ArrayIndexOutOfBoundsException("maxs processing failed for method " + name + ": "+ e.getMessage());
+        throw new ArrayIndexOutOfBoundsException("Maximums processing failed for " + myClassName + "."+ name+ ": "+ e.getMessage());
       }
     }
   }

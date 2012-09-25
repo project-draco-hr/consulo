@@ -1,0 +1,40 @@
+{
+  final Ref<CompilationLog> result=Ref.create(null);
+  final Semaphore semaphore=new Semaphore();
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      semaphore.down();
+      CompilerManagerImpl.testSetup();
+      final CompileStatusNotification callback=new CompileStatusNotification(){
+        @Override public void finished(        boolean aborted,        int errors,        int warnings,        CompileContext compileContext){
+          try {
+            if (aborted) {
+              Assert.fail("compilation aborted");
+            }
+            result.set(new CompilationLog(CompilerManagerImpl.getPathsToRecompile(),CompilerManagerImpl.getPathsToDelete(),compileContext.getMessages(CompilerMessageCategory.ERROR),compileContext.getMessages(CompilerMessageCategory.WARNING)));
+          }
+  finally {
+            semaphore.up();
+          }
+        }
+      }
+;
+      if (useExternalCompiler()) {
+        myProject.save();
+        CompilerTestUtil.saveSdkTable();
+        CompilerTestUtil.scanSourceRootsToRecompile(myProject);
+      }
+      action.run(callback);
+    }
+  }
+);
+  long start=System.currentTimeMillis();
+  while (!semaphore.waitFor(10)) {
+    if (System.currentTimeMillis() - start > 60 * 1000) {
+      throw new RuntimeException("timeout");
+    }
+    UIUtil.dispatchAllInvocationEvents();
+  }
+  UIUtil.dispatchAllInvocationEvents();
+  return result.get();
+}

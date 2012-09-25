@@ -2,8 +2,7 @@
   ApplicationManager.getApplication().assertIsDispatchThread();
   final boolean useExtProcessBuild=useOutOfProcessBuild();
   final String contentName=forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make");
-  final boolean compileInBackground=true;
-  final CompilerTask compileTask=new CompilerTask(myProject,compileInBackground,contentName,ApplicationManager.getApplication().isUnitTestMode());
+  final CompilerTask compileTask=new CompilerTask(myProject,contentName,ApplicationManager.getApplication().isUnitTestMode());
   StatusBar.Info.set("",myProject,"Compiler");
   if (useExtProcessBuild && BuildManager.getInstance().rescanRequired(myProject)) {
     myProject.save();
@@ -42,36 +41,19 @@
             COMPILE_SERVER_BUILD_STATUS.set(compileContext,ExitStatus.CANCELLED);
             return;
           }
-          final Collection<String> paths=fetchFiles(compileContext);
-          final List<TargetTypeBuildScope> scopes=new ArrayList<TargetTypeBuildScope>();
+          final Collection<String> paths=CompileScopeUtil.fetchFiles(compileContext);
+          List<TargetTypeBuildScope> scopes=new ArrayList<TargetTypeBuildScope>();
           if (paths.isEmpty()) {
-            if (!isRebuild && !allProjectModulesAffected(compileContext)) {
-              Module[] affectedModules=compileContext.getCompileScope().getAffectedModules();
-              for (              JavaModuleBuildTargetType type : JavaModuleBuildTargetType.ALL_TYPES) {
-                TargetTypeBuildScope.Builder builder=TargetTypeBuildScope.newBuilder().setTypeId(type.getTypeId());
-                for (                Module module : affectedModules) {
-                  builder.addTargetId(module.getName());
-                }
-                scopes.add(builder.build());
-              }
+            if (!isRebuild && !CompileScopeUtil.allProjectModulesAffected(compileContext)) {
+              CompileScopeUtil.addScopesForModules(Arrays.asList(compileContext.getCompileScope().getAffectedModules()),scopes);
             }
  else {
               scopes.addAll(CmdlineProtoUtil.createAllModulesScopes());
             }
-          }
-          new ReadAction(){
-            protected void run(            final Result result){
-              Set<Artifact> artifacts=ArtifactCompileScope.getArtifactsToBuild(myProject,compileContext.getCompileScope(),true);
-              if (!artifacts.isEmpty()) {
-                TargetTypeBuildScope.Builder builder=TargetTypeBuildScope.newBuilder().setTypeId(ArtifactBuildTargetType.INSTANCE.getTypeId());
-                for (                Artifact artifact : artifacts) {
-                  builder.addTargetId(artifact.getName());
-                }
-                scopes.add(builder.build());
-              }
+            for (            BuildTargetScopeProvider provider : BuildTargetScopeProvider.EP_NAME.getExtensions()) {
+              scopes=CompileScopeUtil.mergeScopes(scopes,provider.getBuildTargetScopes(scope,myCompilerFilter,myProject));
             }
           }
-.execute();
           final RequestFuture future=compileInExternalProcess(compileContext,scopes,paths,callback);
           if (future != null) {
             while (!future.waitFor(200L,TimeUnit.MILLISECONDS)) {
@@ -92,13 +74,11 @@
           final long duration=notifyCompilationCompleted(compileContext,callback,COMPILE_SERVER_BUILD_STATUS.get(compileContext));
           CompilerUtil.logDuration("\tCOMPILATION FINISHED (BUILD PROCESS); Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),duration);
           CompilerCacheManager.getInstance(myProject).flushCaches();
-          if (ApplicationManager.getApplication().isUnitTestMode()) {
-            final Set<File> outputs=new HashSet<File>();
-            for (            final String path : CompilerPathsEx.getOutputPaths(ModuleManager.getInstance(myProject).getModules())) {
-              outputs.add(new File(path));
-            }
-            CompilerUtil.refreshIOFiles(outputs);
+          final Set<File> outputs=new HashSet<File>();
+          for (          final String path : CompilerPathsEx.getOutputPaths(ModuleManager.getInstance(myProject).getModules())) {
+            outputs.add(new File(path));
           }
+          CompilerUtil.refreshIOFiles(outputs);
         }
       }
     }
