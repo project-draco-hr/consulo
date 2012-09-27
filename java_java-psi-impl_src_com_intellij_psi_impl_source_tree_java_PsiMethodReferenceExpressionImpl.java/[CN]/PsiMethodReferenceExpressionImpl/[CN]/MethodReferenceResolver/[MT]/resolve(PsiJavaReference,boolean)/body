@@ -1,47 +1,17 @@
 {
-  PsiClass containingClass=null;
-  final PsiExpression expression=getQualifierExpression();
-  PsiSubstitutor substitutor=PsiSubstitutor.EMPTY;
-  if (expression != null) {
-    PsiClassType.ClassResolveResult result=PsiUtil.resolveGenericsClassInType(expression.getType());
-    containingClass=result.getElement();
-    if (containingClass != null) {
-      substitutor=result.getSubstitutor();
-    }
-    if (containingClass == null && expression instanceof PsiReferenceExpression) {
-      final PsiElement resolve=((PsiReferenceExpression)expression).resolve();
-      if (resolve instanceof PsiClass) {
-        containingClass=(PsiClass)resolve;
-      }
-    }
-  }
- else {
-    final PsiTypeElement typeElement=getQualifierType();
-    if (typeElement != null) {
-      PsiClassType.ClassResolveResult result=PsiUtil.resolveGenericsClassInType(typeElement.getType());
-      containingClass=result.getElement();
-      if (containingClass != null) {
-        substitutor=result.getSubstitutor();
-      }
-    }
-  }
+  final Ref<PsiClass> classRef=new Ref<PsiClass>();
+  final Ref<PsiSubstitutor> substRef=new Ref<PsiSubstitutor>();
+  process(classRef,substRef);
+  final PsiClass containingClass=classRef.get();
+  final PsiSubstitutor substitutor=substRef.get();
   if (containingClass != null) {
     final PsiElement element=getReferenceNameElement();
     if (element instanceof PsiIdentifier) {
       final PsiType functionalInterfaceType=getFunctionalInterfaceType();
       final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
-      PsiMethod interfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
-      final MethodSignature interfaceMethodSignature=interfaceMethod != null ? interfaceMethod.getSignature(resolveResult.getSubstitutor()) : null;
-      MethodCandidatesProcessor processor=new MethodCandidatesProcessor(PsiMethodReferenceExpressionImpl.this,new PsiConflictResolver[]{DuplicateConflictResolver.INSTANCE},new SmartList<CandidateInfo>()){
-        @Override protected boolean isAccepted(        PsiMethod candidate){
-          if (super.isAccepted(candidate)) {
-            if (interfaceMethodSignature == null)             return true;
-            return LambdaUtil.areAcceptable(interfaceMethodSignature,candidate.getSignature(JavaPsiFacade.getElementFactory(getProject()).createRawSubstitutor(candidate)));
-          }
-          return false;
-        }
-      }
-;
+      final PsiMethod interfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
+      final MethodReferenceConflictResolver conflictResolver=new MethodReferenceConflictResolver(containingClass,interfaceMethod,resolveResult.getSubstitutor());
+      final MethodCandidatesProcessor processor=new MethodCandidatesProcessor(PsiMethodReferenceExpressionImpl.this,new PsiConflictResolver[]{conflictResolver},new SmartList<CandidateInfo>());
       processor.setIsConstructor(false);
       processor.setName(element.getText());
       ResolveState state=ResolveState.initial().put(PsiSubstitutor.KEY,substitutor);
