@@ -1,0 +1,60 @@
+{
+  final Project project=PlatformDataKeys.PROJECT.getData(dataContext);
+  Editor editor=PlatformDataKeys.EDITOR.getData(dataContext);
+  PsiFile file=LangDataKeys.PSI_FILE.getData(dataContext);
+  if (project == null)   return;
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  boolean isInvokedFromEditor=editor != null;
+  PsiElement element;
+  if (editor != null) {
+    element=TargetElementUtilBase.findTargetElement(editor,TargetElementUtilBase.getInstance().getAllAccepted());
+  }
+ else {
+    element=LangDataKeys.PSI_ELEMENT.getData(dataContext);
+    if (file != null) {
+      final FileEditor fileEditor=FileEditorManager.getInstance(project).getSelectedEditor(file.getVirtualFile());
+      if (fileEditor instanceof TextEditor) {
+        editor=((TextEditor)fileEditor).getEditor();
+      }
+    }
+  }
+  if (element == null && file == null)   return;
+  PsiFile containingFile=element != null ? element.getContainingFile() : file;
+  if (containingFile == null || !containingFile.getViewProvider().isPhysical())   return;
+  final PsiElement adjustedElement=TargetElementUtilBase.getInstance().adjustElement(editor,TargetElementUtilBase.getInstance().getAllAccepted(),element,null);
+  if (adjustedElement != null) {
+    element=adjustedElement;
+  }
+ else   if (file != null && editor != null) {
+    element=DocumentationManager.getInstance(project).getElementFromLookup(editor,file);
+  }
+  PsiReference ref=null;
+  if (editor != null) {
+    ref=TargetElementUtilBase.findReference(editor,editor.getCaretModel().getOffset());
+    if (element == null && ref != null) {
+      element=TargetElementUtilBase.getInstance().adjustReference(ref);
+    }
+  }
+  String text="";
+  PsiElement[] impls=new PsiElement[0];
+  if (element != null) {
+    impls=getSelfAndImplementations(editor,element,createImplementationsSearcher());
+    text=SymbolPresentationUtil.getSymbolPresentableText(element);
+  }
+  if (impls.length == 0 && ref instanceof PsiPolyVariantReference) {
+    final PsiPolyVariantReference polyReference=(PsiPolyVariantReference)ref;
+    text=polyReference.getRangeInElement().substring(polyReference.getElement().getText());
+    final ResolveResult[] results=polyReference.multiResolve(false);
+    final List<PsiElement> implsList=new ArrayList<PsiElement>(results.length);
+    for (    ResolveResult result : results) {
+      final PsiElement resolvedElement=result.getElement();
+      if (resolvedElement != null && resolvedElement.isPhysical()) {
+        implsList.add(resolvedElement);
+      }
+    }
+    if (!implsList.isEmpty()) {
+      implsList.toArray(impls=new PsiElement[implsList.size()]);
+    }
+  }
+  showImplementations(impls,project,text,editor,file,element,isInvokedFromEditor,invokedByShortcut);
+}
