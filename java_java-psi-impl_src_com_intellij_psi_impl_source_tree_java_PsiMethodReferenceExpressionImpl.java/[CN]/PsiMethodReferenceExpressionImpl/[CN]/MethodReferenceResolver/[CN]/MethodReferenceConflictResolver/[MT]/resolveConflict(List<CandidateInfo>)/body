@@ -1,17 +1,47 @@
 {
   if (mySignature == null)   return null;
-  processStaticAccessConflicts(conflicts);
-  for (Iterator<CandidateInfo> iterator=conflicts.iterator(); iterator.hasNext(); ) {
-    CandidateInfo conflict=iterator.next();
+  boolean hasReceiver=false;
+  final PsiType[] parameterTypes=mySignature.getParameterTypes();
+  if (parameterTypes.length > 0) {
+    final PsiClassType.ClassResolveResult classResolveResult=PsiUtil.resolveGenericsClassInType(parameterTypes[0]);
+    if (classResolveResult.getElement() == myContainingClass && classResolveResult.getSubstitutor().equals(mySubstitutor)) {
+      hasReceiver=true;
+    }
+  }
+  final List<CandidateInfo> firstCandidates=new ArrayList<CandidateInfo>();
+  final List<CandidateInfo> secondCandidates=new ArrayList<CandidateInfo>();
+  for (  CandidateInfo conflict : conflicts) {
     if (!(conflict instanceof MethodCandidateInfo))     continue;
     final PsiMethod psiMethod=((MethodCandidateInfo)conflict).getElement();
     if (psiMethod == null)     continue;
     PsiSubstitutor subst=PsiSubstitutor.EMPTY;
     subst=subst.putAll(mySubstitutor);
-    if (!LambdaUtil.areAcceptable(mySignature,psiMethod.getSignature(subst.putAll(conflict.getSubstitutor())),myContainingClass,mySubstitutor,psiMethod.isVarArgs())) {
-      iterator.remove();
+    final PsiType[] signatureParameterTypes2=psiMethod.getSignature(subst).getParameterTypes();
+    final boolean varArgs=psiMethod.isVarArgs();
+    final boolean isStatic=psiMethod.hasModifierProperty(PsiModifier.STATIC);
+    if ((parameterTypes.length == signatureParameterTypes2.length || varArgs && parameterTypes.length >= signatureParameterTypes2.length) && (isStatic || psiMethod.isConstructor())) {
+      boolean correct=true;
+      for (int i=0; i < parameterTypes.length; i++) {
+        final PsiType type1=parameterTypes[i];
+        final PsiType type2=varArgs && i >= signatureParameterTypes2.length - 1 ? ((PsiArrayType)signatureParameterTypes2[signatureParameterTypes2.length - 1]).getComponentType() : signatureParameterTypes2[i];
+        correct&=GenericsUtil.eliminateWildcards(subst.substitute(type1)).equals(GenericsUtil.eliminateWildcards(type2));
+      }
+      if (correct) {
+        firstCandidates.add(conflict);
+      }
+    }
+    if (hasReceiver && parameterTypes.length == signatureParameterTypes2.length + 1 && !isStatic) {
+      boolean correct=true;
+      for (int i=0; i < signatureParameterTypes2.length; i++) {
+        final PsiType type1=parameterTypes[i + 1];
+        final PsiType type2=signatureParameterTypes2[i];
+        correct&=GenericsUtil.eliminateWildcards(subst.substitute(type1)).equals(GenericsUtil.eliminateWildcards(type2));
+      }
+      if (correct) {
+        secondCandidates.add(conflict);
+      }
     }
   }
-  if (conflicts.size() == 1)   return conflicts.get(0);
-  return null;
+  if (secondCandidates.size() + firstCandidates.size() != 1)   return null;
+  return !firstCandidates.isEmpty() ? firstCandidates.get(0) : secondCandidates.get(0);
 }
