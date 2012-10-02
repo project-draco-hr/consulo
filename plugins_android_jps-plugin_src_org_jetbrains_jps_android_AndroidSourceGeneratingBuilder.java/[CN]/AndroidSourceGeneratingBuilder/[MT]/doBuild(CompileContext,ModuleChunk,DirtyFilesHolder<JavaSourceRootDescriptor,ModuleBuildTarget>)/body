@@ -1,0 +1,77 @@
+{
+  final Map<JpsModule,MyModuleData> moduleDataMap=computeModuleDatas(chunk.getModules(),context);
+  if (moduleDataMap == null || moduleDataMap.size() == 0) {
+    return ExitCode.ABORT;
+  }
+  if (!checkVersions(moduleDataMap,context)) {
+    return ExitCode.ABORT;
+  }
+  checkAndroidDependencies(moduleDataMap,context);
+  if (context.isProjectRebuild()) {
+    if (!clearAndroidStorages(context,chunk.getModules())) {
+      return ExitCode.ABORT;
+    }
+  }
+  final Map<File,ModuleBuildTarget> idlFilesToCompile=new HashMap<File,ModuleBuildTarget>();
+  final Map<File,ModuleBuildTarget> rsFilesToCompile=new HashMap<File,ModuleBuildTarget>();
+  dirtyFilesHolder.processDirtyFiles(new FileProcessor<JavaSourceRootDescriptor,ModuleBuildTarget>(){
+    @Override public boolean apply(    ModuleBuildTarget target,    File file,    JavaSourceRootDescriptor sourceRoot) throws IOException {
+      final JpsAndroidModuleExtension extension=AndroidJpsUtil.getExtension(target.getModule());
+      if (extension == null) {
+        return true;
+      }
+      final String ext=FileUtil.getExtension(file.getName());
+      if (AIDL_EXTENSION.equals(ext)) {
+        idlFilesToCompile.put(file,target);
+      }
+ else       if (RENDERSCRIPT_EXTENSION.equals(ext)) {
+        rsFilesToCompile.put(file,target);
+      }
+      return true;
+    }
+  }
+);
+  boolean success=true;
+  final BuildDataManager dataManager=context.getProjectDescriptor().dataManager;
+  if (context.isProjectRebuild()) {
+    for (    JpsModule module : moduleDataMap.keySet()) {
+      final File generatedSourcesStorage=AndroidJpsUtil.getGeneratedSourcesStorage(module,dataManager);
+      if (generatedSourcesStorage.exists() && !deleteAndMarkRecursively(generatedSourcesStorage,context,BUILDER_NAME)) {
+        success=false;
+      }
+      final File generatedResourcesStorage=AndroidJpsUtil.getGeneratedResourcesStorage(module,dataManager);
+      if (generatedResourcesStorage.exists() && !deleteAndMarkRecursively(generatedResourcesStorage,context,BUILDER_NAME)) {
+        success=false;
+      }
+    }
+  }
+  if (!success) {
+    return ExitCode.ABORT;
+  }
+  if (!runAidlCompiler(context,idlFilesToCompile,moduleDataMap)) {
+    success=false;
+  }
+  if (!runRenderscriptCompiler(context,rsFilesToCompile,moduleDataMap)) {
+    success=false;
+  }
+  final File dataStorageRoot=dataManager.getDataStorageRoot();
+  final AndroidAptStateStorage aptStorage=new AndroidAptStateStorage(dataStorageRoot);
+  try {
+    if (!runAaptCompiler(context,moduleDataMap,aptStorage)) {
+      success=false;
+    }
+  }
+  finally {
+    aptStorage.close();
+  }
+  final AndroidBuildConfigStateStorage buildConfigStorage=new AndroidBuildConfigStateStorage(dataStorageRoot);
+  try {
+    if (!runBuildConfigGeneration(context,moduleDataMap,buildConfigStorage)) {
+      success=false;
+    }
+  }
+  finally {
+    buildConfigStorage.close();
+  }
+  return success ? ExitCode.OK : ExitCode.ABORT;
+}
