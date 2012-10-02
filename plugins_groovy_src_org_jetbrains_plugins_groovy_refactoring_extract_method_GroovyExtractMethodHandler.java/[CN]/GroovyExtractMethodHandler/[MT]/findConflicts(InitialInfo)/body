@@ -1,0 +1,40 @@
+{
+  final MultiMap<PsiElement,String> conflicts=new MultiMap<PsiElement,String>();
+  final PsiElement declarationOwner=info.getStatements()[0].getParent();
+  GroovyRecursiveElementVisitor visitor=new GroovyRecursiveElementVisitor(){
+    @Override public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
+      super.visitReferenceExpression(referenceExpression);
+      GroovyResolveResult resolveResult=referenceExpression.advancedResolve();
+      GroovyPsiElement resolveContext=resolveResult.getCurrentFileResolveContext();
+      if (resolveContext != null && !(resolveContext instanceof GrImportStatement) && !PsiTreeUtil.isAncestor(declarationOwner,resolveContext,true) && !skipResult(resolveResult)) {
+        conflicts.putValue(referenceExpression,GroovyRefactoringBundle.message("ref.0.will.not.be.resolved.outside.of.current.context",referenceExpression.getText()));
+      }
+    }
+    private boolean skipResult(    GroovyResolveResult result){
+      PsiElement element=result.getElement();
+      if (element instanceof PsiMethod) {
+        String name=((PsiMethod)element).getName();
+        if (!name.startsWith("print"))         return false;
+        if (element instanceof GrGdkMethod)         element=((GrGdkMethod)element).getStaticMethod();
+        PsiClass aClass=((PsiMethod)element).getContainingClass();
+        if (aClass != null) {
+          String qname=aClass.getQualifiedName();
+          return GroovyCommonClassNames.DEFAULT_GROOVY_METHODS.equals(qname);
+        }
+      }
+      return false;
+    }
+  }
+;
+  GrStatement[] statements=info.getStatements();
+  for (  GrStatement statement : statements) {
+    statement.accept(visitor);
+  }
+  if (conflicts.isEmpty())   return false;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    throw new BaseRefactoringProcessor.ConflictsInTestsException(conflicts.values());
+  }
+  ConflictsDialog dialog=new ConflictsDialog(info.getProject(),conflicts);
+  dialog.show();
+  return !dialog.isOK();
+}

@@ -1,28 +1,41 @@
 {
-  if (method.hasModifierProperty(PsiModifier.STATIC))   return false;
-  if (method.hasModifierProperty(PsiModifier.SYNCHRONIZED))   return false;
-  if (method.isConstructor())   return false;
-  if (method.getContainingClass() instanceof GroovyScriptClass)   return false;
-  if (SuperMethodsSearch.search(method,null,true,false).findFirst() != null)   return false;
-  if (OverridingMethodsSearch.search(method).findFirst() != null)   return false;
+  if (method.hasModifierProperty(PsiModifier.STATIC))   return Result.mayNotBeStatic;
+  if (method.hasModifierProperty(PsiModifier.SYNCHRONIZED))   return Result.mayNotBeStatic;
+  if (method.isConstructor())   return Result.mayNotBeStatic;
+  if (method.getContainingClass() instanceof GroovyScriptClass)   return Result.mayNotBeStatic;
+  if (SuperMethodsSearch.search(method,null,true,false).findFirst() != null)   return Result.mayNotBeStatic;
+  if (OverridingMethodsSearch.search(method).findFirst() != null)   return Result.mayNotBeStatic;
+  if (ignoreMethod(method))   return Result.mayNotBeStatic;
   if (myOnlyPrivateOrFinal) {
-    if (!(method.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.PRIVATE)))     return false;
+    if (!(method.hasModifierProperty(PsiModifier.FINAL) || method.hasModifierProperty(PsiModifier.PRIVATE)))     return Result.mayNotBeStatic;
   }
   GrOpenBlock block=method.getBlock();
-  if (block == null)   return false;
-  if (myIgnoreEmptyMethods && block.getStatements().length == 0)   return false;
+  if (block == null)   return Result.mayNotBeStatic;
+  if (myIgnoreEmptyMethods && block.getStatements().length == 0)   return Result.mayNotBeStatic;
   PsiClass containingClass=method.getContainingClass();
-  if (containingClass == null)   return false;
-  if (containingClass.getContainingClass() != null && !containingClass.hasModifierProperty(PsiModifier.STATIC))   return false;
+  if (containingClass == null)   return Result.mayNotBeStatic;
+  if (containingClass.getContainingClass() != null && !containingClass.hasModifierProperty(PsiModifier.STATIC)) {
+    return Result.mayNotBeStatic;
+  }
   final ExtensionsArea rootArea=Extensions.getRootArea();
   final ExtensionPoint<Condition<PsiElement>> extensionPoint=rootArea.getExtensionPoint("com.intellij.cantBeStatic");
   final Condition<PsiElement>[] addins=extensionPoint.getExtensions();
   for (  Condition<PsiElement> addin : addins) {
     if (addin.value(method)) {
-      return false;
+      return Result.mayNotBeStatic;
     }
   }
   MethodMayBeStaticVisitor visitor=new MethodMayBeStaticVisitor();
   method.accept(visitor);
-  return visitor.mayBeStatic();
+  boolean haveInstanceRefsInClosure=visitor.haveInstanceRefsInClosure();
+  boolean haveInstanceRefs=visitor.haveInstanceRefsOutsideClosures();
+  if (!haveInstanceRefsInClosure && !haveInstanceRefs) {
+    return Result.mayBeStatic;
+  }
+ else   if (haveInstanceRefsInClosure && !haveInstanceRefs) {
+    return Result.mayBeStaticButHaveInstanceRefsInClosure;
+  }
+ else {
+    return Result.mayNotBeStatic;
+  }
 }
