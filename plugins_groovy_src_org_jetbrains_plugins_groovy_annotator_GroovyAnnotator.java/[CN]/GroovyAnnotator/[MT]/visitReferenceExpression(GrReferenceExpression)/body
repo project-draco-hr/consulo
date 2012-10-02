@@ -1,59 +1,24 @@
 {
+  PsiElement refNameElement=referenceExpression.getReferenceNameElement();
+  if (refNameElement == null)   return;
   checkStringNameIdentifier(referenceExpression);
-  GroovyResolveResult resolveResult=referenceExpression.advancedResolve();
-  GroovyResolveResult[] results=referenceExpression.multiResolve(false);
-  PsiElement resolved=resolveResult.getElement();
-  final PsiElement parent=referenceExpression.getParent();
-  if (resolved != null) {
-    if (!resolveResult.isStaticsOK() && resolved instanceof PsiModifierListOwner) {
-      if (!((PsiModifierListOwner)resolved).hasModifierProperty(STATIC)) {
-        Annotation annotation=myHolder.createInfoAnnotation(referenceExpression,GroovyBundle.message("cannot.reference.nonstatic",referenceExpression.getReferenceName()));
-        annotation.setTextAttributes(PsiUtil.isCompileStatic(referenceExpression) ? DefaultHighlighter.BAD_CHARACTER : DefaultHighlighter.UNRESOLVED_ACCESS);
-      }
+  boolean cannotBeDynamic=PsiUtil.isCompileStatic(referenceExpression) || isPropertyAccessInStaticMethod(referenceExpression);
+  GroovyResolveResult resolveResult=getBestResolveResult(referenceExpression);
+  if (resolveResult.getElement() != null) {
+    if (!isStaticOk(resolveResult)) {
+      createAnnotationForRef(referenceExpression,cannotBeDynamic,GroovyBundle.message("cannot.reference.nonstatic",referenceExpression.getReferenceName()));
     }
+    return;
   }
- else {
-    GrExpression qualifier=referenceExpression.getQualifierExpression();
-    if (qualifier == null && GrHighlightUtil.isDeclarationAssignment(referenceExpression))     return;
-    if (qualifier != null && referenceExpression.getDotTokenType() == GroovyTokenTypes.mMEMBER_POINTER) {
-      if (results.length > 0) {
-        return;
-      }
-    }
-    if (!(parent instanceof GrCall) && ResolveUtil.isKeyOfMap(referenceExpression)) {
-      PsiElement refNameElement=referenceExpression.getReferenceNameElement();
-      PsiElement elt=refNameElement == null ? referenceExpression : refNameElement;
-      Annotation annotation=myHolder.createInfoAnnotation(elt,null);
-      annotation.setTextAttributes(DefaultHighlighter.MAP_KEY);
-      return;
-    }
-    if (parent instanceof GrReferenceExpression && "class".equals(((GrReferenceExpression)parent).getReferenceName())) {
-      checkSingleResolvedElement(myHolder,referenceExpression,resolveResult,false);
-    }
+  if (ResolveUtil.isKeyOfMap(referenceExpression)) {
+    Annotation annotation=myHolder.createInfoAnnotation(refNameElement,null);
+    annotation.setTextAttributes(DefaultHighlighter.MAP_KEY);
+    return;
   }
-  if (parent instanceof GrCall) {
-    if (resolved == null && results.length > 0) {
-      resolved=results[0].getElement();
-    }
-  }
-  if (GrHighlightUtil.isDeclarationAssignment(referenceExpression) || resolved instanceof PsiPackage)   return;
-  if (resolved == null && GrHighlightUtil.shouldHighlightAsUnresolved(referenceExpression)) {
-    PsiElement refNameElement=referenceExpression.getReferenceNameElement();
-    PsiElement elt=refNameElement == null ? referenceExpression : refNameElement;
-    final GrExpression qualifier=referenceExpression.getQualifierExpression();
-    Annotation annotation;
-    boolean compileStatic=PsiUtil.isCompileStatic(referenceExpression) || referenceExpression.getQualifier() == null && isInStaticMethod(referenceExpression);
-    if (compileStatic) {
-      annotation=myHolder.createErrorAnnotation(elt,GroovyBundle.message("cannot.resolve",referenceExpression.getReferenceName()));
-      annotation.setHighlightType(ProblemHighlightType.LIKE_UNKNOWN_SYMBOL);
-    }
- else {
-      if (qualifier != null && qualifier.getType() == null)       return;
-      annotation=myHolder.createInfoAnnotation(elt,null);
-      annotation.setTextAttributes(DefaultHighlighter.UNRESOLVED_ACCESS);
-    }
-    if (qualifier == null) {
-      if (parent instanceof GrMethodCall) {
+  if (GrHighlightUtil.shouldHighlightAsUnresolved(referenceExpression)) {
+    Annotation annotation=createAnnotationForRef(referenceExpression,cannotBeDynamic,GroovyBundle.message("cannot.resolve",referenceExpression.getReferenceName()));
+    if (referenceExpression.getQualifier() == null) {
+      if (isCall(referenceExpression)) {
         registerStaticImportFix(referenceExpression,annotation);
       }
  else {
@@ -61,7 +26,7 @@
         registerAddImportFixes(referenceExpression,annotation);
       }
     }
-    registerReferenceFixes(referenceExpression,annotation,compileStatic);
+    registerReferenceFixes(referenceExpression,annotation,cannotBeDynamic);
     UnresolvedReferenceQuickFixProvider.registerReferenceFixes(referenceExpression,new QuickFixActionRegistrarAdapter(annotation));
     OrderEntryFix.registerFixes(new QuickFixActionRegistrarAdapter(annotation),referenceExpression);
   }
