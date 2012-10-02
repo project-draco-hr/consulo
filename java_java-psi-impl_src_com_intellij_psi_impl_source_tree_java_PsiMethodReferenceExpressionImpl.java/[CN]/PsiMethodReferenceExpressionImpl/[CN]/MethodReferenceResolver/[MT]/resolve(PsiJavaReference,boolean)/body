@@ -1,0 +1,45 @@
+{
+  final Ref<PsiClass> classRef=new Ref<PsiClass>();
+  final Ref<PsiSubstitutor> substRef=new Ref<PsiSubstitutor>();
+  boolean checkStatic=process(classRef,substRef);
+  final PsiClass containingClass=classRef.get();
+  final PsiSubstitutor substitutor=substRef.get();
+  if (containingClass != null) {
+    final PsiElement element=getReferenceNameElement();
+    final boolean isConstructor=element instanceof PsiKeyword && PsiKeyword.NEW.equals(element.getText());
+    if (element instanceof PsiIdentifier || isConstructor) {
+      PsiType functionalInterfaceType=getFunctionalInterfaceType();
+      if (functionalInterfaceType == null) {
+        final Map<PsiMethodReferenceExpression,PsiType> map=LambdaUtil.ourRefs.get();
+        if (map != null) {
+          functionalInterfaceType=map.get(PsiMethodReferenceExpressionImpl.this);
+        }
+ else {
+          functionalInterfaceType=null;
+        }
+      }
+      final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
+      final PsiMethod interfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
+      final MethodSignature signature=interfaceMethod != null ? interfaceMethod.getSignature(resolveResult.getSubstitutor()) : null;
+      final MethodReferenceConflictResolver conflictResolver=new MethodReferenceConflictResolver(containingClass,substitutor,signature);
+      final MethodCandidatesProcessor processor=new MethodCandidatesProcessor(PsiMethodReferenceExpressionImpl.this,new PsiConflictResolver[]{conflictResolver},new SmartList<CandidateInfo>());
+      processor.setIsConstructor(isConstructor);
+      processor.setName(isConstructor ? containingClass.getName() : element.getText());
+      if (checkStatic) {
+        if (containingClass.getContainingClass() == null || !containingClass.hasModifierProperty(PsiModifier.STATIC)) {
+          PsiClass aClass=null;
+          if (PsiTreeUtil.isAncestor(containingClass,PsiMethodReferenceExpressionImpl.this,false)) {
+            aClass=containingClass;
+          }
+          if (PsiUtil.getEnclosingStaticElement(PsiMethodReferenceExpressionImpl.this,aClass) != null) {
+            processor.handleEvent(JavaScopeProcessorEvent.START_STATIC,null);
+          }
+        }
+      }
+      ResolveState state=ResolveState.initial().put(PsiSubstitutor.KEY,substitutor);
+      containingClass.processDeclarations(processor,state,PsiMethodReferenceExpressionImpl.this,PsiMethodReferenceExpressionImpl.this);
+      return processor.getResult();
+    }
+  }
+  return JavaResolveResult.EMPTY_ARRAY;
+}

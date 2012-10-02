@@ -8,8 +8,14 @@
   do {
     nextPassRequired=false;
     myProjectDescriptor.fsState.beforeNextRoundStart(context,chunk);
+    DirtyFilesHolder<RootDescriptor,ModuleBuildTarget> dirtyFilesHolder=new DirtyFilesHolder<RootDescriptor,ModuleBuildTarget>(){
+      @Override public void processDirtyFiles(      @NotNull FileProcessor<RootDescriptor,ModuleBuildTarget> processor) throws IOException {
+        FSOperations.processFilesToRecompile(context,chunk,processor);
+      }
+    }
+;
     if (!context.isProjectRebuild()) {
-      syncOutputFiles(context,chunk);
+      syncOutputFiles(context,dirtyFilesHolder);
     }
     BUILDER_CATEGORY_LOOP:     for (    BuilderCategory category : BuilderCategory.values()) {
       final List<ModuleLevelBuilder> builders=myBuilderRegistry.getBuilders(category);
@@ -20,7 +26,7 @@
         if (context.isMake()) {
           processDeletedPaths(context,chunk);
         }
-        final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk);
+        final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk,dirtyFilesHolder);
         doneSomething|=(buildResult != ModuleLevelBuilder.ExitCode.NOTHING_DONE);
         if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
           throw new ProjectBuildException("Builder " + builder.getDescription() + " requested build stop");
@@ -28,9 +34,9 @@
         context.checkCanceled();
         if (buildResult == ModuleLevelBuilder.ExitCode.ADDITIONAL_PASS_REQUIRED) {
           if (!nextPassRequired) {
-            myModulesProcessed-=(buildersPassed * modulesInChunk) / stageCount;
+            myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
             stageCount+=myTotalModuleLevelBuilderCount;
-            myModulesProcessed+=(buildersPassed * modulesInChunk) / stageCount;
+            myTargetsProcessed+=(buildersPassed * modulesInChunk) / stageCount;
           }
           nextPassRequired=true;
         }
@@ -40,7 +46,7 @@
             rebuildFromScratchRequested=true;
             try {
               FSOperations.markDirty(context,chunk);
-              myModulesProcessed-=(buildersPassed * modulesInChunk) / stageCount;
+              myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
               stageCount=myTotalModuleLevelBuilderCount;
               buildersPassed=0;
               nextPassRequired=true;
@@ -55,8 +61,7 @@
           }
         }
         buildersPassed++;
-        final float fraction=updateFractionBuilderFinished(modulesInChunk / (stageCount));
-        context.setDone(fraction);
+        updateDoneFraction(context,modulesInChunk / (stageCount));
       }
     }
   }
