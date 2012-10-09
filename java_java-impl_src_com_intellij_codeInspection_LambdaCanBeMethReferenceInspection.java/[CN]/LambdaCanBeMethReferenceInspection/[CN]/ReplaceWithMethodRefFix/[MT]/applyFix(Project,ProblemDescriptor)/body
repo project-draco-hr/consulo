@@ -1,0 +1,46 @@
+{
+  final PsiElement element=descriptor.getPsiElement();
+  final PsiLambdaExpression lambdaExpression=PsiTreeUtil.getParentOfType(element,PsiLambdaExpression.class);
+  if (lambdaExpression == null)   return;
+  String methodRefText=null;
+  if (element instanceof PsiMethodCallExpression) {
+    final PsiMethodCallExpression methodCall=(PsiMethodCallExpression)element;
+    final PsiMethod psiMethod=methodCall.resolveMethod();
+    LOG.assertTrue(psiMethod != null);
+    final PsiClass containingClass=psiMethod.getContainingClass();
+    LOG.assertTrue(containingClass != null);
+    final PsiReferenceExpression methodExpression=methodCall.getMethodExpression();
+    final PsiExpression qualifierExpression=methodExpression.getQualifierExpression();
+    final String methodReferenceName=methodExpression.getReferenceName();
+    if (qualifierExpression != null) {
+      final PsiParameter[] parameters=lambdaExpression.getParameterList().getParameters();
+      boolean isReceiverType=parameters.length > 0 && LambdaUtil.isReceiverType(parameters[0].getType(),containingClass,PsiUtil.resolveGenericsClassInType(parameters[0].getType()).getSubstitutor());
+      methodRefText=(isReceiverType ? containingClass.getQualifiedName() : qualifierExpression.getText()) + "::" + methodReferenceName;
+    }
+ else {
+      methodRefText=(psiMethod.hasModifierProperty(PsiModifier.STATIC) ? containingClass.getQualifiedName() : "this") + "::" + methodReferenceName;
+    }
+  }
+ else   if (element instanceof PsiNewExpression) {
+    final PsiMethod constructor=((PsiNewExpression)element).resolveConstructor();
+    if (constructor != null) {
+      final PsiClass containingClass=constructor.getContainingClass();
+      LOG.assertTrue(containingClass != null);
+      methodRefText=containingClass.getQualifiedName() + "::new";
+    }
+ else {
+      final PsiJavaCodeReferenceElement classReference=((PsiNewExpression)element).getClassOrAnonymousClassReference();
+      if (classReference != null) {
+        final JavaResolveResult resolve=classReference.advancedResolve(false);
+        final PsiElement containingClass=resolve.getElement();
+        if (containingClass instanceof PsiClass) {
+          methodRefText=((PsiClass)containingClass).getQualifiedName() + "::new";
+        }
+      }
+    }
+  }
+  if (methodRefText != null) {
+    final PsiExpression psiExpression=JavaPsiFacade.getElementFactory(project).createExpressionFromText(methodRefText,lambdaExpression);
+    JavaCodeStyleManager.getInstance(project).shortenClassReferences(lambdaExpression.replace(psiExpression));
+  }
+}
