@@ -1,30 +1,59 @@
 {
-  Set<BuildTarget<?>> targets=chunk.getTargets();
-  if (targets.size() > 1) {
-    Set<ModuleBuildTarget> moduleTargets=new HashSet<ModuleBuildTarget>();
-    for (    BuildTarget<?> target : targets) {
-      if (target instanceof ModuleBuildTarget) {
-        moduleTargets.add((ModuleBuildTarget)target);
-      }
- else {
-        context.processMessage(new CompilerMessage(BUILD_NAME,BuildMessage.Kind.ERROR,"Cannot build " + target.getPresentableName() + " because it is included into a circular dependency"));
-        return;
-      }
+  boolean doneSomething=false;
+  try {
+    Utils.ERRORS_DETECTED_KEY.set(context,Boolean.FALSE);
+    ensureFSStateInitialized(context,chunk);
+    if (context.isMake()) {
+      processDeletedPaths(context,chunk.getTargets());
+      doneSomething|=Utils.hasRemovedSources(context);
     }
-    buildModuleChunk(context,new ModuleChunk(moduleTargets));
-    return;
+    myProjectDescriptor.fsState.beforeChunkBuildStart(context,chunk);
+    doneSomething=runBuildersForChunk(context,chunk);
   }
-  BuildTarget<?> target=targets.iterator().next();
-  if (target instanceof ModuleBuildTarget) {
-    ModuleBuildTarget moduleBuildTarget=(ModuleBuildTarget)target;
-    buildModuleChunk(context,new ModuleChunk(Collections.singleton(moduleBuildTarget)));
+ catch (  ProjectBuildException e) {
+    throw e;
   }
- else {
+catch (  Exception e) {
+    throw new ProjectBuildException(e);
+  }
+ finally {
     try {
-      buildTarget(target,context);
+      onChunkBuildComplete(context,chunk);
     }
- catch (    IOException e) {
+ catch (    Exception e) {
       throw new ProjectBuildException(e);
+    }
+ finally {
+      for (      BuildRootDescriptor rd : context.getProjectDescriptor().getBuildRootIndex().clearTempRoots(context)) {
+        context.getProjectDescriptor().fsState.clearRecompile(rd);
+      }
+      try {
+        final Map<BuildTarget<?>,Collection<String>> map=Utils.REMOVED_SOURCES_KEY.get(context);
+        if (map != null) {
+          for (          Map.Entry<BuildTarget<?>,Collection<String>> entry : map.entrySet()) {
+            final BuildTarget<?> target=entry.getKey();
+            final Collection<String> paths=entry.getValue();
+            if (paths != null) {
+              for (              String path : paths) {
+                myProjectDescriptor.fsState.registerDeleted(target,new File(path),null);
+              }
+            }
+          }
+        }
+      }
+ catch (      IOException e) {
+        throw new ProjectBuildException(e);
+      }
+      Utils.REMOVED_SOURCES_KEY.set(context,null);
+      if (doneSomething && GENERATE_CLASSPATH_INDEX) {
+        final Future<?> future=SharedThreadPool.getInstance().executeOnPooledThread(new Runnable(){
+          @Override public void run(){
+            createClasspathIndex(chunk);
+          }
+        }
+);
+        myAsyncTasks.add(future);
+      }
     }
   }
 }
