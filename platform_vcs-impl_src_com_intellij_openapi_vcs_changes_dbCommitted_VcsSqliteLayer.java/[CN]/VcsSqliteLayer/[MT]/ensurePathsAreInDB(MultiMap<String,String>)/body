@@ -1,0 +1,47 @@
+{
+  final Set<Long> idsToCheck=new HashSet<Long>();
+  final PreparedStatement select=myConnection.getOrCreatePreparedStatement(SqliteTables.PREPARED_SELECT_ROOTS,new ThrowableConvertor<Connection,PreparedStatement,SQLException>(){
+    @Override public PreparedStatement convert(    Connection connection) throws SQLException {
+      return connection.prepareStatement("SELECT * FROM " + SqliteTables.ROOT.TABLE_NAME + " WHERE VCS_FK=?");
+    }
+  }
+);
+  try {
+    for (    final String vcsName : copy.keySet()) {
+      select.setLong(1,myKnownRepositoryLocations.getVcsKey(vcsName));
+      final ResultSet set=select.executeQuery();
+      SqliteUtil.readSelectResults(set,new ThrowableRunnable<SQLException>(){
+        @Override public void run() throws SQLException {
+          final long id=set.getLong(SqliteTables.ROOT.ID);
+          final String url=set.getString(SqliteTables.ROOT.URL);
+          myKnownRepositoryLocations.add(vcsName,url,id);
+          copy.removeValue(vcsName,url);
+          if (myKnownRepositoryLocations.getLastRevision(id) == null) {
+            idsToCheck.add(id);
+          }
+        }
+      }
+);
+    }
+    if (copy.isEmpty())     return idsToCheck;
+    final PreparedStatement insert=myConnection.getOrCreatePreparedStatement(SqliteTables.PREPARED_INSERT_ROOT,new ThrowableConvertor<Connection,PreparedStatement,SQLException>(){
+      @Override public PreparedStatement convert(      Connection connection) throws SQLException {
+        return connection.prepareStatement("INSERT INTO " + SqliteTables.ROOT.TABLE_NAME + " ( "+ SqliteTables.ROOT.VCS_FK+ ", "+ SqliteTables.ROOT.URL+ ") VALUES (?,?)",Statement.RETURN_GENERATED_KEYS);
+      }
+    }
+);
+    for (    String vcsName : copy.keySet()) {
+      insert.setLong(1,myKnownRepositoryLocations.getVcsKey(vcsName));
+      for (      String path : copy.get(vcsName)) {
+        insert.setString(2,path);
+        final long id=SqliteUtil.insert(insert);
+        myKnownRepositoryLocations.add(vcsName,path,id);
+      }
+    }
+    myConnection.commit();
+  }
+ catch (  SQLException e) {
+    throw new VcsException(e);
+  }
+  return idsToCheck;
+}

@@ -32,10 +32,12 @@
           if (parameterTypes.length == 1 && LambdaUtil.isReceiverType(parameterTypes[0],containingClass,substitutor)) {
             hasReceiver=true;
           }
-          if (parameterTypes.length == 0 || hasReceiver && !(containingClass.getContainingClass() == null || containingClass.hasModifierProperty(PsiModifier.STATIC))) {
-            return new JavaResolveResult[]{new ClassCandidateInfo(containingClass,substitutor)};
+          final boolean innerClassOuterClassReference=containingClass.getContainingClass() != null && !containingClass.hasModifierProperty(PsiModifier.STATIC);
+          ClassCandidateInfo candidateInfo=null;
+          if ((containingClass.getContainingClass() == null || !isLocatedInStaticContext(containingClass)) && parameterTypes.length == 0 || hasReceiver && innerClassOuterClassReference) {
+            candidateInfo=new ClassCandidateInfo(containingClass,substitutor);
           }
-          return JavaResolveResult.EMPTY_ARRAY;
+          return candidateInfo == null ? JavaResolveResult.EMPTY_ARRAY : new JavaResolveResult[]{candidateInfo};
         }
       }
       final MethodReferenceConflictResolver conflictResolver=new MethodReferenceConflictResolver(containingClass,substitutor,signature,beginsWithReferenceType);
@@ -65,17 +67,8 @@
       if (expression == null || !(expression.getType() instanceof PsiArrayType)) {
         processor.setAccessClass(containingClass);
       }
-      if (beginsWithReferenceType) {
-        final PsiClass gContainingClass=containingClass.getContainingClass();
-        if (gContainingClass == null || !containingClass.hasModifierProperty(PsiModifier.STATIC)) {
-          PsiClass aClass=null;
-          if (PsiTreeUtil.isAncestor(gContainingClass != null ? gContainingClass : containingClass,PsiMethodReferenceExpressionImpl.this,false)) {
-            aClass=gContainingClass != null ? gContainingClass : containingClass;
-          }
-          if (PsiUtil.getEnclosingStaticElement(PsiMethodReferenceExpressionImpl.this,aClass) != null) {
-            processor.handleEvent(JavaScopeProcessorEvent.START_STATIC,null);
-          }
-        }
+      if (beginsWithReferenceType && isLocatedInStaticContext(containingClass)) {
+        processor.handleEvent(JavaScopeProcessorEvent.START_STATIC,null);
       }
       ResolveState state=ResolveState.initial().put(PsiSubstitutor.KEY,substitutor);
       containingClass.processDeclarations(processor,state,PsiMethodReferenceExpressionImpl.this,PsiMethodReferenceExpressionImpl.this);

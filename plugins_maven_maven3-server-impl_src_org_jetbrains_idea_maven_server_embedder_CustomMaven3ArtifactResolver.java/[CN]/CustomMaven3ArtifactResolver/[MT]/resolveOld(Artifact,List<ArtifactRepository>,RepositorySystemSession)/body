@@ -1,0 +1,58 @@
+{
+  if (artifact == null) {
+    return;
+  }
+  if (Artifact.SCOPE_SYSTEM.equals(artifact.getScope())) {
+    File systemFile=artifact.getFile();
+    if (systemFile == null) {
+      throw new ArtifactNotFoundException("System artifact: " + artifact + " has no file attached",artifact);
+    }
+    if (!systemFile.exists()) {
+      throw new ArtifactNotFoundException("System artifact: " + artifact + " not found in path: "+ systemFile,artifact);
+    }
+    if (!systemFile.isFile()) {
+      throw new ArtifactNotFoundException("System artifact: " + artifact + " is not a file: "+ systemFile,artifact);
+    }
+    artifact.setResolved(true);
+    return;
+  }
+  if (!artifact.isResolved()) {
+    ArtifactResult result;
+    try {
+      ArtifactRequest artifactRequest=new ArtifactRequest();
+      artifactRequest.setArtifact(RepositoryUtils.toArtifact(artifact));
+      artifactRequest.setRepositories(RepositoryUtils.toRepos(remoteRepositories));
+      LocalRepositoryManager lrm=session.getLocalRepositoryManager();
+      String path=lrm.getPathForLocalArtifact(artifactRequest.getArtifact());
+      artifact.setFile(new File(lrm.getRepository().getBasedir(),path));
+      result=repoSystem.resolveArtifact(session,artifactRequest);
+    }
+ catch (    org.sonatype.aether.resolution.ArtifactResolutionException e) {
+      if (e.getCause() instanceof org.sonatype.aether.transfer.ArtifactNotFoundException) {
+        throw new ArtifactNotFoundException(e.getMessage(),artifact,remoteRepositories,e){
+        }
+;
+      }
+ else {
+        throw new ArtifactResolutionException(e.getMessage(),artifact,remoteRepositories,e);
+      }
+    }
+    artifact.selectVersion(result.getArtifact().getVersion());
+    artifact.setFile(result.getArtifact().getFile());
+    artifact.setResolved(true);
+    if (artifact.isSnapshot()) {
+      Matcher matcher=Artifact.VERSION_FILE_PATTERN.matcher(artifact.getVersion());
+      if (matcher.matches()) {
+        Snapshot snapshot=new Snapshot();
+        snapshot.setTimestamp(matcher.group(2));
+        try {
+          snapshot.setBuildNumber(Integer.parseInt(matcher.group(3)));
+          artifact.addMetadata(new SnapshotArtifactRepositoryMetadata(artifact,snapshot));
+        }
+ catch (        NumberFormatException e) {
+          logger.warn("Invalid artifact version " + artifact.getVersion() + ": "+ e.getMessage());
+        }
+      }
+    }
+  }
+}

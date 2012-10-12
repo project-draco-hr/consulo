@@ -1,0 +1,38 @@
+{
+  final String root=FileUtil.toSystemIndependentName(location.toPresentableString());
+  final long lastExisting=getLastRevision(vcs,root);
+  final long firstExisting=getFirstRevision(vcs,root);
+  if (lastExisting == -1 || firstExisting == -1)   return Collections.emptyList();
+  final long operatingFirst=oldRev == -1 ? firstExisting : oldRev;
+  final long operatingLast=lastRev == -1 ? lastExisting : lastRev;
+  final PreparedStatement statement=myConnection.getOrCreatePreparedStatement(SqliteTables.PREPARED_SELECT_REVISIONS,new ThrowableConvertor<Connection,PreparedStatement,SQLException>(){
+    @Override public PreparedStatement convert(    Connection connection) throws SQLException {
+      return connection.prepareStatement("SELECT * FROM " + SqliteTables.REVISION.TABLE_NAME + " WHERE "+ SqliteTables.REVISION.NUMBER_INT+ ">=? AND "+ SqliteTables.REVISION.NUMBER_INT+ "<=? ORDER BY "+ SqliteTables.REVISION.NUMBER_INT+ " DESC");
+    }
+  }
+);
+  final List<CommittedChangeList> result=new ArrayList<CommittedChangeList>();
+  try {
+    statement.setLong(1,operatingFirst);
+    statement.setLong(2,operatingLast);
+    final CachingCommittedChangesProvider provider=(CachingCommittedChangesProvider)vcs.getCommittedChangesProvider();
+    final ResultSet set=statement.executeQuery();
+    SqliteUtil.readSelectResults(set,new ThrowableRunnable<SQLException>(){
+      @Override public void run() throws SQLException {
+        final byte[] bytes=set.getBytes(SqliteTables.REVISION.RAW_DATA);
+        try {
+          final CommittedChangeList list=provider.readChangeList(location,new DataInputStream(new ByteArrayInputStream(bytes)));
+          result.add(list);
+        }
+ catch (        IOException e) {
+          throw new SQLException(e);
+        }
+      }
+    }
+);
+  }
+ catch (  SQLException e) {
+    throw new VcsException(e);
+  }
+  return result;
+}

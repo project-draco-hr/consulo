@@ -1,0 +1,36 @@
+{
+  final Collection<GitRepository> repositories=getRepositories();
+  final Collection<String> trackingBranches=findTrackingBranches(myBranchName,repositories);
+  String currentBranch=GitBranchUtil.getCurrentBranchOrRev(repositories);
+  boolean currentBranchTracksBranchToDelete=false;
+  if (trackingBranches.contains(currentBranch)) {
+    currentBranchTracksBranchToDelete=true;
+    trackingBranches.remove(currentBranch);
+  }
+  final AtomicReference<DeleteRemoteBranchDecision> decision=new AtomicReference<DeleteRemoteBranchDecision>();
+  final boolean finalCurrentBranchTracksBranchToDelete=currentBranchTracksBranchToDelete;
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      decision.set(confirmBranchDeletion(myBranchName,trackingBranches,finalCurrentBranchTracksBranchToDelete,repositories));
+    }
+  }
+);
+  if (decision.get().delete()) {
+    boolean deletedSuccessfully=doDeleteRemote(myBranchName,repositories);
+    if (deletedSuccessfully) {
+      final Collection<String> successfullyDeletedLocalBranches=new ArrayList<String>(1);
+      if (decision.get().deleteTracking()) {
+        for (        final String branch : trackingBranches) {
+          getIndicator().setText("Deleting " + branch);
+          new GitDeleteBranchOperation(myProject,myFacade,myGit,myUiHandler,repositories,branch){
+            @Override protected void notifySuccess(            @NotNull String message){
+              successfullyDeletedLocalBranches.add(branch);
+            }
+          }
+.execute();
+        }
+      }
+      notifySuccessfulDeletion(myBranchName,successfullyDeletedLocalBranches);
+    }
+  }
+}
