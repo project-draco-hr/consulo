@@ -58,14 +58,23 @@ synchronized (myProjectDataMap) {
  else {
           params=isMake ? CmdlineProtoUtil.createMakeRequest(projectPath,scopes,userData,globals,currentFSChanges) : CmdlineProtoUtil.createForceCompileRequest(projectPath,scopes,paths,userData,globals,currentFSChanges);
         }
-        myMessageDispatcher.registerBuildMessageHandler(sessionId,handler,params);
+        myMessageDispatcher.registerBuildMessageHandler(sessionId,new BuilderMessageHandlerWrapper(handler){
+          @Override public void sessionTerminated(          UUID sessionId){
+            try {
+              super.sessionTerminated(sessionId);
+            }
+  finally {
+              future.setDone();
+            }
+          }
+        }
+,params);
         try {
           projectTaskQueue.submit(new Runnable(){
             @Override public void run(){
+              ExecutionException execFailure=null;
               try {
                 if (project.isDisposed()) {
-                  myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
-                  handler.sessionTerminated(sessionId);
                   return;
                 }
                 myBuildsInProgress.put(projectPath,future);
@@ -78,12 +87,6 @@ synchronized (myProjectDataMap) {
 ;
                 final StringBuilder stdErrOutput=new StringBuilder();
                 processHandler.addProcessListener(new ProcessAdapter(){
-                  @Override public void processTerminated(                  ProcessEvent event){
-                    final BuilderMessageHandler handler=myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
-                    if (handler != null) {
-                      handler.sessionTerminated(sessionId);
-                    }
-                  }
                   @Override public void onTextAvailable(                  ProcessEvent event,                  Key outputType){
                     final String text=event.getText();
                     if (!StringUtil.isEmptyOrSpaces(text)) {
@@ -108,31 +111,38 @@ synchronized (myProjectDataMap) {
  else {
                       msg.append("unknown error");
                     }
-                    future.getMessageHandler().handleFailure(sessionId,CmdlineProtoUtil.createFailure(msg.toString(),null));
+                    handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure(msg.toString(),null));
                   }
                 }
  else {
-                  future.getMessageHandler().handleFailure(sessionId,CmdlineProtoUtil.createFailure("Disconnected from build process",null));
+                  handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure("Disconnected from build process",null));
                 }
               }
  catch (              ExecutionException e) {
-                myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
-                handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure(e.getMessage(),e));
-                handler.sessionTerminated(sessionId);
+                execFailure=e;
               }
  finally {
                 myBuildsInProgress.remove(projectPath);
-                future.setDone();
+                if (myMessageDispatcher.getAssociatedChannel(sessionId) == null) {
+                  final BuilderMessageHandler unregistered=myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+                  if (unregistered != null) {
+                    if (execFailure != null) {
+                      unregistered.handleFailure(sessionId,CmdlineProtoUtil.createFailure(execFailure.getMessage(),execFailure));
+                    }
+                    unregistered.sessionTerminated(sessionId);
+                  }
+                }
               }
             }
           }
 );
         }
  catch (        Throwable e) {
-          myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
-          handler.handleFailure(sessionId,CmdlineProtoUtil.createFailure(e.getMessage(),e));
-          handler.sessionTerminated(sessionId);
-          future.setDone();
+          final BuilderMessageHandler unregistered=myMessageDispatcher.unregisterBuildMessageHandler(sessionId);
+          if (unregistered != null) {
+            unregistered.handleFailure(sessionId,CmdlineProtoUtil.createFailure(e.getMessage(),e));
+            unregistered.sessionTerminated(sessionId);
+          }
         }
       }
     }
