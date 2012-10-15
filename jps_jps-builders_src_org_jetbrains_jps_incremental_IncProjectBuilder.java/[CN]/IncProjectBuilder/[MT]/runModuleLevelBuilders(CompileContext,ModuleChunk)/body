@@ -5,66 +5,73 @@
   final int modulesInChunk=chunk.getModules().size();
   int buildersPassed=0;
   boolean nextPassRequired;
-  do {
-    nextPassRequired=false;
-    myProjectDescriptor.fsState.beforeNextRoundStart(context,chunk);
-    DirtyFilesHolder<JavaSourceRootDescriptor,ModuleBuildTarget> dirtyFilesHolder=new DirtyFilesHolder<JavaSourceRootDescriptor,ModuleBuildTarget>(){
-      @Override public void processDirtyFiles(      @NotNull FileProcessor<JavaSourceRootDescriptor,ModuleBuildTarget> processor) throws IOException {
-        FSOperations.processFilesToRecompile(context,chunk,processor);
+  try {
+    do {
+      nextPassRequired=false;
+      myProjectDescriptor.fsState.beforeNextRoundStart(context,chunk);
+      DirtyFilesHolder<JavaSourceRootDescriptor,ModuleBuildTarget> dirtyFilesHolder=new DirtyFilesHolder<JavaSourceRootDescriptor,ModuleBuildTarget>(){
+        @Override public void processDirtyFiles(        @NotNull FileProcessor<JavaSourceRootDescriptor,ModuleBuildTarget> processor) throws IOException {
+          FSOperations.processFilesToRecompile(context,chunk,processor);
+        }
       }
-    }
 ;
-    if (!context.isProjectRebuild()) {
-      syncOutputFiles(context,dirtyFilesHolder);
-    }
-    BUILDER_CATEGORY_LOOP:     for (    BuilderCategory category : BuilderCategory.values()) {
-      final List<ModuleLevelBuilder> builders=myBuilderRegistry.getBuilders(category);
-      if (builders.isEmpty()) {
-        continue;
-      }
-      for (      ModuleLevelBuilder builder : builders) {
-        if (context.isMake()) {
-          processDeletedPaths(context,chunk);
+      deleteOutputsOfDirtyFiles(context,dirtyFilesHolder);
+      BUILDER_CATEGORY_LOOP:       for (      BuilderCategory category : BuilderCategory.values()) {
+        final List<ModuleLevelBuilder> builders=myBuilderRegistry.getBuilders(category);
+        if (builders.isEmpty()) {
+          continue;
         }
-        final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk,dirtyFilesHolder);
-        doneSomething|=(buildResult != ModuleLevelBuilder.ExitCode.NOTHING_DONE);
-        if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
-          throw new ProjectBuildException("Builder " + builder.getDescription() + " requested build stop");
-        }
-        context.checkCanceled();
-        if (buildResult == ModuleLevelBuilder.ExitCode.ADDITIONAL_PASS_REQUIRED) {
-          if (!nextPassRequired) {
-            myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
-            stageCount+=myTotalModuleLevelBuilderCount;
-            myTargetsProcessed+=(buildersPassed * modulesInChunk) / stageCount;
+        for (        ModuleLevelBuilder builder : builders) {
+          if (context.isMake()) {
+            processDeletedPaths(context,chunk.getTargets());
           }
-          nextPassRequired=true;
-        }
- else         if (buildResult == ModuleLevelBuilder.ExitCode.CHUNK_REBUILD_REQUIRED) {
-          if (!rebuildFromScratchRequested && !context.isProjectRebuild()) {
-            LOG.info("Builder " + builder.getDescription() + " requested rebuild of module chunk "+ chunk.getName());
-            rebuildFromScratchRequested=true;
-            try {
-              FSOperations.markDirty(context,chunk);
+          final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk,dirtyFilesHolder);
+          doneSomething|=(buildResult != ModuleLevelBuilder.ExitCode.NOTHING_DONE);
+          if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
+            throw new ProjectBuildException("Builder " + builder.getDescription() + " requested build stop");
+          }
+          context.checkCanceled();
+          if (buildResult == ModuleLevelBuilder.ExitCode.ADDITIONAL_PASS_REQUIRED) {
+            if (!nextPassRequired) {
               myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
-              stageCount=myTotalModuleLevelBuilderCount;
-              buildersPassed=0;
-              nextPassRequired=true;
-              break BUILDER_CATEGORY_LOOP;
+              stageCount+=myTotalModuleLevelBuilderCount;
+              myTargetsProcessed+=(buildersPassed * modulesInChunk) / stageCount;
             }
- catch (            Exception e) {
-              throw new ProjectBuildException(e);
-            }
+            nextPassRequired=true;
           }
+ else           if (buildResult == ModuleLevelBuilder.ExitCode.CHUNK_REBUILD_REQUIRED) {
+            if (!rebuildFromScratchRequested && !context.isProjectRebuild()) {
+              LOG.info("Builder " + builder.getDescription() + " requested rebuild of module chunk "+ chunk.getName());
+              rebuildFromScratchRequested=true;
+              try {
+                FSOperations.markDirty(context,chunk);
+                myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
+                stageCount=myTotalModuleLevelBuilderCount;
+                buildersPassed=0;
+                nextPassRequired=true;
+                break BUILDER_CATEGORY_LOOP;
+              }
+ catch (              Exception e) {
+                throw new ProjectBuildException(e);
+              }
+            }
  else {
-            context.getLoggingManager().getJavaBuilderLogger().log("Builder " + builder.getDescription() + " requested second chunk rebuild");
+              LOG.debug("Builder " + builder.getDescription() + " requested second chunk rebuild");
+            }
           }
+          buildersPassed++;
+          updateDoneFraction(context,modulesInChunk / (stageCount));
         }
-        buildersPassed++;
-        updateDoneFraction(context,modulesInChunk / (stageCount));
+      }
+    }
+ while (nextPassRequired);
+  }
+  finally {
+    for (    BuilderCategory category : BuilderCategory.values()) {
+      for (      ModuleLevelBuilder builder : myBuilderRegistry.getBuilders(category)) {
+        builder.cleanupChunkResources(context);
       }
     }
   }
- while (nextPassRequired);
   return doneSomething;
 }

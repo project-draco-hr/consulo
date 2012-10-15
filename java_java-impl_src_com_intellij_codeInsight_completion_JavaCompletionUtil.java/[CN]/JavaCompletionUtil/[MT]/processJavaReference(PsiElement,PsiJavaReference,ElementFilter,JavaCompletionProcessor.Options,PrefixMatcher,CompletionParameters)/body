@@ -1,0 +1,53 @@
+{
+  final Set<LookupElement> set=new LinkedHashSet<LookupElement>();
+  final Condition<String> nameCondition=new Condition<String>(){
+    public boolean value(    String s){
+      return matcher.prefixMatches(s);
+    }
+  }
+;
+  PsiMethodCallExpression call=PsiTreeUtil.getParentOfType(element,PsiMethodCallExpression.class);
+  boolean checkInitialized=parameters.getInvocationCount() <= 1 && call != null && PsiKeyword.SUPER.equals(call.getMethodExpression().getText());
+  final JavaCompletionProcessor processor=new JavaCompletionProcessor(element,elementFilter,options.withInitialized(checkInitialized),nameCondition);
+  final PsiType plainQualifier=processor.getQualifierType();
+  PsiType qualifierType=plainQualifier;
+  PsiType runtimeQualifier=getQualifierCastType(javaReference,parameters);
+  if (runtimeQualifier != null) {
+    PsiType composite=qualifierType == null ? runtimeQualifier : PsiIntersectionType.createIntersection(qualifierType,runtimeQualifier);
+    PsiElement ctx=createContextWithXxxVariable(element,composite);
+    javaReference=(PsiReferenceExpression)JavaPsiFacade.getElementFactory(element.getProject()).createExpressionFromText("xxx.xxx",ctx);
+    qualifierType=runtimeQualifier;
+  }
+  javaReference.processVariants(processor);
+  final PsiTypeLookupItem castItem=runtimeQualifier == null ? null : PsiTypeLookupItem.createLookupItem(runtimeQualifier,(PsiReferenceExpression)javaReference);
+  final boolean pkgContext=inSomePackage(element);
+  final Set<PsiMember> mentioned=new THashSet<PsiMember>();
+  for (  CompletionElement completionElement : processor.getResults()) {
+    for (    LookupElement item : createLookupElements(completionElement,javaReference)) {
+      item.putUserData(QUALIFIER_TYPE_ATTR,qualifierType);
+      final Object o=item.getObject();
+      if (o instanceof PsiClass && !isSourceLevelAccessible(element,(PsiClass)o,pkgContext)) {
+        continue;
+      }
+      if (o instanceof PsiMember) {
+        if (isInExcludedPackage((PsiMember)o,true)) {
+          continue;
+        }
+        mentioned.add((PsiMember)o);
+      }
+      set.add(highlightIfNeeded(qualifierType,castQualifier(item,castItem,plainQualifier),o));
+    }
+  }
+  if (javaReference instanceof PsiJavaCodeReferenceElement && !((PsiJavaCodeReferenceElement)javaReference).isQualified()) {
+    final StaticMemberProcessor memberProcessor=new JavaStaticMemberProcessor(parameters);
+    memberProcessor.processMembersOfRegisteredClasses(matcher,new PairConsumer<PsiMember,PsiClass>(){
+      @Override public void consume(      PsiMember member,      PsiClass psiClass){
+        if (!mentioned.contains(member) && processor.satisfies(member,ResolveState.initial())) {
+          set.add(memberProcessor.createLookupElement(member,psiClass,true));
+        }
+      }
+    }
+);
+  }
+  return set;
+}

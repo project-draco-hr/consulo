@@ -1,13 +1,22 @@
 {
   GitVcsSettings settings=GitVcsSettings.getInstance(myProject);
-  if (!Registry.is("git.warn.about.crlf") || !settings.warnAboutCrlf()) {
+  if (!settings.warnAboutCrlf()) {
     return ReturnResult.COMMIT;
   }
-  PlatformFacade platformFacade=ServiceManager.getService(myProject,PlatformFacade.class);
-  Git git=ServiceManager.getService(Git.class);
-  Collection<VirtualFile> files=myPanel.getVirtualFiles();
-  GitCrlfProblemsDetector crlfHelper=GitCrlfProblemsDetector.detect(myProject,platformFacade,git,files);
-  if (crlfHelper.shouldWarn()) {
+  final PlatformFacade platformFacade=ServiceManager.getService(myProject,PlatformFacade.class);
+  final Git git=ServiceManager.getService(Git.class);
+  final Collection<VirtualFile> files=myPanel.getVirtualFiles();
+  final AtomicReference<GitCrlfProblemsDetector> crlfHelper=new AtomicReference<GitCrlfProblemsDetector>();
+  ProgressManager.getInstance().run(new Task.Modal(myProject,"Checking for line separator issues...",true){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      crlfHelper.set(GitCrlfProblemsDetector.detect(GitCheckinHandlerFactory.MyCheckinHandler.this.myProject,platformFacade,git,files));
+    }
+  }
+);
+  if (crlfHelper.get() == null) {
+    return ReturnResult.CANCEL;
+  }
+  if (crlfHelper.get().shouldWarn()) {
     final GitCrlfDialog dialog=new GitCrlfDialog(myProject);
     UIUtil.invokeAndWaitIfNeeded(new Runnable(){
       @Override public void run(){

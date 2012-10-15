@@ -1,0 +1,57 @@
+{
+  try {
+    final Map<BuildTarget<?>,Collection<String>> removedSources=new HashMap<BuildTarget<?>,Collection<String>>();
+    for (    BuildTarget<?> target : targets) {
+      final Collection<String> deletedPaths=myProjectDescriptor.fsState.getAndClearDeletedPaths(target);
+      if (deletedPaths.isEmpty()) {
+        continue;
+      }
+      removedSources.put(target,deletedPaths);
+      final SourceToOutputMapping sourceToOutputStorage=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
+      for (      String deletedSource : deletedPaths) {
+        final Collection<String> outputs=sourceToOutputStorage.getOutputs(deletedSource);
+        if (outputs != null && !outputs.isEmpty()) {
+          final ProjectBuilderLogger logger=context.getLoggingManager().getProjectBuilderLogger();
+          if (logger.isEnabled()) {
+            logger.logDeletedFiles(outputs);
+          }
+          for (          String output : outputs) {
+            new File(output).delete();
+          }
+          context.processMessage(new FileDeletedEvent(outputs));
+        }
+        if (target instanceof ModuleBuildTarget) {
+          final OneToManyPathsMapping sourceToFormMap=context.getProjectDescriptor().dataManager.getSourceToFormMap();
+          final Collection<String> boundForms=sourceToFormMap.getState(deletedSource);
+          if (boundForms != null) {
+            for (            String formPath : boundForms) {
+              final File formFile=new File(formPath);
+              if (formFile.exists()) {
+                FSOperations.markDirty(context,formFile);
+              }
+            }
+            sourceToFormMap.remove(deletedSource);
+          }
+        }
+      }
+    }
+    if (!removedSources.isEmpty()) {
+      final Map<BuildTarget<?>,Collection<String>> existing=Utils.REMOVED_SOURCES_KEY.get(context);
+      if (existing != null) {
+        for (        Map.Entry<BuildTarget<?>,Collection<String>> entry : existing.entrySet()) {
+          final Collection<String> paths=removedSources.get(entry.getKey());
+          if (paths != null) {
+            paths.addAll(entry.getValue());
+          }
+ else {
+            removedSources.put(entry.getKey(),entry.getValue());
+          }
+        }
+      }
+      Utils.REMOVED_SOURCES_KEY.set(context,removedSources);
+    }
+  }
+ catch (  IOException e) {
+    throw new ProjectBuildException(e);
+  }
+}

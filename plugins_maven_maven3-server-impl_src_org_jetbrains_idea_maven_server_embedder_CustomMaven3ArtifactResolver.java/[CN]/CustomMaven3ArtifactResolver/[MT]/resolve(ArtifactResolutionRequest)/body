@@ -1,0 +1,112 @@
+{
+  Artifact rootArtifact=request.getArtifact();
+  Set<Artifact> artifacts=request.getArtifactDependencies();
+  Map managedVersions=request.getManagedVersionMap();
+  List<ResolutionListener> listeners=request.getListeners();
+  ArtifactFilter collectionFilter=request.getCollectionFilter();
+  ArtifactFilter resolutionFilter=request.getResolutionFilter();
+  RepositorySystemSession session=getSession(request.getLocalRepository());
+  if (source == null) {
+    try {
+      source=container.lookup(ArtifactMetadataSource.class);
+    }
+ catch (    ComponentLookupException e) {
+    }
+  }
+  if (listeners == null) {
+    listeners=new ArrayList<ResolutionListener>();
+    if (logger.isDebugEnabled()) {
+      listeners.add(new DebugResolutionListener(logger));
+    }
+    listeners.add(new WarningResolutionListener(logger));
+  }
+  ArtifactResolutionResult result=new ArtifactResolutionResult();
+  if (request.isResolveRoot()) {
+    try {
+      resolve(rootArtifact,request.getRemoteRepositories(),session);
+    }
+ catch (    ArtifactResolutionException e) {
+      result.addErrorArtifactException(e);
+      return result;
+    }
+catch (    ArtifactNotFoundException e) {
+      result.addMissingArtifact(request.getArtifact());
+      return result;
+    }
+  }
+  ArtifactResolutionRequest collectionRequest=request;
+  if (request.isResolveTransitively()) {
+    MetadataResolutionRequest metadataRequest=new DefaultMetadataResolutionRequest(request);
+    metadataRequest.setArtifact(rootArtifact);
+    metadataRequest.setResolveManagedVersions(managedVersions == null);
+    try {
+      ResolutionGroup resolutionGroup=source.retrieve(metadataRequest);
+      if (managedVersions == null) {
+        managedVersions=resolutionGroup.getManagedVersions();
+      }
+      Set<Artifact> directArtifacts=resolutionGroup.getArtifacts();
+      if (artifacts == null || artifacts.isEmpty()) {
+        artifacts=directArtifacts;
+      }
+ else {
+        List<Artifact> allArtifacts=new ArrayList<Artifact>();
+        allArtifacts.addAll(artifacts);
+        allArtifacts.addAll(directArtifacts);
+        Map<String,Artifact> mergedArtifacts=new LinkedHashMap<String,Artifact>();
+        for (        Artifact artifact : allArtifacts) {
+          String conflictId=artifact.getDependencyConflictId();
+          if (!mergedArtifacts.containsKey(conflictId)) {
+            mergedArtifacts.put(conflictId,artifact);
+          }
+        }
+        artifacts=new LinkedHashSet<Artifact>(mergedArtifacts.values());
+      }
+      collectionRequest=new ArtifactResolutionRequest(request);
+      collectionRequest.setServers(request.getServers());
+      collectionRequest.setMirrors(request.getMirrors());
+      collectionRequest.setProxies(request.getProxies());
+      collectionRequest.setRemoteRepositories(resolutionGroup.getResolutionRepositories());
+    }
+ catch (    ArtifactMetadataRetrievalException e) {
+      ArtifactResolutionException are=new ArtifactResolutionException("Unable to get dependency information for " + rootArtifact.getId() + ": "+ e.getMessage(),rootArtifact,metadataRequest.getRemoteRepositories(),e);
+      result.addMetadataResolutionException(are);
+      return result;
+    }
+  }
+  if (artifacts == null || artifacts.isEmpty()) {
+    if (request.isResolveRoot()) {
+      result.addArtifact(rootArtifact);
+    }
+    return result;
+  }
+  result=artifactCollector.collect(artifacts,rootArtifact,managedVersions,collectionRequest,source,collectionFilter,listeners,null);
+  if (result.hasMetadataResolutionExceptions() || result.hasVersionRangeViolations() || result.hasCircularDependencyExceptions()) {
+    return result;
+  }
+  if (result.getArtifactResolutionNodes() != null) {
+    ClassLoader classLoader=Thread.currentThread().getContextClassLoader();
+    CountDownLatch latch=new CountDownLatch(result.getArtifactResolutionNodes().size());
+    for (    ResolutionNode node : result.getArtifactResolutionNodes()) {
+      Artifact artifact=node.getArtifact();
+      if (resolutionFilter == null || resolutionFilter.include(artifact)) {
+        executor.execute(new ResolveTask(classLoader,latch,artifact,session,node.getRemoteRepositories(),result));
+      }
+ else {
+        latch.countDown();
+      }
+    }
+    try {
+      latch.await();
+    }
+ catch (    InterruptedException e) {
+      result.addErrorArtifactException(new ArtifactResolutionException("Resolution interrupted",rootArtifact,e));
+    }
+  }
+  if (request.isResolveRoot()) {
+    Set<Artifact> allArtifacts=new LinkedHashSet<Artifact>();
+    allArtifacts.add(rootArtifact);
+    allArtifacts.addAll(result.getArtifacts());
+    result.setArtifacts(allArtifacts);
+  }
+  return result;
+}
