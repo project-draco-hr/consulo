@@ -1,2 +1,84 @@
 {
+  final GrOpenBlock tryBlock=tryCatchStatement.getTryBlock();
+  final GrCatchClause[] catchClauses=tryCatchStatement.getCatchClauses();
+  final GrFinallyClause finallyClause=tryCatchStatement.getFinallyClause();
+  for (int i=catchClauses.length - 1; i >= 0; i--) {
+    myCaughtExceptionInfos.push(new ExceptionInfo(catchClauses[i]));
+  }
+  if (finallyClause != null)   myFinallyCount++;
+  List<Pair<InstructionImpl,GroovyPsiElement>> oldPending=null;
+  if (finallyClause != null) {
+    oldPending=myPending;
+    myPending=new ArrayList<Pair<InstructionImpl,GroovyPsiElement>>();
+  }
+  InstructionImpl tryBegin=startNode(tryBlock);
+  tryBlock.accept(this);
+  InstructionImpl tryEnd=myHead;
+  finishNode(tryBegin);
+  Set<Pair<InstructionImpl,GroovyPsiElement>> pendingAfterTry=new LinkedHashSet<Pair<InstructionImpl,GroovyPsiElement>>(myPending);
+  @SuppressWarnings("unchecked") List<InstructionImpl>[] throwers=new List[catchClauses.length];
+  for (int i=0; i < catchClauses.length; i++) {
+    throwers[i]=myCaughtExceptionInfos.pop().myThrowers;
+  }
+  InstructionImpl[] catches=new InstructionImpl[catchClauses.length];
+  for (int i=0; i < catchClauses.length; i++) {
+    interruptFlow();
+    final InstructionImpl catchBeg=startNode(catchClauses[i]);
+    for (    InstructionImpl thrower : throwers[i]) {
+      addEdge(thrower,catchBeg);
+    }
+    final GrParameter parameter=catchClauses[i].getParameter();
+    if (parameter != null) {
+      addNode(new ReadWriteVariableInstruction(parameter.getName(),parameter,WRITE));
+    }
+    catchClauses[i].accept(this);
+    catches[i]=myHead;
+    finishNode(catchBeg);
+  }
+  pendingAfterTry.addAll(myPending);
+  myPending=new ArrayList<Pair<InstructionImpl,GroovyPsiElement>>(pendingAfterTry);
+  if (finallyClause != null) {
+    myFinallyCount--;
+    interruptFlow();
+    final InstructionImpl finallyInstruction=startNode(finallyClause,false);
+    Set<AfterCallInstruction> postCalls=new LinkedHashSet<AfterCallInstruction>();
+    final List<Pair<InstructionImpl,GroovyPsiElement>> copy=myPending;
+    myPending=new ArrayList<Pair<InstructionImpl,GroovyPsiElement>>();
+    for (    Pair<InstructionImpl,GroovyPsiElement> pair : copy) {
+      postCalls.add(addCallNode(finallyInstruction,pair.getSecond(),pair.getFirst()));
+    }
+    if (tryEnd != null) {
+      postCalls.add(addCallNode(finallyInstruction,tryCatchStatement,tryEnd));
+    }
+    for (    InstructionImpl catchEnd : catches) {
+      if (catchEnd != null) {
+        postCalls.add(addCallNode(finallyInstruction,tryCatchStatement,catchEnd));
+      }
+    }
+    List<Pair<InstructionImpl,GroovyPsiElement>> pendingPostCalls=myPending;
+    myPending=new ArrayList<Pair<InstructionImpl,GroovyPsiElement>>();
+    myHead=finallyInstruction;
+    finallyClause.accept(this);
+    final ReturnInstruction returnInstruction=new ReturnInstruction(finallyClause);
+    for (    AfterCallInstruction postCall : postCalls) {
+      postCall.setReturnInstruction(returnInstruction);
+      addEdge(returnInstruction,postCall);
+    }
+    addNodeAndCheckPending(returnInstruction);
+    interruptFlow();
+    finishNode(finallyInstruction);
+    if (oldPending == null) {
+      error();
+    }
+    oldPending.addAll(pendingPostCalls);
+    myPending=oldPending;
+  }
+ else {
+    if (tryEnd != null) {
+      addPendingEdge(tryCatchStatement,tryEnd);
+    }
+    for (    InstructionImpl catchEnd : catches) {
+      addPendingEdge(tryBlock,catchEnd);
+    }
+  }
 }
