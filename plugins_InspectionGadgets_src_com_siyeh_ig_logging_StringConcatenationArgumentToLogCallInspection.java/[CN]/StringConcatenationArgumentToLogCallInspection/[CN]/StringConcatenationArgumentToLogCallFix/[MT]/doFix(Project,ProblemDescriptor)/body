@@ -1,0 +1,92 @@
+{
+  final PsiElement element=descriptor.getPsiElement();
+  final PsiElement grandParent=element.getParent().getParent();
+  if (!(grandParent instanceof PsiMethodCallExpression)) {
+    return;
+  }
+  final PsiMethodCallExpression methodCallExpression=(PsiMethodCallExpression)grandParent;
+  final PsiExpressionList argumentList=methodCallExpression.getArgumentList();
+  final PsiExpression[] arguments=argumentList.getExpressions();
+  if (arguments.length == 0) {
+    return;
+  }
+  final StringBuilder newMethodCall=new StringBuilder(methodCallExpression.getMethodExpression().getText());
+  newMethodCall.append("(");
+  PsiExpression argument=arguments[0];
+  int usedArguments;
+  if (!(argument instanceof PsiPolyadicExpression)) {
+    if (!TypeUtils.expressionHasTypeOrSubtype(argument,"org.slf4j.Marker") || arguments.length < 2) {
+      return;
+    }
+    newMethodCall.append(argument.getText()).append(",\"");
+    argument=arguments[1];
+    usedArguments=2;
+    if (!(argument instanceof PsiPolyadicExpression)) {
+      return;
+    }
+  }
+ else {
+    newMethodCall.append('\"');
+    usedArguments=1;
+  }
+  final PsiPolyadicExpression polyadicExpression=(PsiPolyadicExpression)argument;
+  final PsiMethod method=methodCallExpression.resolveMethod();
+  if (method == null) {
+    return;
+  }
+  final String methodName=method.getName();
+  final PsiClass containingClass=method.getContainingClass();
+  if (containingClass == null) {
+    return;
+  }
+  final PsiMethod[] methods=containingClass.findMethodsByName(methodName,false);
+  boolean varArgs=false;
+  for (  PsiMethod otherMethod : methods) {
+    if (otherMethod.isVarArgs()) {
+      varArgs=true;
+      break;
+    }
+  }
+  final List<PsiExpression> newArguments=new ArrayList();
+  final PsiExpression[] operands=polyadicExpression.getOperands();
+  for (  PsiExpression operand : operands) {
+    if (operand instanceof PsiLiteralExpression) {
+      final String text=operand.getText();
+      final int count=StringUtil.getOccurrenceCount(text,"{}");
+      for (int i=0; i < count && usedArguments + i < arguments.length; i++) {
+        newArguments.add((PsiExpression)arguments[i + usedArguments].copy());
+      }
+      usedArguments+=count;
+      newMethodCall.append(text.substring(1,text.length() - 1));
+    }
+ else {
+      newArguments.add((PsiExpression)operand.copy());
+      newMethodCall.append("{}");
+    }
+  }
+  while (usedArguments < arguments.length) {
+    newArguments.add(arguments[usedArguments++]);
+  }
+  newMethodCall.append('"');
+  if (!varArgs && newArguments.size() > 2) {
+    newMethodCall.append(", new Object[]{");
+    boolean comma=false;
+    for (    PsiExpression newArgument : newArguments) {
+      if (comma) {
+        newMethodCall.append(',');
+      }
+ else {
+        comma=true;
+      }
+      newMethodCall.append(newArgument.getText());
+    }
+    newMethodCall.append('}');
+  }
+ else {
+    for (    PsiExpression newArgument : newArguments) {
+      newMethodCall.append(',').append(newArgument.getText());
+    }
+  }
+  newMethodCall.append(')');
+  replaceExpression(methodCallExpression,newMethodCall.toString());
+}
