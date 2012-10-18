@@ -1,97 +1,100 @@
 {
   try {
     while (true) {
-      if (ApplicationManager.getApplication().isDisposeInProgress() || notifierProcess == null || isShuttingDown)       return;
-      final String command=readLine();
-      if (command == null) {
-        if (attemptCount == MAGIC_PROCESS_LAUNCH_ATTEMPT_COUNT) {
-          LOG.debug("Leaving watcher thread");
-          return;
-        }
-        startupProcess(true);
-        continue;
-      }
-      if (GIVE_UP_COMMAND.equals(command)) {
-        LOG.info("FileWatcher gives up to operate on this platform");
-        shutdownProcess();
+      if (myIsShuttingDown) {
+        LOG.info("Shutting down - leaving watcher thread");
         return;
       }
-      if (RESET_COMMAND.equals(command)) {
-        reset();
+      if (myNotifierProcess == null) {
+        TimeoutUtil.sleep(1000);
+        continue;
       }
- else       if (UNWATCHABLE_COMMAND.equals(command)) {
-        List<String> roots=new ArrayList<String>();
-        do {
+      try {
+        final String command=readLine();
+        if (GIVE_UP_COMMAND.equals(command)) {
+          LOG.info("Native file watcher gives up to operate on this platform");
+          shutdownProcess();
+          return;
+        }
+ else         if (RESET_COMMAND.equals(command)) {
+          reset();
+        }
+ else         if (UNWATCHABLE_COMMAND.equals(command)) {
+          List<String> roots=new ArrayList<String>();
+          do {
+            final String path=readLine();
+            if (path == null || "#".equals(path))             break;
+            roots.add(path);
+          }
+ while (true);
+synchronized (myLock) {
+            myManualWatchRoots=roots;
+          }
+          notifyOnEvent();
+        }
+ else         if (MESSAGE_COMMAND.equals(command)) {
+          final String message=readLine();
+          Notifications.Bus.notify(new Notification(Notifications.SYSTEM_MESSAGES_GROUP_ID,"File Watcher",message,NotificationType.WARNING,NotificationListener.URL_OPENING_LISTENER));
+        }
+ else         if (REMAP_COMMAND.equals(command)) {
+          Set<Pair<String,String>> pairs=new HashSet<Pair<String,String>>();
+          do {
+            final String pathA=readLine();
+            if (pathA == null || "#".equals(pathA))             break;
+            final String pathB=readLine();
+            if (pathB == null || "#".equals(pathB))             break;
+            pairs.add(Pair.create(preparePathForMapping(pathA),preparePathForMapping(pathB)));
+          }
+ while (true);
+synchronized (myLock) {
+            myMapping.clear();
+            myMapping.addAll(pairs);
+          }
+          notifyOnEvent();
+        }
+ else {
           final String path=readLine();
-          if (path == null || "#".equals(path))           break;
-          roots.add(path);
-        }
- while (true);
-synchronized (LOCK) {
-          myManualWatchRoots=roots;
-        }
-        notifyOnEvent();
-      }
- else       if (MESSAGE_COMMAND.equals(command)) {
-        final String message=readLine();
-        if (message == null)         break;
-        Notifications.Bus.notify(new Notification(Notifications.SYSTEM_MESSAGES_GROUP_ID,"File Watcher",message,NotificationType.WARNING,NotificationListener.URL_OPENING_LISTENER));
-      }
- else       if (REMAP_COMMAND.equals(command)) {
-        Set<Pair<String,String>> pairs=new HashSet<Pair<String,String>>();
-        do {
-          final String pathA=readLine();
-          if (pathA == null || "#".equals(pathA))           break;
-          final String pathB=readLine();
-          if (pathB == null || "#".equals(pathB))           break;
-          pairs.add(Pair.create(preparePathForMapping(pathA),preparePathForMapping(pathB)));
-        }
- while (true);
-synchronized (LOCK) {
-          myMapping.clear();
-          myMapping.addAll(pairs);
-        }
-        notifyOnEvent();
-      }
- else {
-        final String path=readLine();
-        if (path == null) {
-          startupProcess(true);
-          continue;
-        }
-        final ChangeKind kind;
-        try {
-          kind=ChangeKind.valueOf(command);
-        }
- catch (        IllegalArgumentException e) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Illegal watcher command: " + command);
+          final ChangeKind kind;
+          try {
+            kind=ChangeKind.valueOf(command);
           }
+ catch (          IllegalArgumentException e) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("Illegal watcher command: " + command);
+            }
  else {
-            LOG.error("Illegal watcher command: " + command);
-          }
-          continue;
-        }
-synchronized (LOCK) {
-          if (isWindowsOverflow(path,kind)) {
-            resetRoot(path);
+              LOG.error("Illegal watcher command: " + command);
+            }
             continue;
           }
-          final Collection<String> watchedPaths=checkWatchable(path,!(kind == ChangeKind.DIRTY || kind == ChangeKind.RECDIRTY));
-          if (!watchedPaths.isEmpty()) {
-            onPathChange(kind,watchedPaths);
-          }
- else           if (LOG.isDebugEnabled()) {
-            LOG.debug("Not watchable, filtered: " + path);
+synchronized (myLock) {
+            if (isWindowsOverflow(path,kind)) {
+              resetRoot(path);
+              continue;
+            }
+            final Collection<String> watchedPaths=checkWatchable(path,!(kind == ChangeKind.DIRTY || kind == ChangeKind.RECDIRTY));
+            if (!watchedPaths.isEmpty()) {
+              onPathChange(kind,watchedPaths);
+            }
+ else             if (LOG.isDebugEnabled()) {
+              LOG.debug("Not watchable, filtered: " + path);
+            }
           }
         }
+      }
+ catch (      IOException e) {
+        LOG.warn("Watcher terminated",e);
+        startupProcess(true);
       }
     }
   }
  catch (  IOException e) {
-    reset();
     shutdownProcess();
-    LOG.info("Watcher terminated and attempt to restart has failed. Exiting watching thread.",e);
+    LOG.warn("Watcher terminated and attempt to restart has failed. Exiting watching thread.",e);
+  }
+catch (  Throwable t) {
+    shutdownProcess();
+    LOG.error("Watcher thread stopped unexpectedly",t);
   }
  finally {
     LOG.debug("Watcher thread finished");
