@@ -1,0 +1,62 @@
+{
+  final GitSimpleHandler handler=new GitSimpleHandler(project,root,GitCommand.BRANCH);
+  handler.setNoSSH(true);
+  handler.setSilent(true);
+  handler.addParameters("--no-color");
+  boolean remoteOnly=false;
+  if (remoteWanted && localWanted) {
+    handler.addParameters("-a");
+    remoteOnly=false;
+  }
+ else   if (remoteWanted) {
+    handler.addParameters("-r");
+    remoteOnly=true;
+  }
+  if (containingCommit != null) {
+    handler.addParameters("--contains",containingCommit);
+  }
+  final String output=handler.run();
+  if (output.trim().length() == 0) {
+    String head;
+    try {
+      head=FileUtil.loadFile(new File(root.getPath(),GitRepositoryFiles.GIT_HEAD),GitUtil.UTF8_ENCODING).trim();
+      final String prefix="ref: refs/heads/";
+      return head.startsWith(prefix) ? Collections.singletonList(new GitBranch(head.substring(prefix.length()),GitBranch.DUMMY_HASH,false)) : null;
+    }
+ catch (    IOException e) {
+      LOG.info(e);
+      return null;
+    }
+  }
+  Collection<GitBranch> branches=new ArrayList<GitBranch>();
+  final String[] split=output.split("\n");
+  for (  String b : split) {
+    boolean current=b.charAt(0) == '*';
+    b=b.substring(2).trim();
+    if (b.equals(NO_BRANCH_NAME)) {
+      continue;
+    }
+    String remotePrefix=null;
+    if (b.startsWith("remotes/")) {
+      remotePrefix="remotes/";
+    }
+ else     if (b.startsWith(GitBranch.REFS_REMOTES_PREFIX)) {
+      remotePrefix=GitBranch.REFS_REMOTES_PREFIX;
+    }
+    boolean isRemote=remotePrefix != null || remoteOnly;
+    if (isRemote) {
+      if (!remoteOnly) {
+        b=b.substring(remotePrefix.length());
+      }
+      final int idx=b.indexOf("HEAD ->");
+      if (idx > 0) {
+        continue;
+      }
+    }
+    final GitBranch branch=new GitBranch(b,GitBranch.DUMMY_HASH,isRemote);
+    if ((isRemote && remoteWanted) || (!isRemote && localWanted)) {
+      branches.add(branch);
+    }
+  }
+  return branches;
+}

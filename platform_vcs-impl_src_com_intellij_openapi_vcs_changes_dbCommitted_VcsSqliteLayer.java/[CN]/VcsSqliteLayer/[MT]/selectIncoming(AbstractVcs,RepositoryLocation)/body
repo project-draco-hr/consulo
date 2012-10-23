@@ -1,0 +1,40 @@
+{
+  final Map<Long,CommittedChangeList> full=new HashMap<Long,CommittedChangeList>();
+  final TreeMap<Long,Set<String>> incomingPaths=new TreeMap<Long,Set<String>>();
+  final long locationId=getLocationId(vcs,location);
+  final PreparedStatement select=myConnection.getOrCreatePreparedStatement(SqliteTables.PREPARED_SELECT_INCOMING,new ThrowableConvertor<Connection,PreparedStatement,SQLException>(){
+    @Override public PreparedStatement convert(    Connection connection) throws SQLException {
+      return connection.prepareStatement("SELECT R." + SqliteTables.REVISION.NUMBER_INT + " , R."+ SqliteTables.REVISION.RAW_DATA+ " , P."+ SqliteTables.PATHS.PATH+ " FROM "+ SqliteTables.INCOMING_PATHS.TABLE_NAME+ "I INNER JOIN "+ SqliteTables.PATHS_2_REVS.TABLE_NAME+ "PR ON I."+ SqliteTables.INCOMING_PATHS.PR_FK+ " = PR."+ SqliteTables.PATHS_2_REVS.ID+ ", "+ SqliteTables.REVISION.TABLE_NAME+ " R ON PR."+ SqliteTables.PATHS_2_REVS.REVISION_FK+ " = R."+ SqliteTables.REVISION.ID+ " , "+ SqliteTables.PATHS_2_REVS.TABLE_NAME+ "P ON PR."+ SqliteTables.PATHS_2_REVS.PATH_FK+ " = P."+ SqliteTables.PATHS.ID+ " WHERE R."+ SqliteTables.REVISION.ROOT_FK+ "=?");
+    }
+  }
+);
+  final CachingCommittedChangesProvider provider=vcs.getCachingCommittedChangesProvider();
+  try {
+    select.setLong(1,locationId);
+    final ResultSet set=select.executeQuery();
+    SqliteUtil.readSelectResults(set,new ThrowableRunnable<SQLException>(){
+      @Override public void run() throws SQLException {
+        final long revNum=set.getLong("R." + SqliteTables.REVISION.NUMBER_INT);
+        Set<String> paths=incomingPaths.get(revNum);
+        if (paths == null) {
+          final byte[] bytes=set.getBytes("R." + SqliteTables.REVISION.RAW_DATA);
+          final CommittedChangeList nativeList=readListByProvider(bytes,provider,location);
+          full.put(revNum,nativeList);
+          paths=new HashSet<String>();
+          incomingPaths.put(revNum,paths);
+        }
+        final String path=set.getString("P." + SqliteTables.PATHS.PATH);
+        paths.add(path);
+      }
+    }
+);
+  }
+ catch (  SQLException e) {
+    throw new VcsException(e);
+  }
+  final List<ReceivedChangeList> result=new ArrayList<ReceivedChangeList>();
+  for (  Map.Entry<Long,Set<String>> entry : incomingPaths.entrySet()) {
+    final Long revNum=entry.getKey();
+  }
+  return null;
+}
