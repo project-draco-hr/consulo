@@ -1,0 +1,49 @@
+{
+  final BuildManager buildManager=BuildManager.getInstance();
+  final File projectSystemDir=buildManager.getProjectSystemDirectory(myProject);
+  if (projectSystemDir == null) {
+    return;
+  }
+  final MavenDefaultModifiableModelsProvider provider=new MavenDefaultModifiableModelsProvider(myProject);
+  final File mavenConfigFile;
+  final MavenProjectConfiguration projectConfig;
+  try {
+    final Map<VirtualFile,Module> fileToModuleMap=getFileToModuleMapping(provider);
+    mavenConfigFile=new File(projectSystemDir,MavenProjectConfiguration.CONFIGURATION_FILE_RELATIVE_PATH);
+    projectConfig=new MavenProjectConfiguration();
+    for (    MavenProject mavenProject : getProjects()) {
+      final Module module=fileToModuleMap.get(mavenProject.getFile());
+      if (module == null) {
+        continue;
+      }
+      final MavenModuleResourceConfiguration resourceConfig=new MavenModuleResourceConfiguration();
+      addResources(resourceConfig.myResources,mavenProject.getResources());
+      addResources(resourceConfig.myTestResources,mavenProject.getTestResources());
+      resourceConfig.myFilteringExcludedExtensions.addAll(getFilterExclusions(mavenProject));
+      final Properties properties=getFilteringProperties(mavenProject);
+      for (      Map.Entry<Object,Object> propEntry : properties.entrySet()) {
+        resourceConfig.myProperties.put((String)propEntry.getKey(),(String)propEntry.getValue());
+      }
+      resourceConfig.escapeString=MavenJDOMUtil.findChildValueByPath(mavenProject.getPluginConfiguration("org.apache.maven.plugins","maven-resources-plugin"),"escapeString","\\");
+      projectConfig.moduleConfigurations.put(module.getName(),resourceConfig);
+    }
+  }
+  finally {
+    provider.dispose();
+  }
+  final Document document=new Document(new Element("maven-project-configuration"));
+  XmlSerializer.serializeInto(projectConfig,document.getRootElement());
+  buildManager.runCommand(new Runnable(){
+    @Override public void run(){
+      buildManager.clearState(myProject);
+      FileUtil.createIfDoesntExist(mavenConfigFile);
+      try {
+        JDOMUtil.writeDocument(document,mavenConfigFile,"\n");
+      }
+ catch (      IOException e) {
+        throw new RuntimeException(e);
+      }
+    }
+  }
+);
+}
