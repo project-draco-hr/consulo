@@ -7,25 +7,11 @@
   toEval.accept(new GroovyRecursiveElementVisitor(){
     public void visitReferenceExpression(    GrReferenceExpression referenceExpression){
       super.visitReferenceExpression(referenceExpression);
+      if (PsiUtil.isThisReference(referenceExpression) || PsiUtil.isSuperReference(referenceExpression)) {
+        replaceWithReference(referenceExpression,"delegate");
+        return;
+      }
       PsiElement resolved=referenceExpression.resolve();
-      if (PsiUtil.isThisReference(referenceExpression)) {
-        replaceWithReference(referenceExpression,closure == null ? "delegate" : "owner");
-        return;
-      }
-      if (PsiUtil.isSuperReference(referenceExpression)) {
-        replaceWithReference(referenceExpression,closure == null ? "delegate" : "owner");
-        return;
-      }
-      if (resolved instanceof PsiMethod && !referenceExpression.isQualified()) {
-        if (closure != null && "getDelegate".equals(((PsiMethod)resolved).getName())) {
-          replaceWithReference(referenceExpression,"owner");
-          return;
-        }
-        if ("call".equals(((PsiMethod)resolved).getName())) {
-          replaceWithReference(referenceExpression,(closure == null ? "delegate" : "owner") + ".call");
-          return;
-        }
-      }
       if (resolved instanceof PsiMember && (resolved instanceof PsiClass || ((PsiMember)resolved).hasModifierProperty(PsiModifier.STATIC))) {
         String qName=StaticImportMethodFix.getMemberQualifiedName((PsiMember)resolved);
         if (qName != null && qName.contains(".") && !referenceExpression.isQualified()) {
@@ -33,8 +19,8 @@
           return;
         }
       }
-      if (resolved instanceof GrField && !referenceExpression.isQualified()) {
-        replaceWithReference(referenceExpression,(closure == null ? "delegate" : "owner") + "." + referenceExpression.getReferenceName());
+      if (shouldDelegate(referenceExpression,resolved)) {
+        replaceWithReference(referenceExpression,"delegate." + referenceExpression.getReferenceName());
         return;
       }
       if (resolved instanceof GrVariable && !(resolved instanceof GrField) && !PsiTreeUtil.isAncestor(toEval,resolved,false)) {
@@ -51,6 +37,21 @@
         }
         parameters.put(name,value);
       }
+    }
+    private boolean shouldDelegate(    GrReferenceExpression referenceExpression,    @Nullable PsiElement resolved){
+      if (referenceExpression.isQualified()) {
+        return false;
+      }
+      if (resolved instanceof GrField) {
+        return true;
+      }
+      if (resolved instanceof PsiMethod && !referenceExpression.isQualified()) {
+        String methodName=((PsiMethod)resolved).getName();
+        if (closure != null && "getDelegate".equals(methodName) || "call".equals(methodName)) {
+          return true;
+        }
+      }
+      return closure != null && resolved instanceof GrLightVariable && "owner".equals(((GrLightVariable)resolved).getName());
     }
     private void replaceWithReference(    GrExpression expr,    final String exprText){
       replacements.put(expr,exprText);
