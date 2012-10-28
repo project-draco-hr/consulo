@@ -1,60 +1,62 @@
 {
-  final MavenModuleResourceConfiguration config=target.getModuleResourcesConfiguration(context.getProjectDescriptor().dataManager.getDataPaths());
+  final BuildDataPaths dataPaths=context.getProjectDescriptor().dataManager.getDataPaths();
+  final MavenProjectConfiguration projectConfig=JpsMavenExtensionService.getInstance().getMavenProjectConfiguration(dataPaths);
+  final MavenModuleResourceConfiguration config=target.getModuleResourcesConfiguration(dataPaths);
   if (config == null) {
     return;
   }
-  final SourceToOutputMapping srcOutMapping=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
   final Set<String> filteringExcludedExtensions=config.getFiltetingExcludedExtensions();
   final String encoding=context.getProjectDescriptor().getEncodingConfiguration().getPreferredModuleEncoding(target.getModule());
   final Date timestamp=new Date();
+  if (!context.isProjectRebuild()) {
+    cleanOutputsCorrespondingToChangedFiles(holder,context,target);
+  }
   holder.processDirtyFiles(new FileProcessor<MavenResourceRootDescriptor,MavenResourcesTarget>(){
     private Map<String,String> myProperties;
+    private Pattern myDelimitersPattern;
     @Override public boolean apply(    MavenResourcesTarget target,    File file,    MavenResourceRootDescriptor rd) throws IOException {
       final String relPath=FileUtil.getRelativePath(rd.getRootFile(),file);
       if (relPath == null) {
         return true;
       }
       final String sourcePath=file.getPath();
-      if (rd.isIncluded(relPath)) {
-        final File outputDir=MavenResourcesTarget.getOutputDir(target.getModuleOutputDir(),rd.getConfiguration());
-        if (outputDir != null) {
-          final File outputFile=new File(outputDir,relPath);
-          boolean shouldFilter=rd.getConfiguration().isFiltered && !filteringExcludedExtensions.contains(getExtension(file));
-          if (shouldFilter && file.length() > FILTERING_SIZE_LIMIT) {
-            context.processMessage(new CompilerMessage("MavenResources",BuildMessage.Kind.WARNING,"File is too big to be filtered. Most likely it is a binary file and should be excluded from filtering",sourcePath));
-            shouldFilter=false;
-          }
-          if (shouldFilter) {
-            final byte[] bytes=FileUtil.loadFileBytes(file);
-            final String text=encoding != null ? new String(bytes,encoding) : new String(bytes);
-            final boolean isProperties=SystemInfo.isFileSystemCaseSensitive ? StringUtil.endsWith(file.getName(),".properties") : StringUtil.endsWithIgnoreCase(file.getName(),".properties");
-            final String escapedCharacters=isProperties ? "\\" : null;
-            final Map<String,String> properties=getProperties();
-            PrintWriter printWriter=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
-            try {
-            }
+      if (!rd.isIncluded(relPath)) {
+        return true;
+      }
+      final File outputDir=MavenResourcesTarget.getOutputDir(target.getModuleOutputDir(),rd.getConfiguration());
+      if (outputDir == null) {
+        return true;
+      }
+      final File outputFile=new File(outputDir,relPath);
+      boolean shouldFilter=rd.getConfiguration().isFiltered && !filteringExcludedExtensions.contains(getExtension(file));
+      if (shouldFilter && file.length() > FILTERING_SIZE_LIMIT) {
+        context.processMessage(new CompilerMessage("MavenResources",BuildMessage.Kind.WARNING,"File is too big to be filtered. Most likely it is a binary file and should be excluded from filtering",sourcePath));
+        shouldFilter=false;
+      }
+      if (shouldFilter) {
+        final PrintWriter printWriter=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
+        try {
+          final byte[] bytes=FileUtil.loadFileBytes(file);
+          final String text=encoding != null ? new String(bytes,encoding) : new String(bytes);
+          doFilterText(getDelimitersPattern(),text,projectConfig,config,endsWith(file.getName(),".properties") ? "\\" : null,getProperties(),null,printWriter);
+        }
   finally {
-              printWriter.close();
-            }
-          }
- else {
-            FileUtil.copyContent(file,outputFile);
-          }
-          outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(sourcePath));
+          printWriter.close();
         }
       }
  else {
-        if (!context.isProjectRebuild()) {
-          final Collection<String> outputs=srcOutMapping.getOutputs(sourcePath);
-          if (outputs != null) {
-            for (            String output : outputs) {
-              new File(output).delete();
-            }
-            srcOutMapping.remove(sourcePath);
-          }
-        }
+        FileUtil.copyContent(file,outputFile);
       }
+      outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(sourcePath));
       return true;
+    }
+    private Pattern getDelimitersPattern(){
+      Pattern pattern=myDelimitersPattern;
+      if (pattern == null) {
+        pattern=Pattern.compile(config.delimitersPattern);
+        myDelimitersPattern=pattern;
+      }
+      return pattern;
     }
     private Map<String,String> getProperties(){
       Map<String,String> props=myProperties;
