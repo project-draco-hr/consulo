@@ -1,36 +1,32 @@
 {
-  MavenExecutionRequest request=createRequest(file,activeProfiles,Collections.<String>emptyList(),Collections.<String>emptyList());
-  ProjectBuildingRequest config=request.getProjectBuildingRequest();
-  DefaultMaven maven=(DefaultMaven)getComponent(Maven.class);
-  RepositorySystemSession repositorySession=maven.newRepositorySession(request);
-  config.setRepositorySession(repositorySession);
-  MavenSession mavenSession=new MavenSession(myContainer,repositorySession,request,new DefaultMavenExecutionResult());
-  LegacySupport legacySupport=getComponent(LegacySupport.class);
-  MavenSession oldSession=legacySupport.getSession();
-  legacySupport.setSession(mavenSession);
-  try {
-    ProjectBuilder builder=getComponent(ProjectBuilder.class);
-    ProjectBuildingResult buildingResult=builder.build(new File(file.getPath()),config);
-    MavenProject project=buildingResult.getProject();
-    project.setDependencyArtifacts(project.createArtifacts(getComponent(ArtifactFactory.class),null,null));
-    ArtifactResolver resolver=getComponent(ArtifactResolver.class);
-    ArtifactResolutionRequest resolutionRequest=new ArtifactResolutionRequest();
-    resolutionRequest.setArtifactDependencies(project.getDependencyArtifacts());
-    resolutionRequest.setArtifact(project.getArtifact());
-    resolutionRequest.setManagedVersionMap(project.getManagedVersionMap());
-    resolutionRequest.setLocalRepository(myLocalRepository);
-    resolutionRequest.setRemoteRepositories(project.getRemoteArtifactRepositories());
-    resolutionRequest.setListeners(listeners);
-    resolutionRequest.setResolveRoot(false);
-    resolutionRequest.setResolveTransitively(true);
-    ArtifactResolutionResult result=resolver.resolve(resolutionRequest);
-    project.setArtifacts(result.getArtifacts());
-    return new MavenExecutionResult(project,new ArrayList<Exception>());
+  final MavenExecutionRequest request=createRequest(file,activeProfiles,Collections.<String>emptyList(),Collections.<String>emptyList());
+  final AtomicReference<MavenExecutionResult> ref=new AtomicReference<MavenExecutionResult>();
+  executeWithMavenSession(request,new Runnable(){
+    @Override public void run(){
+      try {
+        ProjectBuilder builder=getComponent(ProjectBuilder.class);
+        ProjectBuildingResult buildingResult=builder.build(new File(file.getPath()),request.getProjectBuildingRequest());
+        MavenProject project=buildingResult.getProject();
+        project.setDependencyArtifacts(project.createArtifacts(getComponent(ArtifactFactory.class),null,null));
+        ArtifactResolver resolver=getComponent(ArtifactResolver.class);
+        ArtifactResolutionRequest resolutionRequest=new ArtifactResolutionRequest();
+        resolutionRequest.setArtifactDependencies(project.getDependencyArtifacts());
+        resolutionRequest.setArtifact(project.getArtifact());
+        resolutionRequest.setManagedVersionMap(project.getManagedVersionMap());
+        resolutionRequest.setLocalRepository(myLocalRepository);
+        resolutionRequest.setRemoteRepositories(project.getRemoteArtifactRepositories());
+        resolutionRequest.setListeners(listeners);
+        resolutionRequest.setResolveRoot(false);
+        resolutionRequest.setResolveTransitively(true);
+        ArtifactResolutionResult result=resolver.resolve(resolutionRequest);
+        project.setArtifacts(result.getArtifacts());
+        ref.set(new MavenExecutionResult(project,new ArrayList<Exception>()));
+      }
+ catch (      Exception e) {
+        ref.set(handleException(e));
+      }
+    }
   }
- catch (  Exception e) {
-    return handleException(e);
-  }
- finally {
-    legacySupport.setSession(oldSession);
-  }
+);
+  return ref.get();
 }
