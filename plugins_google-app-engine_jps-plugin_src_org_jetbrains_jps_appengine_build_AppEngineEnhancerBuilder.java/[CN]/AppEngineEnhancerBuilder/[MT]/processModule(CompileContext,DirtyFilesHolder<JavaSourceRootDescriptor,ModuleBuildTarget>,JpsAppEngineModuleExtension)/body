@@ -1,0 +1,71 @@
+{
+  final Set<File> roots=new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
+  for (  String path : extension.getFilesToEnhance()) {
+    roots.add(new File(FileUtil.toSystemDependentName(path)));
+  }
+  final List<String> pathsToProcess=new ArrayList<String>();
+  dirtyFilesHolder.processDirtyFiles(new FileProcessor<JavaSourceRootDescriptor,ModuleBuildTarget>(){
+    @Override public boolean apply(    ModuleBuildTarget target,    File file,    JavaSourceRootDescriptor root) throws IOException {
+      if (JpsPathUtil.isUnder(roots,file)) {
+        Collection<String> outputs=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target).getOutputs(file.getAbsolutePath());
+        if (outputs != null) {
+          pathsToProcess.addAll(outputs);
+        }
+      }
+      return true;
+    }
+  }
+);
+  if (pathsToProcess.isEmpty()) {
+    return false;
+  }
+  JpsModule module=extension.getModule();
+  JpsSdk<JpsDummyElement> sdk=module.getSdk(JpsJavaSdkType.INSTANCE);
+  if (sdk == null) {
+    context.processMessage(new CompilerMessage(NAME,BuildMessage.Kind.ERROR,"JDK isn't specified for module '" + module.getName() + "'"));
+    return true;
+  }
+  context.processMessage(new ProgressMessage("Enhancing classes in module '" + module.getName() + "'..."));
+  List<String> vmParams=Collections.singletonList("-Xmx256m");
+  List<String> classpath=new ArrayList<String>();
+  classpath.add(extension.getToolsApiJarPath());
+  classpath.add(PathManager.getJarPathForClass(EnhancerRunner.class));
+  for (  File file : JpsJavaExtensionService.dependencies(module).recursively().compileOnly().productionOnly().classes().getRoots()) {
+    classpath.add(file.getAbsolutePath());
+  }
+  List<String> programParams=new ArrayList<String>();
+  final File argsFile=FileUtil.createTempFile("appEngineEnhanceFiles",".txt");
+  PrintWriter writer=new PrintWriter(argsFile);
+  try {
+    for (    String path : pathsToProcess) {
+      writer.println(FileUtil.toSystemDependentName(path));
+    }
+  }
+  finally {
+    writer.close();
+  }
+  programParams.add(argsFile.getAbsolutePath());
+  programParams.add("com.google.appengine.tools.enhancer.Enhance");
+  programParams.add("-api");
+  PersistenceApi api=extension.getPersistenceApi();
+  programParams.add(api.getEnhancerApiName());
+  if (api.getEnhancerVersion() == 2) {
+    programParams.add("-enhancerVersion");
+    programParams.add("v2");
+  }
+  programParams.add("-v");
+  List<String> commandLine=ExternalProcessUtil.buildJavaCommandLine(JpsJavaSdkType.getJavaExecutable(sdk),EnhancerRunner.class.getName(),Collections.<String>emptyList(),classpath,vmParams,programParams);
+  Process process=new ProcessBuilder(commandLine).start();
+  ExternalEnhancerProcessHandler handler=new ExternalEnhancerProcessHandler(process,commandLine,context);
+  handler.startNotify();
+  handler.waitFor();
+  ProjectBuilderLogger logger=context.getLoggingManager().getProjectBuilderLogger();
+  if (logger.isEnabled()) {
+    List<File> processed=new ArrayList<File>();
+    for (    String path : pathsToProcess) {
+      processed.add(new File(path));
+    }
+    logger.logCompiledFiles(processed,NAME,"Enhancing classes:");
+  }
+  return true;
+}
