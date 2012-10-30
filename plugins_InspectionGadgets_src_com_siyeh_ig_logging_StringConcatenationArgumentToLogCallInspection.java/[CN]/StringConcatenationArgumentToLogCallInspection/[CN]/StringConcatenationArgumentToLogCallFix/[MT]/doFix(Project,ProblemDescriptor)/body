@@ -18,7 +18,7 @@
     if (!TypeUtils.expressionHasTypeOrSubtype(argument,"org.slf4j.Marker") || arguments.length < 2) {
       return;
     }
-    newMethodCall.append(argument.getText()).append(",\"");
+    newMethodCall.append(argument.getText()).append(',');
     argument=arguments[1];
     usedArguments=2;
     if (!(argument instanceof PsiPolyadicExpression)) {
@@ -26,7 +26,6 @@
     }
   }
  else {
-    newMethodCall.append('\"');
     usedArguments=1;
   }
   final PsiPolyadicExpression polyadicExpression=(PsiPolyadicExpression)argument;
@@ -49,25 +48,56 @@
   }
   final List<PsiExpression> newArguments=new ArrayList();
   final PsiExpression[] operands=polyadicExpression.getOperands();
+  boolean addPlus=false;
+  boolean inStringLiteral=false;
   for (  PsiExpression operand : operands) {
-    if (operand instanceof PsiLiteralExpression) {
-      final String text=operand.getText();
-      final int count=StringUtil.getOccurrenceCount(text,"{}");
-      for (int i=0; i < count && usedArguments + i < arguments.length; i++) {
-        newArguments.add((PsiExpression)arguments[i + usedArguments].copy());
+    if (ExpressionUtils.isEvaluatedAtCompileTime(operand)) {
+      if (ExpressionUtils.hasStringType(operand)) {
+        final String text=operand.getText();
+        final int count=StringUtil.getOccurrenceCount(text,"{}");
+        for (int i=0; i < count && usedArguments + i < arguments.length; i++) {
+          newArguments.add((PsiExpression)arguments[i + usedArguments].copy());
+        }
+        usedArguments+=count;
+        if (!inStringLiteral) {
+          if (addPlus) {
+            newMethodCall.append('+');
+          }
+          newMethodCall.append('"');
+          inStringLiteral=true;
+        }
+        newMethodCall.append(text.substring(1,text.length() - 1));
       }
-      usedArguments+=count;
-      newMethodCall.append(text.substring(1,text.length() - 1));
+ else {
+        if (inStringLiteral) {
+          newMethodCall.append('"');
+          inStringLiteral=false;
+        }
+        if (addPlus) {
+          newMethodCall.append('+');
+        }
+        newMethodCall.append(operand.getText());
+      }
     }
  else {
       newArguments.add((PsiExpression)operand.copy());
+      if (!inStringLiteral) {
+        if (addPlus) {
+          newMethodCall.append('+');
+        }
+        newMethodCall.append('"');
+        inStringLiteral=true;
+      }
       newMethodCall.append("{}");
     }
+    addPlus=true;
   }
   while (usedArguments < arguments.length) {
     newArguments.add(arguments[usedArguments++]);
   }
-  newMethodCall.append('"');
+  if (inStringLiteral) {
+    newMethodCall.append('"');
+  }
   if (!varArgs && newArguments.size() > 2) {
     newMethodCall.append(", new Object[]{");
     boolean comma=false;

@@ -1,22 +1,28 @@
 {
+  boolean doneSomething=false;
   try {
-    final Map<BuildTarget<?>,Collection<String>> removedSources=new HashMap<BuildTarget<?>,Collection<String>>();
+    final Map<ModuleBuildTarget,Collection<String>> moduleTargetRemovedSources=new HashMap<ModuleBuildTarget,Collection<String>>();
     for (    BuildTarget<?> target : targets) {
       final Collection<String> deletedPaths=myProjectDescriptor.fsState.getAndClearDeletedPaths(target);
       if (deletedPaths.isEmpty()) {
         continue;
       }
-      removedSources.put(target,deletedPaths);
+      if (target instanceof ModuleBuildTarget) {
+        moduleTargetRemovedSources.put((ModuleBuildTarget)target,deletedPaths);
+      }
       final SourceToOutputMapping sourceToOutputStorage=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
+      final ProjectBuilderLogger logger=context.getLoggingManager().getProjectBuilderLogger();
       for (      String deletedSource : deletedPaths) {
         final Collection<String> outputs=sourceToOutputStorage.getOutputs(deletedSource);
         if (outputs != null && !outputs.isEmpty()) {
-          final ProjectBuilderLogger logger=context.getLoggingManager().getProjectBuilderLogger();
           if (logger.isEnabled()) {
             logger.logDeletedFiles(outputs);
           }
           for (          String output : outputs) {
-            new File(output).delete();
+            final boolean deleted=new File(output).delete();
+            if (deleted) {
+              doneSomething=true;
+            }
           }
           context.processMessage(new FileDeletedEvent(outputs));
         }
@@ -33,25 +39,31 @@
             sourceToFormMap.remove(deletedSource);
           }
         }
+ else {
+          if (outputs != null) {
+            sourceToOutputStorage.remove(deletedSource);
+          }
+        }
       }
     }
-    if (!removedSources.isEmpty()) {
-      final Map<BuildTarget<?>,Collection<String>> existing=Utils.REMOVED_SOURCES_KEY.get(context);
+    if (!moduleTargetRemovedSources.isEmpty()) {
+      final Map<ModuleBuildTarget,Collection<String>> existing=Utils.REMOVED_SOURCES_KEY.get(context);
       if (existing != null) {
-        for (        Map.Entry<BuildTarget<?>,Collection<String>> entry : existing.entrySet()) {
-          final Collection<String> paths=removedSources.get(entry.getKey());
+        for (        Map.Entry<ModuleBuildTarget,Collection<String>> entry : existing.entrySet()) {
+          final Collection<String> paths=moduleTargetRemovedSources.get(entry.getKey());
           if (paths != null) {
             paths.addAll(entry.getValue());
           }
  else {
-            removedSources.put(entry.getKey(),entry.getValue());
+            moduleTargetRemovedSources.put(entry.getKey(),entry.getValue());
           }
         }
       }
-      Utils.REMOVED_SOURCES_KEY.set(context,removedSources);
+      Utils.REMOVED_SOURCES_KEY.set(context,moduleTargetRemovedSources);
     }
   }
  catch (  IOException e) {
     throw new ProjectBuildException(e);
   }
+  return doneSomething;
 }
