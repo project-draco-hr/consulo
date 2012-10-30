@@ -1,19 +1,24 @@
 {
-  final GitLogSettings settings=GitLogSettings.getInstance(myProject);
-  settings.setSelectedBranch(mySelectedBranch);
-  settings.setSelectedUser(myUserFilterI.myFilter);
-  settings.setSelectedUserIsMe(myUserFilterI.isMeSelected());
-  settings.setSelectedPaths(myStructureFilter.myAllSelected ? null : myStructureFilter.getSelected());
+  mySettings.setSelectedBranch(mySelectedBranch);
+  mySettings.setSelectedUser(myUserFilterI.myFilter);
+  mySettings.setSelectedUserIsMe(myUserFilterI.isMeSelected());
+  mySettings.setSelectedPaths(myStructureFilter.myAllSelected ? null : myStructureFilter.getSelected());
   myState=StepType.CONTINUE;
   final int was=myTableModel.getRowCount();
   myDetailsCache.resetAsideCaches();
   final Collection<String> startingPoints=mySelectedBranch == null ? Collections.<String>emptyList() : Collections.singletonList(mySelectedBranch);
+  final GitLogSettings.MyDateState dateState=mySettings.getDateState();
+  Set<ChangesFilter.Filter> dateFilters=null;
+  if (dateState.mySelectedTime) {
+    dateFilters=applyDateFilter();
+  }
   myDescriptionRenderer.resetIcons();
   final boolean commentFilterEmpty=StringUtil.isEmptyOrSpaces(myPreviousFilter);
   myCommentSearchContext.clear();
   myUsersSearchContext.clear();
-  myThereAreFilters=(!(commentFilterEmpty && (myUserFilterI.myFilter == null) && myStructureFilter.myAllSelected)) || myIsFilterByStarOn;
-  final boolean topoOrder=(!myThereAreFilters) && myRootsUnderVcs.size() == 1 ? GitLogSettings.getInstance(myProject).isTopoOrder() : false;
+  final boolean haveFilters=(!(commentFilterEmpty && (myUserFilterI.myFilter == null) && myStructureFilter.myAllSelected&& (!mySettings.getDateState().mySelectedTime))) || myIsFilterByStarOn;
+  myThereIsDisordering=haveFilters;
+  final boolean topoOrder=(!myThereIsDisordering) && myRootsUnderVcs.size() == 1 ? mySettings.isTopoOrder() : false;
   myOrderLabel.setVisible(false);
   setOrderText(topoOrder);
   if (topoOrder) {
@@ -22,13 +27,10 @@
  else {
     myTableModel.useDateGroupingStrategy();
   }
-  myEqualToHeadr.getParent().setVisible(false);
-  if (!myThereAreFilters) {
-    if (myMyShowTreeAction.isSelected(null)) {
-      myEqualToHeadr.getParent().setVisible(true);
-    }
+  myEqualToHeadr.getParent().setVisible(!myThereIsDisordering);
+  if (!haveFilters) {
     myUsersSearchContext.clear();
-    myMediator.reload(new RootsHolder(myRootsUnderVcs),startingPoints,new GitLogFilters(),topoOrder);
+    myMediator.reload(new RootsHolder(myRootsUnderVcs),startingPoints,null,new GitLogFilters(),topoOrder);
   }
  else   if (myIsFilterByStarOn) {
     myUsersSearchContext.clear();
@@ -42,43 +44,14 @@
     }
     Set<ChangesFilter.Filter> userFilters=null;
     if (myUserFilterI.myFilter != null) {
-      final String[] strings=myUserFilterI.myFilter.split(",");
-      userFilters=new HashSet<ChangesFilter.Filter>();
-      for (      String string : strings) {
-        string=string.trim();
-        if (string.length() == 0)         continue;
-        myUsersSearchContext.add(string.toLowerCase());
-        final String regexp=StringUtil.escapeToRegexp(string);
-        userFilters.add(new ChangesFilter.Committer(regexp));
-        userFilters.add(new ChangesFilter.Author(regexp));
-      }
+      userFilters=applyUserFilter();
     }
     Map<VirtualFile,ChangesFilter.Filter> structureFilters=null;
     if (!myStructureFilter.myAllSelected) {
-      structureFilters=new HashMap<VirtualFile,ChangesFilter.Filter>();
-      final Collection<VirtualFile> selected=new ArrayList<VirtualFile>(myStructureFilter.getSelected());
-      final ArrayList<VirtualFile> copy=new ArrayList<VirtualFile>(myRootsUnderVcs);
-      Collections.sort(copy,FilePathComparator.getInstance());
-      Collections.reverse(copy);
-      for (      VirtualFile root : copy) {
-        final Collection<VirtualFile> selectedForRoot=new SmartList<VirtualFile>();
-        final Iterator<VirtualFile> iterator=selected.iterator();
-        while (iterator.hasNext()) {
-          VirtualFile next=iterator.next();
-          if (VfsUtil.isAncestor(root,next,false)) {
-            selectedForRoot.add(next);
-            iterator.remove();
-          }
-        }
-        if (!selectedForRoot.isEmpty()) {
-          final ChangesFilter.StructureFilter structureFilter=new ChangesFilter.StructureFilter();
-          structureFilter.addFiles(selectedForRoot);
-          structureFilters.put(root,structureFilter);
-        }
-      }
+      structureFilters=applyStructureFilter();
     }
     final List<String> possibleReferencies=commentFilterEmpty ? null : Arrays.asList(myPreviousFilter.split("[\\s]"));
-    myMediator.reload(new RootsHolder(myRootsUnderVcs),startingPoints,new GitLogFilters(comment,userFilters,structureFilters,possibleReferencies),topoOrder);
+    myMediator.reload(new RootsHolder(myRootsUnderVcs),startingPoints,null,new GitLogFilters(comment,userFilters,dateFilters,structureFilters,possibleReferencies),topoOrder);
   }
   myCommentSearchContext.addHighlighter(myDetailsPanel.getHtmlHighlighter());
   updateMoreVisibility();
