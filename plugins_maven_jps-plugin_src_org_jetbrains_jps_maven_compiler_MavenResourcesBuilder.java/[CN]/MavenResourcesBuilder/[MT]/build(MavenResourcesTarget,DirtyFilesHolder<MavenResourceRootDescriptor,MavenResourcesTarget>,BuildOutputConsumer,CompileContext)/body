@@ -1,25 +1,89 @@
 {
-  final MavenModuleResourceConfiguration config=target.getModuleResourcesConfiguration(context.getProjectDescriptor().dataManager.getDataPaths());
+  final BuildDataPaths dataPaths=context.getProjectDescriptor().dataManager.getDataPaths();
+  final MavenProjectConfiguration projectConfig=JpsMavenExtensionService.getInstance().getMavenProjectConfiguration(dataPaths);
+  final MavenModuleResourceConfiguration config=target.getModuleResourcesConfiguration(dataPaths);
   if (config == null) {
     return;
   }
-  final Set<String> filteringExcludedExtensions=config.getFiltetingExcludedExtensions();
+  final Set<String> filteringExcludedExtensions=config.getFilteringExcludedExtensions();
+  final String encoding=context.getProjectDescriptor().getEncodingConfiguration().getPreferredModuleEncoding(target.getModule());
+  final Date timestamp=new Date();
+  @Nullable final Set<File> cleanedSources;
+  if (context.isProjectRebuild()) {
+    cleanedSources=null;
+  }
+ else {
+    cleanedSources=cleanOutputsCorrespondingToChangedFiles(holder,context,target);
+  }
   holder.processDirtyFiles(new FileProcessor<MavenResourceRootDescriptor,MavenResourcesTarget>(){
+    private Map<String,String> myProperties;
+    private Pattern myDelimitersPattern;
     @Override public boolean apply(    MavenResourcesTarget target,    File file,    MavenResourceRootDescriptor rd) throws IOException {
-      final File outputDir=MavenResourcesTarget.getOutputDir(target.getModuleOutputDir(),rd.getConfiguration());
-      if (outputDir == null) {
-        return true;
-      }
       final String relPath=FileUtil.getRelativePath(rd.getRootFile(),file);
       if (relPath == null) {
         return true;
       }
+      final String sourcePath=file.getPath();
+      if (!rd.isIncluded(relPath)) {
+        return true;
+      }
+      final File outputDir=MavenResourcesTarget.getOutputDir(target.getModuleOutputDir(),rd.getConfiguration());
+      if (outputDir == null) {
+        return true;
+      }
       final File outputFile=new File(outputDir,relPath);
-      final boolean shouldFilter=rd.getConfiguration().isFiltered && !filteringExcludedExtensions.contains(getExtension(file));
-      FileUtil.copyContent(file,outputFile);
-      outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(file.getPath()));
+      boolean shouldFilter=rd.getConfiguration().isFiltered && !filteringExcludedExtensions.contains(getExtension(file));
+      if (shouldFilter && file.length() > FILTERING_SIZE_LIMIT) {
+        context.processMessage(new CompilerMessage("MavenResources",BuildMessage.Kind.WARNING,"File is too big to be filtered. Most likely it is a binary file and should be excluded from filtering",sourcePath));
+        shouldFilter=false;
+      }
+      if (shouldFilter) {
+        final PrintWriter printWriter=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
+        try {
+          final byte[] bytes=FileUtil.loadFileBytes(file);
+          final String text=encoding != null ? new String(bytes,encoding) : new String(bytes);
+          doFilterText(getDelimitersPattern(),text,projectConfig,config,endsWith(file.getName(),".properties") ? "\\" : null,getProperties(),null,printWriter);
+        }
+  finally {
+          printWriter.close();
+        }
+      }
+ else {
+        FileUtil.copyContent(file,outputFile);
+      }
+      outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(sourcePath));
+      if (cleanedSources != null) {
+        cleanedSources.remove(file);
+      }
       return true;
+    }
+    private Pattern getDelimitersPattern(){
+      Pattern pattern=myDelimitersPattern;
+      if (pattern == null) {
+        pattern=Pattern.compile(config.delimitersPattern);
+        myDelimitersPattern=pattern;
+      }
+      return pattern;
+    }
+    private Map<String,String> getProperties(){
+      Map<String,String> props=myProperties;
+      if (props == null) {
+        props=new HashMap<String,String>(config.properties);
+        String timestampFormat=props.get(MAVEN_BUILD_TIMESTAMP_FORMAT_PROPERTY);
+        if (timestampFormat == null) {
+          timestampFormat="yyyyMMdd-HHmm";
+        }
+        props.put(MAVEN_BUILD_TIMESTAMP_PROPERTY,new SimpleDateFormat(timestampFormat).format(timestamp));
+        myProperties=props;
+      }
+      return props;
     }
   }
 );
+  if (cleanedSources != null) {
+    final SourceToOutputMapping mapping=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
+    for (    File file : cleanedSources) {
+      mapping.remove(file.getPath());
+    }
+  }
 }
