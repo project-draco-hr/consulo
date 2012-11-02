@@ -1,0 +1,57 @@
+{
+  if (methodReferenceExpression == null)   return false;
+  Map<PsiMethodReferenceExpression,PsiType> map=ourRefs.get();
+  if (map == null) {
+    map=new HashMap<PsiMethodReferenceExpression,PsiType>();
+    ourRefs.set(map);
+  }
+  final JavaResolveResult result;
+  try {
+    if (map.put(methodReferenceExpression,left) != null) {
+      return false;
+    }
+    result=methodReferenceExpression.advancedResolve(false);
+  }
+  finally {
+    map.remove(methodReferenceExpression);
+  }
+  final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(left);
+  final PsiMethod method=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
+  if (method != null) {
+    final Ref<PsiClass> classRef=new Ref<PsiClass>();
+    final Ref<PsiSubstitutor> substRef=new Ref<PsiSubstitutor>();
+    methodReferenceExpression.process(classRef,substRef);
+    final PsiElement resolve=result.getElement();
+    if (resolve instanceof PsiMethod) {
+      final MethodSignature signature1=method.getSignature(resolveResult.getSubstitutor());
+      PsiSubstitutor subst=PsiSubstitutor.EMPTY;
+      subst=subst.putAll(substRef.get());
+      subst=subst.putAll(result.getSubstitutor());
+      final MethodSignature signature2=((PsiMethod)resolve).getSignature(subst);
+      final PsiType interfaceReturnType=LambdaUtil.getFunctionalInterfaceReturnType(left);
+      PsiType methodReturnType=subst.substitute(((PsiMethod)resolve).getReturnType());
+      if (interfaceReturnType != null && interfaceReturnType != PsiType.VOID) {
+        if (methodReturnType == null) {
+          methodReturnType=JavaPsiFacade.getElementFactory(methodReferenceExpression.getProject()).createType(((PsiMethod)resolve).getContainingClass(),subst);
+        }
+        if (!TypeConversionUtil.isAssignable(interfaceReturnType,methodReturnType,false))         return false;
+      }
+      if (areAcceptable(signature1,signature2,classRef.get(),substRef.get(),((PsiMethod)resolve).isVarArgs()))       return true;
+    }
+ else     if (resolve instanceof PsiClass) {
+      final PsiType interfaceReturnType=LambdaUtil.getFunctionalInterfaceReturnType(left);
+      if (interfaceReturnType != null) {
+        if (interfaceReturnType == PsiType.VOID)         return true;
+        final PsiClassType classType=JavaPsiFacade.getElementFactory(methodReferenceExpression.getProject()).createType((PsiClass)resolve,result.getSubstitutor());
+        if (TypeConversionUtil.isAssignable(interfaceReturnType,classType,!((PsiClass)resolve).hasTypeParameters())) {
+          final PsiParameter[] parameters=method.getParameterList().getParameters();
+          if (parameters.length == 0)           return true;
+          if (parameters.length == 1) {
+            if (isReceiverType(resolveResult.getSubstitutor().substitute(parameters[0].getType()),classRef.get(),substRef.get()))             return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
