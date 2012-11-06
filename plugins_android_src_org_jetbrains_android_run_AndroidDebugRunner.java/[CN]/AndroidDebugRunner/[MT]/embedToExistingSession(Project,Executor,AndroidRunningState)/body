@@ -1,0 +1,45 @@
+{
+  final Pair<ProcessHandler,AndroidSessionInfo> pair=findOldSession(project,executor,state.getConfiguration());
+  final AndroidSessionInfo oldSessionInfo=pair != null ? pair.getSecond() : null;
+  final ProcessHandler oldProcessHandler=pair != null ? pair.getFirst() : null;
+  if (oldSessionInfo == null || oldProcessHandler == null) {
+    return null;
+  }
+  final AndroidExecutionState oldState=oldSessionInfo.getState();
+  final IDevice[] oldDevices=oldState.getDevices();
+  final ConsoleView oldConsole=oldState.getConsoleView();
+  if (oldDevices == null || oldConsole == null || oldDevices.length == 0 || oldDevices.length > 1) {
+    return null;
+  }
+  final Ref<List<IDevice>> devicesRef=Ref.create();
+  final boolean result=ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
+    @Override public void run(){
+      devicesRef.set(state.getAllCompatibleDevices());
+    }
+  }
+,"Scanning available devices",false,project);
+  if (!result) {
+    return null;
+  }
+  final List<IDevice> devices=devicesRef.get();
+  if (devices.size() == 0 || devices.size() > 1 || devices.get(0) != oldDevices[0]) {
+    return null;
+  }
+  state.setTargetDevices(devices.toArray(new IDevice[devices.size()]));
+  state.setConsole(oldConsole);
+  final DefaultDebugProcessHandler newProcessHandler=new DefaultDebugProcessHandler();
+  oldSessionInfo.getDescriptor().setProcessHandler(newProcessHandler);
+  state.setProcessHandler(newProcessHandler);
+  newProcessHandler.startNotify();
+  oldConsole.attachToProcess(newProcessHandler);
+  AndroidProcessText.attach(newProcessHandler);
+  newProcessHandler.notifyTextAvailable("The session is restarted\n",STDOUT);
+  NotificationGroup.toolWindowGroup("Android Session Restarted",ToolWindowId.DEBUG,true).createNotification("Session '" + oldSessionInfo.getDescriptor().getDisplayName() + "' is restarted",MessageType.INFO).notify(project);
+  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+    @Override public void run(){
+      state.start();
+    }
+  }
+);
+  return oldSessionInfo.getDescriptor();
+}
