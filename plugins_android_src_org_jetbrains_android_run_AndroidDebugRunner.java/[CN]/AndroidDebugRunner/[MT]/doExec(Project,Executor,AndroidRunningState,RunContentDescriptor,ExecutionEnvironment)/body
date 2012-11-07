@@ -1,0 +1,38 @@
+{
+  if (DefaultRunExecutor.EXECUTOR_ID.equals(executor.getId())) {
+    final RunContentDescriptor descriptor=super.doExecute(project,executor,state,contentToReuse,environment);
+    if (descriptor != null) {
+      setActivateToolWindowWhenAddedProperty(project,executor,descriptor,"running");
+    }
+    return descriptor;
+  }
+  final RunProfile runProfile=environment.getRunProfile();
+  if (runProfile instanceof AndroidTestRunConfiguration) {
+    String targetPackage=getTargetPackage((AndroidTestRunConfiguration)runProfile,state);
+    if (targetPackage == null) {
+      throw new ExecutionException(AndroidBundle.message("target.package.not.specified.error"));
+    }
+    state.setTargetPackageName(targetPackage);
+  }
+  state.setDebugMode(true);
+  RunContentDescriptor runDescriptor;
+synchronized (myDebugLock) {
+    MyDebugLauncher launcher=new MyDebugLauncher(project,executor,state,environment);
+    state.setDebugLauncher(launcher);
+    final RunContentDescriptor descriptor=embedToExistingSession(project,executor,state);
+    runDescriptor=descriptor != null ? descriptor : super.doExecute(project,executor,state,contentToReuse,environment);
+    launcher.setRunDescriptor(runDescriptor);
+    if (descriptor != null) {
+      return null;
+    }
+  }
+  if (runDescriptor == null) {
+    return null;
+  }
+  tryToCloseOldSessions(executor,project);
+  final ProcessHandler handler=state.getProcessHandler();
+  handler.putUserData(ANDROID_SESSION_INFO,new AndroidSessionInfo(runDescriptor,state,executor.getId()));
+  state.setRestarter(runDescriptor.getRestarter());
+  setActivateToolWindowWhenAddedProperty(project,executor,runDescriptor,"running");
+  return runDescriptor;
+}
