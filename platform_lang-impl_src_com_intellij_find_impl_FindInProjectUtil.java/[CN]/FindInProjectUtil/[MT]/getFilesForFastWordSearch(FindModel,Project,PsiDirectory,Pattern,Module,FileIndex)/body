@@ -10,10 +10,11 @@
     scope=ProjectScope.getContentScope(project);
   }
   Set<Integer> keys=new THashSet<Integer>(30);
-  Set<PsiFile> resultFiles=new THashSet<PsiFile>();
+  final Set<PsiFile> resultFiles=new THashSet<PsiFile>();
   boolean fast=false;
+  String stringToFind=findModel.getStringToFind();
   if (TrigramIndex.ENABLED) {
-    TIntHashSet trigrams=TrigramBuilder.buildTrigram(findModel.getStringToFind());
+    TIntHashSet trigrams=TrigramBuilder.buildTrigram(stringToFind);
     TIntIterator it=trigrams.iterator();
     while (it.hasNext()) {
       keys.add(it.next());
@@ -29,8 +30,8 @@
       if (resultFiles.isEmpty())       return new Pair<Boolean,Collection<PsiFile>>(true,resultFiles);
     }
   }
-  fast|=findModel.isWholeWordsOnly() && findModel.getStringToFind().indexOf('$') < 0;
-  List<String> words=StringUtil.getWordsInStringLongestFirst(findModel.getStringToFind());
+  fast|=findModel.isWholeWordsOnly() && stringToFind.indexOf('$') < 0;
+  List<String> words=StringUtil.getWordsInStringLongestFirst(stringToFind);
   for (int i=0; i < words.size(); i++) {
     String word=words.get(i);
     PsiFile[] files=cacheManager.getFilesWithWord(word,UsageSearchContext.ANY,scope,findModel.isCaseSensitive());
@@ -48,8 +49,24 @@
     filterMaskedFiles(resultFiles,fileMaskRegExp);
     if (resultFiles.isEmpty())     break;
   }
-  PsiFile[] allWordsFiles=cacheManager.getFilesWithWord(findModel.getStringToFind(),UsageSearchContext.ANY,scope,findModel.isCaseSensitive());
-  ContainerUtil.addAll(resultFiles,allWordsFiles);
-  filterMaskedFiles(resultFiles,fileMaskRegExp);
+  if (stringToFind.isEmpty()) {
+    fileIndex.iterateContent(new ContentIterator(){
+      @Override public boolean processFile(      VirtualFile file){
+        if (!file.isDirectory() && fileMaskRegExp.matcher(file.getName()).matches()) {
+          PsiFile psiFile=PsiManager.getInstance(project).findFile(file);
+          if (psiFile != null) {
+            resultFiles.add(psiFile);
+          }
+        }
+        return true;
+      }
+    }
+);
+  }
+ else {
+    PsiFile[] allWordsFiles=cacheManager.getFilesWithWord(stringToFind,UsageSearchContext.ANY,scope,findModel.isCaseSensitive());
+    ContainerUtil.addAll(resultFiles,allWordsFiles);
+    filterMaskedFiles(resultFiles,fileMaskRegExp);
+  }
   return new Pair<Boolean,Collection<PsiFile>>(fast,resultFiles);
 }
