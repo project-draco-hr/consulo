@@ -1,0 +1,58 @@
+{
+  @NotNull final Project project=directory.getProject();
+  if (propsMap == null) {
+    Properties p=FileTemplateManager.getInstance().getDefaultProperties(directory.getProject());
+    propsMap=new HashMap<String,Object>();
+    putAll(propsMap,p);
+  }
+  FileTemplateManager.getInstance().addRecentName(template.getName());
+  Properties p=new Properties();
+  fillDefaultProperties(p,directory);
+  putAll(propsMap,p);
+  final CreateFromTemplateHandler handler=findHandler(template);
+  if (fileName != null && propsMap.get(FileTemplate.ATTRIBUTE_NAME) == null) {
+    propsMap.put(FileTemplate.ATTRIBUTE_NAME,fileName);
+  }
+ else   if (fileName == null && handler.isNameRequired()) {
+    fileName=(String)propsMap.get(FileTemplate.ATTRIBUTE_NAME);
+    if (fileName == null) {
+      throw new Exception("File name must be specified");
+    }
+  }
+  String[] dummyRefs=calculateAttributes(template.getText(),propsMap,true);
+  for (  String dummyRef : dummyRefs) {
+    propsMap.put(dummyRef,"");
+  }
+  handler.prepareProperties(propsMap);
+  final Map<String,Object> props_=propsMap;
+  final String fileName_=fileName;
+  String mergedText=ClassLoaderUtil.runWithClassLoader(classLoader != null ? classLoader : FileTemplateUtil.class.getClassLoader(),new ThrowableComputable<String,IOException>(){
+    @Override public String compute() throws IOException {
+      return template.getText(props_);
+    }
+  }
+);
+  final String templateText=StringUtil.convertLineSeparators(mergedText);
+  final Exception[] commandException=new Exception[1];
+  final PsiElement[] result=new PsiElement[1];
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          try {
+            result[0]=handler.createFromTemplate(project,directory,fileName_,template,templateText,props_);
+          }
+ catch (          Exception ex) {
+            commandException[0]=ex;
+          }
+        }
+      }
+);
+    }
+  }
+,template.isTemplateOfType(StdFileTypes.JAVA) ? IdeBundle.message("command.create.class.from.template") : IdeBundle.message("command.create.file.from.template"),null);
+  if (commandException[0] != null) {
+    throw commandException[0];
+  }
+  return result[0];
+}
