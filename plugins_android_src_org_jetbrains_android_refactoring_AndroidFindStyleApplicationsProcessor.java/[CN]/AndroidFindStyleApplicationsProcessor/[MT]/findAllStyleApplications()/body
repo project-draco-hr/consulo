@@ -1,0 +1,60 @@
+{
+  final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  final Project project=myModule.getProject();
+  final List<VirtualFile> resDirs=new ArrayList<VirtualFile>();
+  if (mySearchOnlyInCurrentModule) {
+    collectResDir(myModule,myStyleNameAttrValue,myStyleName,resDirs);
+  }
+ else {
+    for (    Module m : getAllModulesToScan(myModule)) {
+      collectResDir(m,myStyleNameAttrValue,myStyleName,resDirs);
+    }
+  }
+  final List<VirtualFile> subdirs=AndroidResourceUtil.getResourceSubdirs(ResourceType.LAYOUT.getName(),resDirs.toArray(new VirtualFile[resDirs.size()]));
+  List<VirtualFile> filesToProcess=new ArrayList<VirtualFile>();
+  for (  VirtualFile subdir : subdirs) {
+    for (    VirtualFile child : subdir.getChildren()) {
+      if (child.getFileType() == XmlFileType.INSTANCE && (myFileToScan == null || myFileToScan.equals(child))) {
+        filesToProcess.add(child);
+      }
+    }
+  }
+  if (filesToProcess.size() == 0) {
+    return Collections.emptyList();
+  }
+  final Set<PsiFile> psiFilesToProcess=new HashSet<PsiFile>();
+  for (  VirtualFile file : filesToProcess) {
+    final PsiFile psiFile=PsiManager.getInstance(project).findFile(file);
+    if (psiFile != null) {
+      psiFilesToProcess.add(psiFile);
+    }
+  }
+  final CacheManager cacheManager=CacheManager.SERVICE.getInstance(project);
+  final GlobalSearchScope projectScope=GlobalSearchScope.projectScope(project);
+  for (  Map.Entry<AndroidAttributeInfo,String> entry : myAttrMap.entrySet()) {
+    filterFilesToScan(cacheManager,entry.getKey().getName(),psiFilesToProcess,projectScope);
+    filterFilesToScan(cacheManager,entry.getValue(),psiFilesToProcess,projectScope);
+  }
+  if (psiFilesToProcess.size() == 0) {
+    return Collections.emptyList();
+  }
+  final int n=psiFilesToProcess.size();
+  int i=0;
+  if (indicator != null) {
+    indicator.setText("Searching for style applications");
+  }
+  final List<UsageInfo> usages=new ArrayList<UsageInfo>();
+  for (  PsiFile psiFile : psiFilesToProcess) {
+    ProgressManager.checkCanceled();
+    final VirtualFile vFile=psiFile.getVirtualFile();
+    if (vFile == null) {
+      continue;
+    }
+    if (indicator != null) {
+      indicator.setFraction((double)i / n);
+      indicator.setText2(ProjectUtil.calcRelativeToProjectPath(vFile,project));
+    }
+    findAllStyleApplications(project,vFile,myAttrMap,myParentStyleNameAttrValue,usages);
+  }
+  return usages;
+}
