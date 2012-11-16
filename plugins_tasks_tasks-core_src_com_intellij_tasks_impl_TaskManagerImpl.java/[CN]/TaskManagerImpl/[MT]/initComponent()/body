@@ -15,8 +15,21 @@
       }
     }
 );
+    myTimeTrackingTimer=UIUtil.createNamedTimer("TaskManager time tracking",TIME_TRACKING_TIME_UNIT,new ActionListener(){
+      @Override public void actionPerformed(      final ActionEvent e){
+        getActiveTask().setTimeSpent(getActiveTask().getTimeSpent() + TIME_TRACKING_TIME_UNIT);
+        getState().myTotallyTimeSpent+=TIME_TRACKING_TIME_UNIT;
+      }
+    }
+);
+    StartupManager.getInstance(myProject).registerStartupActivity(new Runnable(){
+      public void run(){
+        myTimeTrackingTimer.start();
+      }
+    }
+);
   }
-  LocalTaskImpl defaultTask=myTasks.get(LocalTaskImpl.DEFAULT_TASK_ID);
+  LocalTask defaultTask=myTasks.get(LocalTaskImpl.DEFAULT_TASK_ID);
   if (defaultTask == null) {
     defaultTask=createDefaultTask();
     addTask(defaultTask);
@@ -25,37 +38,34 @@
   if (defaultList != null) {
     ChangeListInfo listInfo=new ChangeListInfo(defaultList);
     if (!defaultTask.getChangeLists().contains(listInfo)) {
-      defaultTask.getChangeLists().add(listInfo);
+      defaultTask.addChangelist(listInfo);
     }
   }
-  HashSet<ChangeListInfo> infos=new HashSet<ChangeListInfo>();
-  for (  LocalTaskImpl task : getLocalTasks()) {
-    infos.addAll(task.getChangeLists());
-  }
-  List<LocalChangeList> changeLists=myChangeListManager.getChangeLists();
-  for (  LocalChangeList localChangeList : changeLists) {
-    ChangeListInfo info=new ChangeListInfo(localChangeList);
-    if (!infos.contains(info)) {
-      String name=localChangeList.getName();
-      String id=extractId(name);
-      LocalTaskImpl existing=id == null ? myTasks.get(name) : myTasks.get(id);
-      if (existing != null) {
-        existing.getChangeLists().add(info);
-      }
- else {
-        LocalTaskImpl task;
-        if (id == null) {
-          task=createLocalTask(name);
-        }
- else {
-          task=createTask(id,name);
-          task.setIssue(true);
-        }
-        task.getChangeLists().add(info);
-        addTask(task);
+  for (  LocalTask localTask : getLocalTasks()) {
+    for (Iterator<ChangeListInfo> iterator=localTask.getChangeLists().iterator(); iterator.hasNext(); ) {
+      final ChangeListInfo changeListInfo=iterator.next();
+      if (myChangeListManager.getChangeList(changeListInfo.id) == null) {
+        iterator.remove();
       }
     }
+  }
+  LocalTask activeTask=null;
+  final List<LocalTask> tasks=getLocalTasks();
+  Collections.sort(tasks,TASK_UPDATE_COMPARATOR);
+  for (  LocalTask task : tasks) {
+    if (activeTask == null) {
+      if (task.isActive()) {
+        activeTask=task;
+      }
+    }
+ else {
+      task.setActive(false);
+    }
+  }
+  if (activeTask != null) {
+    myActiveTask=activeTask;
   }
   doActivate(myActiveTask,false);
+  myDispatcher.getMulticaster().taskActivated(myActiveTask);
   myChangeListManager.addChangeListListener(myChangeListListener);
 }

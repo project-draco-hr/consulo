@@ -8,12 +8,12 @@
   final Set<String> filteringExcludedExtensions=config.getFilteringExcludedExtensions();
   final String encoding=context.getProjectDescriptor().getEncodingConfiguration().getPreferredModuleEncoding(target.getModule());
   final Date timestamp=new Date();
-  @Nullable final Set<File> cleanedSources;
+  @Nullable final Map<MavenResourcesTarget,Set<File>> cleanedSources;
   if (context.isProjectRebuild()) {
     cleanedSources=null;
   }
  else {
-    cleanedSources=cleanOutputsCorrespondingToChangedFiles(holder,context,target);
+    cleanedSources=BuildOperations.cleanOutputsCorrespondingToChangedFiles(context,holder);
   }
   holder.processDirtyFiles(new FileProcessor<MavenResourceRootDescriptor,MavenResourcesTarget>(){
     private Map<String,String> myProperties;
@@ -37,25 +37,45 @@
         context.processMessage(new CompilerMessage("MavenResources",BuildMessage.Kind.WARNING,"File is too big to be filtered. Most likely it is a binary file and should be excluded from filtering",sourcePath));
         shouldFilter=false;
       }
-      if (shouldFilter) {
-        final PrintWriter printWriter=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
-        try {
-          final byte[] bytes=FileUtil.loadFileBytes(file);
-          final String text=encoding != null ? new String(bytes,encoding) : new String(bytes);
-          doFilterText(getDelimitersPattern(),text,projectConfig,config,endsWith(file.getName(),".properties") ? "\\" : null,getProperties(),null,printWriter);
+      try {
+        if (shouldFilter) {
+          copyWithFiltering(file,outputFile);
         }
-  finally {
-          printWriter.close();
-        }
-      }
  else {
-        FileUtil.copyContent(file,outputFile);
+          FileUtil.copyContent(file,outputFile);
+        }
+        outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(sourcePath));
       }
-      outputConsumer.registerOutputFile(outputFile.getPath(),Collections.singleton(sourcePath));
-      if (cleanedSources != null) {
-        cleanedSources.remove(file);
+ catch (      UnsupportedEncodingException e) {
+        context.processMessage(new CompilerMessage(BUILDER_NAME,BuildMessage.Kind.INFO,"Resource was not copied: " + e.getMessage(),sourcePath));
+      }
+ finally {
+        if (cleanedSources != null) {
+          final Set<File> files=cleanedSources.get(target);
+          if (files != null) {
+            files.remove(file);
+          }
+        }
       }
       return true;
+    }
+    private void copyWithFiltering(    File file,    File outputFile) throws IOException {
+      PrintWriter writer;
+      try {
+        writer=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
+      }
+ catch (      FileNotFoundException e) {
+        FileUtil.createIfDoesntExist(outputFile);
+        writer=encoding != null ? new PrintWriter(outputFile,encoding) : new PrintWriter(outputFile);
+      }
+      try {
+        final byte[] bytes=FileUtil.loadFileBytes(file);
+        final String text=encoding != null ? new String(bytes,encoding) : new String(bytes);
+        doFilterText(getDelimitersPattern(),text,projectConfig,config,endsWith(file.getName(),".properties") ? "\\" : null,getProperties(),null,writer);
+      }
+  finally {
+        writer.close();
+      }
     }
     private Pattern getDelimitersPattern(){
       Pattern pattern=myDelimitersPattern;
@@ -81,9 +101,14 @@
   }
 );
   if (cleanedSources != null) {
-    final SourceToOutputMapping mapping=context.getProjectDescriptor().dataManager.getSourceToOutputMap(target);
-    for (    File file : cleanedSources) {
-      mapping.remove(file.getPath());
+    for (    Map.Entry<MavenResourcesTarget,Set<File>> entry : cleanedSources.entrySet()) {
+      final Set<File> files=entry.getValue();
+      if (!files.isEmpty()) {
+        final SourceToOutputMapping mapping=context.getProjectDescriptor().dataManager.getSourceToOutputMap(entry.getKey());
+        for (        File file : files) {
+          mapping.remove(file.getPath());
+        }
+      }
     }
   }
 }

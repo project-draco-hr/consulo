@@ -1,0 +1,55 @@
+{
+  ClientBootstrap bootstrap=new ClientBootstrap(new NioClientSocketChannelFactory(pooledThreadExecutor,pooledThreadExecutor,1));
+  bootstrap.setOption("child.tcpNoDelay",true);
+  final AtomicBoolean result=new AtomicBoolean();
+  final Semaphore semaphore=new Semaphore();
+  bootstrap.setPipeline(pipeline(new HttpResponseDecoder(),new HttpChunkAggregator(1048576),new HttpRequestEncoder(),new SimpleChannelUpstreamHandler(){
+    @Override public void messageReceived(    ChannelHandlerContext context,    MessageEvent e) throws Exception {
+      try {
+        if (e.getMessage() instanceof HttpResponse) {
+          HttpResponse response=(HttpResponse)e.getMessage();
+          if (response.getStatus().equals(OK) && response.getContent().toString(CharsetUtil.US_ASCII).equals(getApplicationStartTime())) {
+            LOG.info("port check: current OS must be marked as normal");
+            result.set(true);
+          }
+        }
+      }
+  finally {
+        semaphore.up();
+      }
+    }
+    @Override public void exceptionCaught(    ChannelHandlerContext ctx,    ExceptionEvent e) throws Exception {
+      try {
+        LOG.error(e.getCause());
+      }
+  finally {
+        semaphore.up();
+      }
+    }
+  }
+));
+  ChannelFuture connectFuture=bootstrap.connect(remoteAddress);
+  if (!waitComplete(connectFuture,"connect")) {
+    return false;
+  }
+  try {
+    semaphore.down();
+    ChannelFuture writeFuture=connectFuture.getChannel().write(new DefaultHttpRequest(HTTP_1_1,HttpMethod.GET,START_TIME_PATH));
+    if (!waitComplete(writeFuture,"write")) {
+      return false;
+    }
+    try {
+      if (!semaphore.waitForUnsafe(30000)) {
+        LOG.info("port check: semaphore down timeout");
+      }
+    }
+ catch (    InterruptedException e) {
+      LOG.info("port check: semaphore interrupted",e);
+    }
+  }
+  finally {
+    connectFuture.getChannel().close();
+    bootstrap.releaseExternalResources();
+  }
+  return result.get();
+}

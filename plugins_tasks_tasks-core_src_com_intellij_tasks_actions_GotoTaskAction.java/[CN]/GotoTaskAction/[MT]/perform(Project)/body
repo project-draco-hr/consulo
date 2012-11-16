@@ -6,8 +6,8 @@
       return ContainerUtil.emptyList();
     }
     @Override public boolean filterElements(    @NotNull ChooseByNameBase base,    @NotNull String pattern,    boolean everywhere,    @NotNull ProgressIndicator cancelled,    @NotNull Processor<Object> consumer){
-      List<Task> cachedTasks=TaskSearchSupport.getLocalAndCachedTasks(TaskManager.getManager(project),pattern);
-      List<TaskPsiElement> taskPsiElements=ContainerUtil.map(cachedTasks,new Function<Task,TaskPsiElement>(){
+      List<Task> cachedAndLocalTasks=TaskSearchSupport.getLocalAndCachedTasks(TaskManager.getManager(project),pattern,everywhere);
+      List<TaskPsiElement> taskPsiElements=ContainerUtil.map(cachedAndLocalTasks,new Function<Task,TaskPsiElement>(){
         @Override public TaskPsiElement fun(        Task task){
           return new TaskPsiElement(PsiManager.getInstance(project),task);
         }
@@ -25,8 +25,8 @@
         cancelled.checkCanceled();
         if (!consumer.process(element))         return false;
       }
-      List<Task> tasks=TaskSearchSupport.getRepositoriesTasks(TaskManager.getManager(project),pattern,base.getMaximumListSizeLimit(),0,true);
-      tasks.removeAll(cachedTasks);
+      List<Task> tasks=TaskSearchSupport.getRepositoriesTasks(TaskManager.getManager(project),pattern,base.getMaximumListSizeLimit(),0,true,everywhere,cancelled);
+      tasks.removeAll(cachedAndLocalTasks);
       taskPsiElements=ContainerUtil.map(tasks,new Function<Task,TaskPsiElement>(){
         @Override public TaskPsiElement fun(        Task task){
           return new TaskPsiElement(PsiManager.getInstance(project),task);
@@ -44,7 +44,7 @@
       return true;
     }
   }
-,"",false,0);
+,null,false,0);
   popup.setShowListForEmptyPattern(true);
   popup.setSearchInAnyPlace(true);
   popup.setAdText("<html>Press SHIFT to merge with current context<br/>" + "Pressing " + KeymapUtil.getFirstKeyboardShortcutText(ActionManager.getInstance().getAction(IdeActions.ACTION_QUICK_JAVADOC)) + " would show task description and comments</html>");
@@ -69,6 +69,7 @@
   final ActionToolbar actionToolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.UNKNOWN,group,true);
   actionToolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
   popup.setToolArea(actionToolbar.getComponent());
+  popup.setMaximumListSizeLimit(10);
   showNavigationPopup(new GotoActionCallback<Object>(){
     @Override public void elementChosen(    ChooseByNamePopup popup,    Object element){
       TaskManager taskManager=TaskManager.getManager(project);
@@ -76,18 +77,15 @@
         Task task=((TaskPsiElement)element).getTask();
         LocalTask localTask=taskManager.findTask(task.getId());
         if (localTask != null) {
-          final boolean createChangelist=taskManager.isVcsEnabled() && !taskManager.getOpenChangelists(localTask).isEmpty();
-          taskManager.activateTask(localTask,!shiftPressed.get(),createChangelist);
+          taskManager.activateTask(localTask,!shiftPressed.get(),false);
         }
  else {
-          popup.close(false);
-          (new SimpleOpenTaskDialog(project,task)).show();
+          showOpenTaskDialog(project,task);
         }
       }
  else       if (element == CREATE_NEW_TASK_ACTION) {
-        popup.close(false);
-        Task task=taskManager.createLocalTask(CREATE_NEW_TASK_ACTION.getTaskName());
-        new SimpleOpenTaskDialog(project,task).show();
+        LocalTask localTask=taskManager.createLocalTask(CREATE_NEW_TASK_ACTION.getTaskName());
+        showOpenTaskDialog(project,localTask);
       }
     }
   }

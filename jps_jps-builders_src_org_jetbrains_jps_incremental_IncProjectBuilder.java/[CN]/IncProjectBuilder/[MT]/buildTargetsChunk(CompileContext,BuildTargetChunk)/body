@@ -4,10 +4,11 @@
     Utils.ERRORS_DETECTED_KEY.set(context,Boolean.FALSE);
     BuildOperations.ensureFSStateInitialized(context,chunk);
     if (context.isMake()) {
-      doneSomething|=processDeletedPaths(context,chunk.getTargets());
+      doneSomething=processDeletedPaths(context,chunk.getTargets());
     }
     myProjectDescriptor.fsState.beforeChunkBuildStart(context,chunk);
-    doneSomething=runBuildersForChunk(context,chunk);
+    doneSomething|=runBuildersForChunk(context,chunk);
+    onChunkBuildComplete(context,chunk);
   }
  catch (  ProjectBuildException e) {
     throw e;
@@ -16,43 +17,28 @@ catch (  Exception e) {
     throw new ProjectBuildException(e);
   }
  finally {
+    for (    BuildRootDescriptor rd : context.getProjectDescriptor().getBuildRootIndex().clearTempRoots(context)) {
+      context.getProjectDescriptor().fsState.clearRecompile(rd);
+    }
     try {
-      onChunkBuildComplete(context,chunk);
-    }
- catch (    Exception e) {
-      throw new ProjectBuildException(e);
-    }
- finally {
-      for (      BuildRootDescriptor rd : context.getProjectDescriptor().getBuildRootIndex().clearTempRoots(context)) {
-        context.getProjectDescriptor().fsState.clearRecompile(rd);
-      }
-      try {
-        final Map<ModuleBuildTarget,Collection<String>> map=Utils.REMOVED_SOURCES_KEY.get(context);
-        if (map != null) {
-          for (          Map.Entry<ModuleBuildTarget,Collection<String>> entry : map.entrySet()) {
-            final ModuleBuildTarget target=entry.getKey();
-            final Collection<String> paths=entry.getValue();
-            if (paths != null) {
-              for (              String path : paths) {
-                myProjectDescriptor.fsState.registerDeleted(target,new File(path),null);
-              }
+      final Map<BuildTarget<?>,Collection<String>> map=Utils.REMOVED_SOURCES_KEY.get(context);
+      if (map != null) {
+        for (        Map.Entry<BuildTarget<?>,Collection<String>> entry : map.entrySet()) {
+          final BuildTarget<?> target=entry.getKey();
+          final Collection<String> paths=entry.getValue();
+          if (paths != null) {
+            for (            String path : paths) {
+              myProjectDescriptor.fsState.registerDeleted(target,new File(path),null);
             }
           }
         }
       }
- catch (      IOException e) {
-        throw new ProjectBuildException(e);
-      }
+    }
+ catch (    IOException e) {
+      throw new ProjectBuildException(e);
+    }
+ finally {
       Utils.REMOVED_SOURCES_KEY.set(context,null);
-      if (doneSomething && GENERATE_CLASSPATH_INDEX) {
-        final Future<?> future=SharedThreadPool.getInstance().executeOnPooledThread(new Runnable(){
-          @Override public void run(){
-            createClasspathIndex(chunk);
-          }
-        }
-);
-        myAsyncTasks.add(future);
-      }
     }
   }
 }

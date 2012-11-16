@@ -1,0 +1,119 @@
+{
+  ExitCode exitCode=ExitCode.NOTHING_DONE;
+  final boolean hasSourcesToCompile=!files.isEmpty() || !forms.isEmpty();
+  if (!hasSourcesToCompile && !dirtyFilesHolder.hasRemovedFiles()) {
+    return exitCode;
+  }
+  final ProjectPaths paths=context.getProjectPaths();
+  final ProjectDescriptor pd=context.getProjectDescriptor();
+  final boolean addNotNullAssertions=JpsJavaExtensionService.getInstance().getOrCreateCompilerConfiguration(pd.getProject()).isAddNotNullAssertions();
+  JavaBuilderUtil.ensureModuleHasJdk(chunk.representativeTarget().getModule(),context,BUILDER_NAME);
+  final Collection<File> classpath=paths.getCompilationClasspath(chunk,false);
+  final Collection<File> platformCp=paths.getPlatformCompilationClasspath(chunk,false);
+  final DiagnosticSink diagnosticSink=new DiagnosticSink(context);
+  final OutputFilesSink outputSink=new OutputFilesSink(context);
+  final Mappings delta=pd.dataManager.getMappings().createDelta();
+  DELTA_MAPPINGS_CALLBACK_KEY.set(context,delta.getCallback());
+  try {
+    if (hasSourcesToCompile) {
+      exitCode=ExitCode.OK;
+      if (OPTION_COPY_FORMS_RUNTIME_CLASSES && !forms.isEmpty()) {
+        for (        ModuleBuildTarget target : chunk.getTargets()) {
+          if (!target.isTests()) {
+            final File outputDir=target.getOutputDir();
+            if (outputDir != null) {
+              final String outputRoot=FileUtil.toSystemIndependentName(outputDir.getPath());
+              final List<File> generatedFiles=CopyResourcesUtil.copyFormsRuntime(outputRoot,false);
+              if (!generatedFiles.isEmpty()) {
+                final FileGeneratedEvent event=new FileGeneratedEvent();
+                for (                File file : generatedFiles) {
+                  final String relativePath=FileUtil.getRelativePath(outputRoot,FileUtil.toSystemIndependentName(file.getPath()),'/');
+                  if (relativePath != null) {
+                    event.add(outputRoot,relativePath);
+                  }
+                }
+                context.processMessage(event);
+              }
+            }
+          }
+        }
+      }
+      final Set<File> srcPath=new HashSet<File>();
+      final BuildRootIndex index=pd.getBuildRootIndex();
+      for (      ModuleBuildTarget target : chunk.getTargets()) {
+        for (        JavaSourceRootDescriptor rd : index.getTempTargetRoots(target,context)) {
+          srcPath.add(rd.root);
+        }
+      }
+      final String chunkName=getChunkPresentableName(chunk);
+      context.processMessage(new ProgressMessage("Compiling java [" + chunkName + "]"));
+      final int filesCount=files.size();
+      boolean compiledOk=true;
+      if (filesCount > 0) {
+        LOG.info("Compiling " + filesCount + " java files; module: "+ chunkName+ (chunk.containsTests() ? " (tests)" : ""));
+        if (LOG.isDebugEnabled()) {
+          for (          File file : files) {
+            LOG.debug("Compiling " + file.getPath());
+          }
+          LOG.debug(" classpath for " + chunkName + ":");
+          for (          File file : classpath) {
+            LOG.debug("  " + file.getAbsolutePath());
+          }
+          LOG.debug(" platform classpath for " + chunkName + ":");
+          for (          File file : platformCp) {
+            LOG.debug("  " + file.getAbsolutePath());
+          }
+        }
+        compiledOk=compileJava(context,chunk,files,classpath,platformCp,srcPath,diagnosticSink,outputSink);
+      }
+      context.checkCanceled();
+      if (diagnosticSink.getErrorCount() == 0 && (!forms.isEmpty() || addNotNullAssertions)) {
+        final Map<File,String> chunkSourcePath=ProjectPaths.getSourceRootsWithDependents(chunk);
+        final InstrumentationClassFinder finder=createInstrumentationClassFinder(platformCp,classpath,chunkSourcePath,outputSink);
+        try {
+          if (OPTION_ENABLE_FORMS_INSTRUMENTATION && !forms.isEmpty()) {
+            try {
+              context.processMessage(new ProgressMessage("Instrumenting forms [" + chunkName + "]"));
+              instrumentForms(context,chunk,chunkSourcePath,finder,forms,outputSink);
+            }
+  finally {
+              context.processMessage(new ProgressMessage("Finished instrumenting forms [" + chunkName + "]"));
+            }
+          }
+          context.checkCanceled();
+          if (addNotNullAssertions) {
+            try {
+              context.processMessage(new ProgressMessage("Adding NotNull assertions [" + chunkName + "]"));
+              instrumentNotNull(context,outputSink,finder);
+            }
+  finally {
+              context.processMessage(new ProgressMessage("Finished adding NotNull assertions [" + chunkName + "]"));
+            }
+          }
+        }
+  finally {
+          finder.releaseResources();
+        }
+      }
+      context.checkCanceled();
+      if (!compiledOk && diagnosticSink.getErrorCount() == 0) {
+        diagnosticSink.report(new PlainMessageDiagnostic(Diagnostic.Kind.ERROR,"Compilation failed: internal java compiler error"));
+      }
+      if (!Utils.PROCEED_ON_ERROR_KEY.get(context,Boolean.FALSE) && diagnosticSink.getErrorCount() > 0) {
+        if (!compiledOk) {
+          diagnosticSink.report(new PlainMessageDiagnostic(Diagnostic.Kind.OTHER,"Errors occurred while compiling module '" + chunkName + "'"));
+        }
+        throw new ProjectBuildException("Compilation failed: errors: " + diagnosticSink.getErrorCount() + "; warnings: "+ diagnosticSink.getWarningCount());
+      }
+    }
+  }
+  finally {
+    outputSink.writePendingData();
+    final Set<File> successfullyCompiled=outputSink.getSuccessfullyCompiled();
+    DELTA_MAPPINGS_CALLBACK_KEY.set(context,null);
+    if (JavaBuilderUtil.updateMappings(context,delta,dirtyFilesHolder,chunk,files,successfullyCompiled)) {
+      exitCode=ExitCode.ADDITIONAL_PASS_REQUIRED;
+    }
+  }
+  return exitCode;
+}
