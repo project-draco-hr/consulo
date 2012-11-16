@@ -1,71 +1,23 @@
 {
   String namePattern=getNamePattern(base,pattern);
   String qualifierPattern=getQualifierPattern(base,pattern);
-  String modifiedNamePattern=null;
-  if (base.isSearchInAnyPlace() && !namePattern.trim().isEmpty()) {
-    modifiedNamePattern="*" + namePattern + (namePattern.endsWith(" ") ? "" : "*");
-  }
   ChooseByNameModel model=base.getModel();
   boolean empty=namePattern.isEmpty() || namePattern.equals("@") && model instanceof GotoClassModel2;
   if (empty && !base.canShowListForEmptyPattern())   return true;
-  List<String> namesList=new ArrayList<String>();
-  String[] names=base.getNames(everywhere);
-  NameUtil.MatchingCaseSensitivity sensitivity=modifiedNamePattern == null ? NameUtil.MatchingCaseSensitivity.NONE : NameUtil.MatchingCaseSensitivity.ALL;
-  getNamesByPattern(base,names,indicator,namesList,namePattern,sensitivity);
-  if (modifiedNamePattern != null && namesList.isEmpty() && sensitivity != NameUtil.MatchingCaseSensitivity.NONE) {
-    getNamesByPattern(base,names,indicator,namesList,namePattern,NameUtil.MatchingCaseSensitivity.NONE);
+  Set<String> names=new HashSet<String>(Arrays.asList(base.getNames(everywhere)));
+  if (base.isSearchInAnyPlace() && !namePattern.trim().isEmpty()) {
+    String middleMatchPattern="*" + namePattern + (namePattern.endsWith(" ") ? "" : "*");
+    Integer elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,NameUtil.MatchingCaseSensitivity.ALL,false);
+    if (elementsConsumed == null)     return false;
+    if (elementsConsumed == 0) {
+      elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,NameUtil.MatchingCaseSensitivity.NONE,false);
+      if (elementsConsumed == null)       return false;
+    }
+    elementsConsumed=consumeElements(base,everywhere,indicator,consumer,middleMatchPattern,qualifierPattern,names,NameUtil.MatchingCaseSensitivity.NONE,elementsConsumed > 0);
+    return elementsConsumed != null;
   }
-  indicator.checkCanceled();
-  sortNamesList(namePattern,namesList);
-  if (modifiedNamePattern != null) {
-    final Set<String> matched=new HashSet<String>(namesList);
-    List<String> additionalNamesList=new ArrayList<String>();
-    namePattern=modifiedNamePattern;
-    getNamesByPattern(base,names,indicator,additionalNamesList,namePattern,NameUtil.MatchingCaseSensitivity.NONE);
-    additionalNamesList=ContainerUtil.filter(additionalNamesList,new Condition<String>(){
-      @Override public boolean value(      String name){
-        return !matched.contains(name);
-      }
-    }
-);
-    sortNamesList(namePattern,additionalNamesList);
-    namesList.add(ChooseByNameBase.NON_PREFIX_SEPARATOR);
-    namesList.addAll(additionalNamesList);
+ else {
+    Integer elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,NameUtil.MatchingCaseSensitivity.NONE,false);
+    return elementsConsumed != null;
   }
-  indicator.checkCanceled();
-  List<Object> sameNameElements=new SmartList<Object>();
-  boolean previousElemSeparator=false;
-  boolean wasElement=false;
-  List<Pair<String,MinusculeMatcher>> patternsAndMatchers=getPatternsAndMatchers(qualifierPattern,base);
-  for (  String name : namesList) {
-    indicator.checkCanceled();
-    if (name == ChooseByNameBase.NON_PREFIX_SEPARATOR) {
-      previousElemSeparator=wasElement;
-      continue;
-    }
-    Object[] elements=model instanceof ContributorsBasedGotoByModel ? ((ContributorsBasedGotoByModel)model).getElementsByName(name,everywhere,namePattern,indicator) : model.getElementsByName(name,everywhere,namePattern);
-    if (elements.length > 1) {
-      sameNameElements.clear();
-      for (      final Object element : elements) {
-        indicator.checkCanceled();
-        if (matchesQualifier(element,base,patternsAndMatchers)) {
-          sameNameElements.add(element);
-        }
-      }
-      sortByProximity(base,sameNameElements);
-      for (      Object element : sameNameElements) {
-        if (previousElemSeparator && !consumer.process(ChooseByNameBase.NON_PREFIX_SEPARATOR))         return false;
-        if (!consumer.process(element))         return false;
-        previousElemSeparator=false;
-        wasElement=true;
-      }
-    }
- else     if (elements.length == 1 && matchesQualifier(elements[0],base,patternsAndMatchers)) {
-      if (previousElemSeparator && !consumer.process(ChooseByNameBase.NON_PREFIX_SEPARATOR))       return false;
-      if (!consumer.process(elements[0]))       return false;
-      previousElemSeparator=false;
-      wasElement=true;
-    }
-  }
-  return true;
 }
