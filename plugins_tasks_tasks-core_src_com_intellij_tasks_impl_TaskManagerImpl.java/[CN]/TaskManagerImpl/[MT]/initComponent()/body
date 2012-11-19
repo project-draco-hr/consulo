@@ -17,17 +17,45 @@
 );
     myTimeTrackingTimer=UIUtil.createNamedTimer("TaskManager time tracking",TIME_TRACKING_TIME_UNIT,new ActionListener(){
       @Override public void actionPerformed(      final ActionEvent e){
-        getActiveTask().setTimeSpent(getActiveTask().getTimeSpent() + TIME_TRACKING_TIME_UNIT);
-        getState().myTotallyTimeSpent+=TIME_TRACKING_TIME_UNIT;
+        if (isTimeTrackingAutoMode()) {
+          getActiveTask().setTimeSpent(getActiveTask().getTimeSpent() + TIME_TRACKING_TIME_UNIT);
+          getState().myTotallyTimeSpent+=TIME_TRACKING_TIME_UNIT;
+        }
+ else {
+          boolean runningTaskExist=false;
+          for (          LocalTask localTask : getLocalTasks()) {
+            if (localTask.isRunning()) {
+              localTask.setTimeSpent(localTask.getTimeSpent() + TIME_TRACKING_TIME_UNIT);
+              runningTaskExist=true;
+            }
+          }
+          if (runningTaskExist)           getState().myTotallyTimeSpent+=TIME_TRACKING_TIME_UNIT;
+        }
       }
     }
 );
     StartupManager.getInstance(myProject).registerStartupActivity(new Runnable(){
       public void run(){
-        myTimeTrackingTimer.start();
+        SwingUtilities.invokeLater(new Runnable(){
+          @Override public void run(){
+            startTimeTrackingTimer();
+          }
+        }
+);
       }
     }
 );
+    myIdleAlarm=new Alarm(Alarm.ThreadToUse.SWING_THREAD,myProject);
+    IdeEventQueue.getInstance().addActivityListener(new Runnable(){
+      @Override public void run(){
+        final IdeFrame frame=IdeFocusManager.getGlobalInstance().getLastFocusedFrame();
+        if (frame == null)         return;
+        final Project project=frame.getProject();
+        if (project == null || !myProject.equals(project))         return;
+        startTimeTrackingTimer();
+      }
+    }
+,myProject);
   }
   LocalTask defaultTask=myTasks.get(LocalTaskImpl.DEFAULT_TASK_ID);
   if (defaultTask == null) {
@@ -68,4 +96,19 @@
   doActivate(myActiveTask,false);
   myDispatcher.getMulticaster().taskActivated(myActiveTask);
   myChangeListManager.addChangeListListener(myChangeListListener);
+  addTaskListener(new TaskListener(){
+    @Override public void taskDeactivated(    final LocalTask task){
+      updateTimeTrackingToolWindow();
+    }
+    @Override public void taskActivated(    final LocalTask task){
+      updateTimeTrackingToolWindow();
+    }
+    @Override public void taskAdded(    final LocalTask task){
+      updateTimeTrackingToolWindow();
+    }
+    @Override public void taskRemoved(    final LocalTask task){
+      updateTimeTrackingToolWindow();
+    }
+  }
+);
 }

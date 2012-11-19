@@ -31,7 +31,15 @@
 ;
     CommandProcessor.getInstance().executeCommand(myProject,selectOnEditorRunnable,FindBundle.message("find.replace.select.on.editor.command"),null);
     String title=FindBundle.message("find.replace.found.usage.title",i + 1,usages.length);
-    int result=FindManager.getInstance(myProject).showPromptDialog(replaceContext.getFindModel(),title);
+    int result;
+    try {
+      doReplace(usage,replaceContext.getFindModel(),replaceContext.getExcludedSet(),true);
+      result=FindManager.getInstance(myProject).showPromptDialog(replaceContext.getFindModel(),title);
+    }
+ catch (    FindManager.MalformedReplacementStringException e) {
+      markAsMalformedReplacement(replaceContext,usage);
+      result=FindManager.getInstance(myProject).showMalformedReplacementPrompt(replaceContext.getFindModel(),title,e);
+    }
     if (result == FindManager.PromptResult.CANCEL) {
       return;
     }
@@ -40,16 +48,15 @@
     }
     final int currentNumber=i;
     if (result == FindManager.PromptResult.OK) {
+      final Ref<Boolean> success=Ref.create();
       Runnable runnable=new Runnable(){
         @Override public void run(){
-          doReplace(usage,replaceContext.getFindModel(),replaceContext.getExcludedSet());
-          replaceContext.getUsageView().removeUsage(usage);
+          success.set(doReplace(usage,replaceContext));
         }
       }
 ;
       CommandProcessor.getInstance().executeCommand(myProject,runnable,FindBundle.message("find.replace.command"),null);
-      if (i + 1 == usages.length) {
-        replaceContext.getUsageView().close();
+      if (closeUsageViewIfEmpty(replaceContext.getUsageView(),success.get())) {
         return;
       }
     }
@@ -58,6 +65,7 @@
       Runnable runnable=new Runnable(){
         @Override public void run(){
           int j=currentNumber;
+          boolean success=true;
           for (; j < usages.length; j++) {
             final Usage usage=usages[j];
             final UsageInfo usageInfo=((UsageInfo2UsageAdapter)usage).getUsageInfo();
@@ -67,12 +75,11 @@
             if (!otherPsiFile.equals(psiFile)) {
               break;
             }
-            doReplace(usage,replaceContext.getFindModel(),replaceContext.getExcludedSet());
-            replaceContext.getUsageView().removeUsage(usage);
+            if (!doReplace(usage,replaceContext)) {
+              success=false;
+            }
           }
-          if (j == usages.length) {
-            replaceContext.getUsageView().close();
-          }
+          closeUsageViewIfEmpty(replaceContext.getUsageView(),success);
           nextNumber[0]=j;
         }
       }
@@ -83,8 +90,8 @@
     if (result == FindManager.PromptResult.ALL_FILES) {
       CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
         @Override public void run(){
-          doReplace(replaceContext,_usages);
-          replaceContext.getUsageView().close();
+          final boolean success=doReplace(replaceContext,_usages);
+          closeUsageViewIfEmpty(replaceContext.getUsageView(),success);
         }
       }
 ,FindBundle.message("find.replace.command"),null);
