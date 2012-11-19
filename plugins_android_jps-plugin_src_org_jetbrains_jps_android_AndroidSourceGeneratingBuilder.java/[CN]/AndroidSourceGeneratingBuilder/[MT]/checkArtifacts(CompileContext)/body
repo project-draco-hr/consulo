@@ -1,0 +1,57 @@
+{
+  final List<JpsArtifact> artifacts=AndroidJpsUtil.getAndroidArtifactsToBuild(context);
+  final Set<JpsArtifact> debugArtifacts=new HashSet<JpsArtifact>();
+  final Set<JpsArtifact> releaseArtifacts=new HashSet<JpsArtifact>();
+  final Map<String,List<JpsArtifact>> moduleName2Artifact=new HashMap<String,List<JpsArtifact>>();
+  for (  JpsArtifact artifact : artifacts) {
+    final JpsElement properties=artifact.getProperties();
+    if (!(properties instanceof JpsAndroidApplicationArtifactProperties)) {
+      continue;
+    }
+    final AndroidArtifactSigningMode mode=((JpsAndroidApplicationArtifactProperties)properties).getSigningMode();
+    if (mode == AndroidArtifactSigningMode.DEBUG) {
+      debugArtifacts.add(artifact);
+    }
+ else {
+      releaseArtifacts.add(artifact);
+    }
+    final JpsAndroidModuleExtension facet=AndroidJpsUtil.getPackagedFacet(artifact);
+    if (facet != null) {
+      final String moduleName=facet.getModule().getName();
+      List<JpsArtifact> list=moduleName2Artifact.get(moduleName);
+      if (list == null) {
+        list=new ArrayList<JpsArtifact>();
+        moduleName2Artifact.put(moduleName,list);
+      }
+      list.add(artifact);
+    }
+  }
+  boolean success=true;
+  if (debugArtifacts.size() > 0 && releaseArtifacts.size() > 0) {
+    final String message="Cannot build debug and release Android artifacts in the same session\n" + "Debug artifacts: " + artifactsToString(debugArtifacts) + "\n"+ "Release artifacts: "+ artifactsToString(releaseArtifacts);
+    context.processMessage(new CompilerMessage(ANDROID_VALIDATOR,BuildMessage.Kind.ERROR,message));
+    success=false;
+  }
+  if (releaseArtifacts.size() > 0 && AndroidJpsUtil.getRunConfigurationTypeId(context) != null) {
+    final String message="Cannot build release Android artifacts in the 'make before run' session\n" + "Release artifacts: " + artifactsToString(releaseArtifacts);
+    context.processMessage(new CompilerMessage(ANDROID_VALIDATOR,BuildMessage.Kind.ERROR,message));
+    success=false;
+  }
+  for (  Map.Entry<String,List<JpsArtifact>> entry : moduleName2Artifact.entrySet()) {
+    final List<JpsArtifact> list=entry.getValue();
+    final String moduleName=entry.getKey();
+    if (list.size() > 1) {
+      final JpsArtifact firstArtifact=list.get(0);
+      final Object[] firstArtifactProGuardOptions=getProGuardOptions(firstArtifact);
+      for (int i=1; i < list.size(); i++) {
+        final JpsArtifact artifact=list.get(i);
+        if (!Arrays.equals(getProGuardOptions(artifact),firstArtifactProGuardOptions)) {
+          context.processMessage(new CompilerMessage(ANDROID_VALIDATOR,BuildMessage.Kind.ERROR,"Artifacts related to the same module '" + moduleName + "' have different ProGuard options: "+ firstArtifact.getName()+ ", "+ artifact.getName()));
+          success=false;
+          break;
+        }
+      }
+    }
+  }
+  return success;
+}
