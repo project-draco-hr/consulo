@@ -73,54 +73,15 @@
   Set<Object> librariesToAdd=new THashSet<Object>();
   final JavaPsiFacade facade=JavaPsiFacade.getInstance(psiElement.getProject());
   final PsiClass[] classes=PsiShortNamesCache.getInstance(project).getClassesByName(referenceName,GlobalSearchScope.allScope(project));
+  final OrderEntryFix moduleDependencyFix=new AddModuleDependencyFix(currentModule,classVFile,classes,reference);
+  registrar.register(moduleDependencyFix);
+  result.add(moduleDependencyFix);
   for (  final PsiClass aClass : classes) {
     if (!facade.getResolveHelper().isAccessible(aClass,psiElement,aClass))     continue;
     PsiFile psiFile=aClass.getContainingFile();
     if (psiFile == null)     continue;
     VirtualFile virtualFile=psiFile.getVirtualFile();
     if (virtualFile == null)     continue;
-    final Module classModule=fileIndex.getModuleForFile(virtualFile);
-    if (classModule != null && classModule != currentModule && !ModuleRootManager.getInstance(currentModule).isDependsOn(classModule)) {
-      final OrderEntryFix fix=new OrderEntryFix(){
-        @Override @NotNull public String getText(){
-          return QuickFixBundle.message("orderEntry.fix.add.dependency.on.module",classModule.getName());
-        }
-        @Override @NotNull public String getFamilyName(){
-          return QuickFixBundle.message("orderEntry.fix.family.add.module.dependency");
-        }
-        @Override public boolean isAvailable(        @NotNull Project project,        Editor editor,        PsiFile file){
-          return !project.isDisposed() && !classModule.isDisposed() && !currentModule.isDisposed();
-        }
-        @Override public void invoke(        @NotNull final Project project,        @Nullable final Editor editor,        PsiFile file){
-          final Runnable doit=new Runnable(){
-            @Override public void run(){
-              final boolean test=ModuleRootManager.getInstance(currentModule).getFileIndex().isInTestSourceContent(classVFile);
-              ModuleRootModificationUtil.addDependency(currentModule,classModule,test ? DependencyScope.TEST : DependencyScope.COMPILE,false);
-              if (editor != null) {
-                final List<PsiClass> targetClasses=new ArrayList<PsiClass>();
-                for (                PsiClass psiClass : classes) {
-                  if (ModuleUtilCore.findModuleForPsiElement(psiClass) == classModule) {
-                    targetClasses.add(psiClass);
-                  }
-                }
-                new AddImportAction(project,reference,editor,targetClasses.toArray(new PsiClass[targetClasses.size()])).execute();
-              }
-            }
-          }
-;
-          final Pair<Module,Module> circularModules=ModuleCompilerUtil.addingDependencyFormsCircularity(currentModule,classModule);
-          if (circularModules == null) {
-            doit.run();
-          }
- else {
-            showCircularWarningAndContinue(project,circularModules,classModule,doit);
-          }
-        }
-      }
-;
-      registrar.register(fix);
-      result.add(fix);
-    }
     ModuleFileIndex moduleFileIndex=ModuleRootManager.getInstance(currentModule).getFileIndex();
     for (    OrderEntry orderEntry : fileIndex.getOrderEntriesForFile(virtualFile)) {
       if (orderEntry instanceof LibraryOrderEntry) {
