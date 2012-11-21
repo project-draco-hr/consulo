@@ -1,0 +1,44 @@
+{
+  final JpsProject project=context.getProjectDescriptor().getProject();
+  final JpsUiDesignerConfiguration config=JpsUiDesignerExtensionService.getInstance().getOrCreateUiDesignerConfiguration(project);
+  if (!config.isInstrumentClasses()) {
+    return ExitCode.NOTHING_DONE;
+  }
+  final List<File> forms=new ArrayList<File>();
+  dirtyFilesHolder.processDirtyFiles(new FileProcessor<JavaSourceRootDescriptor,ModuleBuildTarget>(){
+    public boolean apply(    ModuleBuildTarget target,    File file,    JavaSourceRootDescriptor descriptor) throws IOException {
+      if (FORM_SOURCES_FILTER.accept(file)) {
+        forms.add(file);
+      }
+      return true;
+    }
+  }
+);
+  if (forms.isEmpty()) {
+    return ExitCode.NOTHING_DONE;
+  }
+  if (context.isMake()) {
+    final ProjectBuilderLogger logger=context.getLoggingManager().getProjectBuilderLogger();
+    if (logger.isEnabled()) {
+      logger.logCompiledFiles(forms,getPresentableName(),"Compiling forms:");
+    }
+  }
+  try {
+    context.processMessage(new ProgressMessage("Instrumenting forms [" + chunk.getName() + "]"));
+    final ProjectPaths paths=context.getProjectPaths();
+    final Collection<File> classpath=paths.getCompilationClasspath(chunk,false);
+    final Collection<File> platformCp=paths.getPlatformCompilationClasspath(chunk,false);
+    final Map<File,String> chunkSourcePath=ProjectPaths.getSourceRootsWithDependents(chunk);
+    final InstrumentationClassFinder finder=createInstrumentationClassFinder(platformCp,classpath,chunkSourcePath,outputConsumer);
+    try {
+      instrumentForms(context,chunk,chunkSourcePath,finder,forms,outputConsumer);
+    }
+  finally {
+      finder.releaseResources();
+    }
+  }
+  finally {
+    context.processMessage(new ProgressMessage("Finished instrumenting forms [" + chunk.getName() + "]"));
+  }
+  return ExitCode.OK;
+}
