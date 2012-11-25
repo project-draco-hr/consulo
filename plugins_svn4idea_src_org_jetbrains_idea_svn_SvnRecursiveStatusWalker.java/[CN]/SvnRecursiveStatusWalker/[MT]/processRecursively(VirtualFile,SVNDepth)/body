@@ -8,13 +8,24 @@
   final File ioFile=new File(vFile.getPath());
   final Processor<File> processor;
   final Processor<File> directoryFilter;
+  final Ref<File> lastIgnored=new Ref<File>();
   final Processor<File> checkDirProcessor=new Processor<File>(){
     @Override public boolean process(    File file){
+      final FilePathImpl path=new FilePathImpl(file,true);
+      path.refresh();
+      path.hardRefresh();
+      VirtualFile vf=path.getVirtualFile();
+      if (vf != null && myPartner.isIgnoredIdeaLevel(vf)) {
+        lastIgnored.set(file);
+        myReceiver.processIgnored(vf);
+        return true;
+      }
       if (file.isDirectory() && new File(file,SVNFileUtil.getAdminDirectoryName()).exists()) {
-        final FilePathImpl path=new FilePathImpl(file,true);
-        path.hardRefresh();
         final MyItem childItem=new MyItem(myProject,path,newDepth,myPartner.createStatusClient(),true);
         myQueue.add(childItem);
+      }
+ else       if (vf != null) {
+        myReceiver.processUnversioned(vf);
       }
       return true;
     }
@@ -34,7 +45,7 @@
  else {
     directoryFilter=new Processor<File>(){
       @Override public boolean process(      File file){
-        return myQueue.isEmpty() || !FileUtil.filesEqual(myQueue.getLast().getPath().getIOFile(),file);
+        return !Comparing.equal(lastIgnored,file) && (myQueue.isEmpty() || !FileUtil.filesEqual(myQueue.getLast().getPath().getIOFile(),file));
       }
     }
 ;
