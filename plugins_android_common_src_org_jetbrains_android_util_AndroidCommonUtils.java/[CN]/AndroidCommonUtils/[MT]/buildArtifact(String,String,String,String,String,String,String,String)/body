@@ -1,0 +1,49 @@
+{
+  final Map<AndroidCompilerMessageKind,List<String>> messages=new HashMap<AndroidCompilerMessageKind,List<String>>();
+  messages.put(AndroidCompilerMessageKind.ERROR,new ArrayList<String>());
+  messages.put(AndroidCompilerMessageKind.WARNING,new ArrayList<String>());
+  messages.put(AndroidCompilerMessageKind.INFORMATION,new ArrayList<String>());
+  final Pair<PrivateKey,X509Certificate> pair=getPrivateKeyAndCertificate(messagePrefix,messages,keyAlias,keyStorePath,keyStorePassword,keyPassword);
+  if (pair == null) {
+    return messages;
+  }
+  final String prefix="Cannot sign artifact " + artifactName + ": ";
+  if (artifactFilePath == null) {
+    messages.get(AndroidCompilerMessageKind.ERROR).add(prefix + "output path is not specified");
+    return messages;
+  }
+  final File artifactFile=new File(artifactFilePath);
+  if (!artifactFile.exists()) {
+    messages.get(AndroidCompilerMessageKind.ERROR).add(prefix + "file " + artifactFilePath+ " hasn't been generated");
+    return messages;
+  }
+  final String zipAlignPath=FileUtil.toSystemDependentName(sdkLocation + '/' + toolPath(SdkConstants.FN_ZIPALIGN));
+  final boolean runZipAlign=new File(zipAlignPath).isFile();
+  File tmpDir=null;
+  try {
+    tmpDir=FileUtil.createTempDirectory("android_artifact","tmp");
+    final File tmpArtifact=new File(tmpDir,"tmpArtifact.apk");
+    if (runZipAlign) {
+      final String errorMessage=executeZipAlign(zipAlignPath,artifactFile,tmpArtifact);
+      if (errorMessage != null) {
+        messages.get(AndroidCompilerMessageKind.ERROR).add(messagePrefix + "zip-align: " + errorMessage);
+        return messages;
+      }
+    }
+ else {
+      messages.get(AndroidCompilerMessageKind.WARNING).add(messagePrefix + AndroidCommonBundle.message("android.artifact.building.cannot.find.zip.align.error"));
+      FileUtil.copy(artifactFile,tmpArtifact);
+    }
+    if (!FileUtil.delete(artifactFile)) {
+      messages.get(AndroidCompilerMessageKind.ERROR).add("Cannot delete file " + artifactFile.getPath());
+      return messages;
+    }
+    signApk(tmpArtifact,artifactFile,pair.getFirst(),pair.getSecond());
+  }
+  finally {
+    if (tmpDir != null) {
+      FileUtil.delete(tmpDir);
+    }
+  }
+  return messages;
+}

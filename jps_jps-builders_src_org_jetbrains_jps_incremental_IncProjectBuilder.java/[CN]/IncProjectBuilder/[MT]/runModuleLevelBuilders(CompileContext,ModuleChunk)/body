@@ -1,4 +1,9 @@
 {
+  for (  BuilderCategory category : BuilderCategory.values()) {
+    for (    ModuleLevelBuilder builder : myBuilderRegistry.getBuilders(category)) {
+      builder.chunkBuildStarted(context,chunk);
+    }
+  }
   boolean doneSomething=false;
   boolean rebuildFromScratchRequested=false;
   float stageCount=myTotalModuleLevelBuilderCount;
@@ -35,9 +40,7 @@
           continue;
         }
         for (        ModuleLevelBuilder builder : builders) {
-          if (context.isMake()) {
-            processDeletedPaths(context,chunk.getTargets());
-          }
+          processDeletedPaths(context,chunk.getTargets());
           final ModuleLevelBuilder.ExitCode buildResult=builder.build(context,chunk,dirtyFilesHolder,outputConsumer);
           doneSomething|=(buildResult != ModuleLevelBuilder.ExitCode.NOTHING_DONE);
           if (buildResult == ModuleLevelBuilder.ExitCode.ABORT) {
@@ -57,11 +60,13 @@
               LOG.info("Builder " + builder.getPresentableName() + " requested rebuild of module chunk "+ chunk.getName());
               rebuildFromScratchRequested=true;
               try {
-                FSOperations.markDirty(context,chunk);
+                context.getProjectDescriptor().fsState.clearContextRoundData(context);
+                FSOperations.markDirty(context,chunk,null);
                 myTargetsProcessed-=(buildersPassed * modulesInChunk) / stageCount;
                 stageCount=myTotalModuleLevelBuilderCount;
                 buildersPassed=0;
                 nextPassRequired=true;
+                outputConsumer.clear();
                 break BUILDER_CATEGORY_LOOP;
               }
  catch (              Exception e) {
@@ -80,10 +85,16 @@
  while (nextPassRequired);
   }
   finally {
+    for (    CompiledClass compiledClass : outputConsumer.getCompiledClasses().values()) {
+      if (compiledClass.isDirty()) {
+        compiledClass.save();
+      }
+    }
     outputConsumer.fireFileGeneratedEvents();
+    outputConsumer.clear();
     for (    BuilderCategory category : BuilderCategory.values()) {
       for (      ModuleLevelBuilder builder : myBuilderRegistry.getBuilders(category)) {
-        builder.cleanupChunkResources(context);
+        builder.chunkBuildFinished(context,chunk);
       }
     }
   }
