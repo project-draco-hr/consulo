@@ -1,8 +1,9 @@
 {
-  ClientBootstrap bootstrap=new ClientBootstrap(new NioClientSocketChannelFactory(pooledThreadExecutor,pooledThreadExecutor,1));
+  final ClientBootstrap bootstrap=new ClientBootstrap(new OioClientSocketChannelFactory(pooledThreadExecutor));
   bootstrap.setOption("child.tcpNoDelay",true);
-  final AtomicBoolean result=new AtomicBoolean();
+  final AtomicBoolean result=new AtomicBoolean(false);
   final Semaphore semaphore=new Semaphore();
+  semaphore.down();
   bootstrap.setPipeline(pipeline(new HttpResponseDecoder(),new HttpChunkAggregator(1048576),new HttpRequestEncoder(),new SimpleChannelUpstreamHandler(){
     @Override public void messageReceived(    ChannelHandlerContext context,    MessageEvent e) throws Exception {
       try {
@@ -28,12 +29,12 @@
     }
   }
 ));
-  ChannelFuture connectFuture=bootstrap.connect(remoteAddress);
-  if (!waitComplete(connectFuture,"connect")) {
-    return false;
-  }
+  ChannelFuture connectFuture=null;
   try {
-    semaphore.down();
+    connectFuture=bootstrap.connect(remoteAddress);
+    if (!waitComplete(connectFuture,"connect")) {
+      return false;
+    }
     ChannelFuture writeFuture=connectFuture.getChannel().write(new DefaultHttpRequest(HTTP_1_1,HttpMethod.GET,START_TIME_PATH));
     if (!waitComplete(writeFuture,"write")) {
       return false;
@@ -48,7 +49,9 @@
     }
   }
   finally {
-    connectFuture.getChannel().close();
+    if (connectFuture != null) {
+      connectFuture.getChannel().close().awaitUninterruptibly();
+    }
     bootstrap.releaseExternalResources();
   }
   return result.get();
