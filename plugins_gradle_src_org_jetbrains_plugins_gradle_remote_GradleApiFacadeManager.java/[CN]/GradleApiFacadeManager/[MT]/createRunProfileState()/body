@@ -1,11 +1,6 @@
 {
   return new CommandLineState(null){
     private SimpleJavaParameters createJavaParameters() throws ExecutionException {
-      Collection<File> gradleLibraries=myGradleInstallationManager.getAllLibraries(project);
-      GradleLog.LOG.assertTrue(gradleLibraries != null,GradleBundle.message("gradle.generic.text.error.sdk.undefined"));
-      if (gradleLibraries == null) {
-        throw new ExecutionException("Can't find gradle libraries");
-      }
       final SimpleJavaParameters params=new SimpleJavaParameters();
       params.setJdk(new SimpleJavaSdkType().createJdk("tmp",SystemProperties.getJavaHome()));
       params.setWorkingDirectory(PathManager.getBinPath());
@@ -19,12 +14,28 @@
       ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(ExtensionPointName.class),classPath);
       ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(OpenProjectFileChooserDescriptor.class),classPath);
       ContainerUtil.addIfNotNull(PathUtil.getJarPathForClass(getClass()),classPath);
-      for (      File library : gradleLibraries) {
-        classPath.add(library.getAbsolutePath());
-      }
-      params.getClassPath().addAll(classPath);
       addBundle(params.getClassPath(),"messages.CommonBundle");
       addBundle(params.getClassPath(),GradleBundle.PATH_TO_BUNDLE);
+      String toolingApiPath=PathManager.getJarPathForClass(ProjectConnection.class);
+      if (toolingApiPath == null) {
+        GradleLog.LOG.warn(GradleBundle.message("gradle.generic.text.error.jar.not.found"));
+        throw new ExecutionException("Can't find gradle libraries");
+      }
+      File gradleJarsDir=new File(toolingApiPath).getParentFile();
+      String[] gradleJars=gradleJarsDir.list(new FilenameFilter(){
+        @Override public boolean accept(        File dir,        String name){
+          return name.endsWith(".jar");
+        }
+      }
+);
+      if (gradleJars == null) {
+        GradleLog.LOG.warn(GradleBundle.message("gradle.generic.text.error.jar.not.found"));
+        throw new ExecutionException("Can't find gradle libraries at " + gradleJarsDir.getAbsolutePath());
+      }
+      for (      String jar : gradleJars) {
+        classPath.add(new File(gradleJarsDir,jar).getAbsolutePath());
+      }
+      params.getClassPath().addAll(classPath);
       params.setMainClass(MAIN_CLASS_NAME);
       params.getVMParametersList().addParametersString("-Djava.awt.headless=true -Xmx512m");
       params.getVMParametersList().addParametersString("-Dsun.rmi.transport.connectionTimeout=" + String.valueOf(TimeUnit.HOURS.toMillis(1)));
