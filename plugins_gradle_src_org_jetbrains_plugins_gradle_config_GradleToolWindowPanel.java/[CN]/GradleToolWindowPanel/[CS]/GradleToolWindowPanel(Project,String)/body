@@ -4,7 +4,19 @@
   myPlace=place;
   setContent(myContent);
   MessageBusConnection connection=project.getMessageBus().connect(project);
-  connection.subscribe(GradleConfigNotifier.TOPIC,new GradleConfigNotifierAdapter(){
+  connection.subscribe(GradleConfigNotifier.TOPIC,new GradleConfigNotifier(){
+    private boolean myRefresh;
+    private boolean myInBulk;
+    @Override public void onBulkChangeStart(){
+      myInBulk=true;
+    }
+    @Override public void onBulkChangeEnd(){
+      myInBulk=false;
+      if (myRefresh) {
+        myRefresh=false;
+        refreshAll();
+      }
+    }
     @Override public void onLinkedProjectPathChange(    @Nullable String oldPath,    @Nullable String newPath){
       refreshAll();
     }
@@ -15,7 +27,23 @@
       refreshAll();
     }
     private void refreshAll(){
-      GradleUtil.refreshProject(myProject);
+      if (myInBulk) {
+        myRefresh=true;
+        return;
+      }
+      GradleUtil.refreshProject(myProject,new Consumer<String>(){
+        @Override public void consume(        String s){
+          GradleConfigNotificationManager notificationManager=myProject.getComponent(GradleConfigNotificationManager.class);
+          notificationManager.processRefreshError(s);
+          UIUtil.invokeLaterIfNeeded(new Runnable(){
+            @Override public void run(){
+              update();
+            }
+          }
+);
+        }
+      }
+);
       update();
     }
   }
