@@ -1,0 +1,92 @@
+{
+  List<LookupElement> items=myLookup.getItems();
+  if (items.isEmpty()) {
+    return;
+  }
+  LookupElement first=items.get(0);
+  final String text=getPreviewText(first);
+  if (text == null) {
+    return;
+  }
+  final String prefix=myLookup.itemPattern(first);
+  final Iterable<TextRange> fragments=LookupCellRenderer.getMatchingFragments(prefix,text);
+  if (fragments == null) {
+    return;
+  }
+  ArrayList<TextRange> ranges=ContainerUtil.newArrayList(fragments);
+  if (ranges.isEmpty()) {
+    return;
+  }
+  final int lastMatch=ranges.get(ranges.size() - 1).getEndOffset();
+  final Editor editor=myLookup.getEditor();
+  final int caret=editor.getCaretModel().getOffset();
+  myPreviewStart=caret - prefix.length();
+  final int previewCaret=myPreviewStart + lastMatch;
+  final int previewEnd=myPreviewStart + text.length();
+  final List<RangeHighlighter> highlighters=ContainerUtil.newArrayList();
+  myLookup.performGuardedChange(new Runnable(){
+    @Override public void run(){
+      Runnable runnable=new Runnable(){
+        public void run(){
+          AccessToken token=WriteAction.start();
+          try {
+            editor.getDocument().insertString(caret,text.substring(lastMatch));
+            editor.getDocument().replaceString(myPreviewStart,caret,text.substring(0,lastMatch));
+            editor.getCaretModel().moveToOffset(previewCaret);
+          }
+  finally {
+            token.finish();
+          }
+        }
+      }
+;
+      CommandProcessor.getInstance().runUndoTransparentAction(runnable);
+      int lastOffset=0;
+      for (      TextRange range : fragments) {
+        if (range.getStartOffset() > lastOffset) {
+          highlighters.add(createRange(lastOffset,range.getStartOffset(),true));
+        }
+        highlighters.add(createRange(range.getStartOffset(),range.getEndOffset(),false));
+        lastOffset=range.getEndOffset();
+      }
+      if (lastOffset < text.length()) {
+        highlighters.add(createRange(lastOffset,text.length(),true));
+      }
+    }
+  }
+,"preview");
+  myLookup.setPreview(this);
+  myUninstaller=new Disposable(){
+    @Override public void dispose(){
+      myLookup.setPreview(null);
+      myUninstaller=null;
+      if (editor.isDisposed()) {
+        return;
+      }
+      for (      RangeHighlighter highlighter : highlighters) {
+        editor.getMarkupModel().removeHighlighter(highlighter);
+      }
+      myLookup.performGuardedChange(new Runnable(){
+        @Override public void run(){
+          Runnable runnable=new Runnable(){
+            public void run(){
+              AccessToken token=WriteAction.start();
+              try {
+                editor.getDocument().replaceString(myPreviewStart,previewEnd,prefix);
+                editor.getCaretModel().moveToOffset(myPreviewStart + prefix.length());
+              }
+  finally {
+                token.finish();
+              }
+            }
+          }
+;
+          CommandProcessor.getInstance().runUndoTransparentAction(runnable);
+        }
+      }
+,"remove preview");
+    }
+  }
+;
+  Disposer.register(myLookup,myUninstaller);
+}
