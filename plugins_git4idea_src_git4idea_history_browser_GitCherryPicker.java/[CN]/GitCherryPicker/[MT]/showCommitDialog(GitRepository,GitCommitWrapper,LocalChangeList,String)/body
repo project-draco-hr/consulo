@@ -1,18 +1,35 @@
 {
   final AtomicBoolean commitSucceeded=new AtomicBoolean();
+  final Semaphore sem=new Semaphore(0);
   myPlatformFacade.invokeAndWait(new Runnable(){
     @Override public void run(){
       cancelCherryPick(repository);
       List<Change> changes=commit.getCommit().getChanges();
-      CherryPickCommitExecutor executor=new CherryPickCommitExecutor(myProject,myPlatformFacade,changes,commitMessage);
-      boolean commitNotCancelled=myPlatformFacade.getVcsHelper(myProject).commitChanges(changes,changeList,commitMessage,executor);
-      boolean success=commitNotCancelled && !executor.hasCommitFailed();
-      if (success) {
-        commit.setActualSubject(getSubjectFromCommitMessage(executor.getActualCommitMessage()));
+      boolean commitNotCancelled=myPlatformFacade.getVcsHelper(myProject).commitChanges(changes,changeList,commitMessage,new CommitResultHandler(){
+        @Override public void onSuccess(        @NotNull String commitMessage){
+          commit.setActualSubject(commitMessage);
+          commitSucceeded.set(true);
+          sem.release();
+        }
+        @Override public void onFailure(){
+          commitSucceeded.set(false);
+          sem.release();
+        }
       }
-      commitSucceeded.set(success);
+);
+      if (!commitNotCancelled) {
+        sem.release();
+        commitSucceeded.set(false);
+      }
     }
   }
 ,ModalityState.NON_MODAL);
+  try {
+    sem.acquire();
+  }
+ catch (  InterruptedException e) {
+    LOG.error(e);
+    return false;
+  }
   return commitSucceeded.get();
 }
