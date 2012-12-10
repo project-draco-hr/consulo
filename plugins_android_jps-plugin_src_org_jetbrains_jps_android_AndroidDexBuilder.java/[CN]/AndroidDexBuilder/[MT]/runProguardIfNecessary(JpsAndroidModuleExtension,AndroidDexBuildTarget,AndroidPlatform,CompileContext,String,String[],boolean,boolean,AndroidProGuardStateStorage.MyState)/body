@@ -1,0 +1,63 @@
+{
+  final JpsModule module=extension.getModule();
+  final File[] proguardCfgFiles=new File[proguardCfgPaths.length];
+  for (int i=0; i < proguardCfgFiles.length; i++) {
+    proguardCfgFiles[i]=new File(proguardCfgPaths[i]);
+    if (!proguardCfgFiles[i].exists()) {
+      context.processMessage(new CompilerMessage(PRO_GUARD_BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.cannot.find.file",proguardCfgPaths[i])));
+      return null;
+    }
+  }
+  final File mainContentRoot=AndroidJpsUtil.getMainContentRoot(extension);
+  if (mainContentRoot == null) {
+    context.processMessage(new CompilerMessage(PRO_GUARD_BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.errors.main.content.root.not.found",module.getName())));
+    return null;
+  }
+  final String logsDirOsPath=FileUtil.toSystemDependentName(mainContentRoot.getPath() + '/' + AndroidCommonUtils.DIRECTORY_FOR_LOGS_NAME);
+  final AndroidProGuardStateStorage.MyState newState=new AndroidProGuardStateStorage.MyState(proguardCfgFiles,includeSystemProguardCfg);
+  if (context.isMake() && !hasDirtyFiles && newState.equals(oldState)) {
+    return Pair.create(false,null);
+  }
+  final List<String> classesDirs=new ArrayList<String>();
+  final List<String> libClassesDirs=new ArrayList<String>();
+  final List<String> externalJars=new ArrayList<String>();
+  final List<BuildRootDescriptor> roots=context.getProjectDescriptor().getBuildRootIndex().getTargetRoots(target,context);
+  for (  BuildRootDescriptor root : roots) {
+    final File rootFile=root.getRootFile();
+    if (!rootFile.exists()) {
+      continue;
+    }
+    if (root instanceof AndroidDexBuildTarget.MyClassesDirBuildRootDescriptor) {
+      final AndroidDexBuildTarget.ClassesDirType type=((AndroidDexBuildTarget.MyClassesDirBuildRootDescriptor)root).getClassesDirType();
+      if (type == AndroidDexBuildTarget.ClassesDirType.JAVA) {
+        classesDirs.add(rootFile.getPath());
+      }
+ else       if (type == AndroidDexBuildTarget.ClassesDirType.ANDROID_APP) {
+        AndroidJpsUtil.addSubdirectories(rootFile,classesDirs);
+      }
+ else {
+        AndroidJpsUtil.addSubdirectories(rootFile,libClassesDirs);
+      }
+    }
+ else     if (root instanceof AndroidDexBuildTarget.MyJarBuildRootDescriptor) {
+      if (!((AndroidDexBuildTarget.MyJarBuildRootDescriptor)root).isLibPackage()) {
+        externalJars.add(rootFile.getPath());
+      }
+    }
+  }
+  final String[] classFilesDirOsPaths=ArrayUtil.toStringArray(classesDirs);
+  final String[] libClassFilesDirOsPaths=ArrayUtil.toStringArray(libClassesDirs);
+  final String[] externalJarOsPaths=ArrayUtil.toStringArray(externalJars);
+  final String inputJarOsPath=AndroidCommonUtils.buildTempInputJar(classFilesDirOsPaths,libClassFilesDirOsPaths);
+  final File logsDir=new File(logsDirOsPath);
+  if (!logsDir.exists()) {
+    if (!logsDir.mkdirs()) {
+      context.processMessage(new CompilerMessage(PRO_GUARD_BUILDER_NAME,BuildMessage.Kind.ERROR,AndroidJpsBundle.message("android.jps.cannot.create.directory",logsDirOsPath)));
+      return null;
+    }
+  }
+  context.processMessage(new ProgressMessage(AndroidJpsBundle.message("android.jps.progress.proguard",module.getName())));
+  final Map<AndroidCompilerMessageKind,List<String>> messages=AndroidCommonUtils.launchProguard(platform.getTarget(),platform.getSdkToolsRevision(),platform.getSdk().getHomePath(),proguardCfgPaths,includeSystemProguardCfg,inputJarOsPath,externalJarOsPaths,outputJarPath,logsDirOsPath);
+  AndroidJpsUtil.addMessages(context,messages,PRO_GUARD_BUILDER_NAME,module.getName());
+  return messages.get(AndroidCompilerMessageKind.ERROR).isEmpty() ? Pair.create(true,newState) : null;
+}
