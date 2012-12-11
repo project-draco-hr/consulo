@@ -1,5 +1,6 @@
 {
   myProject=project;
+  myConfig=config;
   myFreezeName=new AtomicReference<String>(null);
   myAdditionalInfo=null;
   myChangesViewManager=myProject.isDefault() ? new DummyChangesView(myProject) : ChangesViewManager.getInstance(myProject);
@@ -14,38 +15,30 @@
   myConflictTracker=new ChangelistConflictTracker(project,this,myFileStatusManager,EditorNotifications.getInstance(project));
   myListeners.addListener(new ChangeListAdapter(){
     @Override public void defaultListChanged(    final ChangeList oldDefaultList,    ChangeList newDefaultList){
-      if (oldDefaultList == null || ((LocalChangeList)oldDefaultList).hasDefaultName() || oldDefaultList.equals(newDefaultList))       return;
-      if (!ApplicationManager.getApplication().isUnitTestMode() && oldDefaultList.getChanges().isEmpty() && !((LocalChangeList)oldDefaultList).isReadOnly()) {
+      final LocalChangeList oldList=(LocalChangeList)oldDefaultList;
+      if (oldDefaultList == null || oldList.hasDefaultName() || oldDefaultList.equals(newDefaultList))       return;
+      if (!ApplicationManager.getApplication().isUnitTestMode() && oldDefaultList.getChanges().isEmpty() && !oldList.isReadOnly()) {
         invokeAfterUpdate(new Runnable(){
           public void run(){
-            if (getChangeList(((LocalChangeList)oldDefaultList).getId()) == null) {
+            if (getChangeList(oldList.getId()) == null) {
               return;
             }
 switch (config.REMOVE_EMPTY_INACTIVE_CHANGELISTS) {
 case SHOW_CONFIRMATION:
-              VcsConfirmationDialog dialog=new VcsConfirmationDialog(myProject,new VcsShowConfirmationOption(){
-                public Value getValue(){
-                  return config.REMOVE_EMPTY_INACTIVE_CHANGELISTS;
-                }
-                public void setValue(                Value value){
-                  config.REMOVE_EMPTY_INACTIVE_CHANGELISTS=value;
-                }
-                @Override public boolean isPersistent(){
-                  return true;
-                }
+              if (myModalNotificationsBlocked) {
+                myListsToBeDeleted.add(oldList);
+                return;
               }
-,"<html>The empty changelist '" + StringUtil.first(oldDefaultList.getName(),30,true) + "' is no longer active.<br>"+ "Do you want to remove it?</html>","&Remember my choice");
-            dialog.show();
-          if (!dialog.isOK()) {
-            return;
-          }
-        break;
+            if (!showRemoveEmptyChangeListsProposal(config,Collections.singletonList(oldList))) {
+              return;
+            }
+          break;
 case DO_NOTHING_SILENTLY:
-      return;
+        return;
 case DO_ACTION_SILENTLY:
-    break;
-}
-removeChangeList((LocalChangeList)oldDefaultList);
+      break;
+  }
+  removeChangeList(oldList);
 }
 }
 ,InvokeAfterUpdateMode.SILENT,null,null);
