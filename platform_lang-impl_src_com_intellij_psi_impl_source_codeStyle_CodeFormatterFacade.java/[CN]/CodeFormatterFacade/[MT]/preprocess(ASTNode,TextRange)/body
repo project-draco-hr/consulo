@@ -1,0 +1,61 @@
+{
+  TextRange result=range;
+  PsiElement psi=node.getPsi();
+  if (!psi.isValid()) {
+    for (    PreFormatProcessor processor : Extensions.getExtensions(PreFormatProcessor.EP_NAME)) {
+      result=processor.process(node,result);
+    }
+    return result;
+  }
+  PsiFile file=psi.getContainingFile();
+  final LinkedHashSet<TextRange> injectedFileRangesSet=ContainerUtilRt.newLinkedHashSet();
+  if (InjectedLanguageUtil.areInjectionsProcessed(file)) {
+    for (    DocumentWindow window : InjectedLanguageUtil.getCachedInjectedDocuments(file)) {
+      injectedFileRangesSet.add(TextRange.create(window.injectedToHost(0),window.injectedToHost(window.getTextLength())));
+    }
+  }
+ else   if (!file.getProject().isDefault()) {
+    PsiLanguageInjectionHost.InjectedPsiVisitor visitor=new PsiLanguageInjectionHost.InjectedPsiVisitor(){
+      @Override public void visit(      @NotNull PsiFile injectedPsi,      @NotNull List<PsiLanguageInjectionHost.Shred> places){
+        for (        PsiLanguageInjectionHost.Shred place : places) {
+          Segment rangeMarker=place.getHostRangeMarker();
+          injectedFileRangesSet.add(TextRange.create(rangeMarker.getStartOffset(),rangeMarker.getEndOffset()));
+        }
+      }
+    }
+;
+    for (PsiElement e=PsiTreeUtil.getDeepestFirst(file); e != null; e=PsiTreeUtil.nextLeaf(e,true)) {
+      InjectedLanguageUtil.enumerate(e,visitor);
+    }
+  }
+  if (!injectedFileRangesSet.isEmpty()) {
+    List<TextRange> ranges=ContainerUtilRt.newArrayList(injectedFileRangesSet);
+    Collections.reverse(ranges);
+    for (    TextRange injectedFileRange : ranges) {
+      int startHostOffset=injectedFileRange.getStartOffset();
+      int endHostOffset=injectedFileRange.getEndOffset();
+      if (startHostOffset >= range.getStartOffset() && endHostOffset <= range.getEndOffset()) {
+        PsiFile injected=InjectedLanguageUtil.findInjectedPsiNoCommit(file,startHostOffset);
+        if (injected != null) {
+          int startInjectedOffset=range.getStartOffset() > startHostOffset ? startHostOffset - range.getStartOffset() : 0;
+          int endInjectedOffset=injected.getTextLength();
+          if (range.getEndOffset() < endHostOffset) {
+            endInjectedOffset-=endHostOffset - range.getEndOffset();
+          }
+          final TextRange initialInjectedRange=TextRange.create(startInjectedOffset,endInjectedOffset);
+          TextRange injectedRange=initialInjectedRange;
+          for (          PreFormatProcessor processor : Extensions.getExtensions(PreFormatProcessor.EP_NAME)) {
+            injectedRange=processor.process(injected.getNode(),injectedRange);
+          }
+          if ((initialInjectedRange.getStartOffset() > injectedRange.getStartOffset() && initialInjectedRange.getStartOffset() > 0) || (initialInjectedRange.getEndOffset() < injectedRange.getEndOffset() && initialInjectedRange.getEndOffset() < injected.getTextLength())) {
+            range=TextRange.create(range.getStartOffset() + injectedRange.getStartOffset() - initialInjectedRange.getStartOffset(),range.getEndOffset() + initialInjectedRange.getEndOffset() - injectedRange.getEndOffset());
+          }
+        }
+      }
+    }
+  }
+  for (  PreFormatProcessor processor : Extensions.getExtensions(PreFormatProcessor.EP_NAME)) {
+    result=processor.process(node,result);
+  }
+  return result;
+}
