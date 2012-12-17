@@ -1,0 +1,78 @@
+{
+  super(project,Charset.class,"Default Encoding",VirtualFileFilter.ALL,false);
+  reset(EncodingProjectManager.getInstance(project).getAllMappings());
+  getValueColumn().setCellRenderer(new DefaultTableCellRenderer(){
+    @Override public Component getTableCellRendererComponent(    final JTable table,    final Object value,    final boolean isSelected,    final boolean hasFocus,    final int row,    final int column){
+      super.getTableCellRendererComponent(table,value,isSelected,hasFocus,row,column);
+      final Charset t=(Charset)value;
+      final Object userObject=table.getModel().getValueAt(row,0);
+      final VirtualFile file=userObject instanceof VirtualFile ? (VirtualFile)userObject : null;
+      Pair<Charset,String> check=file == null || file.isDirectory() ? null : ChooseFileEncodingAction.checkCanReload(file);
+      String failReason=check == null ? null : check.second;
+      boolean enabled=failReason == null;
+      boolean toShow=t != null || failReason != null;
+      if (toShow) {
+        Charset existing=check == null ? null : check.first;
+        String encodingText=t != null ? t.displayName() : existing == null ? "N/A" : existing.displayName();
+        setText(encodingText + (failReason == null ? "" : " (" + failReason + ")"));
+      }
+      setEnabled(enabled);
+      return this;
+    }
+  }
+);
+  getValueColumn().setCellEditor(new DefaultCellEditor(new JComboBox()){
+    private VirtualFile myVirtualFile;
+{
+      delegate=new EditorDelegate(){
+        @Override public void setValue(        Object value){
+          getTableModel().setValueAt(value,new DefaultMutableTreeNode(myVirtualFile),-1);
+        }
+        @Override public Object getCellEditorValue(){
+          return getTableModel().getValueAt(new DefaultMutableTreeNode(myVirtualFile),1);
+        }
+      }
+;
+    }
+    @Override public Component getTableCellEditorComponent(    JTable table,    final Object value,    boolean isSelected,    int row,    int column){
+      final Object o=table.getModel().getValueAt(row,0);
+      myVirtualFile=o instanceof Project ? null : (VirtualFile)o;
+      ChooseFileEncodingAction changeAction=new ChooseFileEncodingAction(myVirtualFile){
+        @NotNull @Override protected DefaultActionGroup createPopupActionGroup(        JComponent button){
+          return createGroup("<Clear>",null,"Encoding ''{1}''",null);
+        }
+        @Override public void update(        AnActionEvent e){
+        }
+        @Override protected void chosen(        VirtualFile virtualFile,        @NotNull Charset charset){
+          getValueColumn().getCellEditor().stopCellEditing();
+          if (clearSubdirectoriesOnDemandOrCancel(virtualFile,"There are encodings specified for the subdirectories. Override them?","Override Subdirectory Encoding")) {
+            getTableModel().setValueAt(charset,new DefaultMutableTreeNode(virtualFile),1);
+          }
+        }
+      }
+;
+      Presentation templatePresentation=changeAction.getTemplatePresentation();
+      JComponent comboComponent=changeAction.createCustomComponent(templatePresentation);
+      DataContext dataContext=SimpleDataContext.getSimpleContext(PlatformDataKeys.VIRTUAL_FILE.getName(),myVirtualFile,SimpleDataContext.getProjectContext(getProject()));
+      AnActionEvent event=new AnActionEvent(null,dataContext,ActionPlaces.UNKNOWN,templatePresentation,ActionManager.getInstance(),0);
+      changeAction.update(event);
+      templatePresentation.setDescription(null);
+      if (myVirtualFile == null) {
+        templatePresentation.setEnabled(true);
+      }
+      editorComponent=comboComponent;
+      comboComponent.addComponentListener(new ComponentAdapter(){
+        @Override public void componentShown(        final ComponentEvent e){
+          press((Container)e.getComponent());
+        }
+      }
+);
+      Charset charset=(Charset)getTableModel().getValueAt(new DefaultMutableTreeNode(myVirtualFile),1);
+      templatePresentation.setText(charset == null ? "" : charset.displayName());
+      comboComponent.setToolTipText(null);
+      comboComponent.revalidate();
+      return editorComponent;
+    }
+  }
+);
+}
