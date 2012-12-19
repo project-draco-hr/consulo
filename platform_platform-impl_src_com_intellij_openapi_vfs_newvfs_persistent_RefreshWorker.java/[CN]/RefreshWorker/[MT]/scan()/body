@@ -5,7 +5,7 @@
   if (!rootDirty)   return;
   final long t=System.currentTimeMillis();
   NewVirtualFileSystem fs=root.getFileSystem();
-  final FileAttributes rootAttributes=fs.getAttributes(root);
+  final FileAttributes rootAttributes=getAttributes(fs,root);
   if (rootAttributes == null) {
     scheduleDeletion(root);
     root.markClean();
@@ -16,12 +16,12 @@
     fs=PersistentFS.replaceWithNativeFS(fs);
   }
   final PersistentFS persistence=PersistentFS.getInstance();
-  while (!myRefreshQueue.isEmpty()) {
+  main:   while (!myRefreshQueue.isEmpty() && !myCancelled) {
     final VirtualFileSystemEntry file=(VirtualFileSystemEntry)myRefreshQueue.pullFirst();
     final boolean fileDirty=file.isDirty();
     debug(LOG,"file=%s dirty=%b",file,fileDirty);
     if (!fileDirty)     continue;
-    final FileAttributes attributes=Comparing.equal(file,root) ? rootAttributes : fs.getAttributes(file);
+    final FileAttributes attributes=getAttributes(fs,file);
     if (attributes == null) {
       scheduleDeletion(file);
       continue;
@@ -46,7 +46,8 @@
           scheduleDeletion(file.findChild(name));
         }
         for (        String name : newNames) {
-          final FileAttributes childAttributes=fs.getAttributes(new FakeVirtualFile(file,name));
+          if (myCancelled)           break main;
+          final FileAttributes childAttributes=getAttributes(fs,new FakeVirtualFile(file,name));
           if (childAttributes != null) {
             scheduleCreation(file,name,childAttributes.isDirectory());
           }
@@ -55,8 +56,9 @@
           }
         }
         for (        VirtualFile child : file.getChildren()) {
+          if (myCancelled)           break main;
           if (!deletedNames.contains(child.getName())) {
-            final FileAttributes childAttributes=fs.getAttributes(child);
+            final FileAttributes childAttributes=getAttributes(fs,child);
             if (childAttributes != null) {
               checkAndScheduleChildRefresh(file,child,childAttributes);
             }
@@ -71,7 +73,8 @@
         final Collection<VirtualFile> cachedChildren=file.getCachedChildren();
         debug(LOG,"cached=%s",cachedChildren);
         for (        VirtualFile child : cachedChildren) {
-          final FileAttributes childAttributes=fs.getAttributes(child);
+          if (myCancelled)           break main;
+          final FileAttributes childAttributes=getAttributes(fs,child);
           if (childAttributes != null) {
             checkAndScheduleChildRefresh(file,child,childAttributes);
           }
@@ -82,9 +85,10 @@
         final List<String> names=dir.getSuspiciousNames();
         debug(LOG,"suspicious=%s",names);
         for (        String name : names) {
+          if (myCancelled)           break main;
           if (name.isEmpty())           continue;
           final VirtualFile fake=new FakeVirtualFile(file,name);
-          final FileAttributes childAttributes=fs.getAttributes(fake);
+          final FileAttributes childAttributes=getAttributes(fs,fake);
           if (childAttributes != null) {
             scheduleCreation(file,name,childAttributes.isDirectory());
           }
@@ -109,5 +113,6 @@
     }
     file.markClean();
   }
+  myFsCache.clear();
   debug(LOG,"root=%s time=%d",root,System.currentTimeMillis() - t);
 }
