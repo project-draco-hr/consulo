@@ -19,6 +19,7 @@
     }
   }
   final MessageBus messageBus=myProject.getMessageBus();
+  final MultiMap<String,Artifact> outputToArtifact=ArtifactCompilerUtil.containsArtifacts(scopes) ? ArtifactCompilerUtil.createOutputToArtifactMap(myProject) : null;
   final BuildManager buildManager=BuildManager.getInstance();
   buildManager.cancelAutoMakeTasks(myProject);
   return buildManager.scheduleBuild(myProject,compileContext.isRebuild(),compileContext.isMake(),onlyCheckUpToDate,scopes,paths,builderParams,new DefaultMessageHandler(myProject){
@@ -68,19 +69,32 @@ switch (eventType) {
 case FILES_GENERATED:
         final List<CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.GeneratedFile> generated=event.getGeneratedFilesList();
       final CompilationStatusListener publisher=messageBus.syncPublisher(CompilerTopics.COMPILATION_STATUS);
-    for (    CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.GeneratedFile generatedFile : generated) {
-      final String root=FileUtil.toSystemIndependentName(generatedFile.getOutputRoot());
-      final String relativePath=FileUtil.toSystemIndependentName(generatedFile.getRelativePath());
-      publisher.fileGenerated(root,relativePath);
+    Set<String> writtenArtifactOutputPaths=outputToArtifact != null ? new THashSet<String>(FileUtil.PATH_HASHING_STRATEGY) : null;
+  for (  CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.GeneratedFile generatedFile : generated) {
+    final String root=FileUtil.toSystemIndependentName(generatedFile.getOutputRoot());
+    final String relativePath=FileUtil.toSystemIndependentName(generatedFile.getRelativePath());
+    publisher.fileGenerated(root,relativePath);
+    if (outputToArtifact != null) {
+      Collection<Artifact> artifacts=outputToArtifact.get(root);
+      if (!artifacts.isEmpty()) {
+        for (        Artifact artifact : artifacts) {
+          ArtifactsCompiler.addChangedArtifact(compileContext,artifact);
+        }
+        writtenArtifactOutputPaths.add(FileUtil.toSystemDependentName(DeploymentUtil.appendToPath(root,relativePath)));
+      }
     }
-  break;
+  }
+if (writtenArtifactOutputPaths != null && !writtenArtifactOutputPaths.isEmpty()) {
+  ArtifactsCompiler.addWrittenPaths(compileContext,writtenArtifactOutputPaths);
+}
+break;
 case BUILD_COMPLETED:
 ExitStatus status=ExitStatus.SUCCESS;
 if (event.hasCompletionStatus()) {
 final CmdlineRemoteProto.Message.BuilderMessage.BuildEvent.Status completionStatus=event.getCompletionStatus();
 switch (completionStatus) {
 case CANCELED:
-  status=ExitStatus.CANCELLED;
+status=ExitStatus.CANCELLED;
 break;
 case ERRORS:
 status=ExitStatus.ERRORS;
