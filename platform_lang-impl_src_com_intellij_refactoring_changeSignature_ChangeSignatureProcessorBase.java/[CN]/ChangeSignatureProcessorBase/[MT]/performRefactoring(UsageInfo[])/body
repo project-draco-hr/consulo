@@ -17,12 +17,20 @@
   }
   try {
     final ChangeSignatureUsageProcessor[] processors=ChangeSignatureUsageProcessor.EP_NAME.getExtensions();
+    final PsiElement method=myChangeInfo.getMethod();
+    final ResolveSnapshotProvider resolveSnapshotProvider=myChangeInfo.isParameterNamesChanged() ? VariableInplaceRenamer.INSTANCE.forLanguage(method.getLanguage()) : null;
+    final List<ResolveSnapshotProvider.ResolveSnapshot> snapshots=new ArrayList<ResolveSnapshotProvider.ResolveSnapshot>();
+    for (    ChangeSignatureUsageProcessor processor : processors) {
+      if (resolveSnapshotProvider != null) {
+        processor.registerConflictResolvers(snapshots,resolveSnapshotProvider,usages,myChangeInfo);
+      }
+    }
     for (    UsageInfo usage : usages) {
       for (      ChangeSignatureUsageProcessor processor : processors) {
         if (processor.processUsage(myChangeInfo,usage,true,usages))         break;
       }
     }
-    LOG.assertTrue(myChangeInfo.getMethod().isValid());
+    LOG.assertTrue(method.isValid());
     for (    ChangeSignatureUsageProcessor processor : processors) {
       if (processor.processPrimaryMethod(myChangeInfo))       break;
     }
@@ -31,7 +39,13 @@
         if (processor.processUsage(myChangeInfo,usage,false,usages))         break;
       }
     }
-    final PsiElement method=myChangeInfo.getMethod();
+    if (!snapshots.isEmpty()) {
+      for (      ParameterInfo parameterInfo : myChangeInfo.getNewParameters()) {
+        for (        ResolveSnapshotProvider.ResolveSnapshot snapshot : snapshots) {
+          snapshot.apply(parameterInfo.getName());
+        }
+      }
+    }
     LOG.assertTrue(method.isValid());
     if (elementListener != null && myChangeInfo.isNameChanged()) {
       elementListener.elementRenamed(method);
