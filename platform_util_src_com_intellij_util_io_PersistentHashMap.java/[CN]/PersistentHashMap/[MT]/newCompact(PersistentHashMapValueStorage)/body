@@ -1,0 +1,32 @@
+{
+  int l=(int)(myLiveAndGarbageKeysCounter / LIVE_KEY_MASK);
+  long started=System.currentTimeMillis();
+  final List<CompactionRecordInfo> infos=new ArrayList<CompactionRecordInfo>(l);
+  traverseAllRecords(new PersistentEnumerator.RecordsProcessor(){
+    @Override public boolean process(    final int keyId) throws IOException {
+      final long record=readValueId(keyId);
+      if (record != NULL_ADDR) {
+        infos.add(new CompactionRecordInfo(getCurrentKey(),record,keyId));
+      }
+      return true;
+    }
+  }
+);
+  System.out.println("Loaded:" + (System.currentTimeMillis() - started));
+  started=System.currentTimeMillis();
+  if (infos.size() > 0)   myValueStorage.compactValues(infos,newStorage);
+  System.out.println("Compacted:" + (System.currentTimeMillis() - started));
+  started=System.currentTimeMillis();
+  try {
+    myEnumerator.lockStorage();
+    for (int i=0; i < infos.size(); ++i) {
+      CompactionRecordInfo info=infos.get(i);
+      updateValueId(info.address,info.newValueAddress,info.valueAddress,null,info.key);
+      myLiveAndGarbageKeysCounter+=LIVE_KEY_MASK;
+    }
+  }
+  finally {
+    myEnumerator.unlockStorage();
+  }
+  System.out.println("Updated:" + (System.currentTimeMillis() - started));
+}
