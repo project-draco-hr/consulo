@@ -1,0 +1,32 @@
+{
+  long started=System.currentTimeMillis();
+  final List<CompactionRecordInfo> infos=new ArrayList<CompactionRecordInfo>(10000);
+  traverseAllRecords(new PersistentEnumerator.RecordsProcessor(){
+    @Override public boolean process(    final int keyId) throws IOException {
+      final long record=readValueId(keyId);
+      if (record != NULL_ADDR) {
+        infos.add(new CompactionRecordInfo(getCurrentKey(),record,keyId));
+      }
+      return true;
+    }
+  }
+);
+  LOG.info("Loaded mappings:" + (System.currentTimeMillis() - started) + "ms,");
+  started=System.currentTimeMillis();
+  int fragments=0;
+  if (infos.size() > 0)   fragments=myValueStorage.compactValues(infos,newStorage);
+  LOG.info("Compacted values for:" + (System.currentTimeMillis() - started) + "ms fragments:"+ fragments+ ", keys:"+ infos.size());
+  started=System.currentTimeMillis();
+  try {
+    myEnumerator.lockStorage();
+    for (int i=0; i < infos.size(); ++i) {
+      CompactionRecordInfo info=infos.get(i);
+      updateValueId(info.address,info.newValueAddress,info.valueAddress,null,info.key);
+      myLiveAndGarbageKeysCounter+=LIVE_KEY_MASK;
+    }
+  }
+  finally {
+    myEnumerator.unlockStorage();
+  }
+  LOG.info("Updated mappings:" + (System.currentTimeMillis() - started) + " ms");
+}
