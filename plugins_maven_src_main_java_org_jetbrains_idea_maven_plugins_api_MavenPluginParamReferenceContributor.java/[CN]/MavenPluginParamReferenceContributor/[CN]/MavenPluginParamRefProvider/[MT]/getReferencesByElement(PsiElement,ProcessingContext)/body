@@ -1,64 +1,21 @@
 {
-  XmlText xmlText=(XmlText)element.getParent();
-  PsiElement prevSibling=xmlText.getPrevSibling();
-  if (!(prevSibling instanceof LeafPsiElement) || ((LeafPsiElement)prevSibling).getElementType() != XmlTokenType.XML_TAG_END)   return PsiReference.EMPTY_ARRAY;
-  PsiElement nextSibling=xmlText.getNextSibling();
-  if (!(nextSibling instanceof LeafPsiElement) || ((LeafPsiElement)nextSibling).getElementType() != XmlTokenType.XML_END_TAG_START)   return PsiReference.EMPTY_ARRAY;
-  XmlTag paramTag=xmlText.getParentTag();
-  if (paramTag == null)   return PsiReference.EMPTY_ARRAY;
-  XmlTag configurationTag=paramTag;
-  DomElement domElement;
-  Map m=getMap().get(paramTag.getName());
-  while (true) {
-    if (m == null)     return PsiReference.EMPTY_ARRAY;
-    configurationTag=configurationTag.getParentTag();
-    if (configurationTag == null)     return PsiReference.EMPTY_ARRAY;
-    String tagName=configurationTag.getName();
-    if ("configuration".equals(tagName)) {
-      domElement=DomManager.getDomManager(configurationTag.getProject()).getDomElement(configurationTag);
-      if (domElement instanceof MavenDomConfiguration) {
-        break;
+  final XmlText xmlText=(XmlText)element.getParent();
+  if (!MavenPluginParamInfo.isSimpleText(xmlText))   return PsiReference.EMPTY_ARRAY;
+class MyProcessor implements PairProcessor<ParamInfo,MavenDomConfiguration> {
+    PsiReference[] result;
+    @Override public boolean process(    ParamInfo info,    MavenDomConfiguration domCfg){
+      MavenParamReferenceProvider providerInstance=info.getProviderInstance();
+      if (providerInstance != null) {
+        result=providerInstance.getReferencesByElement(xmlText,domCfg,context);
+        return false;
       }
-      if (domElement != null)       return PsiReference.EMPTY_ARRAY;
-    }
-    m=(Map)m.get(tagName);
-  }
-  Map<Pair<String,String>,Map<String,ParamInfo>> pluginsMap=m;
-  MavenDomConfiguration domCfg=(MavenDomConfiguration)domElement;
-  MavenDomPlugin domPlugin=domCfg.getParentOfType(MavenDomPlugin.class,true);
-  if (domPlugin == null)   return PsiReference.EMPTY_ARRAY;
-  String pluginGroupId=domPlugin.getGroupId().getStringValue();
-  String pluginArtifactId=domPlugin.getArtifactId().getStringValue();
-  Map<String,ParamInfo> goalsMap;
-  if (pluginGroupId == null) {
-    goalsMap=pluginsMap.get(Pair.create("org.apache.maven.plugins",pluginArtifactId));
-    if (goalsMap == null) {
-      goalsMap=pluginsMap.get(Pair.create("org.codehaus.mojo",pluginArtifactId));
+      return true;
     }
   }
- else {
-    goalsMap=pluginsMap.get(Pair.create(pluginGroupId,pluginArtifactId));
-  }
-  if (goalsMap == null)   return PsiReference.EMPTY_ARRAY;
-  DomElement parent=domCfg.getParent();
-  if (parent instanceof MavenDomPluginExecution) {
-    MavenDomGoals goals=((MavenDomPluginExecution)parent).getGoals();
-    for (    MavenDomGoal goal : goals.getGoals()) {
-      ParamInfo info=goalsMap.get(goal.getStringValue());
-      if (info != null) {
-        MavenParamReferenceProvider providerInstance=info.getProviderInstance();
-        if (providerInstance != null) {
-          return providerInstance.getReferencesByElement(element,domCfg,context);
-        }
-      }
-    }
-  }
-  ParamInfo defaultInfo=goalsMap.get(null);
-  if (defaultInfo != null) {
-    MavenParamReferenceProvider providerInstance=defaultInfo.getProviderInstance();
-    if (providerInstance != null) {
-      return providerInstance.getReferencesByElement(element,domCfg,context);
-    }
+  MyProcessor processor=new MyProcessor();
+  MavenPluginParamInfo.processParamInfo(xmlText,processor);
+  if (processor.result != null) {
+    return processor.result;
   }
   return PsiReference.EMPTY_ARRAY;
 }
