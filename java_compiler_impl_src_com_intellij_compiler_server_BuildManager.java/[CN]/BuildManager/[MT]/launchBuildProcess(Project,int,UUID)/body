@@ -1,61 +1,69 @@
 {
-  Sdk projectJdk=null;
+  final String compilerPath;
+  final String vmExecutablePath;
   JavaSdkVersion sdkVersion=null;
-  int sdkMinorVersion=0;
-  final Set<Sdk> candidates=new HashSet<Sdk>();
-  final Sdk defaultSdk=ProjectRootManager.getInstance(project).getProjectSdk();
-  if (defaultSdk != null && defaultSdk.getSdkType() instanceof JavaSdk) {
-    candidates.add(defaultSdk);
-  }
-  for (  Module module : ModuleManager.getInstance(project).getModules()) {
-    final Sdk sdk=ModuleRootManager.getInstance(module).getSdk();
-    if (sdk != null && sdk.getSdkType() instanceof JavaSdk) {
-      candidates.add(sdk);
+  final String forcedCompiledJdkHome=Registry.stringValue(COMPILER_PROCESS_JDK_PROPERTY);
+  if (StringUtil.isEmptyOrSpaces(forcedCompiledJdkHome)) {
+    Sdk projectJdk=null;
+    int sdkMinorVersion=0;
+    final Set<Sdk> candidates=new HashSet<Sdk>();
+    final Sdk defaultSdk=ProjectRootManager.getInstance(project).getProjectSdk();
+    if (defaultSdk != null && defaultSdk.getSdkType() instanceof JavaSdk) {
+      candidates.add(defaultSdk);
     }
-  }
-  for (  Sdk candidate : candidates) {
-    final String vs=candidate.getVersionString();
-    if (vs != null) {
-      final JavaSdkVersion candidateVersion=((JavaSdk)candidate.getSdkType()).getVersion(vs);
-      if (candidateVersion != null) {
-        final int candidateMinorVersion=getMinorVersion(vs);
-        if (projectJdk == null) {
-          sdkVersion=candidateVersion;
-          sdkMinorVersion=candidateMinorVersion;
-          projectJdk=candidate;
-        }
- else {
-          final int result=candidateVersion.compareTo(sdkVersion);
-          if (result > 0 || (result == 0 && candidateMinorVersion > sdkMinorVersion)) {
+    for (    Module module : ModuleManager.getInstance(project).getModules()) {
+      final Sdk sdk=ModuleRootManager.getInstance(module).getSdk();
+      if (sdk != null && sdk.getSdkType() instanceof JavaSdk) {
+        candidates.add(sdk);
+      }
+    }
+    for (    Sdk candidate : candidates) {
+      final String vs=candidate.getVersionString();
+      if (vs != null) {
+        final JavaSdkVersion candidateVersion=((JavaSdk)candidate.getSdkType()).getVersion(vs);
+        if (candidateVersion != null) {
+          final int candidateMinorVersion=getMinorVersion(vs);
+          if (projectJdk == null) {
             sdkVersion=candidateVersion;
             sdkMinorVersion=candidateMinorVersion;
             projectJdk=candidate;
           }
+ else {
+            final int result=candidateVersion.compareTo(sdkVersion);
+            if (result > 0 || (result == 0 && candidateMinorVersion > sdkMinorVersion)) {
+              sdkVersion=candidateVersion;
+              sdkMinorVersion=candidateMinorVersion;
+              projectJdk=candidate;
+            }
+          }
         }
       }
     }
-  }
-  final Sdk internalJdk=JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
-  if (projectJdk == null || sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_6)) {
-    projectJdk=internalJdk;
-  }
-  final String compilerPath;
-  if (projectJdk.equals(internalJdk)) {
-    final JavaCompiler systemCompiler=ToolProvider.getSystemJavaCompiler();
-    if (systemCompiler == null) {
-      throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
+    final Sdk internalJdk=JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk();
+    if (projectJdk == null || sdkVersion == null || !sdkVersion.isAtLeast(JavaSdkVersion.JDK_1_6)) {
+      projectJdk=internalJdk;
     }
-    compilerPath=ClasspathBootstrap.getResourcePath(systemCompiler.getClass());
+    if (projectJdk.equals(internalJdk)) {
+      final JavaCompiler systemCompiler=ToolProvider.getSystemJavaCompiler();
+      if (systemCompiler == null) {
+        throw new ExecutionException("No system java compiler is provided by the JRE. Make sure tools.jar is present in IntelliJ IDEA classpath.");
+      }
+      compilerPath=ClasspathBootstrap.getResourcePath(systemCompiler.getClass());
+    }
+ else {
+      compilerPath=((JavaSdk)projectJdk.getSdkType()).getToolsPath(projectJdk);
+      if (compilerPath == null) {
+        throw new ExecutionException("Cannot determine path to 'tools.jar' library for " + projectJdk.getName() + " ("+ projectJdk.getHomePath()+ ")");
+      }
+    }
+    vmExecutablePath=((JavaSdkType)projectJdk.getSdkType()).getVMExecutablePath(projectJdk);
   }
  else {
-    compilerPath=((JavaSdk)projectJdk.getSdkType()).getToolsPath(projectJdk);
-    if (compilerPath == null) {
-      throw new ExecutionException("Cannot determine path to 'tools.jar' library for " + projectJdk.getName() + " ("+ projectJdk.getHomePath()+ ")");
-    }
+    compilerPath=new File(forcedCompiledJdkHome,"lib/tools.jar").getAbsolutePath();
+    vmExecutablePath=new File(forcedCompiledJdkHome,"bin/java").getAbsolutePath();
   }
   final CompilerWorkspaceConfiguration config=CompilerWorkspaceConfiguration.getInstance(project);
   final GeneralCommandLine cmdLine=new GeneralCommandLine();
-  final String vmExecutablePath=((JavaSdkType)projectJdk.getSdkType()).getVMExecutablePath(projectJdk);
   cmdLine.setExePath(vmExecutablePath);
   int heapSize=config.COMPILER_PROCESS_HEAP_SIZE;
   if (heapSize == CompilerWorkspaceConfiguration.DEFAULT_COMPILE_PROCESS_HEAP_SIZE) {
