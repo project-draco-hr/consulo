@@ -1,5 +1,5 @@
 {
-  List<Pair<File,GroovyDslExecutor>> result=ourStandardScripts;
+  List<Pair<File,GroovyDslExecutor>> result=derefStandardScripts();
   if (result != null) {
     return result;
   }
@@ -7,7 +7,7 @@
   semaphore.down();
   ourPool.execute(new Runnable(){
     @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod") @Override public void run(){
-      if (ourStandardScripts != null) {
+      if (derefStandardScripts() != null) {
         return;
       }
       try {
@@ -22,21 +22,24 @@
         List<Pair<File,GroovyDslExecutor>> executors=new ArrayList<Pair<File,GroovyDslExecutor>>();
         for (        File file : scriptFolders) {
           if (file.exists()) {
-            for (            File child : file.listFiles()) {
-              final String fileName=child.getName();
-              if (fileName.endsWith(".gdsl")) {
-                try {
-                  final String text=new String(FileUtil.loadFileText(child));
-                  executors.add(Pair.create(child,new GroovyDslExecutor(text,fileName)));
-                }
- catch (                IOException e) {
-                  LOG.error(e);
+            File[] children=file.listFiles();
+            if (children != null) {
+              for (              File child : children) {
+                final String fileName=child.getName();
+                if (fileName.endsWith(".gdsl")) {
+                  try {
+                    final String text=new String(FileUtil.loadFileText(child));
+                    executors.add(Pair.create(child,new GroovyDslExecutor(text,fileName)));
+                  }
+ catch (                  IOException e) {
+                    LOG.error(e);
+                  }
                 }
               }
             }
           }
         }
-        ourStandardScripts=executors;
+        ourStandardScripts=new SoftReference<List<Pair<File,GroovyDslExecutor>>>(executors);
       }
  catch (      OutOfMemoryError e) {
         stopGdsl=true;
@@ -52,11 +55,11 @@ catch (      NoClassDefFoundError e) {
     }
   }
 );
-  while (ourStandardScripts == null && !stopGdsl && !semaphore.waitFor(20)) {
+  while (derefStandardScripts() == null && !stopGdsl && !semaphore.waitFor(20)) {
     ProgressManager.checkCanceled();
   }
   if (stopGdsl) {
     return Collections.emptyList();
   }
-  return ourStandardScripts;
+  return derefStandardScripts();
 }
