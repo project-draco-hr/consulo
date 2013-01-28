@@ -1,6 +1,13 @@
 {
   final FilePath filePath=getLastCommitName(project,path);
-  final VirtualFile finalRoot=(root == null ? GitUtil.getGitRoot(filePath) : root);
+  final VirtualFile finalRoot;
+  try {
+    finalRoot=(root == null ? GitUtil.getGitRoot(filePath) : root);
+  }
+ catch (  VcsException e) {
+    exceptionConsumer.consume(e);
+    return;
+  }
   final GitLogParser logParser=new GitLogParser(project,GitLogParser.NameStatus.STATUS,HASH,COMMIT_TIME,AUTHOR_NAME,AUTHOR_EMAIL,COMMITTER_NAME,COMMITTER_EMAIL,PARENTS,SUBJECT,BODY,RAW_BODY,AUTHOR_TIME);
   final AtomicReference<String> firstCommit=new AtomicReference<String>("HEAD");
   final AtomicReference<String> firstCommitParent=new AtomicReference<String>("HEAD");
@@ -39,7 +46,7 @@
         final Pair<String,String> authorPair=Pair.create(record.getAuthorName(),record.getAuthorEmail());
         final Pair<String,String> committerPair=record.getCommitterName() == null ? null : Pair.create(record.getCommitterName(),record.getCommitterEmail());
         Collection<String> parents=parentHashes == null ? Collections.<String>emptyList() : Arrays.asList(parentHashes);
-        consumer.consume(new GitFileRevision(project,revisionPath,revision,Pair.create(authorPair,committerPair),message,null,new Date(record.getAuthorTimeStamp() * 1000),false,parents));
+        consumer.consume(new GitFileRevision(project,revisionPath,revision,Pair.create(authorPair,committerPair),message,null,new Date(record.getAuthorTimeStamp() * 1000),parents));
         List<GitLogStatusInfo> statusInfos=record.getStatusInfos();
         if (statusInfos.isEmpty()) {
           return;
@@ -54,6 +61,7 @@
     }
   }
 ;
+  final AtomicBoolean criticalFailure=new AtomicBoolean();
   while (currentPath.get() != null && firstCommitParent.get() != null) {
     logHandler.set(getLogHandler(project,finalRoot,logParser,currentPath.get(),firstCommitParent.get(),parameters));
     final MyTokenAccumulator accumulator=new MyTokenAccumulator(logParser);
@@ -70,6 +78,7 @@
           exceptionConsumer.consume(new VcsException(exception));
         }
   finally {
+          criticalFailure.set(true);
           semaphore.up();
         }
       }
@@ -82,6 +91,7 @@
           }
         }
   finally {
+          criticalFailure.set(true);
           semaphore.up();
         }
       }
@@ -90,7 +100,19 @@
     semaphore.down();
     logHandler.get().start();
     semaphore.waitFor();
-    currentPath.set(getFirstCommitRenamePath(project,finalRoot,firstCommit.get(),currentPath.get()));
-    skipFurtherOutput.set(false);
+    if (criticalFailure.get()) {
+      return;
+    }
+    try {
+      FilePath firstCommitRenamePath;
+      firstCommitRenamePath=getFirstCommitRenamePath(project,finalRoot,firstCommit.get(),currentPath.get());
+      currentPath.set(firstCommitRenamePath);
+      skipFurtherOutput.set(false);
+    }
+ catch (    VcsException e) {
+      LOG.warn("Tried to get first commit rename path",e);
+      exceptionConsumer.consume(e);
+      return;
+    }
   }
 }
