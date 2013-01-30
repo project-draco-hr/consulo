@@ -1,6 +1,7 @@
 {
-  if (modifierList == null)   return true;
-  final PsiManager manager=member.getManager();
+  if (modifierList == null || isInJavaDoc(place)) {
+    return true;
+  }
   if (placeFile instanceof JavaCodeFragment) {
     JavaCodeFragment fragment=(JavaCodeFragment)placeFile;
     JavaCodeFragment.VisibilityChecker visibilityChecker=fragment.getVisibilityChecker();
@@ -10,25 +11,37 @@
       if (visibility == JavaCodeFragment.VisibilityChecker.Visibility.NOT_VISIBLE)       return false;
     }
   }
- else   if (ignoreReferencedElementAccessibility(placeFile))   return true;
-  if (isInJavaDoc(place))   return true;
-  if (accessObjectClass != null) {
-    if (!isAccessible(accessObjectClass,accessObjectClass.getContainingClass(),accessObjectClass.getModifierList(),place,null,null,placeFile))     return false;
-  }
-  int effectiveAccessLevel=PsiUtil.getAccessLevel(modifierList);
-  PsiFile file=placeFile == null ? null : FileContextUtil.getContextFile(placeFile);
-  if (PsiImplUtil.isInServerPage(file) && PsiImplUtil.isInServerPage(member.getContainingFile()))   return true;
-  if (ignoreReferencedElementAccessibility(file))   return true;
-  if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PUBLIC) {
+ else   if (ignoreReferencedElementAccessibility(placeFile)) {
     return true;
   }
+  if (accessObjectClass != null) {
+    PsiClass containingClass=accessObjectClass.getContainingClass();
+    if (!isAccessible(accessObjectClass,containingClass,accessObjectClass.getModifierList(),place,null,null,placeFile)) {
+      return false;
+    }
+  }
+  PsiFile file=placeFile == null ? null : FileContextUtil.getContextFile(placeFile);
+  if (PsiImplUtil.isInServerPage(file) && PsiImplUtil.isInServerPage(member.getContainingFile())) {
+    return true;
+  }
+  int effectiveAccessLevel=PsiUtil.getAccessLevel(modifierList);
+  if (ignoreReferencedElementAccessibility(file) || effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PUBLIC) {
+    return true;
+  }
+  PsiManager manager=member.getManager();
+  JavaPsiFacade facade=JavaPsiFacade.getInstance(manager.getProject());
   if (effectiveAccessLevel == PsiUtil.ACCESS_LEVEL_PROTECTED) {
-    if (JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(member,place))     return true;
-    if (memberClass == null)     return false;
+    if (facade.arePackagesTheSame(member,place)) {
+      return true;
+    }
+    if (memberClass == null) {
+      return false;
+    }
     for (PsiElement placeParent=place; placeParent != null; placeParent=placeParent.getContext()) {
       if (placeParent instanceof PsiClass && InheritanceUtil.isInheritorOrSelf((PsiClass)placeParent,memberClass,true)) {
-        if (member instanceof PsiClass || modifierList.hasModifierProperty(PsiModifier.STATIC))         return true;
-        if (accessObjectClass == null || InheritanceUtil.isInheritorOrSelf(accessObjectClass,(PsiClass)placeParent,true))         return true;
+        if (member instanceof PsiClass || modifierList.hasModifierProperty(PsiModifier.STATIC) || accessObjectClass == null || InheritanceUtil.isInheritorOrSelf(accessObjectClass,(PsiClass)placeParent,true)) {
+          return true;
+        }
       }
     }
     return false;
@@ -49,7 +62,7 @@
       return fileResolveScope instanceof PsiClass && !((PsiClass)fileResolveScope).isInheritor(memberClass,true);
     }
   }
-  if (!JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(member,place))   return false;
+  if (!facade.arePackagesTheSame(member,place))   return false;
   if (modifierList.hasModifierProperty(PsiModifier.STATIC))   return true;
   final PsiClass placeClass=getContextClass(place);
   if (memberClass == null || placeClass == null)   return true;
@@ -58,7 +71,7 @@
   if (clazz != null && clazz.isInheritor(memberClass,true)) {
     PsiClass superClass=clazz;
     while (!manager.areElementsEquivalent(superClass,memberClass)) {
-      if (superClass == null || !JavaPsiFacade.getInstance(manager.getProject()).arePackagesTheSame(superClass,memberClass))       return false;
+      if (superClass == null || !facade.arePackagesTheSame(superClass,memberClass))       return false;
       superClass=superClass.getSuperClass();
     }
   }
