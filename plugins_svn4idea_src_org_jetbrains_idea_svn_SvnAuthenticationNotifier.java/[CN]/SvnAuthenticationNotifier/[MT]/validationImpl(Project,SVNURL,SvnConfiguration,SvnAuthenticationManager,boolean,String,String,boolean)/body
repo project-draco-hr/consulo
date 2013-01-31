@@ -1,8 +1,31 @@
 {
-  if (configuration.isIsUseDefaultProxy()) {
+  Proxy proxyToRelease=null;
+  if (!interactive && configuration.isIsUseDefaultProxy()) {
     final HttpConfigurable instance=HttpConfigurable.getInstance();
     if (instance.USE_HTTP_PROXY && instance.PROXY_AUTHENTICATION && (StringUtil.isEmptyOrSpaces(instance.PROXY_LOGIN) || StringUtil.isEmptyOrSpaces(instance.getPlainProxyPassword()))) {
       return false;
+    }
+    if (instance.USE_PROXY_PAC) {
+      final List<Proxy> select;
+      try {
+        select=CommonProxy.getInstance().select(new URI(url.toString()));
+      }
+ catch (      URISyntaxException e) {
+        LOG.info("wrong URL: " + url.toString());
+        return false;
+      }
+      if (select != null && !select.isEmpty()) {
+        for (        Proxy proxy : select) {
+          if (HttpConfigurable.isRealProxy(proxy) && Proxy.Type.HTTP.equals(proxy.type())) {
+            final InetSocketAddress address=(InetSocketAddress)proxy.address();
+            final PasswordAuthentication password=HttpConfigurable.getInstance().getGenericPassword(address.getHostName(),address.getPort());
+            if (password == null) {
+              CommonProxy.getInstance().noAuthentication("http",address.getHostName(),address.getPort());
+              proxyToRelease=proxy;
+            }
+          }
+        }
+      }
     }
   }
   SvnInteractiveAuthenticationProvider.clearCallState();
@@ -24,29 +47,15 @@ catch (  final SVNException e) {
     }
     LOG.info("some other exc",e);
     if (interactive) {
-      ApplicationManager.getApplication().invokeLater(new Runnable(){
-        @Override public void run(){
-          VcsBalloonProblemNotifier.showOverChangesView(project,"Authentication failed: " + e.getMessage(),MessageType.ERROR,new NamedRunnable(SvnBundle.message("confirmation.title.clear.authentication.cache")){
-            @Override public void run(){
-              SvnConfigurable.clearAuthenticationCache(project,null,configuration.getConfigurationDirectory());
-            }
-          }
-,new NamedRunnable(SvnBundle.message("action.title.select.configuration.directory")){
-            @Override public void run(){
-              SvnConfigurable.selectConfigirationDirectory(configuration.getConfigurationDirectory(),new Consumer<String>(){
-                @Override public void consume(                String s){
-                  configuration.setConfigurationDirParameters(false,s);
-                }
-              }
-,project,null);
-            }
-          }
-);
-        }
-      }
-,ModalityState.NON_MODAL,project.getDisposed());
+      showAuthenticationFailedWithHotFixes(project,configuration,e);
     }
     return false;
+  }
+ finally {
+    if (!interactive && configuration.isIsUseDefaultProxy() && proxyToRelease != null) {
+      final InetSocketAddress address=(InetSocketAddress)proxyToRelease.address();
+      CommonProxy.getInstance().noAuthentication("http",address.getHostName(),address.getPort());
+    }
   }
   if (!checkWrite) {
     return true;
