@@ -1,11 +1,23 @@
 {
-  if (PROXY_AUTHENTICATION && KEEP_PROXY_PASSWORD) {
-    return new PasswordAuthentication(PROXY_LOGIN,getPlainProxyPassword().toCharArray());
+  if (AUTHENTICATION_CANCELLED)   return null;
+  final String password=getPlainProxyPassword();
+  if (!StringUtil.isEmptyOrSpaces(PROXY_LOGIN) && !StringUtil.isEmptyOrSpaces(password)) {
+    return new PasswordAuthentication(PROXY_LOGIN,password.toCharArray());
   }
+  if (ApplicationManager.getApplication() == null || ApplicationManager.getApplication().isDisposeInProgress() || ApplicationManager.getApplication().isDisposed())   return null;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    return myTestGenericAuthRunnable.get();
+  }
+  final String login=PROXY_LOGIN == null ? "" : PROXY_LOGIN;
   final PasswordAuthentication[] value=new PasswordAuthentication[1];
   final Runnable runnable=new Runnable(){
     public void run(){
-      final AuthenticationDialog dlg=new AuthenticationDialog(host,prompt,"","",KEEP_PROXY_PASSWORD);
+      if (AUTHENTICATION_CANCELLED)       return;
+      if (!StringUtil.isEmptyOrSpaces(PROXY_LOGIN) && !StringUtil.isEmptyOrSpaces(password)) {
+        value[0]=new PasswordAuthentication(PROXY_LOGIN,password.toCharArray());
+        return;
+      }
+      final AuthenticationDialog dlg=new AuthenticationDialog(PopupUtil.getActiveComponent(),"Proxy authentication: " + host,"Please enter credentials for: " + prompt,login,"",KEEP_PROXY_PASSWORD);
       dlg.show();
       if (dlg.getExitCode() == DialogWrapper.OK_EXIT_CODE) {
         final AuthenticationPanel panel=dlg.getPanel();
@@ -14,9 +26,12 @@
         setPlainProxyPassword(String.valueOf(panel.getPassword()));
         value[0]=new PasswordAuthentication(panel.getLogin(),panel.getPassword());
       }
+ else {
+        AUTHENTICATION_CANCELLED=true;
+      }
     }
   }
 ;
-  WaitForProgressToShow.runOrInvokeAndWaitAboveProgress(runnable,ModalityState.any());
+  runAboveAll(runnable);
   return value[0];
 }
