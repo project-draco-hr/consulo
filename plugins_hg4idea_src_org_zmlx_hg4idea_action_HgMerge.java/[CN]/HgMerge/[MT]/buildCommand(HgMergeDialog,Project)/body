@@ -1,0 +1,57 @@
+{
+  return new HgGlobalCommand(){
+    public VirtualFile getRepo(){
+      return dialog.getRepository();
+    }
+    public void execute() throws HgCommandException {
+      UpdatedFiles updatedFiles=UpdatedFiles.create();
+      HgCommandResultNotifier notifier=new HgCommandResultNotifier(project);
+      final VirtualFile repo=dialog.getRepository();
+      HgMergeCommand hgMergeCommand=new HgMergeCommand(project,repo);
+      HgRevisionNumber incomingRevision=null;
+      HgTagBranch branch=dialog.getBranch();
+      if (branch != null) {
+        hgMergeCommand.setBranch(branch.getName());
+        incomingRevision=branch.getHead();
+      }
+      HgTagBranch tag=dialog.getTag();
+      if (tag != null) {
+        hgMergeCommand.setRevision(tag.getName());
+        incomingRevision=tag.getHead();
+      }
+      String revision=dialog.getRevision();
+      if (revision != null) {
+        hgMergeCommand.setRevision(revision);
+        incomingRevision=HgRevisionNumber.getLocalInstance(revision);
+      }
+      HgRevisionNumber otherHead=dialog.getOtherHead();
+      if (otherHead != null) {
+        hgMergeCommand.setRevision(otherHead.getRevision());
+        incomingRevision=otherHead;
+      }
+      if (incomingRevision != null) {
+        try {
+          String warnings=new HgHeadMerger(project,hgMergeCommand).merge(repo,updatedFiles,incomingRevision).getWarnings();
+          if (!StringUtil.isEmptyOrSpaces(warnings)) {
+            VcsException warning=new VcsException(warnings);
+            warning.setIsWarning(true);
+            notifier.notifyWarning("Warnings during merge",warnings);
+          }
+          new HgConflictResolver(project,updatedFiles).resolve(repo);
+        }
+ catch (        VcsException e) {
+          if (e.isWarning()) {
+            notifier.notifyWarning("Warning during merge",e.getMessage());
+          }
+ else {
+            notifier.notifyError(null,"Exception during merge",e.getMessage());
+          }
+        }
+      }
+ else {
+        notifier.notifyError(null,"Merge error",HgVcsMessages.message("hg4idea.error.invalidTarget"));
+      }
+    }
+  }
+;
+}
