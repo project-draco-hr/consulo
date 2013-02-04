@@ -5,12 +5,15 @@
   }
   final Semaphore semaphore=new Semaphore();
   semaphore.down();
+  final AtomicReference<List<Pair<File,GroovyDslExecutor>>> ref=new AtomicReference<List<Pair<File,GroovyDslExecutor>>>();
   ourPool.execute(new Runnable(){
     @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod") @Override public void run(){
-      if (derefStandardScripts() != null) {
-        return;
-      }
       try {
+        List<Pair<File,GroovyDslExecutor>> pairs=derefStandardScripts();
+        if (pairs != null) {
+          ref.set(pairs);
+          return;
+        }
         Set<File> scriptFolders=new LinkedHashSet<File>();
         for (        GroovyFrameworkConfigNotification extension : GroovyFrameworkConfigNotification.EP_NAME.getExtensions()) {
           File jarPath=new File(PathUtil.getJarPathForClass(extension.getClass()));
@@ -40,6 +43,7 @@
           }
         }
         ourStandardScripts=new SoftReference<List<Pair<File,GroovyDslExecutor>>>(executors);
+        ref.set(executors);
       }
  catch (      OutOfMemoryError e) {
         stopGdsl=true;
@@ -55,11 +59,13 @@ catch (      NoClassDefFoundError e) {
     }
   }
 );
-  while (derefStandardScripts() == null && !stopGdsl && !semaphore.waitFor(20)) {
+  while (true) {
     ProgressManager.checkCanceled();
+    if (stopGdsl) {
+      return Collections.emptyList();
+    }
+    if (ref.get() != null || semaphore.waitFor(20)) {
+      return ref.get();
+    }
   }
-  if (stopGdsl) {
-    return Collections.emptyList();
-  }
-  return derefStandardScripts();
 }
