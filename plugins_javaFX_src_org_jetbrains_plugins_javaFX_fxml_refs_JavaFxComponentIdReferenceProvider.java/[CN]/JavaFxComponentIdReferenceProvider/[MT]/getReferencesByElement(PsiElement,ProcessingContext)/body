@@ -1,0 +1,47 @@
+{
+  final XmlAttributeValue xmlAttributeValue=(XmlAttributeValue)element;
+  final XmlTag currentTag=PsiTreeUtil.getParentOfType(xmlAttributeValue,XmlTag.class);
+  final String value=xmlAttributeValue.getValue();
+  final boolean startsWithDollar=value.startsWith("$");
+  final String referencesId=startsWithDollar ? value.substring(1) : value;
+  final Map<String,XmlAttributeValue> fileIds=new HashMap<String,XmlAttributeValue>();
+  xmlAttributeValue.getContainingFile().accept(new XmlRecursiveElementVisitor(){
+    @Override public void visitXmlTag(    XmlTag tag){
+      super.visitXmlTag(tag);
+      if (currentTag != tag) {
+        final XmlAttribute attribute=tag.getAttribute(FxmlConstants.FX_ID);
+        if (attribute != null) {
+          fileIds.put(attribute.getValue(),attribute.getValueElement());
+        }
+      }
+    }
+  }
+);
+  if (JavaFxPsiUtil.isExpressionBinding(value)) {
+    final String expressionText=referencesId.substring(1,referencesId.length() - 1);
+    final String newId=StringUtil.getPackageName(expressionText);
+    final String fieldRef=StringUtil.getShortName(expressionText);
+    final JavaFxIdReferenceBase idReferenceBase=new JavaFxIdReferenceBase(xmlAttributeValue,fileIds,newId);
+    final TextRange range=idReferenceBase.getRangeInElement();
+    final int startOffset=range.getStartOffset() + 2;
+    final int endOffset=startOffset + newId.length();
+    idReferenceBase.setRangeInElement(new TextRange(startOffset,endOffset));
+    if (fileIds.containsKey(newId)) {
+      final XmlAttributeValue attributeValue=fileIds.get(newId);
+      final PsiClass tagClass=JavaFxPsiUtil.getTagClass(attributeValue);
+      if (tagClass != null) {
+        final JavaFxExpressionReferenceBase referenceBase=new JavaFxExpressionReferenceBase(xmlAttributeValue,tagClass,fieldRef);
+        final TextRange textRange=referenceBase.getRangeInElement();
+        referenceBase.setRangeInElement(new TextRange(endOffset + 1,textRange.getEndOffset() - 1));
+        return new PsiReference[]{idReferenceBase,referenceBase};
+      }
+    }
+    return new PsiReference[]{idReferenceBase};
+  }
+  final JavaFxIdReferenceBase idReferenceBase=new JavaFxIdReferenceBase(xmlAttributeValue,fileIds,referencesId);
+  if (startsWithDollar) {
+    final TextRange rangeInElement=idReferenceBase.getRangeInElement();
+    idReferenceBase.setRangeInElement(new TextRange(rangeInElement.getStartOffset() + 1,rangeInElement.getEndOffset()));
+  }
+  return new PsiReference[]{idReferenceBase};
+}

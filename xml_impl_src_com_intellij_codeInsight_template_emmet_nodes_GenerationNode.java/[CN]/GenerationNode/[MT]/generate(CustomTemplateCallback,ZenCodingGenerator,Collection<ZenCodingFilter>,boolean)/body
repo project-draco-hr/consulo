@@ -1,0 +1,85 @@
+{
+  myContainsSurroundedTextMarker=!(insertSurroundedText && myInsertSurroundedTextAtTheEnd);
+  boolean singleLineFilterEnabled=false;
+  GenerationNode generationNode=this;
+  for (  ZenCodingFilter filter : filters) {
+    generationNode=filter.filterNode(generationNode);
+    if (filter instanceof SingleLineEmmetFilter) {
+      singleLineFilterEnabled=true;
+    }
+  }
+  if (generationNode != this) {
+    return generationNode.generate(callback,generator,Collections.<ZenCodingFilter>emptyList(),insertSurroundedText);
+  }
+  LiveTemplateBuilder builder=new LiveTemplateBuilder();
+  int end=-1;
+  boolean hasChildren=myChildren.size() > 0;
+  TemplateImpl parentTemplate;
+  Map<String,String> predefinedValues;
+  if (myTemplateToken instanceof TemplateToken && generator instanceof XmlZenCodingGenerator) {
+    TemplateToken xmlTemplateToken=myTemplateToken;
+    List<Pair<String,String>> attr2value=new ArrayList<Pair<String,String>>(xmlTemplateToken.getAttribute2Value());
+    parentTemplate=invokeXmlTemplate(xmlTemplateToken,callback,generator,hasChildren,attr2value);
+    predefinedValues=buildPredefinedValues(attr2value,(XmlZenCodingGenerator)generator,hasChildren);
+  }
+ else {
+    parentTemplate=invokeTemplate(myTemplateToken,hasChildren,callback,generator);
+    predefinedValues=null;
+  }
+  String s=parentTemplate.getString();
+  for (  ZenCodingFilter filter : filters) {
+    s=filter.filterText(s,myTemplateToken);
+  }
+  parentTemplate=parentTemplate.copy();
+  parentTemplate.setString(s);
+  final String txt=hasChildren || myContainsSurroundedTextMarker ? null : mySurroundedText;
+  parentTemplate=expandTemplate(parentTemplate,predefinedValues,txt);
+  int offset=builder.insertTemplate(0,parentTemplate,null);
+  int newOffset=gotoChild(callback.getProject(),builder.getText(),offset,0,builder.length());
+  if (offset < builder.length() && newOffset != offset) {
+    end=offset;
+  }
+  offset=newOffset;
+  if (end == -1 && offset < builder.length() && myChildren.size() == 0) {
+    end=offset;
+  }
+  LiveTemplateBuilder.Marker marker=offset < builder.length() ? builder.createMarker(offset) : null;
+  CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(callback.getProject());
+  String indentStr;
+  if (callback.isInInjectedFragment()) {
+    indentStr="";
+  }
+ else   if (settings.useTabCharacter(callback.getFileType())) {
+    indentStr="\t";
+  }
+ else {
+    StringBuilder tab=new StringBuilder();
+    int tabSize=settings.getTabSize(callback.getFileType());
+    while (tabSize-- > 0) {
+      tab.append(' ');
+    }
+    indentStr=tab.toString();
+  }
+  for (int i=0, myChildrenSize=myChildren.size(); i < myChildrenSize; i++) {
+    GenerationNode child=myChildren.get(i);
+    TemplateImpl childTemplate=child.generate(callback,generator,filters,!myContainsSurroundedTextMarker);
+    boolean blockTag=child.isBlockTag();
+    if (!singleLineFilterEnabled && blockTag && !isNewLineBefore(builder.getText(),offset)) {
+      builder.insertText(offset,"\n" + indentStr,false);
+      offset+=indentStr.length() + 1;
+    }
+    int e=builder.insertTemplate(offset,childTemplate,null);
+    offset=marker != null ? marker.getEndOffset() : builder.length();
+    if (!singleLineFilterEnabled && blockTag && !isNewLineAfter(builder.getText(),offset)) {
+      builder.insertText(offset,"\n" + indentStr,false);
+      offset+=indentStr.length() + 1;
+    }
+    if (end == -1 && e < offset) {
+      end=e;
+    }
+  }
+  if (singleLineFilterEnabled) {
+    builder.setIsToReformat(false);
+  }
+  return builder.buildTemplate();
+}
