@@ -1,0 +1,116 @@
+{
+  final Map<String,String> parameters=new HashMap<String,String>();
+  if (replaceParameters) {
+    ApplicationManager.getApplication().runReadAction(new Runnable(){
+      public void run(){
+        ProjectTemplateParameterFactory[] extensions=Extensions.getExtensions(ProjectTemplateParameterFactory.EP_NAME);
+        for (        ProjectTemplateParameterFactory extension : extensions) {
+          String value=extension.detectParameterValue(project);
+          if (value != null) {
+            parameters.put(value,extension.getParameterId());
+          }
+        }
+      }
+    }
+);
+  }
+  indicator.setText("Saving project...");
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        public void run(){
+          project.save();
+        }
+      }
+);
+    }
+  }
+);
+  indicator.setText("Processing project files...");
+  ZipOutputStream stream=null;
+  try {
+    FileUtil.ensureExists(zipFile.getParentFile());
+    stream=new ZipOutputStream(new FileOutputStream(zipFile));
+    final VirtualFile dir=getDirectoryToSave(project,moduleToSave);
+    final VirtualFile descriptionFile=getDescriptionFile(project);
+    if (descriptionFile == null) {
+      stream.putNextEntry(new ZipEntry(dir.getName() + "/" + LocalArchivedTemplate.DESCRIPTION_PATH));
+      stream.write(description.getBytes());
+      stream.closeEntry();
+    }
+ else {
+      UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+        public void run(){
+          try {
+            VfsUtil.saveText(descriptionFile,description);
+          }
+ catch (          IOException e) {
+            LOG.error(e);
+          }
+        }
+      }
+);
+    }
+    if (replaceParameters) {
+      String text=getInputFieldsText(parameters);
+      stream.putNextEntry(new ZipEntry(dir.getName() + "/" + LocalArchivedTemplate.IDEA_INPUT_FIELDS_XML));
+      stream.write(text.getBytes());
+      stream.closeEntry();
+    }
+    FileIndex index=moduleToSave == null ? ProjectRootManager.getInstance(project).getFileIndex() : ModuleRootManager.getInstance(moduleToSave).getFileIndex();
+    final ZipOutputStream finalStream=stream;
+    final FileTemplate template=FileTemplateManager.getInstance().getDefaultTemplate(FileTemplateManager.FILE_HEADER_TEMPLATE_NAME);
+    final String templateText=template.getText();
+    final Pattern pattern=FileHeaderChecker.getTemplatePattern(template,project,new TIntObjectHashMap<String>());
+    index.iterateContent(new ContentIterator(){
+      @Override public boolean processFile(      final VirtualFile virtualFile){
+        if (!virtualFile.isDirectory()) {
+          String name=virtualFile.getName();
+          indicator.setText2(name);
+          try {
+            String relativePath=VfsUtilCore.getRelativePath(virtualFile,dir,'/');
+            if (relativePath == null) {
+              throw new RuntimeException("Can't find relative path for " + virtualFile);
+            }
+            boolean system=".idea".equals(virtualFile.getParent().getName());
+            if (system) {
+              if (!name.equals("description.html") && !name.equals("misc.xml") && !name.equals("modules.xml")&& !name.equals("workspace.xml")) {
+                return true;
+              }
+            }
+            ZipUtil.addFileToZip(finalStream,new File(virtualFile.getPath()),dir.getName() + "/" + relativePath,null,null,new ZipUtil.FileContentProcessor(){
+              @Override public InputStream getContent(              File file) throws IOException {
+                if (virtualFile.getFileType().isBinary())                 return STANDARD.getContent(file);
+                String s=VfsUtilCore.loadText(virtualFile);
+                String result=convertTemplates(s,pattern,templateText);
+                for (                Map.Entry<String,String> entry : parameters.entrySet()) {
+                  result=result.replace(entry.getKey(),"${" + entry.getValue() + "}");
+                }
+                return new ByteArrayInputStream(result.getBytes(TemplateModuleBuilder.UTF_8));
+              }
+            }
+);
+          }
+ catch (          IOException e) {
+            LOG.error(e);
+          }
+        }
+        indicator.checkCanceled();
+        return true;
+      }
+    }
+);
+  }
+ catch (  Exception ex) {
+    LOG.error(ex);
+    UIUtil.invokeLaterIfNeeded(new Runnable(){
+      public void run(){
+        Messages.showErrorDialog(project,"Can't save project as template","Internal Error");
+      }
+    }
+);
+  }
+ finally {
+    StreamUtil.closeStream(stream);
+  }
+}
