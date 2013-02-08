@@ -1,14 +1,25 @@
 {
-  PsiMethod method=getElement();
-  PsiTypeParameter[] typeParameters=method.getTypeParameters();
-  JavaPsiFacade javaPsiFacade=JavaPsiFacade.getInstance(method.getProject());
-  if (!method.hasModifierProperty(PsiModifier.STATIC)) {
-    final PsiClass containingClass=method.getContainingClass();
-    if (containingClass != null && PsiUtil.isRawSubstitutor(containingClass,mySubstitutor)) {
-      return javaPsiFacade.getElementFactory().createRawSubstitutor(mySubstitutor,typeParameters);
-    }
+  Map<PsiElement,Pair<PsiMethod,PsiSubstitutor>> map=CURRENT_CANDIDATE.get();
+  if (map == null) {
+    map=new ConcurrentWeakHashMap<PsiElement,Pair<PsiMethod,PsiSubstitutor>>();
+    CURRENT_CANDIDATE.set(map);
   }
-  final PsiElement parent=getParent();
-  if (parent == null)   return PsiSubstitutor.EMPTY;
-  return javaPsiFacade.getResolveHelper().inferTypeArguments(typeParameters,method.getParameterList().getParameters(),arguments,mySubstitutor,parent,policy);
+  final PsiMethod method=getElement();
+  final Pair<PsiMethod,PsiSubstitutor> alreadyThere=map.put(myArgumentList,Pair.create(method,super.getSubstitutor()));
+  try {
+    PsiTypeParameter[] typeParameters=method.getTypeParameters();
+    JavaPsiFacade javaPsiFacade=JavaPsiFacade.getInstance(method.getProject());
+    if (!method.hasModifierProperty(PsiModifier.STATIC)) {
+      final PsiClass containingClass=method.getContainingClass();
+      if (containingClass != null && PsiUtil.isRawSubstitutor(containingClass,mySubstitutor)) {
+        return javaPsiFacade.getElementFactory().createRawSubstitutor(mySubstitutor,typeParameters);
+      }
+    }
+    final PsiElement parent=getParent();
+    if (parent == null)     return PsiSubstitutor.EMPTY;
+    return javaPsiFacade.getResolveHelper().inferTypeArguments(typeParameters,method.getParameterList().getParameters(),arguments,mySubstitutor,parent,policy);
+  }
+  finally {
+    if (alreadyThere == null)     map.remove(myArgumentList);
+  }
 }
