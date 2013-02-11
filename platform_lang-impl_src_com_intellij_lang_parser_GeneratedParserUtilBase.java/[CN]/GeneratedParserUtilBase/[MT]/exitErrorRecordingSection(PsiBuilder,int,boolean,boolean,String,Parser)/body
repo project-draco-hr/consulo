@@ -1,0 +1,78 @@
+{
+  ErrorState state=ErrorState.get(builder_);
+  Frame frame=state.frameStack.pollLast();
+  int initialOffset=builder_.getCurrentOffset();
+  if (frame == null || level != frame.level || !sectionType.equals(frame.section)) {
+    LOG.error("Unbalanced error section: got " + new Frame().init(initialOffset,level,sectionType,"",0) + ", expected "+ frame);
+    if (frame != null)     state.FRAMES.recycle(frame);
+    return result;
+  }
+  if (sectionType == _SECTION_AND_ || sectionType == _SECTION_NOT_) {
+    state.predicateCount--;
+    if (sectionType == _SECTION_NOT_)     state.predicateSign=!state.predicateSign;
+    state.FRAMES.recycle(frame);
+    return result;
+  }
+  if (!result && !pinned && initialOffset == frame.offset && state.lastExpectedVariantOffset == frame.offset && frame.name != null && state.variants.size() - frame.variantCount > 1) {
+    state.clearVariants(true,frame.variantCount);
+    addVariantInner(state,initialOffset,frame.name);
+  }
+  if (sectionType == _SECTION_RECOVER_ && !state.suppressErrors && eatMore != null) {
+    state.suppressErrors=true;
+    final boolean eatMoreFlagOnce=!builder_.eof() && eatMore.parse(builder_,frame.level + 1);
+    final int lastErrorPos=getLastVariantOffset(state,initialOffset);
+    boolean eatMoreFlag=eatMoreFlagOnce || !result && frame.offset == initialOffset && lastErrorPos > frame.offset;
+    final LighterASTNode latestDoneMarker=(pinned || result) && (state.altMode || lastErrorPos > initialOffset) && eatMoreFlagOnce ? builder_.getLatestDoneMarker() : null;
+    PsiBuilder.Marker extensionMarker=null;
+    IElementType extensionTokenType=null;
+    if (latestDoneMarker instanceof PsiBuilder.Marker && frame.offset == latestDoneMarker.getStartOffset()) {
+      extensionMarker=((PsiBuilder.Marker)latestDoneMarker).precede();
+      extensionTokenType=latestDoneMarker.getTokenType();
+      ((PsiBuilder.Marker)latestDoneMarker).drop();
+    }
+    int parenCount=0;
+    while ((eatMoreFlag || parenCount > 0) && builder_.getCurrentOffset() < lastErrorPos) {
+      if (state.braces != null) {
+        if (builder_.getTokenType() == state.braces[0].getLeftBraceType())         parenCount++;
+ else         if (builder_.getTokenType() == state.braces[0].getRightBraceType())         parenCount--;
+      }
+      builder_.advanceLexer();
+      eatMoreFlag=eatMore.parse(builder_,frame.level + 1);
+    }
+    boolean errorReported=frame.errorReportedAt == initialOffset;
+    if (errorReported) {
+      if (eatMoreFlag) {
+        builder_.advanceLexer();
+        parseAsTree(state,builder_,frame.level + 1,DUMMY_BLOCK,true,TOKEN_ADVANCER,eatMore);
+      }
+    }
+ else     if (eatMoreFlag) {
+      errorReported=reportError(builder_,state,true,true);
+      parseAsTree(state,builder_,frame.level + 1,DUMMY_BLOCK,true,TOKEN_ADVANCER,eatMore);
+    }
+ else     if (eatMoreFlagOnce || (!result && frame.offset != builder_.getCurrentOffset())) {
+      errorReported=reportError(builder_,state,true,false);
+    }
+    if (extensionMarker != null) {
+      extensionMarker.done(extensionTokenType);
+    }
+    state.suppressErrors=false;
+    if (errorReported || result) {
+      state.clearVariants(true,0);
+      state.clearVariants(false,0);
+      state.lastExpectedVariantOffset=-1;
+    }
+    if (!result && eatMoreFlagOnce && frame.offset != builder_.getCurrentOffset())     result=true;
+  }
+ else   if (!result && pinned && frame.errorReportedAt < 0) {
+    if (getLastVariantOffset(state,initialOffset) == initialOffset) {
+      if (reportError(builder_,state,false,false)) {
+        frame.errorReportedAt=initialOffset;
+      }
+    }
+  }
+  Frame prevFrame=state.frameStack.isEmpty() ? null : state.frameStack.getLast();
+  if (prevFrame != null && prevFrame.errorReportedAt < frame.errorReportedAt)   prevFrame.errorReportedAt=frame.errorReportedAt;
+  state.FRAMES.recycle(frame);
+  return result;
+}
