@@ -1,13 +1,13 @@
 {
   List<MavenProjectsProcessorTask> postTasks=new ArrayList<MavenProjectsProcessorTask>();
-  boolean hasChanges=false;
+  boolean hasChanges;
   myAllProjects=new LinkedHashSet<MavenProject>(myProjectsTree.getProjects());
   myAllProjects.addAll(myProjectsToImportWithChanges.keySet());
-  hasChanges|=deleteIncompatibleModules();
+  hasChanges=deleteIncompatibleModules();
   myProjectsToImportWithChanges=collectProjectsToImport(myProjectsToImportWithChanges);
   mapMavenProjectsToModulesAndNames();
   if (myProject.isDisposed())   return null;
-  boolean projectsHaveChanges=projectsToImportHaveChanges();
+  final boolean projectsHaveChanges=projectsToImportHaveChanges();
   if (projectsHaveChanges) {
     hasChanges=true;
     importModules(postTasks);
@@ -23,14 +23,26 @@
   if (hasChanges) {
     removeUnusedProjectLibraries();
   }
-  if (hasChanges) {
-    myModelsProvider.commit();
-    if (projectsHaveChanges) {
-      configSettings();
+  final boolean finalHasChanges=hasChanges;
+  MavenUtil.invokeAndWaitWriteAction(myProject,new Runnable(){
+    public void run(){
+      if (finalHasChanges) {
+        myModelsProvider.commit();
+        if (projectsHaveChanges) {
+          removeOutdatedCompilerConfigSettings();
+          for (          MavenProject mavenProject : myAllProjects) {
+            Module module=myMavenProjectToModule.get(mavenProject);
+            for (            MavenModuleConfigurer configurer : MavenModuleConfigurer.getConfigurers()) {
+              configurer.configure(mavenProject,myProject,module);
+            }
+          }
+        }
+      }
+ else {
+        myModelsProvider.dispose();
+      }
     }
   }
- else {
-    myModelsProvider.dispose();
-  }
+);
   return postTasks;
 }
