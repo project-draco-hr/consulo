@@ -1,16 +1,29 @@
 {
+  if (Registry.is("disable.graph.inference",false))   return null;
   final PsiExpressionList argumentList=parentCall.getArgumentList();
   LOG.assertTrue(argumentList != null);
   final int exprIdx=ArrayUtilRt.find(argumentList.getExpressions(),PsiUtil.skipParenthesizedExprUp(methodCall));
   if (exprIdx > -1) {
     final PsiExpression nullPlaceholder=JavaPsiFacade.getElementFactory(methodCall.getProject()).createExpressionFromText("null",methodCall);
-    final PsiCallExpression copy=(PsiCallExpression)parentCall.copy();
+    final PsiTypeParameterListOwner owner=typeParameter.getOwner();
+    if (owner instanceof PsiMethod) {
+      final PsiType returnType=((PsiMethod)owner).getReturnType();
+      final Pair<PsiType,ConstraintType> constraint=ProcessCandidateParameterTypeInferencePolicy.inferConstraint(typeParameter,parentCall,nullPlaceholder,exprIdx,returnType);
+      if (constraint != null)       return constraint;
+    }
+    final PsiCallExpression copy=ourGraphGuard.doPreventingRecursion(parentCall,true,new Computable<PsiCallExpression>(){
+      @Override public PsiCallExpression compute(){
+        return (PsiCallExpression)parentCall.copy();
+      }
+    }
+);
+    if (copy == null)     return null;
     final PsiExpressionList copyArgumentList=copy.getArgumentList();
     LOG.assertTrue(copyArgumentList != null);
     final PsiExpression currentCallInCopy=copyArgumentList.getExpressions()[exprIdx];
     final PsiExpression methodCallCopy=(PsiExpression)currentCallInCopy.replace(nullPlaceholder);
     copy.putCopyableUserData(CALL_EXPRESSION_KEY,parentCall);
-    return ProcessCandidateParameterTypeInferencePolicy.INSTANCE.inferTypeConstraintFromCallContext(methodCallCopy,copyArgumentList,copy,typeParameter);
+    return GRAPH_INFERENCE_POLICY.inferTypeConstraintFromCallContext(methodCallCopy,copyArgumentList,copy,typeParameter);
   }
   return null;
 }

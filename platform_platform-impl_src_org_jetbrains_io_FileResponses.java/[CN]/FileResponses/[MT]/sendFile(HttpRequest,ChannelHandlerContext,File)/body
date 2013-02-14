@@ -1,0 +1,41 @@
+{
+  if (checkCache(request,context,file.lastModified())) {
+    return;
+  }
+  boolean fileWillBeClosed=false;
+  RandomAccessFile raf=new RandomAccessFile(file,"r");
+  try {
+    long fileLength=raf.length();
+    HttpResponse response=createResponse(file.getPath());
+    setContentLength(response,fileLength);
+    setDateAndCacheHeaders(response,file);
+    if (isKeepAlive(request)) {
+      response.setHeader(CONNECTION,HttpHeaders.Values.KEEP_ALIVE);
+    }
+    Channel channel=context.getChannel();
+    channel.write(response);
+    ChannelFuture future;
+    if (channel.getPipeline().get(SslHandler.class) == null) {
+      final FileRegion region=new DefaultFileRegion(raf.getChannel(),0,fileLength);
+      future=channel.write(region);
+      future.addListener(new ChannelFutureListener(){
+        @Override public void operationComplete(        ChannelFuture future){
+          region.releaseExternalResources();
+        }
+      }
+);
+    }
+ else {
+      future=channel.write(new ChunkedFile(raf,0,fileLength,8192));
+    }
+    if (!isKeepAlive(request)) {
+      future.addListener(ChannelFutureListener.CLOSE);
+    }
+    fileWillBeClosed=true;
+  }
+  finally {
+    if (!fileWillBeClosed) {
+      raf.close();
+    }
+  }
+}
