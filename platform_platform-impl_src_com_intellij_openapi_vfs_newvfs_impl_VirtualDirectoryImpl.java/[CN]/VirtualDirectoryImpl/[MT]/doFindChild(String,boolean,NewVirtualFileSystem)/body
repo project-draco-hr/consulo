@@ -2,28 +2,13 @@
   if (name.isEmpty()) {
     return null;
   }
-  final VirtualFileSystemEntry[] array;
-  final Map<String,VirtualFileSystemEntry> map;
-  final VirtualFileSystemEntry file;
-synchronized (this) {
-    array=asArray();
-    if (array == null) {
-      map=ensureAsMap();
-      file=map.get(name);
-    }
- else {
-      file=null;
-      map=null;
-    }
-  }
-  if (array != null) {
-    final boolean ignoreCase=!getFileSystem().isCaseSensitive();
-    for (    VirtualFileSystemEntry vf : array) {
-      if (vf.nameMatches(name,ignoreCase))       return vf;
-    }
+  final boolean ignoreCase=!delegate.isCaseSensitive();
+  Comparer comparer=getComparer(name,ignoreCase);
+  VirtualFileSystemEntry found=doFindChildInArray(comparer);
+  if (found != null)   return found;
+  if (allChildrenLoaded()) {
     return NULL_VIRTUAL_FILE;
   }
-  if (file != null)   return file;
   if (ensureCanonicalName) {
     VirtualFile fake=new FakeVirtualFile(this,name);
     name=delegate.getCanonicallyCasedName(fake);
@@ -31,14 +16,20 @@ synchronized (this) {
   }
 synchronized (this) {
     int id=ourPersistence.getId(this,name,delegate);
-    if (id > 0) {
-      VirtualFileSystemEntry lastTry=map.get(name);
-      if (lastTry != null)       return lastTry;
-      final String shorty=new String(name);
-      VirtualFileSystemEntry child=createChild(shorty,id);
-      map.put(shorty,child);
-      return child;
+    if (id <= 0) {
+      return null;
     }
+    VirtualFileSystemEntry[] array=myChildren;
+    long r=findIndexInBoth(array,comparer);
+    int indexInReal=(int)(r >> 32);
+    int indexInSuspicious=(int)r;
+    if (indexInSuspicious >= 0)     return NULL_VIRTUAL_FILE;
+    if (indexInReal >= 0) {
+      return array[indexInReal];
+    }
+    String shorty=new String(name);
+    VirtualFileSystemEntry child=createChild(shorty,id,delegate);
+    insertChildAt(child,indexInReal,array,ignoreCase);
+    return child;
   }
-  return null;
 }
