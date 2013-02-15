@@ -1,39 +1,62 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
   FileDocumentManager.getInstance().saveAllDocuments();
-  final Map<VirtualFile,Charset> map=new HashMap<VirtualFile,Charset>(result.size());
-  ProjectFileIndex fileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
-  for (  Map.Entry<VirtualFile,Charset> entry : result.entrySet()) {
-    VirtualFile virtualFile=entry.getKey();
-    Charset charset=entry.getValue();
-    if (virtualFile != null && !fileIndex.isInContent(virtualFile)) {
-      continue;
-    }
-    Pair<Charset,String> check=virtualFile == null || virtualFile.isDirectory() ? null : ChooseFileEncodingAction.checkCanReload(virtualFile);
-    String failReason=check == null ? null : check.second;
-    boolean enabled=failReason == null;
-    if (!enabled) {
-      continue;
-    }
-    map.put(virtualFile,charset);
-  }
-  final Map<VirtualFile,Charset> oldMapping=new HashMap<VirtualFile,Charset>(myMapping);
-  myMapping.clear();
-  myMapping.putAll(map);
-  final Processor<VirtualFile> reloadProcessor=createChangeCharsetProcessor();
-  ProgressManager.getInstance().runProcessWithProgressSynchronously(new Runnable(){
+  final Map<VirtualFile,Charset> newMap=new HashMap<VirtualFile,Charset>(mapping.size());
+  final Map<VirtualFile,Charset> oldMap=new HashMap<VirtualFile,Charset>(myMapping);
+  suppressReloadDuring(new Runnable(){
     @Override public void run(){
-      Set<VirtualFile> changed=new HashSet<VirtualFile>(map.keySet());
-      changed.addAll(oldMapping.keySet());
-      for (      VirtualFile changedFile : changed) {
-        final Charset newCharset=map.get(changedFile);
-        Charset oldCharset=oldMapping.get(changedFile);
-        if (!Comparing.equal(newCharset,oldCharset)) {
-          reloadDir(changedFile,reloadProcessor);
+      ProjectFileIndex fileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+      for (      Map.Entry<VirtualFile,Charset> entry : mapping.entrySet()) {
+        VirtualFile virtualFile=entry.getKey();
+        Charset charset=entry.getValue();
+        if (virtualFile != null) {
+          if (!fileIndex.isInContent(virtualFile))           continue;
+          if (!virtualFile.isDirectory() && !Comparing.equal(charset,oldMap.get(virtualFile))) {
+            Document document;
+            byte[] bytes;
+            try {
+              document=FileDocumentManager.getInstance().getDocument(virtualFile);
+              if (document == null)               throw new IOException();
+              bytes=virtualFile.contentsToByteArray();
+            }
+ catch (            IOException e) {
+              continue;
+            }
+            boolean changed=new ChangeFileEncodingAction().chosen(document,null,virtualFile,bytes,charset);
+            if (!changed)             continue;
+          }
         }
+        newMap.put(virtualFile,charset);
       }
     }
   }
-,"Reload Files",false,myProject);
+);
+  myMapping.clear();
+  myMapping.putAll(newMap);
+  final Set<VirtualFile> changed=new HashSet<VirtualFile>(oldMap.keySet());
+  for (  VirtualFile newFile : newMap.keySet()) {
+    if (Comparing.equal(oldMap.get(newFile),newMap.get(newFile)))     changed.remove(newFile);
+  }
+  Set<VirtualFile> added=new HashSet<VirtualFile>(newMap.keySet());
+  added.removeAll(oldMap.keySet());
+  Set<VirtualFile> removed=new HashSet<VirtualFile>(oldMap.keySet());
+  removed.removeAll(newMap.keySet());
+  changed.addAll(added);
+  changed.addAll(removed);
+  if (!changed.isEmpty()) {
+    final Processor<VirtualFile> reloadProcessor=createChangeCharsetProcessor();
+    startReloadWithProgress(new Runnable(){
+      @Override public void run(){
+        for (        VirtualFile changedFile : changed) {
+          final Charset newCharset=newMap.get(changedFile);
+          Charset oldCharset=oldMap.get(changedFile);
+          if (!Comparing.equal(newCharset,oldCharset)) {
+            reloadDir(changedFile,reloadProcessor);
+          }
+        }
+      }
+    }
+);
+  }
   myModificationCount++;
 }
