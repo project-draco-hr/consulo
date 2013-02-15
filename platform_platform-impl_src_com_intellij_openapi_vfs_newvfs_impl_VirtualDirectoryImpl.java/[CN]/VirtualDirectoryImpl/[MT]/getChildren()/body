@@ -1,26 +1,47 @@
 {
-  VirtualFileSystemEntry[] children=asArray();
-  if (children != null) {
-    return children;
+  VirtualFileSystemEntry[] children=myChildren;
+  NewVirtualFileSystem delegate=getFileSystem();
+  final boolean ignoreCase=!delegate.isCaseSensitive();
+  if (allChildrenLoaded()) {
+    assertConsistency(children,ignoreCase);
+    int sas=getSuspiciousArrayStart();
+    return sas == children.length ? children : Arrays.copyOf(children,sas);
   }
-  Pair<String[],int[]> pair=ourPersistence.listAll(this);
-  final int[] childrenIds=pair.second;
+  FSRecords.NameId[] childrenIds=ourPersistence.listAll(this);
+  VirtualFileSystemEntry[] result;
   if (childrenIds.length == 0) {
-    children=EMPTY_ARRAY;
+    result=EMPTY_ARRAY;
   }
  else {
-    children=new VirtualFileSystemEntry[childrenIds.length];
-    String[] names=pair.first;
-    final Map<String,VirtualFileSystemEntry> map=asMap();
-    for (int i=0; i < children.length; i++) {
-      final int childId=childrenIds[i];
-      final String name=names[i];
-      VirtualFileSystemEntry child=map != null ? map.get(name) : null;
-      children[i]=child != null && child != NULL_VIRTUAL_FILE ? child : createChild(name,childId);
+    Arrays.sort(childrenIds,new Comparator<FSRecords.NameId>(){
+      @Override public int compare(      FSRecords.NameId o1,      FSRecords.NameId o2){
+        String name1=o1.name;
+        String name2=o2.name;
+        return compareNames(name1,name2,ignoreCase);
+      }
     }
+);
+    result=new VirtualFileSystemEntry[childrenIds.length];
+    int delegateI=0;
+    int cachedI=0;
+    int cachedEnd=getSuspiciousArrayStart();
+    while (delegateI < childrenIds.length) {
+      FSRecords.NameId nameId=childrenIds[delegateI];
+      while (cachedI < cachedEnd && children[cachedI].compareNameTo(nameId.name,ignoreCase) < 0)       cachedI++;
+      VirtualFileSystemEntry resultFile;
+      if (cachedI < cachedEnd && children[cachedI].compareNameTo(nameId.name,ignoreCase) == 0) {
+        resultFile=children[cachedI++];
+      }
+ else {
+        resultFile=createChild(nameId.name,nameId.id,delegate);
+      }
+      result[delegateI++]=resultFile;
+    }
+    assertConsistency(result,ignoreCase);
   }
   if (getId() > 0) {
-    myChildren=children;
+    myChildren=result;
+    setChildrenLoaded();
   }
-  return children;
+  return result;
 }
