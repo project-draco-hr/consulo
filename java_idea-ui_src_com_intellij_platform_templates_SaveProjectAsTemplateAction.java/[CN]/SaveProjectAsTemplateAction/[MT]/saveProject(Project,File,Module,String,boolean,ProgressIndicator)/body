@@ -1,19 +1,5 @@
 {
-  final Map<String,String> parameters=new HashMap<String,String>();
-  if (replaceParameters) {
-    ApplicationManager.getApplication().runReadAction(new Runnable(){
-      public void run(){
-        ProjectTemplateParameterFactory[] extensions=Extensions.getExtensions(ProjectTemplateParameterFactory.EP_NAME);
-        for (        ProjectTemplateParameterFactory extension : extensions) {
-          String value=extension.detectParameterValue(project);
-          if (value != null) {
-            parameters.put(value,extension.getParameterId());
-          }
-        }
-      }
-    }
-);
-  }
+  final Map<String,String> parameters=computeParameters(project,replaceParameters);
   indicator.setText("Saving project...");
   UIUtil.invokeAndWaitIfNeeded(new Runnable(){
     @Override public void run(){
@@ -59,33 +45,26 @@
     }
     FileIndex index=moduleToSave == null ? ProjectRootManager.getInstance(project).getFileIndex() : ModuleRootManager.getInstance(moduleToSave).getFileIndex();
     final ZipOutputStream finalStream=stream;
-    final FileTemplate template=FileTemplateManager.getInstance().getDefaultTemplate(FileTemplateManager.FILE_HEADER_TEMPLATE_NAME);
-    final String templateText=template.getText();
-    final Pattern pattern=FileHeaderChecker.getTemplatePattern(template,project,new TIntObjectHashMap<String>());
     index.iterateContent(new ContentIterator(){
       @Override public boolean processFile(      final VirtualFile virtualFile){
         if (!virtualFile.isDirectory()) {
-          String name=virtualFile.getName();
-          indicator.setText2(name);
+          final String fileName=virtualFile.getName();
+          indicator.setText2(fileName);
           try {
             String relativePath=VfsUtilCore.getRelativePath(virtualFile,dir,'/');
             if (relativePath == null) {
               throw new RuntimeException("Can't find relative path for " + virtualFile);
             }
-            boolean system=".idea".equals(virtualFile.getParent().getName());
+            final boolean system=".idea".equals(virtualFile.getParent().getName());
             if (system) {
-              if (!name.equals("description.html") && !name.equals("misc.xml") && !name.equals("modules.xml")&& !name.equals("workspace.xml")) {
+              if (!fileName.equals("description.html") && !fileName.equals("misc.xml") && !fileName.equals("modules.xml")&& !fileName.equals("workspace.xml")) {
                 return true;
               }
             }
             ZipUtil.addFileToZip(finalStream,new File(virtualFile.getPath()),dir.getName() + "/" + relativePath,null,null,new ZipUtil.FileContentProcessor(){
-              @Override public InputStream getContent(              File file) throws IOException {
+              @Override public InputStream getContent(              final File file) throws IOException {
                 if (virtualFile.getFileType().isBinary())                 return STANDARD.getContent(file);
-                String s=VfsUtilCore.loadText(virtualFile);
-                String result=convertTemplates(s,pattern,templateText);
-                for (                Map.Entry<String,String> entry : parameters.entrySet()) {
-                  result=result.replace(entry.getKey(),"${" + entry.getValue() + "}");
-                }
+                String result=getEncodedContent(virtualFile,project,parameters);
                 return new ByteArrayInputStream(result.getBytes(TemplateModuleBuilder.UTF_8));
               }
             }
