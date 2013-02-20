@@ -1,0 +1,57 @@
+{
+  final IndexState originalState=myState;
+  IndexState state=originalState;
+  int parentId=getId(parent);
+  DirectoryInfo parentInfo=originalState.getInfo(parentId);
+  if (parentInfo != null) {
+    assertAncestor(parentInfo,parent,parentId);
+  }
+  String fileUrl=file.getUrl();
+  for (  Module eachModule : ModuleManager.getInstance(myProject).getModules()) {
+    for (    ContentEntry contentRoot : getContentEntries(eachModule)) {
+      if (parentInfo != null) {
+        VirtualFile contFile=contentRoot.getFile();
+        if (contFile != null && contFile.equals(parentInfo.getContentRoot()))         continue;
+      }
+      String contentRootUrl=contentRoot.getUrl();
+      if (FileUtil.startsWith(contentRootUrl,fileUrl)) {
+        String rel=FileUtil.getRelativePath(fileUrl,contentRootUrl,'/');
+        if (rel != null) {
+          VirtualFile f=file.findFileByRelativePath(rel);
+          if (f instanceof NewVirtualFile) {
+            if (state == originalState)             state=state.copy(null);
+            state.fillMapWithModuleContent(f,eachModule,f,null);
+          }
+        }
+      }
+    }
+  }
+  if (parentInfo == null)   return state;
+  Module module=parentInfo.getModule();
+  for (  DirectoryIndexExcludePolicy policy : myExcludePolicies) {
+    if (policy.isExcludeRoot(file))     return state;
+  }
+  if (state == originalState)   state=state.copy(null);
+  VirtualFile parentContentRoot=parentInfo.getContentRoot();
+  state.fillMapWithModuleContent(file,module,parentContentRoot,null);
+  String parentPackage=state.myDirToPackageName.get(parentId);
+  if (module != null) {
+    if (parentInfo.isInModuleSource()) {
+      String newDirPackageName=getPackageNameForSubdir(parentPackage,file.getName());
+      state.fillMapWithModuleSource(module,parentContentRoot,file,newDirPackageName,parentInfo.getSourceRoot(),parentInfo.isTestSource(),null);
+    }
+  }
+  if (parentInfo.hasLibraryClassRoot()) {
+    String newDirPackageName=getPackageNameForSubdir(parentPackage,file.getName());
+    state.fillMapWithLibraryClasses(file,newDirPackageName,parentInfo.getLibraryClassRoot(),null);
+  }
+  if (parentInfo.isInLibrarySource()) {
+    String newDirPackageName=getPackageNameForSubdir(parentPackage,file.getName());
+    state.fillMapWithLibrarySources(file,newDirPackageName,parentInfo.getSourceRoot(),null);
+  }
+  OrderEntry[] entries=parentInfo.getOrderEntries();
+  if (entries.length != 0) {
+    state.fillMapWithOrderEntries(file,entries,null,null,null,parentInfo,null);
+  }
+  return state;
+}
