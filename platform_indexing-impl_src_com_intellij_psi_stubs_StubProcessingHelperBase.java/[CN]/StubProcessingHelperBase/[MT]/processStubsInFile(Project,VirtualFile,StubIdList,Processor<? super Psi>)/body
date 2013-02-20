@@ -1,0 +1,64 @@
+{
+  StubTree stubTree=null;
+  final PsiFile _psifile=PsiManager.getInstance(project).findFile(file);
+  PsiFileWithStubSupport psiFile=null;
+  if (_psifile != null && !(_psifile instanceof PsiPlainTextFile)) {
+    if (_psifile instanceof PsiFileWithStubSupport) {
+      psiFile=(PsiFileWithStubSupport)_psifile;
+      stubTree=psiFile.getStubTree();
+      if (stubTree == null && psiFile instanceof PsiFileImpl) {
+        stubTree=((PsiFileImpl)psiFile).calcStubTree();
+      }
+    }
+  }
+  if (stubTree == null && psiFile == null) {
+    return true;
+  }
+  if (stubTree == null) {
+    ObjectStubTree objectStubTree=StubTreeLoader.getInstance().readFromVFile(project,file);
+    if (!(objectStubTree instanceof ObjectStubTree)) {
+      return true;
+    }
+    stubTree=(StubTree)objectStubTree;
+    final List<StubElement<?>> plained=stubTree.getPlainList();
+    for (int i=0, size=value.size(); i < size; i++) {
+      final StubElement<?> stub=plained.get(value.get(i));
+      final ASTNode tree=psiFile.findTreeForStub(stubTree,stub);
+      if (tree != null) {
+        if (tree.getElementType() == stubType(stub)) {
+          Psi psi=(Psi)tree.getPsi();
+          if (!processor.process(psi))           return false;
+        }
+ else {
+          String persistedStubTree=((PsiFileStubImpl)stubTree.getRoot()).printTree();
+          String stubTreeJustBuilt=((PsiFileStubImpl)((IStubFileElementType)((PsiFileImpl)psiFile).getContentElementType()).getBuilder().buildStubTree(psiFile)).printTree();
+          StringBuilder builder=new StringBuilder();
+          builder.append("Oops\n");
+          builder.append("Recorded stub:-----------------------------------\n");
+          builder.append(persistedStubTree);
+          builder.append("\nAST built stub: ------------------------------------\n");
+          builder.append(stubTreeJustBuilt);
+          builder.append("\n");
+          LOG.info(builder.toString());
+          onInternalError(file);
+        }
+      }
+    }
+  }
+ else {
+    final List<StubElement<?>> plained=stubTree.getPlainList();
+    for (int i=0, size=value.size(); i < size; i++) {
+      final int stubTreeIndex=value.get(i);
+      if (stubTreeIndex >= plained.size()) {
+        final VirtualFile virtualFile=psiFile.getVirtualFile();
+        StubTree stubTreeFromIndex=(StubTree)StubTreeLoader.getInstance().readFromVFile(project,file);
+        LOG.error(stubTreeAndIndexDoNotMatch(stubTree,psiFile,plained,virtualFile,stubTreeFromIndex));
+        onInternalError(file);
+        break;
+      }
+      Psi psi=(Psi)plained.get(stubTreeIndex).getPsi();
+      if (!processor.process(psi))       return false;
+    }
+  }
+  return true;
+}
