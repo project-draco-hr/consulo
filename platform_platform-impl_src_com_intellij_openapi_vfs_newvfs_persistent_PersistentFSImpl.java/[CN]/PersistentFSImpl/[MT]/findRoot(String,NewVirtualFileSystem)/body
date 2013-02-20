@@ -1,8 +1,9 @@
 {
-  final String rootUrl=fs.getProtocol() + "://" + basePath;
+  String rootUrl=fs.getProtocol() + "://" + VfsImplUtil.normalize(fs,basePath);
+  VirtualFileSystemEntry root;
   myRootsLock.readLock().lock();
   try {
-    final VirtualFileSystemEntry root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
+    root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
   }
   finally {
@@ -10,9 +11,11 @@
   }
   myRootsLock.writeLock().lock();
   try {
-    VirtualFileSystemEntry root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
+    root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
-    final int rootId=FSRecords.findRootRecord(rootUrl);
+    int rootId=FSRecords.findRootRecord(rootUrl);
+    root=myRootsById.get(rootId);
+    if (root != null)     return root;
     if (basePath.isEmpty()) {
       root=new VirtualDirectoryImpl("",null,fs,rootId,0){
         @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod") @Override @NotNull public VirtualFile[] getChildren(){
@@ -27,8 +30,12 @@
     }
  else     if (fs instanceof JarFileSystem) {
       String parentPath=basePath.substring(0,basePath.indexOf(JarFileSystem.JAR_SEPARATOR));
-      final VirtualFile parentLocalFile=LocalFileSystem.getInstance().findFileByPath(parentPath);
+      VirtualFile parentLocalFile=LocalFileSystem.getInstance().findFileByPath(parentPath);
       if (parentLocalFile == null)       return null;
+      root=myRoots.get(rootUrl);
+      if (root != null)       return root;
+      root=myRootsById.get(rootId);
+      if (root != null)       return root;
       root=new JarRoot(fs,rootId,parentLocalFile);
     }
  else {
@@ -49,14 +56,12 @@
     }
  else {
       myRoots.put(rootUrl,root);
-      myRootsById.put(root.getId(),root);
+      myRootsById.put(rootId,root);
+      if (rootId != root.getId())       throw new AssertionError();
     }
     return root;
   }
- catch (  IOException e) {
-    throw new RuntimeException(e);
-  }
- finally {
+  finally {
     myRootsLock.writeLock().unlock();
   }
 }

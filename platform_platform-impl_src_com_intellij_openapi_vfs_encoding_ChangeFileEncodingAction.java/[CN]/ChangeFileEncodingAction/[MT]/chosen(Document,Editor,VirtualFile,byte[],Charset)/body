@@ -1,0 +1,79 @@
+{
+  String text=document.getText();
+  EncodingUtil.Magic8 isSafeToConvert=EncodingUtil.isSafeToConvertTo(virtualFile,text,bytes,charset);
+  EncodingUtil.Magic8 isSafeToReload=EncodingUtil.isSafeToReloadIn(virtualFile,text,bytes,charset);
+  final Project project=ProjectLocator.getInstance().guessProjectForFile(virtualFile);
+  final Charset oldCharset=virtualFile.getCharset();
+  final Runnable undo;
+  final Runnable redo;
+  if (isSafeToConvert == EncodingUtil.Magic8.ABSOLUTELY && isSafeToReload == EncodingUtil.Magic8.ABSOLUTELY) {
+    EncodingManager.getInstance().setEncoding(virtualFile,charset);
+    undo=new Runnable(){
+      @Override public void run(){
+        EncodingManager.getInstance().setEncoding(virtualFile,oldCharset);
+      }
+    }
+;
+    redo=new Runnable(){
+      @Override public void run(){
+        EncodingManager.getInstance().setEncoding(virtualFile,charset);
+      }
+    }
+;
+  }
+ else {
+    IncompatibleEncodingDialog dialog=new IncompatibleEncodingDialog(document,virtualFile,bytes,charset,isSafeToReload,isSafeToConvert);
+    dialog.show();
+    if (dialog.getExitCode() == IncompatibleEncodingDialog.RELOAD_EXIT_CODE) {
+      undo=new Runnable(){
+        @Override public void run(){
+          EncodingUtil.reloadIn(virtualFile,oldCharset);
+        }
+      }
+;
+      redo=new Runnable(){
+        @Override public void run(){
+          EncodingUtil.reloadIn(virtualFile,charset);
+        }
+      }
+;
+    }
+ else     if (dialog.getExitCode() == IncompatibleEncodingDialog.CONVERT_EXIT_CODE) {
+      undo=new Runnable(){
+        @Override public void run(){
+          EncodingUtil.saveIn(document,editor,virtualFile,oldCharset);
+        }
+      }
+;
+      redo=new Runnable(){
+        @Override public void run(){
+          EncodingUtil.saveIn(document,editor,virtualFile,charset);
+        }
+      }
+;
+    }
+ else {
+      return false;
+    }
+  }
+  final UndoableAction action=new GlobalUndoableAction(virtualFile){
+    @Override public void undo(){
+      Application application=ApplicationManager.getApplication();
+      application.invokeLater(undo,ModalityState.NON_MODAL,(project == null ? application : project).getDisposed());
+    }
+    @Override public void redo(){
+      Application application=ApplicationManager.getApplication();
+      application.invokeLater(redo,ModalityState.NON_MODAL,(project == null ? application : project).getDisposed());
+    }
+  }
+;
+  redo.run();
+  CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+    @Override public void run(){
+      UndoManager undoManager=project == null ? UndoManager.getGlobalInstance() : UndoManager.getInstance(project);
+      undoManager.undoableActionPerformed(action);
+    }
+  }
+,"Change encoding for '" + virtualFile.getName() + "'",null,UndoConfirmationPolicy.REQUEST_CONFIRMATION);
+  return true;
+}
