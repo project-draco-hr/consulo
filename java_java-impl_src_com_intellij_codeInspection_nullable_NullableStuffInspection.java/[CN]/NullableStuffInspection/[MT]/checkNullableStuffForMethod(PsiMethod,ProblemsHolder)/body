@@ -17,7 +17,8 @@
       reported_not_annotated_method_overrides_notnull=true;
       final String defaultNotNull=nullableManager.getDefaultNotNull();
       final String[] annotationsToRemove=ArrayUtil.toStringArray(nullableManager.getNullables());
-      holder.registerProblem(method.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.method.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,createAnnotateMethodFix(defaultNotNull,annotationsToRemove));
+      final LocalQuickFix fix=AnnotationUtil.isAnnotatingApplicable(method,defaultNotNull) ? createAnnotateMethodFix(defaultNotNull,annotationsToRemove) : createChangeDefaultNotNullFix(nullableManager,superMethod);
+      holder.registerProblem(method.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.method.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,fix);
     }
     if (REPORT_NOTNULL_PARAMETER_OVERRIDES_NULLABLE || REPORT_NOT_ANNOTATED_METHOD_OVERRIDES_NOTNULL) {
       PsiParameter[] superParameters=superMethod.getParameterList().getParameters();
@@ -34,7 +35,8 @@
         if (!reported_not_annotated_parameter_overrides_notnull[i] && REPORT_NOT_ANNOTATED_METHOD_OVERRIDES_NOTNULL) {
           if (!AnnotationUtil.isAnnotated(parameter,nullableManager.getAllAnnotations(),false,false) && nullableManager.isNotNull(superParameter,false)) {
             reported_not_annotated_parameter_overrides_notnull[i]=true;
-            holder.registerProblem(parameter.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.parameter.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,new AddNotNullAnnotationFix(parameter));
+            final LocalQuickFix fix=AnnotationUtil.isAnnotatingApplicable(parameter,nullableManager.getDefaultNotNull()) ? new AddNotNullAnnotationFix(parameter) : createChangeDefaultNotNullFix(nullableManager,superParameter);
+            holder.registerProblem(parameter.getNameIdentifier(),InspectionsBundle.message("inspection.nullable.problems.parameter.overrides.NotNull"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,fix);
           }
         }
       }
@@ -51,16 +53,25 @@
     }
     if (hasAnnotatedParameter || annotated.isDeclaredNotNull) {
       PsiManager manager=method.getManager();
+      final String defaultNotNull=nullableManager.getDefaultNotNull();
+      final boolean superMethodApplicable=AnnotationUtil.isAnnotatingApplicable(method,defaultNotNull);
       PsiMethod[] overridings=OverridingMethodsSearch.search(method,GlobalSearchScope.allScope(manager.getProject()),true).toArray(PsiMethod.EMPTY_ARRAY);
       boolean methodQuickFixSuggested=false;
       for (      PsiMethod overriding : overridings) {
         if (!manager.isInProject(overriding))         continue;
+        final boolean applicable=AnnotationUtil.isAnnotatingApplicable(overriding,defaultNotNull);
         if (!methodQuickFixSuggested && annotated.isDeclaredNotNull && !nullableManager.isNotNull(overriding,false)&& (nullableManager.isNullable(overriding,false) || !nullableManager.isNullable(overriding,true))) {
           method.getNameIdentifier();
           PsiAnnotation annotation=AnnotationUtil.findAnnotation(method,nullableManager.getNotNulls());
-          final String defaultNotNull=nullableManager.getDefaultNotNull();
           final String[] annotationsToRemove=ArrayUtil.toStringArray(nullableManager.getNullables());
-          holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.methods.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,new MyAnnotateMethodFix(defaultNotNull,annotationsToRemove));
+          final LocalQuickFix fix;
+          if (applicable) {
+            fix=new MyAnnotateMethodFix(defaultNotNull,annotationsToRemove);
+          }
+ else {
+            fix=superMethodApplicable ? null : createChangeDefaultNotNullFix(nullableManager,method);
+          }
+          holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.methods.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,fix);
           methodQuickFixSuggested=true;
         }
         if (hasAnnotatedParameter) {
@@ -71,7 +82,7 @@
             if (parameterAnnotated[i] && !nullableManager.isNotNull(parameter,false) && !nullableManager.isNullable(parameter,false)) {
               parameters[i].getNameIdentifier();
               PsiAnnotation annotation=AnnotationUtil.findAnnotation(parameters[i],nullableManager.getNotNulls());
-              holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.method.parameters.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,new AnnotateOverriddenMethodParameterFix(nullableManager.getDefaultNotNull(),nullableManager.getDefaultNullable()));
+              holder.registerProblem(annotation,InspectionsBundle.message("nullable.stuff.problems.overridden.method.parameters.are.not.annotated"),ProblemHighlightType.GENERIC_ERROR_OR_WARNING,!applicable ? createChangeDefaultNotNullFix(nullableManager,parameters[i]) : new AnnotateOverriddenMethodParameterFix(defaultNotNull,nullableManager.getDefaultNullable()));
               parameterQuickFixSuggested[i]=true;
             }
           }
