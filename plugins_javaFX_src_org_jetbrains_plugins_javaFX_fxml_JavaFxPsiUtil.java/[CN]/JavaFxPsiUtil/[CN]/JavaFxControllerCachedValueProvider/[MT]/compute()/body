@@ -1,0 +1,42 @@
+{
+  final Ref<PsiClass> injectedController=new Ref<PsiClass>();
+  final Ref<PsiFile> dep=new Ref<PsiFile>();
+  final PsiClass fxmlLoader=JavaPsiFacade.getInstance(myProject).findClass(JavaFxCommonClassNames.JAVAFX_FXML_FXMLLOADER,GlobalSearchScope.allScope(myProject));
+  if (fxmlLoader != null) {
+    final PsiMethod[] injectControllerMethods=fxmlLoader.findMethodsByName("setController",false);
+    if (injectControllerMethods.length == 1) {
+      final JavaFxRetrieveControllerProcessor processor=new JavaFxRetrieveControllerProcessor(){
+        @Override protected boolean isResolveToSetter(        PsiMethodCallExpression methodCallExpression){
+          return methodCallExpression.resolveMethod() == injectControllerMethods[0];
+        }
+      }
+;
+      ReferencesSearch.search(myContainingFile).forEach(new Processor<PsiReference>(){
+        @Override public boolean process(        PsiReference reference){
+          final PsiElement element=reference.getElement();
+          if (element instanceof PsiLiteralExpression) {
+            final PsiNewExpression expression=PsiTreeUtil.getParentOfType(element,PsiNewExpression.class);
+            if (expression != null) {
+              final PsiType type=expression.getType();
+              if (type != null && type.equalsToText(JavaFxCommonClassNames.JAVAFX_FXML_FXMLLOADER)) {
+                final PsiElement parent=expression.getParent();
+                if (parent instanceof PsiVariable) {
+                  ReferencesSearch.search(parent).forEach(processor);
+                  final PsiClass controller=processor.getInjectedController();
+                  if (controller != null) {
+                    injectedController.set(controller);
+                    dep.set(processor.getContainingFile());
+                    return false;
+                  }
+                }
+              }
+            }
+          }
+          return true;
+        }
+      }
+);
+    }
+  }
+  return new Result<PsiClass>(injectedController.get(),dep.get() != null ? dep.get() : PsiModificationTracker.MODIFICATION_COUNT);
+}
