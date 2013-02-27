@@ -62,9 +62,14 @@
     }
   }
  else   if (parent instanceof PsiLambdaExpression) {
-    expectedType=LambdaUtil.getFunctionalInterfaceReturnType(((PsiLambdaExpression)parent).getFunctionalInterfaceType());
+    expectedType=ourGraphGuard.doPreventingRecursion(methodCall,true,new Computable<PsiType>(){
+      @Override public PsiType compute(){
+        return LambdaUtil.getFunctionalInterfaceReturnType(((PsiLambdaExpression)parent).getFunctionalInterfaceType());
+      }
+    }
+);
     if (expectedType == null) {
-      return getFailedInferenceConstraint(typeParameter);
+      return null;
     }
   }
  else   if (parent instanceof PsiTypeCastExpression) {
@@ -72,7 +77,15 @@
   }
  else   if (parent instanceof PsiConditionalExpression) {
     if (PsiUtil.isLanguageLevel8OrHigher(parent)) {
-      return inferMethodTypeParameterFromParent(parent.getParent(),(PsiExpression)parent,typeParameter,substitutor,policy);
+      try {
+        final Pair<PsiType,ConstraintType> pair=inferFromConditionalExpression(parent,methodCall,typeParameter,substitutor,policy);
+        if (pair != null) {
+          return pair;
+        }
+      }
+  finally {
+        GraphInferencePolicy.forget(parent);
+      }
     }
   }
   final PsiManager manager=typeParameter.getManager();
@@ -113,6 +126,10 @@
                 return getFailedInferenceConstraint(typeParameter);
               }
               return null;
+            }
+            final Pair<PsiType,ConstraintType> inferredExceptionTypeConstraint=inferExceptionConstrains(typeParameter,expression,method,resolveResult.getSubstitutor());
+            if (inferredExceptionTypeConstraint != null) {
+              return inferredExceptionTypeConstraint;
             }
           }
         }
