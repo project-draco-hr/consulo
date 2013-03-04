@@ -1,0 +1,46 @@
+{
+  File base=firstFile.isDirectory() ? firstFile : firstFile.getParentFile();
+  base=Util.correctUpToExistingParent(base);
+  listener.baseDirectory(base);
+  boolean certificateAttempt=false;
+  File configDir=null;
+  while (true) {
+    final SvnLineCommand command=runCommand(exePath,commandName,listener,base,configDir,parameters);
+    if (command.myErr.length() > 0) {
+      final String errText=command.myErr.toString().trim();
+      if ((errText.startsWith(AUTHENTICATION_REALM) || errText.startsWith(CERTIFICATE_ERROR)) && authenticationCallback != null) {
+        cleanup(exePath,commandName,base);
+        if (errText.startsWith(CERTIFICATE_ERROR)) {
+          if (!certificateAttempt && authenticationCallback.acceptSSLServerCertificate(base)) {
+            certificateAttempt=true;
+            if (authenticationCallback.getSpecialConfigDir() != null) {
+              configDir=authenticationCallback.getSpecialConfigDir();
+            }
+            continue;
+          }
+          throw new SvnBindException("Server SSL certificate rejected");
+        }
+ else {
+          final int idx=errText.indexOf('\n');
+          if (idx == -1) {
+            throw new SvnBindException("Can not detect authentication realm name: " + errText);
+          }
+          final String realm=errText.substring(AUTHENTICATION_REALM.length(),idx).trim();
+          if (authenticationCallback.authenticateFor(realm,base,configDir != null)) {
+            if (authenticationCallback.getSpecialConfigDir() != null) {
+              configDir=authenticationCallback.getSpecialConfigDir();
+            }
+            continue;
+          }
+          throw new SvnBindException("Authentication canceled for realm: " + realm);
+        }
+      }
+      throw new SvnBindException(errText);
+    }
+    final Integer exitCode=command.myExitCode.get();
+    if (exitCode != 0) {
+      throw new SvnBindException("Svn process exited with error code: " + exitCode);
+    }
+    return;
+  }
+}
