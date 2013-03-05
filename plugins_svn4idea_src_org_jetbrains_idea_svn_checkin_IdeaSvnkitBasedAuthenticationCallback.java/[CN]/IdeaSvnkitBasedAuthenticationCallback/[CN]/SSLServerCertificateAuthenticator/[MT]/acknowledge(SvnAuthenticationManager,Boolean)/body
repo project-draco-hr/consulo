@@ -1,4 +1,18 @@
 {
+  if (myCertificate == null) {
+    String stored=(String)manager.getRuntimeAuthStorage().getData("svn.ssl.server",myRealm);
+    CertificateFactory cf=null;
+    try {
+      cf=CertificateFactory.getInstance("X509");
+      final byte[] buffer=new byte[stored.length()];
+      SVNBase64.base64ToByteArray(new StringBuffer(stored),buffer);
+      myCertificate=(X509Certificate)cf.generateCertificate(new ByteArrayInputStream(buffer));
+    }
+ catch (    CertificateException e) {
+      throw new SVNException(SVNErrorMessage.create(SVNErrorCode.AUTHN_CREDS_UNAVAILABLE,e));
+    }
+    myCertificateRealm=myRealm;
+  }
   if (myTempDirectory != null && myCertificate != null) {
     if (!(myCertificate instanceof X509Certificate)) {
       throw new SVNException(SVNErrorMessage.create(SVNErrorCode.IO_ERROR,"Can not store server certificate: " + myCertificate));
@@ -13,13 +27,15 @@
     }
     int failures=SVNSSLUtil.getServerCertificateFailures(x509Certificate,myUrl.getHost());
     storeServerCertificate(myTempDirectory,myCertificateRealm,stored,failures);
-    try {
-      final String kind=myAuthentication instanceof SVNPasswordAuthentication ? ISVNAuthenticationManager.PASSWORD : ISVNAuthenticationManager.SSL;
-      final String realm=myCredentialsRealm == null ? myCertificateRealm : myCredentialsRealm;
-      manager.acknowledgeAuthentication(true,kind,realm,null,myAuthentication,myUrl);
-    }
- catch (    SvnAuthenticationManager.CredentialsSavedException e) {
-      return e.isSuccess();
+    if (myAuthentication != null) {
+      try {
+        final String kind=myAuthentication instanceof SVNPasswordAuthentication ? ISVNAuthenticationManager.PASSWORD : ISVNAuthenticationManager.SSL;
+        final String realm=myCredentialsRealm == null ? myCertificateRealm : myCredentialsRealm;
+        manager.acknowledgeAuthentication(true,kind,realm,null,myAuthentication,myUrl);
+      }
+ catch (      SvnAuthenticationManager.CredentialsSavedException e) {
+        return e.isSuccess();
+      }
     }
   }
   return true;
