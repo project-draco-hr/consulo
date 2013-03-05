@@ -1,0 +1,87 @@
+{
+  super(project,"JavaDebugger",sessionName,debuggerSession.getSearchScope());
+  myDebuggerSession=debuggerSession;
+  myDebugUIEnvironment=environment;
+  final DefaultActionGroup focus=new DefaultActionGroup();
+  focus.add(ActionManager.getInstance().getAction("Debugger.FocusOnBreakpoint"));
+  myUi.getOptions().setAdditionalFocusActions(focus);
+  final DebuggerSettings debuggerSettings=DebuggerSettings.getInstance();
+  if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    getContextManager().addListener(new DebuggerContextListener(){
+      public void changeEvent(      DebuggerContextImpl newContext,      int event){
+switch (event) {
+case DebuggerSession.EVENT_DETACHED:
+          myUi.updateActionsNow();
+        if (debuggerSettings.HIDE_DEBUGGER_ON_PROCESS_TERMINATION) {
+          try {
+            ExecutionManager.getInstance(getProject()).getContentManager().hideRunContent(DefaultDebugExecutor.getDebugExecutorInstance(),myRunContentDescriptor);
+          }
+ catch (          NullPointerException e) {
+            LOG.debug(e);
+          }
+        }
+      break;
+  }
+}
+}
+);
+}
+DefaultActionGroup topToolbar=new DefaultActionGroup();
+ActionManager actionManager=ActionManager.getInstance();
+topToolbar.addAll(getCustomizedActionGroup(XDebuggerActions.TOOL_WINDOW_TOP_TOOLBAR_GROUP));
+topToolbar.add(actionManager.getAction(DebuggerActions.POP_FRAME),new Constraints(Anchor.AFTER,XDebuggerActions.STEP_OUT));
+topToolbar.add(Separator.getInstance(),new Constraints(Anchor.BEFORE,DebuggerActions.POP_FRAME));
+topToolbar.add(Separator.getInstance(),new Constraints(Anchor.AFTER,DebuggerActions.POP_FRAME));
+myUi.getOptions().setTopToolbar(topToolbar,ActionPlaces.DEBUGGER_TOOLBAR);
+myWatchPanel=new MainWatchPanel(getProject(),getContextManager());
+myFramesPanel=new FramesPanel(getProject(),getContextManager());
+final AlertIcon breakpointAlert=new AlertIcon(AllIcons.Debugger.BreakpointAlert);
+Content watches=myUi.createContent(DebuggerContentInfo.WATCHES_CONTENT,myWatchPanel,XDebuggerBundle.message("debugger.session.tab.watches.title"),AllIcons.Debugger.Watches,null);
+watches.setCloseable(false);
+watches.setAlertIcon(breakpointAlert);
+myUi.addContent(watches,0,PlaceInGrid.right,false);
+Content framesContent=myUi.createContent(DebuggerContentInfo.FRAME_CONTENT,myFramesPanel,XDebuggerBundle.message("debugger.session.tab.frames.title"),AllIcons.Debugger.Frame,myFramesPanel.getFramesList());
+framesContent.setCloseable(false);
+framesContent.setAlertIcon(breakpointAlert);
+myUi.addContent(framesContent,0,PlaceInGrid.left,false);
+myVariablesPanel=new VariablesPanel(getProject(),myStateManager,this);
+myVariablesPanel.getFrameTree().setAutoVariablesMode(debuggerSettings.AUTO_VARIABLES_MODE);
+Content vars=myUi.createContent(DebuggerContentInfo.VARIABLES_CONTENT,myVariablesPanel,XDebuggerBundle.message("debugger.session.tab.variables.title"),AllIcons.Debugger.Value,null);
+vars.setCloseable(false);
+vars.setAlertIcon(breakpointAlert);
+myUi.addContent(vars,0,PlaceInGrid.center,false);
+myThreadsPanel=new ThreadsPanel(project,getContextManager());
+Content threadsContent=myUi.createContent(DebuggerContentInfo.THREADS_CONTENT,myThreadsPanel,XDebuggerBundle.message("debugger.session.tab.threads.title"),AllIcons.Debugger.Threads,null);
+threadsContent.setCloseable(false);
+myUi.addContent(threadsContent,0,PlaceInGrid.left,true);
+for (Content each : myUi.getContents()) {
+updateStatus(each);
+}
+myUi.addListener(new ContentManagerAdapter(){
+public void selectionChanged(ContentManagerEvent event){
+updateStatus(event.getContent());
+}
+}
+,this);
+debuggerSession.getContextManager().addListener(new DebuggerContextListener(){
+public void changeEvent(DebuggerContextImpl newContext,int event){
+if (!myUi.isDisposed()) {
+  attractFramesOnPause(event);
+  myStateManager.fireStateChanged(newContext,event);
+  SwingUtilities.invokeLater(new Runnable(){
+    @Override public void run(){
+      if (!myUi.isDisposed()) {
+        myUi.updateActionsNow();
+      }
+    }
+  }
+);
+}
+}
+}
+);
+ExecutionResult executionResult=debuggerSession.getProcess().getExecutionResult();
+myConsole=executionResult.getExecutionConsole();
+myRunContentDescriptor=new RunContentDescriptor(myConsole,executionResult.getProcessHandler(),myUi.getComponent(),getSessionName(),environment.getIcon());
+initUI(executionResult);
+}
