@@ -1,0 +1,45 @@
+{
+  final SvnLineCommand command=new SvnLineCommand(base,commandName,exePath,configDir);
+  command.addParameters(parameters);
+  final AtomicReference<Throwable> exceptionRef=new AtomicReference<Throwable>();
+  command.addListener(new LineProcessEventListener(){
+    @Override public void onLineAvailable(    String line,    Key outputType){
+      if (SvnCommand.LOG.isDebugEnabled()) {
+        SvnCommand.LOG.debug("==> " + line);
+      }
+      if (ApplicationManager.getApplication().isUnitTestMode()) {
+        System.out.println("==> " + line);
+      }
+      listener.onLineAvailable(line,outputType);
+      if (listener.isCanceled()) {
+        command.destroyProcess();
+        return;
+      }
+      if (ProcessOutputTypes.STDERR.equals(outputType)) {
+        if (command.myErr.length() > 0) {
+          command.myErr.append('\n');
+        }
+        command.myErr.append(line);
+        if (line.trim().startsWith(AUTHENTICATION_REALM) || line.trim().startsWith(CERTIFICATE_ERROR)) {
+          command.destroyProcess();
+          return;
+        }
+      }
+    }
+    @Override public void processTerminated(    int exitCode){
+      listener.processTerminated(exitCode);
+      command.myExitCode.set(exitCode);
+    }
+    @Override public void startFailed(    Throwable exception){
+      listener.startFailed(exception);
+      exceptionRef.set(exception);
+    }
+  }
+);
+  command.start();
+  command.waitFor();
+  if (exceptionRef.get() != null) {
+    throw new SvnBindException(exceptionRef.get());
+  }
+  return command;
+}
