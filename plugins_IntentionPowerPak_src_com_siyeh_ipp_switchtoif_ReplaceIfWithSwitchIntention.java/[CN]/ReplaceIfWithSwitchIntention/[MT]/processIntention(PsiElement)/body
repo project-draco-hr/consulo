@@ -1,2 +1,91 @@
 {
+  final PsiJavaToken switchToken=(PsiJavaToken)element;
+  PsiIfStatement ifStatement=(PsiIfStatement)switchToken.getParent();
+  if (ifStatement == null) {
+    return;
+  }
+  boolean breaksNeedRelabeled=false;
+  PsiStatement breakTarget=null;
+  String labelString="";
+  if (ControlFlowUtils.statementContainsNakedBreak(ifStatement)) {
+    breakTarget=PsiTreeUtil.getParentOfType(ifStatement,PsiLoopStatement.class,PsiSwitchStatement.class);
+    if (breakTarget != null) {
+      final PsiElement parent=breakTarget.getParent();
+      if (parent instanceof PsiLabeledStatement) {
+        final PsiLabeledStatement labeledStatement=(PsiLabeledStatement)parent;
+        labelString=labeledStatement.getLabelIdentifier().getText();
+        breakTarget=labeledStatement;
+        breaksNeedRelabeled=true;
+      }
+ else {
+        labelString=SwitchUtils.findUniqueLabelName(ifStatement,"label");
+        breaksNeedRelabeled=true;
+      }
+    }
+  }
+  final PsiIfStatement statementToReplace=ifStatement;
+  final PsiExpression switchExpression=SwitchUtils.getSwitchExpression(ifStatement);
+  if (switchExpression == null) {
+    return;
+  }
+  final List<IfStatementBranch> branches=new ArrayList<IfStatementBranch>(20);
+  while (true) {
+    final PsiExpression condition=ifStatement.getCondition();
+    final PsiStatement thenBranch=ifStatement.getThenBranch();
+    final IfStatementBranch ifBranch=new IfStatementBranch(thenBranch,false);
+    extractCaseExpressions(condition,switchExpression,ifBranch);
+    if (!branches.isEmpty()) {
+      extractIfComments(ifStatement,ifBranch);
+    }
+    extractStatementComments(thenBranch,ifBranch);
+    branches.add(ifBranch);
+    final PsiStatement elseBranch=ifStatement.getElseBranch();
+    if (elseBranch instanceof PsiIfStatement) {
+      ifStatement=(PsiIfStatement)elseBranch;
+    }
+ else     if (elseBranch == null) {
+      break;
+    }
+ else {
+      final IfStatementBranch elseIfBranch=new IfStatementBranch(elseBranch,true);
+      final PsiKeyword elseKeyword=ifStatement.getElseElement();
+      extractIfComments(elseKeyword,elseIfBranch);
+      extractStatementComments(elseBranch,elseIfBranch);
+      branches.add(elseIfBranch);
+      break;
+    }
+  }
+  @NonNls final StringBuilder switchStatementText=new StringBuilder();
+  switchStatementText.append("switch(").append(switchExpression.getText()).append("){");
+  final PsiType type=switchExpression.getType();
+  final boolean castToInt=type != null && type.equalsToText(CommonClassNames.JAVA_LANG_INTEGER);
+  for (  IfStatementBranch branch : branches) {
+    boolean hasConflicts=false;
+    for (    IfStatementBranch testBranch : branches) {
+      if (branch == testBranch) {
+        continue;
+      }
+      if (branch.topLevelDeclarationsConflictWith(testBranch)) {
+        hasConflicts=true;
+      }
+    }
+    dumpBranch(branch,castToInt,hasConflicts,breaksNeedRelabeled,labelString,switchStatementText);
+  }
+  switchStatementText.append('}');
+  final JavaPsiFacade psiFacade=JavaPsiFacade.getInstance(element.getProject());
+  final PsiElementFactory factory=psiFacade.getElementFactory();
+  if (breaksNeedRelabeled) {
+    final StringBuilder out=new StringBuilder();
+    if (!(breakTarget instanceof PsiLabeledStatement)) {
+      out.append(labelString).append(':');
+    }
+    termReplace(breakTarget,statementToReplace,switchStatementText,out);
+    final String newStatementText=out.toString();
+    final PsiStatement newStatement=factory.createStatementFromText(newStatementText,element);
+    breakTarget.replace(newStatement);
+  }
+ else {
+    final PsiStatement newStatement=factory.createStatementFromText(switchStatementText.toString(),element);
+    statementToReplace.replace(newStatement);
+  }
 }
