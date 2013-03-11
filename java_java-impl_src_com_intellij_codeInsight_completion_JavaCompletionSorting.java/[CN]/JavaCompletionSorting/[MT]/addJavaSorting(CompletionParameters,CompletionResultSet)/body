@@ -1,22 +1,15 @@
 {
-  String prefix=result.getPrefixMatcher().getPrefix();
   final PsiElement position=parameters.getPosition();
   final ExpectedTypeInfo[] expectedTypes=PsiJavaPatterns.psiElement().beforeLeaf(PsiJavaPatterns.psiElement().withText(".")).accepts(position) ? ExpectedTypeInfo.EMPTY_ARRAY : JavaSmartCompletionContributor.getExpectedTypes(parameters);
   final CompletionType type=parameters.getCompletionType();
   final boolean smart=type == CompletionType.SMART;
   final boolean afterNew=JavaSmartCompletionContributor.AFTER_NEW.accepts(position);
-  List<LookupElementWeigher> afterPriority=new ArrayList<LookupElementWeigher>();
-  if (smart) {
-    afterPriority.add(new PreferDefaultTypeWeigher(expectedTypes,parameters));
-  }
-  ContainerUtil.addIfNotNull(afterPriority,recursion(parameters,expectedTypes));
-  afterPriority.add(new PreferSimilarlyEnding(expectedTypes,prefix));
   List<LookupElementWeigher> afterProximity=new ArrayList<LookupElementWeigher>();
   afterProximity.add(new PreferContainingSameWords(expectedTypes));
   if (smart) {
     afterProximity.add(new PreferFieldsAndGetters());
   }
-  afterProximity.add(new PreferShorter(expectedTypes,prefix));
+  afterProximity.add(new PreferShorter(expectedTypes));
   CompletionSorter sorter=CompletionSorter.defaultSorter(parameters,result.getPrefixMatcher());
   if (!smart && afterNew) {
     sorter=sorter.weighBefore("liftShorter",new PreferExpected(true,expectedTypes));
@@ -24,16 +17,18 @@
  else {
     sorter=((CompletionSorterImpl)sorter).withClassifier("liftShorterClasses",true,new LiftShorterClasses(position));
   }
+  if (smart) {
+    sorter=sorter.weighAfter("priority",new PreferDefaultTypeWeigher(expectedTypes,parameters));
+  }
   List<LookupElementWeigher> afterPrefix=ContainerUtil.newArrayList();
   if (!smart) {
     ContainerUtil.addIfNotNull(afterPrefix,preferStatics(position,expectedTypes));
   }
+  ContainerUtil.addIfNotNull(afterPrefix,recursion(parameters,expectedTypes));
   if (!smart && !afterNew) {
     afterPrefix.add(new PreferExpected(false,expectedTypes));
   }
-  afterPrefix.add(new PreferByKindWeigher(type,position));
-  Collections.addAll(afterPrefix,new PreferNonGeneric(),new PreferAccessible(position),new PreferSimple(),new PreferEnumConstants(parameters));
-  sorter=sorter.weighAfter("priority",afterPriority.toArray(new LookupElementWeigher[afterPriority.size()]));
+  Collections.addAll(afterPrefix,new PreferByKindWeigher(type,position),new PreferSimilarlyEnding(expectedTypes),new PreferNonGeneric(),new PreferAccessible(position),new PreferSimple(),new PreferEnumConstants(parameters));
   sorter=sorter.weighAfter("prefix",afterPrefix.toArray(new LookupElementWeigher[afterPrefix.size()]));
   sorter=sorter.weighAfter("proximity",afterProximity.toArray(new LookupElementWeigher[afterProximity.size()]));
   return result.withRelevanceSorter(sorter);
