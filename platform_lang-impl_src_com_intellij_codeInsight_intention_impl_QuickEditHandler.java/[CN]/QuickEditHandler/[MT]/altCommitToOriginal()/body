@@ -1,0 +1,36 @@
+{
+  final PsiFile origPsiFile=PsiDocumentManager.getInstance(myProject).getPsiFile(myOrigDocument);
+  String newText=myNewDocument.getText();
+  LinkedHashMap<String,String> replacementMap=new LinkedHashMap<String,String>();
+  for (  RangeMarker o : ContainerUtil.reverse(((DocumentEx)myNewDocument).getGuardedBlocks())) {
+    String replacement=o.getUserData(REPLACEMENT_KEY);
+    String tempText="REPLACE" + Long.toHexString(StringHash.calc(replacement));
+    newText=newText.substring(0,o.getStartOffset()) + tempText + newText.substring(o.getEndOffset());
+    replacementMap.put(tempText,replacement);
+  }
+  myEditor.getCaretModel().moveToOffset(myAltFullRange.getStartOffset());
+  for (  CopyPastePreProcessor preProcessor : Extensions.getExtensions(CopyPastePreProcessor.EP_NAME)) {
+    newText=preProcessor.preprocessOnPaste(myProject,origPsiFile,myEditor,newText,null);
+  }
+  myOrigDocument.replaceString(myAltFullRange.getStartOffset(),myAltFullRange.getEndOffset(),newText);
+  for (  String tempText : replacementMap.keySet()) {
+    int idx=CharArrayUtil.indexOf(myOrigDocument.getCharsSequence(),tempText,myAltFullRange.getStartOffset(),myAltFullRange.getEndOffset());
+    myOrigDocument.replaceString(idx,idx + tempText.length(),replacementMap.get(tempText));
+  }
+  fixDocumentQuotes(myOrigDocument,myAltFullRange.getStartOffset() - 1);
+  fixDocumentQuotes(myOrigDocument,myAltFullRange.getEndOffset());
+  PsiDocumentManager.getInstance(myProject).commitDocument(myOrigDocument);
+  Runnable task=new Runnable(){
+    @Override public void run(){
+      try {
+        CodeStyleManager.getInstance(myProject).reformatRange(origPsiFile,myAltFullRange.getStartOffset(),myAltFullRange.getEndOffset(),true);
+      }
+ catch (      IncorrectOperationException e) {
+      }
+    }
+  }
+;
+  DocumentUtil.executeInBulk(myOrigDocument,true,task);
+  myEditor.getCaretModel().moveToOffset(myAltFullRange.getStartOffset());
+  myEditor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
+}

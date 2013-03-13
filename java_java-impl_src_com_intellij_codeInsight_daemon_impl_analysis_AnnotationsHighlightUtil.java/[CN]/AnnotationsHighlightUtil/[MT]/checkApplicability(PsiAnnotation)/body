@@ -1,26 +1,56 @@
 {
-  PsiAnnotationOwner owner=annotation.getOwner();
-  if (owner instanceof PsiModifierList || owner instanceof PsiTypeElement || owner instanceof PsiTypeParameter) {
-    PsiJavaCodeReferenceElement nameRef=annotation.getNameReferenceElement();
-    if (nameRef == null) {
-      return null;
-    }
-    PsiElement member=owner instanceof PsiModifierList ? ((PsiElement)owner).getParent() : (PsiElement)owner;
-    String[] elementTypeFields=PsiAnnotationImpl.getApplicableElementTypeFields(member);
-    if (elementTypeFields == null || PsiAnnotationImpl.isAnnotationApplicableTo(annotation,false,elementTypeFields)) {
-      return null;
-    }
-    String target=JavaErrorMessages.message("annotation.target." + elementTypeFields[0]);
-    String description=JavaErrorMessages.message("annotation.not.applicable",nameRef.getText(),target);
-    HighlightInfo highlightInfo=HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(nameRef).descriptionAndTooltip(description).create();
-    QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteNotApplicableAnnotationAction(annotation));
-    return highlightInfo;
+  if (ANY_ANNOTATION_ALLOWED.accepts(annotation)) {
+    return null;
   }
-  if (!ANNOTATION_ALLOWED.accepts(annotation)) {
+  PsiJavaCodeReferenceElement nameRef=annotation.getNameReferenceElement();
+  if (nameRef == null)   return null;
+  PsiElement annotationType=nameRef.resolve();
+  if (!(annotationType instanceof PsiClass))   return null;
+  PsiAnnotationOwner owner=annotation.getOwner();
+  PsiAnnotation.TargetType[] targets=PsiImplUtil.getApplicableTargets(owner);
+  if (owner == null || targets == null) {
     String message=JavaErrorMessages.message("annotation.not.allowed.here");
-    HighlightInfo highlightInfo=HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(annotation).descriptionAndTooltip(message).create();
-    QuickFixAction.registerQuickFixAction(highlightInfo,new DeleteNotApplicableAnnotationAction(annotation));
-    return highlightInfo;
+    return annotationError(annotation,message);
+  }
+  if (!(owner instanceof PsiModifierList)) {
+    HighlightInfo info=HighlightUtil.checkTypeAnnotationFeature(annotation);
+    if (info != null)     return info;
+  }
+  PsiAnnotation.TargetType applicable=PsiImplUtil.findApplicableTarget((PsiClass)annotationType,targets);
+  if (applicable == null) {
+    String target=JavaErrorMessages.message("annotation.target." + targets[0]);
+    String message=JavaErrorMessages.message("annotation.not.applicable",nameRef.getText(),target);
+    return annotationError(annotation,message);
+  }
+  if (applicable == PsiAnnotation.TargetType.TYPE_USE) {
+    if (owner instanceof PsiClassReferenceType) {
+      PsiJavaCodeReferenceElement ref=((PsiClassReferenceType)owner).getReference();
+      HighlightInfo info=checkReferenceTarget(annotation,ref);
+      if (info != null)       return info;
+    }
+ else     if (owner instanceof PsiModifierList) {
+      PsiElement nextElement=PsiTreeUtil.skipSiblingsForward((PsiModifierList)owner,PsiComment.class,PsiWhiteSpace.class,PsiTypeParameterList.class);
+      if (nextElement instanceof PsiTypeElement) {
+        PsiTypeElement typeElement=(PsiTypeElement)nextElement;
+        PsiType type=typeElement.getType();
+        if (PsiType.VOID.equals(type)) {
+          String message=JavaErrorMessages.message("annotation.not.allowed.void");
+          return annotationError(annotation,message);
+        }
+        if (!(type instanceof PsiPrimitiveType)) {
+          PsiJavaCodeReferenceElement ref=getOutermostReferenceElement(typeElement.getInnermostComponentReferenceElement());
+          HighlightInfo info=checkReferenceTarget(annotation,ref);
+          if (info != null)           return info;
+        }
+      }
+    }
+ else     if (owner instanceof PsiTypeElement) {
+      PsiElement context=PsiTreeUtil.skipParentsOfType((PsiTypeElement)owner,PsiTypeElement.class);
+      if (context instanceof PsiClassObjectAccessExpression) {
+        String message=JavaErrorMessages.message("annotation.not.allowed.class");
+        return annotationError(annotation,message);
+      }
+    }
   }
   return null;
 }
