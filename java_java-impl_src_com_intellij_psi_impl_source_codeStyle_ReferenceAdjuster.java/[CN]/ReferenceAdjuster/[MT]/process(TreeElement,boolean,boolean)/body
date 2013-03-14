@@ -1,14 +1,14 @@
 {
   IElementType elementType=element.getElementType();
-  if (elementType == JavaElementType.JAVA_CODE_REFERENCE || elementType == JavaElementType.REFERENCE_EXPRESSION) {
-    final IElementType parentElementType=element.getTreeParent().getElementType();
-    if (elementType == JavaElementType.JAVA_CODE_REFERENCE || parentElementType == JavaElementType.REFERENCE_EXPRESSION || parentElementType == JavaElementType.METHOD_REF_EXPRESSION || uncompleteCode) {
-      final PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)SourceTreeToPsiMap.treeElementToPsi(element);
-      final PsiReferenceParameterList parameterList=ref.getParameterList();
+  if ((elementType == JavaElementType.JAVA_CODE_REFERENCE || elementType == JavaElementType.REFERENCE_EXPRESSION) && !isAnnotated(element)) {
+    IElementType parentType=element.getTreeParent().getElementType();
+    if (elementType == JavaElementType.JAVA_CODE_REFERENCE || incompleteCode || parentType == JavaElementType.REFERENCE_EXPRESSION || parentType == JavaElementType.METHOD_REF_EXPRESSION) {
+      PsiJavaCodeReferenceElement ref=(PsiJavaCodeReferenceElement)element.getPsi();
+      PsiReferenceParameterList parameterList=ref.getParameterList();
       if (parameterList != null) {
-        final PsiTypeElement[] typeParameters=parameterList.getTypeParameterElements();
+        PsiTypeElement[] typeParameters=parameterList.getTypeParameterElements();
         for (        PsiTypeElement typeParameter : typeParameters) {
-          process((TreeElement)SourceTreeToPsiMap.psiElementToTree(typeParameter),addImports,uncompleteCode);
+          process((TreeElement)typeParameter.getNode(),addImports,incompleteCode);
         }
       }
       boolean rightKind=true;
@@ -18,44 +18,45 @@
       }
       if (rightKind) {
         boolean isInsideDocComment=TreeUtil.findParent(element,JavaDocElementType.DOC_COMMENT) != null;
-        boolean isShort=!((SourceJavaCodeReference)element).isQualified();
+        boolean isShort=!ref.isQualified();
         if (!makeFQ(isInsideDocComment)) {
           if (isShort)           return element;
         }
         PsiElement refElement;
-        if (!uncompleteCode) {
+        if (!incompleteCode) {
           refElement=ref.resolve();
         }
  else {
           PsiResolveHelper helper=JavaPsiFacade.getInstance(element.getManager().getProject()).getResolveHelper();
-          refElement=helper.resolveReferencedClass(((SourceJavaCodeReference)element).getClassNameText(),SourceTreeToPsiMap.treeElementToPsi(element));
+          refElement=helper.resolveReferencedClass(((SourceJavaCodeReference)element).getClassNameText(),ref);
         }
         if (refElement instanceof PsiClass) {
+          PsiClass psiClass=(PsiClass)refElement;
           if (makeFQ(isInsideDocComment)) {
-            String qName=((PsiClass)refElement).getQualifiedName();
+            String qName=psiClass.getQualifiedName();
             if (qName == null)             return element;
-            PsiImportHolder file=(PsiImportHolder)SourceTreeToPsiMap.treeElementToPsi(element).getContainingFile();
-            if (file instanceof PsiJavaFile && ImportHelper.isImplicitlyImported(qName,(PsiJavaFile)file)) {
-              if (isShort)               return element;
-              return (TreeElement)makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports);
-            }
+            PsiFile file=ref.getContainingFile();
             if (file instanceof PsiJavaFile) {
+              if (ImportHelper.isImplicitlyImported(qName,(PsiJavaFile)file)) {
+                if (isShort)                 return element;
+                return (TreeElement)makeShortReference((CompositeElement)element,psiClass,addImports);
+              }
               String thisPackageName=((PsiJavaFile)file).getPackageName();
               if (ImportHelper.hasPackage(qName,thisPackageName)) {
                 if (!isShort) {
-                  return (TreeElement)makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports);
+                  return (TreeElement)makeShortReference((CompositeElement)element,psiClass,addImports);
                 }
               }
             }
-            return (TreeElement)replaceReferenceWithFQ(element,(PsiClass)refElement);
+            return (TreeElement)replaceReferenceWithFQ(element,psiClass);
           }
  else {
             int oldLength=element.getTextLength();
-            TreeElement treeElement=(TreeElement)makeShortReference((CompositeElement)element,(PsiClass)refElement,addImports);
-            if (treeElement.getTextLength() == oldLength && ((PsiClass)refElement).getContainingClass() != null) {
+            TreeElement treeElement=(TreeElement)makeShortReference((CompositeElement)element,psiClass,addImports);
+            if (treeElement.getTextLength() == oldLength && psiClass.getContainingClass() != null) {
               PsiElement qualifier=ref.getQualifier();
               if (qualifier instanceof PsiJavaCodeReferenceElement && ((PsiJavaCodeReferenceElement)qualifier).resolve() instanceof PsiClass) {
-                process((TreeElement)qualifier.getNode(),addImports,uncompleteCode);
+                process((TreeElement)qualifier.getNode(),addImports,incompleteCode);
               }
             }
             return treeElement;
@@ -65,7 +66,7 @@
     }
   }
   for (TreeElement child=element.getFirstChildNode(); child != null; child=child.getTreeNext()) {
-    child=process(child,addImports,uncompleteCode);
+    child=process(child,addImports,incompleteCode);
   }
   return element;
 }
