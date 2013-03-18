@@ -1,0 +1,57 @@
+{
+  if (preprocessing)   return;
+  final CompositePackagingElement<?> rootElement=artifact.getRootElement();
+  final String artifactName=FileUtil.getNameWithoutExtension(rootElement.getName());
+  final String tempDirPath=BuildProperties.propertyRef(context.getArtifactOutputProperty(artifact));
+  final List<PackagingElement<?>> children=rootElement.getChildren();
+  final PackagingElementResolvingContext resolvingContext=ArtifactManager.getInstance(context.getProject()).getResolvingContext();
+  for (  Generator childGenerator : computeChildrenGenerators(resolvingContext,new DirectoryAntCopyInstructionCreator(tempDirPath),context,artifact.getArtifactType(),children)) {
+    generator.add(childGenerator);
+  }
+  final String artifactFileName=rootElement.getName();
+  final JavaFxArtifactProperties properties=(JavaFxArtifactProperties)artifact.getProperties(JavaFxArtifactPropertiesProvider.getInstance());
+  final String appId=artifactName + "_id";
+  final Tag applicationTag=new Tag("fx:application",new Pair<String,String>("id",appId),new Pair<String,String>("name",artifactName),new Pair<String,String>("mainClass",properties.getAppClass()));
+  generator.add(applicationTag);
+  final Tag createJarTag=new Tag("fx:jar",new Pair<String,String>("destfile",tempDirPath + "/" + artifactFileName));
+  createJarTag.add(new Tag("fx:application",new Pair<String,String>("refid",appId)));
+  createJarTag.add(new Tag("fileset",new Pair<String,String>("dir",tempDirPath)));
+  generator.add(createJarTag);
+  final Tag deployTag=new Tag("fx:deploy",new Pair<String,String>("width",properties.getWidth()),new Pair<String,String>("height",properties.getHeight()),new Pair<String,String>("updatemode",properties.getUpdateMode()),new Pair<String,String>("outdir",tempDirPath + "/deploy"),new Pair<String,String>("outfile",artifactName));
+  deployTag.add(new Tag("fx:application",new Pair<String,String>("refid",appId)));
+  deployTag.add(new Tag("fx:info",new Pair<String,String>("title",properties.getTitle()),new Pair<String,String>("vendor",properties.getVendor()),new Pair<String,String>("description",properties.getDescription())));
+  final Tag deployResourcesTag=new Tag("fx:resources");
+  deployResourcesTag.add(new Tag("fx:fileset",new Pair<String,String>("dir",tempDirPath),new Pair<String,String>("includes",artifactFileName)));
+  deployTag.add(deployResourcesTag);
+  generator.add(deployTag);
+  if (properties.isEnabledSigning()) {
+    final boolean selfSigning=properties.isSelfSigning();
+    String vendor=properties.getVendor();
+    if (vendor != null) {
+      vendor=vendor.replaceAll(",","\\\\,");
+    }
+    generator.add(new Property(artifactBasedProperty(ARTIFACT_VENDOR_SIGN_PROPERTY,artifactName),"CN=" + vendor));
+    final String alias=selfSigning ? "jb" : properties.getAlias();
+    generator.add(new Property(artifactBasedProperty(ARTIFACT_ALIAS_SIGN_PROPERTY,artifactName),alias));
+    final String keystore=selfSigning ? tempDirPath + File.separator + "jb-key.jks" : properties.getKeystore();
+    generator.add(new Property(artifactBasedProperty(ARTIFACT_KEYSTORE_SIGN_PROPERTY,artifactName),keystore));
+    final String storepass=selfSigning ? "storepass" : Base64Converter.decode(properties.getStorepass());
+    generator.add(new Property(artifactBasedProperty(ARTIFACT_STOREPASS_SIGN_PROPERTY,artifactName),storepass));
+    final String keypass=selfSigning ? "keypass" : Base64Converter.decode(properties.getKeypass());
+    generator.add(new Property(artifactBasedProperty(ARTIFACTKEYPASS_SIGN_PROPERTY,artifactName),keypass));
+    final Pair[] keysDescriptions=createKeysDescriptions(artifactName);
+    if (selfSigning) {
+      generator.add(new Tag("genkey",ArrayUtil.prepend(new Pair<String,String>("dname",BuildProperties.propertyRef(artifactBasedProperty(ARTIFACT_VENDOR_SIGN_PROPERTY,artifactName))),keysDescriptions)));
+    }
+    final Tag signjar=new Tag("signjar",keysDescriptions);
+    final Tag fileset=new Tag("fileset",new Pair<String,String>("dir",tempDirPath + "/deploy"));
+    fileset.add(new Tag("include",new Pair<String,String>("name",artifactFileName)));
+    signjar.add(fileset);
+    generator.add(signjar);
+  }
+  final DirectoryAntCopyInstructionCreator creator=new DirectoryAntCopyInstructionCreator(BuildProperties.propertyRef(context.getConfiguredArtifactOutputProperty(artifact)));
+  generator.add(creator.createDirectoryContentCopyInstruction(tempDirPath + "/deploy"));
+  final Tag deleteTag=new Tag("delete",new Pair<String,String>("includeemptydirs","true"));
+  deleteTag.add(new Tag("fileset",new Pair<String,String>("dir",tempDirPath)));
+  generator.add(deleteTag);
+}
