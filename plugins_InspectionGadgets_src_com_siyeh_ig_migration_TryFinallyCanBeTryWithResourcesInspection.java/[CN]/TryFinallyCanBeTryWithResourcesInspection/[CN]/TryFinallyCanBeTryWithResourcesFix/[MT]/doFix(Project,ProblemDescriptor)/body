@@ -1,2 +1,123 @@
 {
+  final PsiElement element=descriptor.getPsiElement();
+  final PsiElement parent=element.getParent();
+  if (!(parent instanceof PsiTryStatement)) {
+    return;
+  }
+  final PsiTryStatement tryStatement=(PsiTryStatement)parent;
+  final PsiCodeBlock tryBlock=tryStatement.getTryBlock();
+  if (tryBlock == null) {
+    return;
+  }
+  final PsiCodeBlock finallyBlock=tryStatement.getFinallyBlock();
+  if (finallyBlock == null) {
+    return;
+  }
+  final PsiElement[] tryBlockChildren=tryBlock.getChildren();
+  final Set<PsiLocalVariable> variables=new HashSet();
+  for (  PsiLocalVariable variable : collectVariables(tryStatement)) {
+    if (!isVariableUsedOutsideContext(variable,tryBlock)) {
+      variables.add(variable);
+    }
+  }
+  final PsiElementFactory factory=JavaPsiFacade.getElementFactory(project);
+  @NonNls final StringBuilder newTryStatementText=new StringBuilder("try (");
+  final Set<Integer> unwantedChildren=new HashSet(2);
+  boolean separator=false;
+  for (  PsiLocalVariable variable : variables) {
+    final boolean hasInitializer;
+    final PsiExpression initializer=variable.getInitializer();
+    if (initializer == null) {
+      hasInitializer=false;
+    }
+ else {
+      final PsiType type=initializer.getType();
+      hasInitializer=!PsiType.NULL.equals(type);
+    }
+    if (separator) {
+      newTryStatementText.append(';');
+    }
+    newTryStatementText.append(variable.getTypeElement().getText()).append(' ').append(variable.getName()).append('=');
+    if (hasInitializer) {
+      newTryStatementText.append(initializer.getText());
+    }
+ else {
+      final int index=findInitialization(tryBlockChildren,variable,hasInitializer);
+      if (index < 0) {
+        return;
+      }
+      unwantedChildren.add(Integer.valueOf(index));
+      final PsiExpressionStatement expressionStatement=(PsiExpressionStatement)tryBlockChildren[index];
+      if (expressionStatement.getNextSibling() instanceof PsiWhiteSpace) {
+        unwantedChildren.add(Integer.valueOf(index + 1));
+      }
+      final PsiAssignmentExpression assignmentExpression=(PsiAssignmentExpression)expressionStatement.getExpression();
+      final PsiExpression rhs=assignmentExpression.getRExpression();
+      if (rhs == null) {
+        return;
+      }
+      newTryStatementText.append(rhs.getText());
+    }
+    separator=true;
+  }
+  newTryStatementText.append(") {");
+  final int tryBlockStatementsLength=tryBlockChildren.length - 1;
+  for (int i=1; i < tryBlockStatementsLength; i++) {
+    final PsiElement child=tryBlockChildren[i];
+    if (unwantedChildren.contains(Integer.valueOf(i))) {
+      continue;
+    }
+    newTryStatementText.append(child.getText());
+  }
+  newTryStatementText.append('}');
+  final PsiCatchSection[] catchSections=tryStatement.getCatchSections();
+  for (  PsiCatchSection catchSection : catchSections) {
+    newTryStatementText.append(catchSection.getText());
+  }
+  final PsiElement[] finallyChildren=finallyBlock.getChildren();
+  boolean appended=false;
+  final int finallyChildrenLength=finallyChildren.length - 1;
+  final List<PsiElement> savedComments=new ArrayList();
+  for (int i=1; i < finallyChildrenLength; i++) {
+    final PsiElement child=finallyChildren[i];
+    if (isCloseStatement(child,variables)) {
+      continue;
+    }
+    if (!appended) {
+      if (child instanceof PsiComment) {
+        final PsiElement prevSibling=child.getPrevSibling();
+        if (prevSibling instanceof PsiWhiteSpace) {
+          savedComments.add(prevSibling);
+        }
+        savedComments.add(child);
+      }
+ else       if (!(child instanceof PsiWhiteSpace)) {
+        newTryStatementText.append(" finally {");
+        for (        PsiElement savedComment : savedComments) {
+          newTryStatementText.append(savedComment.getText());
+        }
+        newTryStatementText.append(child.getText());
+        appended=true;
+      }
+    }
+ else {
+      newTryStatementText.append(child.getText());
+    }
+  }
+  if (appended) {
+    newTryStatementText.append('}');
+  }
+  for (  PsiLocalVariable variable : variables) {
+    variable.delete();
+  }
+  if (!appended) {
+    final int savedCommentsSize=savedComments.size();
+    final PsiElement parent1=tryStatement.getParent();
+    for (int i=savedCommentsSize - 1; i >= 0; i--) {
+      final PsiElement savedComment=savedComments.get(i);
+      parent1.addAfter(savedComment,tryStatement);
+    }
+  }
+  final PsiStatement newTryStatement=factory.createStatementFromText(newTryStatementText.toString(),element);
+  tryStatement.replace(newTryStatement);
 }
