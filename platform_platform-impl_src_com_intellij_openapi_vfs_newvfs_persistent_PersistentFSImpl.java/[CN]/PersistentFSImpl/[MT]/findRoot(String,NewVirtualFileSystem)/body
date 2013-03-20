@@ -1,9 +1,10 @@
 {
-  String rootUrl=fs.getProtocol() + "://" + VfsImplUtil.normalize(fs,basePath);
-  VirtualFileSystemEntry root;
+  String rootUrl=normalizeRootUrl(fs,basePath);
+  boolean isFakeRoot=basePath.isEmpty();
   myRootsLock.readLock().lock();
+  VirtualFileSystemEntry root;
   try {
-    root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
+    root=isFakeRoot ? myFakeRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
   }
   finally {
@@ -11,12 +12,12 @@
   }
   myRootsLock.writeLock().lock();
   try {
-    root=basePath.isEmpty() ? myFakeRoot : myRoots.get(rootUrl);
+    root=isFakeRoot ? myFakeRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
     int rootId=FSRecords.findRootRecord(rootUrl);
     root=myRootsById.get(rootId);
     if (root != null)     return root;
-    if (basePath.isEmpty()) {
+    if (isFakeRoot) {
       root=new VirtualDirectoryImpl("",null,fs,rootId,0){
         @SuppressWarnings("NonSynchronizedMethodOverridesSynchronizedMethod") @Override @NotNull public VirtualFile[] getChildren(){
           return getRoots(getFileSystem());
@@ -41,20 +42,18 @@
  else {
       root=new VirtualDirectoryImpl(basePath,null,fs,rootId,0);
     }
-    final FileAttributes attributes=fs.getAttributes(root);
-    if (attributes == null) {
-      return null;
-    }
-    final boolean newRoot=writeAttributesToRecord(rootId,0,root,fs,attributes);
-    if (!newRoot) {
-      if (attributes.lastModified != FSRecords.getTimestamp(rootId)) {
-        root.markDirtyRecursively();
-      }
-    }
-    if (basePath.isEmpty()) {
+    if (isFakeRoot) {
       myFakeRoot=root;
     }
  else {
+      FileAttributes attributes=fs.getAttributes(root);
+      if (attributes == null || !attributes.isDirectory()) {
+        return null;
+      }
+      final boolean newRoot=writeAttributesToRecord(rootId,0,root,fs,attributes);
+      if (!newRoot && attributes.lastModified != FSRecords.getTimestamp(rootId)) {
+        root.markDirtyRecursively();
+      }
       myRoots.put(rootUrl,root);
       myRootsById.put(rootId,root);
       if (rootId != root.getId())       throw new AssertionError();
