@@ -1,10 +1,10 @@
 {
-  String rootUrl=normalizeRootUrl(fs,basePath);
+  String rootUrl=normalizeRootUrl(basePath,fs);
   boolean isFakeRoot=basePath.isEmpty();
   myRootsLock.readLock().lock();
   VirtualFileSystemEntry root;
   try {
-    root=isFakeRoot ? myFakeRoot : myRoots.get(rootUrl);
+    root=isFakeRoot ? mySuperRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
   }
   finally {
@@ -12,7 +12,7 @@
   }
   myRootsLock.writeLock().lock();
   try {
-    root=isFakeRoot ? myFakeRoot : myRoots.get(rootUrl);
+    root=isFakeRoot ? mySuperRoot : myRoots.get(rootUrl);
     if (root != null)     return root;
     int rootId=FSRecords.findRootRecord(rootUrl);
     root=myRootsById.get(rootId);
@@ -25,6 +25,13 @@
         @Override public VirtualFileSystemEntry findChild(        @NotNull String name){
           if (name.isEmpty())           return null;
           return findRoot(name,getFileSystem());
+        }
+        @Override protected char[] appendPathOnFileSystem(        int pathLength,        int[] position){
+          String fakeName="@&^%$#*/\\(";
+          int rootPathLength=pathLength + fakeName.length();
+          char[] chars=new char[rootPathLength];
+          position[0]=copyString(chars,position[0],fakeName);
+          return chars;
         }
       }
 ;
@@ -40,10 +47,25 @@
       root=new JarRoot(fs,rootId,parentLocalFile);
     }
  else {
-      root=new VirtualDirectoryImpl(basePath,null,fs,rootId,0);
+      root=new VirtualDirectoryImpl(basePath,null,fs,rootId,0){
+        @Override protected char[] appendPathOnFileSystem(        int pathLength,        int[] position){
+          String name=getName();
+          int nameLength=name.length();
+          boolean appendSlash=SystemInfo.isWindows && nameLength == 2 && name.charAt(1) == ':';
+          int rootPathLength=pathLength + nameLength;
+          if (appendSlash)           ++rootPathLength;
+          char[] chars=new char[rootPathLength];
+          position[0]=copyString(chars,position[0],name);
+          if (appendSlash) {
+            chars[position[0]++]='/';
+          }
+          return chars;
+        }
+      }
+;
     }
     if (isFakeRoot) {
-      myFakeRoot=root;
+      mySuperRoot=root;
     }
  else {
       FileAttributes attributes=fs.getAttributes(root);
