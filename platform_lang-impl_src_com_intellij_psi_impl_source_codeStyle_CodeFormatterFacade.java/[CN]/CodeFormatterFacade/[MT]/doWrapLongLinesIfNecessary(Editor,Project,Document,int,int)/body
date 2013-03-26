@@ -14,151 +14,19 @@
   for (int line=startLine; line < maxLine; line++) {
     int startLineOffset=document.getLineStartOffset(line);
     int endLineOffset=document.getLineEndOffset(line);
-    boolean hasTabs=false;
-    boolean canOptimize=true;
-    boolean hasNonSpaceSymbols=false;
-    loop:     for (int i=startLineOffset; i < Math.min(endLineOffset,endOffsetToUse); i++) {
-      char c=text.charAt(i);
-switch (c) {
-case '\t':
-{
-          hasTabs=true;
-          if (hasNonSpaceSymbols) {
-            canOptimize=false;
-            break loop;
-          }
-        }
-case ' ':
-      break;
-default :
-    hasNonSpaceSymbols=true;
-}
-}
-boolean wrapLine=false;
-int preferredWrapPosition=Integer.MAX_VALUE;
-if (!hasTabs) {
-if (Math.min(endLineOffset,endOffsetToUse) - startLineOffset > mySettings.RIGHT_MARGIN) {
-  preferredWrapPosition=startLineOffset + mySettings.RIGHT_MARGIN - FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS;
-  wrapLine=true;
-}
-}
- else if (canOptimize) {
-int width=0;
-int symbolWidth;
-for (int i=startLineOffset; i < Math.min(endLineOffset,endOffsetToUse); i++) {
-  char c=text.charAt(i);
-switch (c) {
-case '\t':
-    symbolWidth=tabSize - (width % tabSize);
-  break;
-default :
-symbolWidth=1;
-}
-if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN && (Math.min(endLineOffset,endOffsetToUse) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS) {
-preferredWrapPosition=i - 1;
-}
-if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
-wrapLine=true;
-break;
-}
-width+=symbolWidth;
-}
-}
- else {
-int width=0;
-int x=0;
-int newX;
-int symbolWidth;
-for (int i=startLineOffset; i < Math.min(endLineOffset,endOffsetToUse); i++) {
-char c=text.charAt(i);
-switch (c) {
-case '\t':
-newX=EditorUtil.nextTabStop(x,editor);
-int diffInPixels=newX - x;
-symbolWidth=diffInPixels / spaceSize;
-if (diffInPixels % spaceSize > 0) {
-symbolWidth++;
-}
-break;
-default :
-newX=x + EditorUtil.charWidth(c,Font.PLAIN,editor);
-symbolWidth=1;
-}
-if (width + symbolWidth + FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS >= mySettings.RIGHT_MARGIN && (Math.min(endLineOffset,endOffsetToUse) - i) >= FormatConstants.RESERVED_LINE_WRAP_WIDTH_IN_COLUMNS) {
-preferredWrapPosition=i - 1;
-}
-if (width + symbolWidth >= mySettings.RIGHT_MARGIN) {
-wrapLine=true;
-break;
-}
-x=newX;
-width+=symbolWidth;
-}
-}
-if (!wrapLine || preferredWrapPosition >= endLineOffset) {
-continue;
-}
-if (preferredWrapPosition >= endOffsetToUse) {
-return;
-}
-int wrapOffset=strategy.calculateWrapPosition(document,editor.getProject(),Math.max(startLineOffset,startOffsetToUse),Math.min(endLineOffset,endOffsetToUse),preferredWrapPosition,false,false);
-if (wrapOffset < 0 || CharArrayUtil.shiftBackward(text,startLineOffset,wrapOffset - 1," \t") < startLineOffset) {
-continue;
-}
-editor.getCaretModel().moveToOffset(wrapOffset);
-final DataContext baseDataContext=DataManager.getInstance().getDataContext(editor.getComponent());
-final DataContext dataContext=new DelegatingDataContext(baseDataContext){
-@Override public Object getData(@NonNls String dataId){
-Object result=baseDataContext.getData(dataId);
-if (result == null && PlatformDataKeys.PROJECT.is(dataId)) {
-result=project;
-}
-return result;
-}
-}
-;
-SelectionModel selectionModel=editor.getSelectionModel();
-int startSelectionOffset=0;
-int endSelectionOffset=0;
-boolean restoreSelection=selectionModel.hasSelection();
-if (restoreSelection) {
-startSelectionOffset=selectionModel.getSelectionStart();
-endSelectionOffset=selectionModel.getSelectionEnd();
-selectionModel.removeSelection();
-}
-int textLengthBeforeWrap=document.getTextLength();
-DataManager.getInstance().saveInDataContext(dataContext,WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY,true);
-CommandProcessor commandProcessor=CommandProcessor.getInstance();
-try {
-Runnable command=new Runnable(){
-@Override public void run(){
-EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_ENTER).execute(editor,dataContext);
-}
-}
-;
-if (commandProcessor.getCurrentCommand() == null) {
-commandProcessor.executeCommand(editor.getProject(),command,WRAP_LINE_COMMAND_NAME,null);
-}
- else {
-command.run();
-}
-}
-  finally {
-DataManager.getInstance().saveInDataContext(dataContext,WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY,null);
-}
-if (restoreSelection) {
-int symbolsDiff=document.getTextLength() - textLengthBeforeWrap;
-int newSelectionStart=startSelectionOffset;
-int newSelectionEnd=endSelectionOffset;
-if (startSelectionOffset >= wrapOffset) {
-newSelectionStart+=symbolsDiff;
-}
-if (endSelectionOffset >= wrapOffset) {
-newSelectionEnd+=symbolsDiff;
-}
-selectionModel.setSelection(newSelectionStart,newSelectionEnd);
-}
-maxLine++;
-line++;
-}
+    final int preferredWrapPosition=calculatePreferredWrapPosition(editor,text,tabSize,spaceSize,startLineOffset,endLineOffset,endOffsetToUse);
+    if (preferredWrapPosition < 0 || preferredWrapPosition >= endLineOffset) {
+      continue;
+    }
+    if (preferredWrapPosition >= endOffsetToUse) {
+      return;
+    }
+    int wrapOffset=strategy.calculateWrapPosition(document,editor.getProject(),Math.max(startLineOffset,startOffsetToUse),Math.min(endLineOffset,endOffsetToUse),preferredWrapPosition,false,false);
+    if (wrapOffset < 0 || CharArrayUtil.shiftBackward(text,startLineOffset,wrapOffset - 1," \t") < startLineOffset) {
+      continue;
+    }
+    editor.getCaretModel().moveToOffset(wrapOffset);
+    int addedLinesNumber=emulateEnter(editor,project);
+    maxLine+=addedLinesNumber;
+  }
 }
