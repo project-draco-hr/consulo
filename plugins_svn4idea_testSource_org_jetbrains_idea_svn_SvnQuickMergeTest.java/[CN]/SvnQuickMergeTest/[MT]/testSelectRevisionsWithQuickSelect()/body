@@ -1,0 +1,64 @@
+{
+  final SVNInfo info=myVcs.createWCClient().doInfo(new File(myBranchTree.myS1File.getPath()),SVNRevision.WORKING);
+  Assert.assertNotNull(info);
+  final long numberBefore=info.getRevision().getNumber();
+  final int totalChanges=3;
+  final StringBuilder sb=new StringBuilder(FileUtil.loadFile(new File(myBranchTree.myS1File.getPath())));
+  for (int i=0; i < totalChanges; i++) {
+    sb.append("\nedited in branch ").append(i);
+    editFileInCommand(myProject,myBranchTree.myS1File,sb.toString());
+    runInAndVerifyIgnoreOutput(myBranchRoot,"ci","-m","change in branch " + i,myBranchTree.myS1File.getPath());
+    Thread.sleep(10);
+  }
+  final SVNInfo info2=myVcs.createWCClient().doInfo(new File(myBranchTree.myS1File.getPath()),SVNRevision.WORKING);
+  Assert.assertNotNull(info2);
+  final long numberBeforeCopy=info2.getRevision().getNumber();
+  runInAndVerifyIgnoreOutput("copy","-q","-m","copy1",myBranchUrl,myRepoUrl + "/branches/b2");
+  runInAndVerifyIgnoreOutput(myBranchRoot,"switch",myRepoUrl + "/branches/b2",myBranchRoot.getPath());
+  myBranchTree=new SubTree(myBranchVf);
+  editFileInCommand(myProject,myBranchTree.myS2File,"completely changed");
+  runInAndVerifyIgnoreOutput(myBranchRoot,"ci","-m","change in b2",myBranchTree.myS2File.getPath());
+  final WCInfo found=getWcInfo();
+  final QuickMerge quickMerge=new QuickMerge(myProject,myRepoUrl + "/branches/b2",found,SVNPathUtil.tail(myRepoUrl + "/branches/b2"),myWorkingCopyDir);
+  final AtomicReference<String> selectionError=new AtomicReference<String>();
+  final QuickMergeTestInteraction testInteraction=new QuickMergeTestInteraction(){
+    @Override public boolean shouldReintegrate(    @NotNull String sourceUrl,    @NotNull String targetUrl){
+      return true;
+    }
+    @Override public List<CommittedChangeList> showRecentListsForSelection(    @NotNull List<CommittedChangeList> list,    @NotNull String mergeTitle,    @NotNull MergeChecker mergeChecker,    @NotNull PairConsumer<Long,MergeDialogI> loader,    boolean everyThingLoaded){
+      if (list.size() != 2) {
+        selectionError.set("List size: " + list.size());
+      }
+ else       if (list.get(1).getNumber() != numberBeforeCopy + 1) {
+        selectionError.set("wrong revision for copy statement: " + list.get(1).getNumber());
+      }
+      return new SmartList<CommittedChangeList>(list.get(0));
+    }
+  }
+;
+  testInteraction.setMergeVariant(QuickMergeContentsVariants.showLatest);
+  final WaitingTaskDescriptor descriptor=new WaitingTaskDescriptor();
+  ApplicationManager.getApplication().invokeLater(new Runnable(){
+    @Override public void run(){
+      quickMerge.execute(testInteraction,descriptor);
+    }
+  }
+);
+  descriptor.waitForCompletion();
+  testInteraction.throwIfExceptions();
+  if (selectionError.get() != null) {
+    throw new RuntimeException(selectionError.get());
+  }
+  Assert.assertTrue(descriptor.isCompleted());
+  VcsDirtyScopeManager.getInstance(myProject).markEverythingDirty();
+  myChangeListManager.ensureUpToDate(false);
+  final Change fileChange=myChangeListManager.getChange(myTree.myS2File);
+  Assert.assertNotNull(fileChange);
+  Assert.assertEquals(FileStatus.MODIFIED,fileChange.getFileStatus());
+  final Change dirChange=myChangeListManager.getChange(myWorkingCopyDir);
+  Assert.assertNotNull(dirChange);
+  Assert.assertEquals(FileStatus.MODIFIED,dirChange.getFileStatus());
+  final SVNPropertyData data=myVcs.createWCClient().doGetProperty(new File(myWorkingCopyDir.getPath()),"svn:mergeinfo",SVNRevision.UNDEFINED,SVNRevision.WORKING);
+  System.out.println(data.getValue().getString());
+  Assert.assertEquals("/branches/b2:" + (numberBeforeCopy + 2),data.getValue().getString());
+}
