@@ -1,0 +1,47 @@
+{
+  final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+  final SvnCommittedChangesProvider committedChangesProvider=(SvnCommittedChangesProvider)myVcs.getCommittedChangesProvider();
+  final ChangeBrowserSettings settings=new ChangeBrowserSettings();
+  if (myFirst > 0) {
+    settings.CHANGE_BEFORE=String.valueOf(myFirst);
+    settings.USE_CHANGE_BEFORE_FILTER=true;
+  }
+  String local=SVNPathUtil.getRelativePath(myWcInfo.getRepositoryRoot(),myWcInfo.getRootUrl());
+  final String relativeLocal=(local.startsWith("/") ? local : "/" + local);
+  String relativeBranch=SVNPathUtil.getRelativePath(myWcInfo.getRepositoryRoot(),mySourceUrl);
+  relativeBranch=(relativeBranch.startsWith("/") ? relativeBranch : "/" + relativeBranch);
+  ProgressManager.progress2(SvnBundle.message("progress.text2.collecting.history",mySourceUrl + (myFirst > 0 ? ("@" + myFirst) : "")));
+  final List<Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>> list=new ArrayList<Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>>();
+  try {
+    committedChangesProvider.getCommittedChangesWithMergedRevisons(settings,new SvnRepositoryLocation(mySourceUrl),myBunchSize + (myFirst > 0 ? 2 : 1),new PairConsumer<SvnChangeList,TreeStructureNode<SVNLogEntry>>(){
+      public void consume(      SvnChangeList svnList,      TreeStructureNode<SVNLogEntry> tree){
+        indicator.setText2(SvnBundle.message("progress.text2.processing.revision",svnList.getNumber()));
+        list.add(new Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>>(svnList,tree));
+      }
+    }
+);
+  }
+ catch (  VcsException e) {
+    context.handleException(e,true);
+    return;
+  }
+  myCommittedChangeLists=new ArrayList<CommittedChangeList>();
+  for (  Pair<SvnChangeList,TreeStructureNode<SVNLogEntry>> pair : list) {
+    if (myFirst > 0 && myFirst == pair.getFirst().getNumber())     continue;
+    if (!QuickMerge.checkListForPaths(relativeLocal,relativeBranch,pair)) {
+      myCommittedChangeLists.add(pair.getFirst());
+    }
+  }
+  try {
+    myHelper=new OneShotMergeInfoHelper(myVcs.getProject(),myWcInfo,mySourceUrl);
+    ProgressManager.progress2("Calculating not merged revisions");
+    myHelper.prepare();
+  }
+ catch (  SVNException e) {
+    context.handleException(new VcsException(e),true);
+  }
+  myLastLoaded=myCommittedChangeLists.size() < myBunchSize + 1;
+  if (myCommittedChangeLists.size() > myBunchSize) {
+    myCommittedChangeLists=myCommittedChangeLists.subList(0,myBunchSize);
+  }
+}
