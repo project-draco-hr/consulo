@@ -1,0 +1,44 @@
+{
+  if (!checkNotEmpty(getAppClass(),"Application class"))   return;
+  if (!checkNotEmpty(getWidth(),"Width"))   return;
+  if (!checkNotEmpty(getHeight(),"Height"))   return;
+  final String zipPath=getArtifactOutputFilePath();
+  final File tempUnzippedArtifactOutput;
+  try {
+    tempUnzippedArtifactOutput=FileUtil.createTempDirectory("artifact","unzipped");
+    ZipUtil.extract(new File(zipPath),tempUnzippedArtifactOutput,null);
+    copyLibraries(zipPath,tempUnzippedArtifactOutput);
+  }
+ catch (  IOException e) {
+    registerJavaFxPackagerError(e);
+    return;
+  }
+  final File tempDirectory=new File(tempUnzippedArtifactOutput,"deploy");
+  try {
+    final StringBuilder buf=new StringBuilder();
+    buf.append("<project default=\"build artifact\">\n");
+    buf.append("<taskdef resource=\"com/sun/javafx/tools/ant/antlib.xml\" uri=\"javafx:com.sun.javafx.tools.ant\" ").append("classpath=\"").append(homePath).append("/lib/ant-javafx.jar\"/>\n");
+    buf.append("<target name=\"build artifact\" xmlns:fx=\"javafx:com.sun.javafx.tools.ant\">");
+    final String artifactFileName=getArtifactRootName();
+    final String artifactName=FileUtil.getNameWithoutExtension(artifactFileName);
+    final List<JavaFxAntGenerator.SimpleTag> tags=JavaFxAntGenerator.createJarAndDeployTasks(this,artifactFileName,artifactName,tempUnzippedArtifactOutput.getPath());
+    for (    JavaFxAntGenerator.SimpleTag tag : tags) {
+      tag.generate(buf);
+    }
+    buf.append("</target>");
+    buf.append("</project>");
+    final int result=startAntTarget(buf.toString(),homePath);
+    if (result == 0) {
+      if (isEnabledSigning()) {
+        signApp(homePath + File.separator + "bin",tempDirectory);
+      }
+    }
+ else {
+      registerJavaFxPackagerError("fx:deploy task has failed.");
+    }
+  }
+  finally {
+    copyResultsToArtifactsOutput(tempDirectory);
+    FileUtil.delete(tempUnzippedArtifactOutput);
+  }
+}

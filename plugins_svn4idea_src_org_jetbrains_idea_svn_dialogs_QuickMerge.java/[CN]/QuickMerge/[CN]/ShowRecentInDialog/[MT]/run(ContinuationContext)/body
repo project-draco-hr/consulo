@@ -1,0 +1,44 @@
+{
+  final PairConsumer<Long,MergeDialogI> loader=new PairConsumer<Long,MergeDialogI>(){
+    @Override public void consume(    Long bunchSize,    final MergeDialogI dialog){
+      final LoadRecentBranchRevisions loader=new LoadRecentBranchRevisions(myBranchName,dialog.getLastNumber(),myWcInfo,myVcs,mySourceUrl);
+      loader.setBunchSize(bunchSize.intValue());
+      final TaskDescriptor updater=new TaskDescriptor("",Where.AWT){
+        @Override public void run(        ContinuationContext context){
+          dialog.addMoreLists(loader.getCommittedChangeLists());
+          if (loader.isLastLoaded()) {
+            dialog.setEverythingLoaded(true);
+          }
+        }
+        @Override public void canceled(){
+          dialog.addMoreLists(Collections.<CommittedChangeList>emptyList());
+          dialog.setEverythingLoaded(true);
+        }
+      }
+;
+      final Continuation fragmented=Continuation.createFragmented(myProject,true);
+      fragmented.addExceptionHandler(VcsException.class,new Consumer<VcsException>(){
+        @Override public void consume(        VcsException e){
+          PopupUtil.showBalloonForActiveComponent(e.getMessage() == null ? e.getClass().getName() : e.getMessage(),MessageType.ERROR);
+        }
+      }
+);
+      fragmented.run(loader,updater);
+    }
+  }
+;
+  final List<CommittedChangeList> lists=myInteraction.showRecentListsForSelection(myLoader.getCommittedChangeLists(),myTitle,myLoader.getHelper(),loader,myLoader.isLastLoaded());
+  if (lists != null && !lists.isEmpty()) {
+    final MergerFactory factory=new ChangeListsMergerFactory(lists){
+      @Override public IMerger createMerger(      SvnVcs vcs,      File target,      UpdateEventHandler handler,      SVNURL currentBranchUrl,      String branchName){
+        return new GroupMerger(vcs,lists,target,handler,currentBranchUrl,branchName,false,false,false);
+      }
+    }
+;
+    final SvnBranchPointsCalculator.BranchCopyData copyData=new SvnBranchPointsCalculator.BranchCopyData(myWcInfo.getUrl().toString(),-1,mySourceUrl,-1);
+    context.next(new LocalChangesPrompt(false,lists,new SvnBranchPointsCalculator.WrapperInvertor<SvnBranchPointsCalculator.BranchCopyData>(false,copyData)),new MergeTask(factory,myTitle));
+  }
+ else {
+    context.cancelEverything();
+  }
+}
