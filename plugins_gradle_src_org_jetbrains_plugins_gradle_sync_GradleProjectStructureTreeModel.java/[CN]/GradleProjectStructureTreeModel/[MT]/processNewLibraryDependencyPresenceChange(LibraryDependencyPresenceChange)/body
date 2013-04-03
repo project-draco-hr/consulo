@@ -1,0 +1,52 @@
+{
+  ProjectStructureNode<LibraryDependencyId> dependencyNode=processNewDependencyPresenceChange(change);
+  LibraryDependencyId id=change.getExternalEntity();
+  if (dependencyNode == null || id == null) {
+    return;
+  }
+  ExternalLibrary gradleLibrary=myProjectStructureHelper.findExternalLibrary(id.getLibraryId());
+  if (gradleLibrary == null) {
+    return;
+  }
+  Map<JarId,ProjectStructureNode<JarId>> existingJarNodes=ContainerUtilRt.newHashMap();
+  for (  ProjectStructureNode<JarId> jarNode : dependencyNode.getChildren(JarId.class)) {
+    existingJarNodes.put(jarNode.getDescriptor().getElement(),jarNode);
+  }
+  Map<JarId,ProjectStructureNode<JarId>> gradleJarIds=ContainerUtilRt.newHashMap();
+  LibraryId libraryId=dependencyNode.getDescriptor().getElement().getLibraryId();
+  for (  String path : gradleLibrary.getPaths(LibraryPathType.BINARY)) {
+    JarId jarId=new JarId(path,LibraryPathType.BINARY,libraryId);
+    ProjectStructureNode<JarId> jarNode=existingJarNodes.get(jarId);
+    if (jarNode == null) {
+      jarNode=buildNode(jarId,GradleUtil.extractNameFromPath(jarId.getPath()));
+      jarNode.setAttributes(ExternalSystemTextAttributes.NO_CHANGE);
+      jarNode.getDescriptor().setToolTip(jarId.getPath());
+      dependencyNode.add(jarNode);
+    }
+    gradleJarIds.put(jarId,jarNode);
+  }
+  Library intellijLibrary=myProjectStructureHelper.findIdeLibrary(gradleLibrary);
+  if (intellijLibrary == null) {
+    for (    ProjectStructureNode<?> jarNode : dependencyNode) {
+      jarNode.setAttributes(ExternalSystemTextAttributes.EXTERNAL_SYSTEM_LOCAL_CHANGE);
+    }
+  }
+ else {
+    Set<JarId> intellijJarIds=ContainerUtilRt.newHashSet();
+    for (    VirtualFile jarFile : intellijLibrary.getFiles(OrderRootType.CLASSES)) {
+      JarId jarId=new JarId(GradleUtil.getLocalFileSystemPath(jarFile),LibraryPathType.BINARY,libraryId);
+      if (gradleJarIds.remove(jarId) == null) {
+        intellijJarIds.add(jarId);
+      }
+    }
+    for (    ProjectStructureNode<JarId> jarNode : gradleJarIds.values()) {
+      jarNode.setAttributes(ExternalSystemTextAttributes.EXTERNAL_SYSTEM_LOCAL_CHANGE);
+    }
+    for (    JarId jarId : intellijJarIds) {
+      ProjectStructureNode<JarId> jarNode=buildNode(jarId,GradleUtil.extractNameFromPath(jarId.getPath()));
+      jarNode.setAttributes(ExternalSystemTextAttributes.IDE_LOCAL_CHANGE);
+      jarNode.getDescriptor().setToolTip(jarId.getPath());
+      dependencyNode.add(jarNode);
+    }
+  }
+}

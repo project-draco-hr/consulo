@@ -1,0 +1,59 @@
+{
+  List<Pair<ExternalLibraryDependency,Module>> libraryDependenciesToImport=ContainerUtilRt.newArrayList();
+  Map<String,Library> ideLibsToRemove=ContainerUtilRt.newHashMap();
+  Map<String,ExternalLibrary> ide2gradleLibs=ContainerUtilRt.newHashMap();
+  Collection<LibraryOrderEntry> ideLibraryDependenciesToRemove=ContainerUtilRt.newArrayList();
+  ProjectStructureHelper projectStructureHelper=myContext.getProjectStructureHelper();
+  PlatformFacade facade=myContext.getPlatformFacade();
+  for (  ProjectStructureNode<?> node : nodes) {
+    Object entity=node.getDescriptor().getElement().mapToEntity(myContext,project);
+    if (!(entity instanceof ExternalCompositeLibraryDependency)) {
+      continue;
+    }
+    ExternalCompositeLibraryDependency e=(ExternalCompositeLibraryDependency)entity;
+    String ideLibraryName=e.getIdeEntity().getLibraryName();
+    Library ideLibraryToRemove=null;
+    if (ideLibraryName != null) {
+      ideLibraryToRemove=projectStructureHelper.findIdeLibrary(ideLibraryName,project);
+    }
+    if (ideLibraryToRemove != null) {
+      ideLibsToRemove.put(ideLibraryName,ideLibraryToRemove);
+      ide2gradleLibs.put(ideLibraryName,e.getExternalEntity().getTarget());
+    }
+  }
+  RootPolicy<LibraryOrderEntry> visitor=new RootPolicy<LibraryOrderEntry>(){
+    @Override public LibraryOrderEntry visitLibraryOrderEntry(    LibraryOrderEntry libraryOrderEntry,    LibraryOrderEntry value){
+      return libraryOrderEntry;
+    }
+  }
+;
+  for (  Module ideModule : facade.getModules(myProject)) {
+    ExternalModule gradleModule=projectStructureHelper.findExternalModule(ideModule.getName(),externalSystemId,project);
+    if (gradleModule == null) {
+      continue;
+    }
+    for (    OrderEntry entry : facade.getOrderEntries(ideModule)) {
+      LibraryOrderEntry ideLibraryDependency=entry.accept(visitor,null);
+      if (ideLibraryDependency == null) {
+        continue;
+      }
+      String libraryName=ideLibraryDependency.getLibraryName();
+      if (libraryName == null) {
+        continue;
+      }
+      if (!ideLibsToRemove.containsKey(libraryName)) {
+        continue;
+      }
+      ideLibraryDependenciesToRemove.add(ideLibraryDependency);
+      ExternalLibraryDependency gradleLibraryDependency=new ExternalLibraryDependency(gradleModule,ide2gradleLibs.get(libraryName));
+      gradleLibraryDependency.setExported(ideLibraryDependency.isExported());
+      gradleLibraryDependency.setScope(ideLibraryDependency.getScope());
+      libraryDependenciesToImport.add(Pair.create(gradleLibraryDependency,ideModule));
+    }
+  }
+  myDependencyManager.removeDependencies(ideLibraryDependenciesToRemove,false);
+  myLibraryManager.removeLibraries(ideLibsToRemove.values(),myProject);
+  for (  Pair<ExternalLibraryDependency,Module> pair : libraryDependenciesToImport) {
+    myDependencyManager.importDependency(pair.first,pair.second,false);
+  }
+}
