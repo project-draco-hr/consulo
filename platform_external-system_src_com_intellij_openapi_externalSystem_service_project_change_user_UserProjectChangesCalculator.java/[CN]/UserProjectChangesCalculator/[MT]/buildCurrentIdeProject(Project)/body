@@ -1,0 +1,47 @@
+{
+  String compileOutput=null;
+  CompilerProjectExtension compilerProjectExtension=CompilerProjectExtension.getInstance(project);
+  if (compilerProjectExtension != null) {
+    compileOutput=compilerProjectExtension.getCompilerOutputUrl();
+  }
+  if (compileOutput == null) {
+    compileOutput="";
+  }
+  ExternalProject result=new ExternalProject(ProjectSystemId.IDE,".",compileOutput);
+  final Map<String,ExternalModule> modules=ContainerUtilRt.newHashMap();
+  for (  Module ideModule : myFacade.getModules(project)) {
+    final ExternalModule module=new ExternalModule(ProjectSystemId.IDE,ideModule.getName(),ideModule.getModuleFilePath());
+    modules.put(module.getName(),module);
+  }
+  for (  Module ideModule : myFacade.getModules(project)) {
+    final ExternalModule module=modules.get(ideModule.getName());
+    RootPolicy<Void> visitor=new RootPolicy<Void>(){
+      @Override public Void visitLibraryOrderEntry(      LibraryOrderEntry libraryOrderEntry,      Void value){
+        Library library=libraryOrderEntry.getLibrary();
+        if (library != null) {
+          ExternalLibraryDependency dependency=new ExternalLibraryDependency(module,new ExternalLibrary(ProjectSystemId.IDE,ExternalSystemUtil.getLibraryName(library)));
+          dependency.setScope(libraryOrderEntry.getScope());
+          dependency.setExported(libraryOrderEntry.isExported());
+          module.addDependency(dependency);
+        }
+        return value;
+      }
+      @Override public Void visitModuleOrderEntry(      ModuleOrderEntry moduleOrderEntry,      Void value){
+        ExternalModule dependencyModule=modules.get(moduleOrderEntry.getModuleName());
+        if (dependencyModule != null) {
+          ExternalModuleDependency dependency=new ExternalModuleDependency(module,dependencyModule);
+          dependency.setScope(moduleOrderEntry.getScope());
+          dependency.setExported(moduleOrderEntry.isExported());
+          module.addDependency(dependency);
+        }
+        return value;
+      }
+    }
+;
+    for (    OrderEntry orderEntry : myFacade.getOrderEntries(ideModule)) {
+      orderEntry.accept(visitor,null);
+    }
+    result.addModule(module);
+  }
+  return result;
+}
