@@ -1,0 +1,54 @@
+{
+  GrExpression selected=getInvokedExpression();
+  PsiType thisType=selected.getType();
+  if (thisType == null)   return null;
+  GrArgumentList argList=getArgumentList();
+  PsiType[] argTypes=PsiUtil.getArgumentTypes(argList);
+  if (argTypes == null)   return null;
+  final PsiManager manager=getManager();
+  final GlobalSearchScope resolveScope=getResolveScope();
+  if (argTypes.length == 0) {
+    PsiType arrType=null;
+    if (selected instanceof GrBuiltinTypeClassExpression) {
+      arrType=((GrBuiltinTypeClassExpression)selected).getPrimitiveType();
+    }
+    if (selected instanceof GrReferenceExpression) {
+      final PsiElement resolved=((GrReferenceExpression)selected).resolve();
+      if (resolved instanceof PsiClass) {
+        String qname=((PsiClass)resolved).getQualifiedName();
+        if (qname != null) {
+          arrType=TypesUtil.createTypeByFQClassName(qname,this);
+        }
+      }
+    }
+    if (arrType != null) {
+      final PsiArrayType param=arrType.createArrayType();
+      return TypesUtil.createJavaLangClassType(param,getProject(),resolveScope);
+    }
+  }
+  if (PsiImplUtil.isSimpleArrayAccess(thisType,argTypes,this,isSetter != null ? isSetter.booleanValue() : PsiUtil.isLValue(this))) {
+    return TypesUtil.boxPrimitiveType(((PsiArrayType)thisType).getComponentType(),manager,resolveScope);
+  }
+  final GroovyResolveResult[] candidates;
+  if (isSetter != null) {
+    candidates=isSetter.booleanValue() ? multiResolveSetter(false) : multiResolveGetter(false);
+  }
+ else {
+    candidates=multiResolve(false);
+  }
+  PsiType[] args=PsiUtil.getArgumentTypes(argList.getNamedArguments(),argList.getExpressionArguments(),GrClosableBlock.EMPTY_ARRAY,true,null,false);
+  final GroovyResolveResult candidate=PsiImplUtil.extractUniqueResult(candidates);
+  final PsiElement element=candidate.getElement();
+  if (element instanceof PsiNamedElement) {
+    final String name=((PsiNamedElement)element).getName();
+    if ("putAt".equals(name) && args != null) {
+      args=ArrayUtil.append(args,TypeInferenceHelper.getInitializerFor(this),PsiType.class);
+    }
+  }
+  PsiType overloadedOperatorType=ResolveUtil.extractReturnTypeFromCandidate(candidate,this,args);
+  PsiType componentType=extractMapValueType(thisType,args,manager,resolveScope);
+  if (overloadedOperatorType != null && (componentType == null || !TypesUtil.isAssignableByMethodCallConversion(overloadedOperatorType,componentType,selected))) {
+    return TypesUtil.boxPrimitiveType(overloadedOperatorType,manager,resolveScope);
+  }
+  return componentType;
+}

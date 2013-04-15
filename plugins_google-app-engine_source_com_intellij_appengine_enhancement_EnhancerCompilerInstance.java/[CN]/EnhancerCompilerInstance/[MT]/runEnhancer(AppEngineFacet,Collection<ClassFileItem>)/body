@@ -1,0 +1,60 @@
+{
+  try {
+    final AppEngineSdk sdk=facet.getSdk();
+    if (!sdk.isValid()) {
+      throw new CantRunException("Valid App Engine SDK isn't specified for '" + facet.getName() + "' facet (module '"+ facet.getModule().getName()+ "')");
+    }
+    final JavaParameters javaParameters=new JavaParameters();
+    new ReadAction(){
+      protected void run(      final Result result) throws Throwable {
+        myContext.getProgressIndicator().setText2("'" + facet.getModule().getName() + "' module, processing "+ items.size()+ " classes...");
+        javaParameters.configureByModule(facet.getModule(),JavaParameters.JDK_AND_CLASSES);
+        final PathsList classPath=javaParameters.getClassPath();
+        classPath.addFirst(sdk.getToolsApiJarFile().getAbsolutePath());
+        removeAsmJarFromClasspath(classPath);
+        final ParametersList vmParameters=javaParameters.getVMParametersList();
+        vmParameters.add("-Xmx256m");
+        javaParameters.setMainClass(EnhancerRunner.class.getName());
+        classPath.addFirst(PathUtil.getJarPathForClass(EnhancerRunner.class));
+        final File argsFile=FileUtil.createTempFile("appEngineEnhanceFiles",".txt");
+        PrintWriter writer=new PrintWriter(argsFile);
+        try {
+          for (          ClassFileItem item : items) {
+            writer.println(FileUtil.toSystemDependentName(item.getFile().getPath()));
+          }
+        }
+  finally {
+          writer.close();
+        }
+        final ParametersList programParameters=javaParameters.getProgramParametersList();
+        programParameters.add(argsFile.getAbsolutePath());
+        programParameters.add("com.google.appengine.tools.enhancer.Enhance");
+        programParameters.add("-api");
+        PersistenceApi api=facet.getConfiguration().getPersistenceApi();
+        programParameters.add(api.getEnhancerApiName());
+        if (api.getEnhancerVersion() == 2) {
+          programParameters.add("-enhancerVersion");
+          programParameters.add("v2");
+        }
+        programParameters.add("-v");
+      }
+    }
+.execute().throwException();
+    final GeneralCommandLine commandLine=CommandLineBuilder.createFromJavaParameters(javaParameters);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("starting enhancer: " + commandLine.getCommandLineString());
+    }
+    final Process process=commandLine.createProcess();
+    EnhancerProcessHandler handler=new EnhancerProcessHandler(process,commandLine.getCommandLineString(),myContext);
+    handler.startNotify();
+    handler.waitFor();
+  }
+ catch (  ProcessCanceledException e) {
+    throw e;
+  }
+catch (  Throwable e) {
+    myContext.addMessage(CompilerMessageCategory.ERROR,e.getMessage(),null,-1,-1);
+    LOG.info(e);
+  }
+  return myContext.getMessageCount(CompilerMessageCategory.ERROR) == 0;
+}

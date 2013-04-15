@@ -1,0 +1,56 @@
+{
+  final String explodedPath=artifact.getOutputPath();
+  if (explodedPath == null) {
+    Messages.showErrorDialog(project,"Output path isn't specified for '" + artifact.getName() + "' artifact",CommonBundle.getErrorTitle());
+    return null;
+  }
+  final AppEngineFacet appEngineFacet=AppEngineUtil.findAppEngineFacet(project,artifact);
+  if (appEngineFacet == null) {
+    Messages.showErrorDialog(project,"App Engine facet not found in '" + artifact.getName() + "' artifact",CommonBundle.getErrorTitle());
+    return null;
+  }
+  final AppEngineSdk sdk=appEngineFacet.getSdk();
+  if (!sdk.getAppCfgFile().exists()) {
+    Messages.showErrorDialog(project,"Path to App Engine SDK isn't specified correctly in App Engine Facet settings",CommonBundle.getErrorTitle());
+    return null;
+  }
+  PackagingElementResolvingContext context=ArtifactManager.getInstance(project).getResolvingContext();
+  VirtualFile descriptorFile=ArtifactUtil.findSourceFileByOutputPath(artifact,"WEB-INF/appengine-web.xml",context);
+  final AppEngineWebApp root=AppEngineFacet.getDescriptorRoot(descriptorFile,appEngineFacet.getModule().getProject());
+  if (root != null) {
+    final GenericDomValue<String> application=root.getApplication();
+    if (StringUtil.isEmptyOrSpaces(application.getValue())) {
+      final String name=Messages.showInputDialog(project,"<html>Application name is not specified in appengine-web.xml.<br>" + "Enter application name (see your <a href=\"http://appengine.google.com\">AppEngine account</a>):</html>",CommonBundle.getErrorTitle(),null,"",null);
+      if (name == null)       return null;
+      final PsiFile file=application.getXmlTag().getContainingFile();
+      new WriteCommandAction(project,file){
+        protected void run(        final Result result){
+          application.setStringValue(name);
+        }
+      }
+.execute();
+      final Document document=PsiDocumentManager.getInstance(project).getDocument(file);
+      if (document != null) {
+        FileDocumentManager.getInstance().saveDocument(document);
+      }
+    }
+  }
+  String password=null;
+  String email=null;
+  try {
+    email=AppEngineAccountDialog.getStoredEmail(project);
+    password=AppEngineAccountDialog.getStoredPassword(project,email);
+  }
+ catch (  PasswordSafeException e) {
+    LOG.info("Cannot load stored password: " + e.getMessage());
+    LOG.info(e);
+  }
+  if (StringUtil.isEmpty(email) || StringUtil.isEmpty(password)) {
+    final AppEngineAccountDialog dialog=new AppEngineAccountDialog(project);
+    dialog.show();
+    if (!dialog.isOK())     return null;
+    email=dialog.getEmail();
+    password=dialog.getPassword();
+  }
+  return new AppEngineUploader(project,artifact,appEngineFacet,sdk,email,password);
+}
