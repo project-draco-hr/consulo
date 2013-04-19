@@ -1,11 +1,48 @@
 {
-  final ProjectSystemId owner;
-  if (entity instanceof ProjectEntityData) {
-    owner=((ProjectEntityData)entity).getOwner();
+  final Ref<ProjectEntityId> result=new Ref<ProjectEntityId>();
+  if (entity instanceof DataNode) {
+    Object data=((DataNode)entity).getData();
+    if (data instanceof ProjectEntityData) {
+      return (T)((ProjectEntityData)data).getId((DataNode<T>)entity);
+    }
   }
- else {
-    owner=ProjectSystemId.IDE;
+  if (result.get() == null) {
+    ExternalSystemUtil.dispatch(entity,new IdeEntityVisitor(){
+      @Override public void visit(      @NotNull Project project){
+        result.set(new ProjectId(ProjectSystemId.IDE));
+      }
+      @Override public void visit(      @NotNull Module module){
+        result.set(new ModuleId(ProjectSystemId.IDE,module.getName()));
+      }
+      @Override public void visit(      @NotNull ModuleAwareContentRoot contentRoot){
+        final String path=contentRoot.getFile().getPath();
+        result.set(new ContentRootId(ProjectSystemId.IDE,contentRoot.getModule().getName(),path));
+      }
+      @Override public void visit(      @NotNull LibraryOrderEntry libraryDependency){
+        String libraryName=libraryDependency.getLibraryName();
+        if (libraryName == null) {
+          final Library library=libraryDependency.getLibrary();
+          if (library != null) {
+            libraryName=ExternalSystemUtil.getLibraryName(library);
+          }
+        }
+        if (libraryName == null) {
+          return;
+        }
+        result.set(new LibraryDependencyId(ProjectSystemId.IDE,libraryDependency.getOwnerModule().getName(),libraryName));
+      }
+      @Override public void visit(      @NotNull ModuleOrderEntry moduleDependency){
+        result.set(new ModuleDependencyId(ProjectSystemId.IDE,moduleDependency.getOwnerModule().getName(),moduleDependency.getModuleName()));
+      }
+      @Override public void visit(      @NotNull Library library){
+        result.set(new LibraryId(ProjectSystemId.IDE,ExternalSystemUtil.getLibraryName(library)));
+      }
+    }
+);
   }
-  T t=mapEntityToId(entity,owner);
-  return t;
+  final Object r=result.get();
+  if (r == null) {
+    throw new IllegalArgumentException(String.format("Can't map entity '%s' to id element",entity));
+  }
+  return (T)r;
 }
