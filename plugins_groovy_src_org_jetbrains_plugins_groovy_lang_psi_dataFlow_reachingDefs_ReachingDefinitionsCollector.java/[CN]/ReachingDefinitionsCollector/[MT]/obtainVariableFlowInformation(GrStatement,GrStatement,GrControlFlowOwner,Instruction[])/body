@@ -1,0 +1,47 @@
+{
+  final DefinitionMap dfaResult=inferDfaResult(flow);
+  final LinkedHashSet<Integer> fragmentInstructions=getFragmentInstructions(first,last,flow);
+  final int[] postorder=ControlFlowBuilderUtil.postorder(flow);
+  LinkedHashSet<Integer> reachableFromFragmentReads=getReachable(fragmentInstructions,flow,dfaResult,postorder);
+  LinkedHashSet<Integer> fragmentReads=filterReads(fragmentInstructions,flow);
+  final Map<String,VariableInfo> imap=new LinkedHashMap<String,VariableInfo>();
+  final Map<String,VariableInfo> omap=new LinkedHashMap<String,VariableInfo>();
+  final PsiManager manager=first.getManager();
+  for (  final Integer ref : fragmentReads) {
+    ReadWriteVariableInstruction rwInstruction=(ReadWriteVariableInstruction)flow[ref];
+    String name=rwInstruction.getVariableName();
+    final int[] defs=dfaResult.getDefinitions(ref);
+    if (!allDefsInFragment(defs,fragmentInstructions)) {
+      addVariable(name,imap,manager,getType(rwInstruction.getElement()));
+    }
+  }
+  for (  final Integer ref : reachableFromFragmentReads) {
+    ReadWriteVariableInstruction rwInstruction=(ReadWriteVariableInstruction)flow[ref];
+    String name=rwInstruction.getVariableName();
+    final int[] defs=dfaResult.getDefinitions(ref);
+    if (anyDefInFragment(defs,fragmentInstructions)) {
+      for (      int def : defs) {
+        if (fragmentInstructions.contains(def)) {
+          PsiType outputType=getType(flow[def].getElement());
+          addVariable(name,omap,manager,outputType);
+        }
+      }
+      if (!allProperDefsInFragment(defs,ref,fragmentInstructions,postorder)) {
+        PsiType inputType=getType(rwInstruction.getElement());
+        addVariable(name,imap,manager,inputType);
+      }
+    }
+  }
+  addClosureUsages(imap,omap,first,last,flowOwner);
+  final VariableInfo[] iarr=filterNonlocals(imap,first);
+  final VariableInfo[] oarr=filterNonlocals(omap,first);
+  return new FragmentVariableInfos(){
+    public VariableInfo[] getInputVariableNames(){
+      return iarr;
+    }
+    public VariableInfo[] getOutputVariableNames(){
+      return oarr;
+    }
+  }
+;
+}
