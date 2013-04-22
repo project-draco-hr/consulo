@@ -1,0 +1,38 @@
+{
+  if (!JavaFxFileTypeFactory.isFxml(file))   return null;
+  final XmlDocument document=((XmlFile)file).getDocument();
+  if (document == null)   return null;
+  final Set<String> usedNames=new HashSet<String>();
+  file.accept(new JavaFxImportsOptimizer.JavaFxUsedClassesVisitor(){
+    @Override protected void appendClassName(    String fqn){
+      usedNames.add(fqn);
+      final String packageName=StringUtil.getPackageName(fqn);
+      if (!StringUtil.isEmpty(packageName)) {
+        usedNames.add(packageName);
+      }
+    }
+  }
+);
+  final InspectionManager inspectionManager=InspectionManager.getInstance(file.getProject());
+  final List<ProblemDescriptor> problems=new ArrayList<ProblemDescriptor>();
+  final Collection<XmlProcessingInstruction> instructions=PsiTreeUtil.findChildrenOfType(document.getProlog(),XmlProcessingInstruction.class);
+  final Map<String,XmlProcessingInstruction> targetProcessingInstructions=new LinkedHashMap<String,XmlProcessingInstruction>();
+  for (  XmlProcessingInstruction instruction : instructions) {
+    final String target=JavaFxPsiUtil.getInstructionTarget("import",instruction);
+    if (target != null) {
+      targetProcessingInstructions.put(target,instruction);
+    }
+  }
+  for (  String target : targetProcessingInstructions.keySet()) {
+    final XmlProcessingInstruction instruction=targetProcessingInstructions.get(target);
+    if (target.endsWith(".*")) {
+      if (!usedNames.contains(StringUtil.trimEnd(target,".*"))) {
+        problems.add(inspectionManager.createProblemDescriptor(instruction,"Unused import",ProblemHighlightType.LIKE_UNUSED_SYMBOL,null,isOnTheFly,new JavaFxOptimizeImportsFix()));
+      }
+    }
+ else     if (!usedNames.contains(target) || targetProcessingInstructions.containsKey(StringUtil.getPackageName(target) + ".*")) {
+      problems.add(inspectionManager.createProblemDescriptor(instruction,"Unused import",ProblemHighlightType.LIKE_UNUSED_SYMBOL,null,isOnTheFly,new JavaFxOptimizeImportsFix()));
+    }
+  }
+  return problems.isEmpty() ? null : problems.toArray(new ProblemDescriptor[problems.size()]);
+}

@@ -7,14 +7,8 @@
   }
   UISettings.getInstance().addUISettingsListener(this,this);
   final ID pool=invoke("NSAutoreleasePool","new");
-  if (SystemInfo.isMac) {
-    ID awtWindow=Foundation.getObjcClass("AWTWindow");
-    Pointer windowWillEnterFullScreenMethod=Foundation.createSelector("windowWillEnterFullScreen:");
-    ID originalWindowWillEnterFullScreen=Foundation.class_replaceMethod(awtWindow,windowWillEnterFullScreenMethod,windowWillEnterFullScreenCallBack,"v@::@");
-    Foundation.addMethodByID(awtWindow,Foundation.createSelector("oldWindowWillEnterFullScreen:"),originalWindowWillEnterFullScreen,"v@::@");
-    Pointer windowWillExitFullScreenMethod=Foundation.createSelector("windowWillExitFullScreen:");
-    ID originalWindowWillExitFullScreen=Foundation.class_replaceMethod(awtWindow,windowWillExitFullScreenMethod,windowWillExitFullScreenCallBack,"v@::@");
-    Foundation.addMethodByID(awtWindow,Foundation.createSelector("oldWindowWillExitFullScreen:"),originalWindowWillExitFullScreen,"v@::@");
+  if (ORACLE_BUG_ID_8003173) {
+    replaceNativeFullscreenListenerCallback();
   }
   int v=UNIQUE_COUNTER.incrementAndGet();
   if (Patches.APPLE_BUG_ID_10514018) {
@@ -33,15 +27,23 @@
       FullScreenUtilities.setWindowCanFullScreen(frame,true);
       FullScreenUtilities.addFullScreenListenerTo(frame,new FullScreenAdapter(){
         @Override public void windowEnteredFullScreen(        AppEvent.FullScreenEvent event){
-          LOG.assertTrue(SystemInfo.isMac,"For mac we set myInFullScreen in the windowWillEnterFullScreenCallBack methods");
+          if (!ORACLE_BUG_ID_8003173) {
+            enterFullscreen();
+            myFrame.validate();
+          }
         }
         @Override public void windowExitedFullScreen(        AppEvent.FullScreenEvent event){
-          LOG.assertTrue(SystemInfo.isMac,"For mac we set myInFullScreen in the windowWillExitFullScreenCallBack methods");
+          if (!ORACLE_BUG_ID_8003173) {
+            exitFullscreen();
+            myFrame.validate();
+          }
         }
       }
 );
     }
  else {
+      final ID window=MacUtil.findWindowForTitle(frame.getTitle());
+      if (window == null)       return;
       String className="IdeaToolbar" + v;
       final ID ownToolbar=Foundation.allocateObjcClassPair(Foundation.getObjcClass("NSToolbar"),className);
       Foundation.registerObjcClassPair(ownToolbar);
@@ -50,8 +52,6 @@
       invoke(toolbar,"setVisible:",0);
       Foundation.addMethod(ownToolbar,Foundation.createSelector("setVisible:"),SET_VISIBLE_CALLBACK,"v*");
       Foundation.addMethod(ownToolbar,Foundation.createSelector("isVisible"),IS_VISIBLE,"B*");
-      final ID window=MacUtil.findWindowForTitle(frame.getTitle());
-      if (window == null)       return;
       Foundation.executeOnMainThread(new Runnable(){
         @Override public void run(){
           invoke(window,"setToolbar:",toolbar);

@@ -1,0 +1,39 @@
+{
+  Object cachedResult=myRemotes.get(interfaceClass);
+  if (cachedResult != null) {
+    return (I)cachedResult;
+  }
+  S settings=mySettings.get();
+  if (settings != null) {
+    impl.setNotificationListener(myNotificationListener.get());
+    impl.setSettings(settings);
+  }
+  impl.setNotificationListener(myNotificationListener.get());
+  I proxy=(I)Proxy.newProxyInstance(getClass().getClassLoader(),new Class<?>[]{interfaceClass},new InvocationHandler(){
+    @Override public Object invoke(    Object proxy,    Method method,    Object[] args) throws Throwable {
+      myCallsInProgressNumber.incrementAndGet();
+      try {
+        return method.invoke(impl,args);
+      }
+  finally {
+        myCallsInProgressNumber.decrementAndGet();
+        updateAutoShutdownTime();
+      }
+    }
+  }
+);
+  try {
+    I stub=(I)UnicastRemoteObject.exportObject(proxy,0);
+    I stored=(I)myRemotes.putIfAbsent(interfaceClass,stub);
+    return stored == null ? stub : stored;
+  }
+ catch (  RemoteException e) {
+    Object raceResult=myRemotes.get(interfaceClass);
+    if (raceResult != null) {
+      return (I)raceResult;
+    }
+ else {
+      throw new IllegalStateException(String.format("Can't prepare remote service for interface '%s', implementation '%s'",interfaceClass,impl),e);
+    }
+  }
+}

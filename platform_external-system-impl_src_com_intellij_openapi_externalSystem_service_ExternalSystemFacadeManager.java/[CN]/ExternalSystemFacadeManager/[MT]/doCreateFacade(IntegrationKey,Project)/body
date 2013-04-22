@@ -1,0 +1,38 @@
+{
+  myTargetExternalSystemId.set(key.getExternalSystemId());
+  final RemoteExternalSystemFacade facade=mySupport.acquire(this,project.getName());
+  myTargetExternalSystemId.set(null);
+  if (facade == null) {
+    throw new IllegalStateException("Can't obtain facade to working with gradle api at the remote process. Project: " + project);
+  }
+  Disposer.register(project,new Disposable(){
+    @Override public void dispose(){
+      mySupport.stopAll(true);
+      myFacadeWrappers.clear();
+      myRemoteFacades.clear();
+    }
+  }
+);
+  final RemoteExternalSystemFacade result=new ExternalSystemFacadeWrapper(facade,myProgressManager);
+  ExternalSystemExecutionSettings settings=mySettingsManager.getExecutionSettings(project,key.getExternalSystemId());
+  Pair<RemoteExternalSystemFacade,ExternalSystemExecutionSettings> newPair=Pair.create(result,settings);
+  myRemoteFacades.put(key,newPair);
+  result.applySettings(newPair.second);
+  RemoteExternalSystemProgressNotificationManager exported=myExportedNotificationManager.get();
+  if (exported == null) {
+    try {
+      exported=(RemoteExternalSystemProgressNotificationManager)UnicastRemoteObject.exportObject(myProgressManager,0);
+      myExportedNotificationManager.set(exported);
+    }
+ catch (    RemoteException e) {
+      exported=myExportedNotificationManager.get();
+    }
+  }
+  if (exported == null) {
+    LOG.warn("Can't export progress manager");
+  }
+ else {
+    result.applyProgressManager(exported);
+  }
+  return result;
+}
