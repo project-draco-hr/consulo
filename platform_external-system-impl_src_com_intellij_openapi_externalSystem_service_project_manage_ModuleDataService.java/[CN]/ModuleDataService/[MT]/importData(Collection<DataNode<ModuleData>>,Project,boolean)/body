@@ -1,0 +1,66 @@
+{
+  if (toImport.isEmpty()) {
+    return;
+  }
+  if (!project.isInitialized()) {
+    myAlarm.addRequest(new ImportModulesTask(project,toImport,synchronous),PROJECT_INITIALISATION_DELAY_MS);
+    return;
+  }
+  Runnable task=new Runnable(){
+    @Override public void run(){
+      removeExistingModulesConfigs(toImport,project);
+      Application application=ApplicationManager.getApplication();
+      final Map<DataNode<ModuleData>,Module> moduleMappings=ContainerUtilRt.newHashMap();
+      application.runWriteAction(new Runnable(){
+        @Override public void run(){
+          final ModuleManager moduleManager=ModuleManager.getInstance(project);
+          final ProjectEntityChangeListener publisher=project.getMessageBus().syncPublisher(ProjectEntityChangeListener.TOPIC);
+          for (          DataNode<ModuleData> module : toImport) {
+            publisher.onChangeStart(module,module.getData().getOwner());
+            try {
+              importModule(moduleManager,module);
+            }
+  finally {
+              publisher.onChangeEnd(module,module.getData().getOwner());
+            }
+          }
+        }
+        private void importModule(        @NotNull ModuleManager moduleManager,        @NotNull DataNode<ModuleData> module){
+          ModuleData data=module.getData();
+          final Module created=moduleManager.newModule(data.getModuleFilePath(),data.getModuleTypeId());
+          ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(created);
+          final ModifiableRootModel moduleRootModel=moduleRootManager.getModifiableModel();
+          moduleRootModel.inheritSdk();
+          RootPolicy<Object> visitor=new RootPolicy<Object>(){
+            @Override public Object visitLibraryOrderEntry(            LibraryOrderEntry libraryOrderEntry,            Object value){
+              moduleRootModel.removeOrderEntry(libraryOrderEntry);
+              return value;
+            }
+            @Override public Object visitModuleOrderEntry(            ModuleOrderEntry moduleOrderEntry,            Object value){
+              moduleRootModel.removeOrderEntry(moduleOrderEntry);
+              return value;
+            }
+          }
+;
+          try {
+            for (            OrderEntry orderEntry : moduleRootModel.getOrderEntries()) {
+              orderEntry.accept(visitor,null);
+            }
+          }
+  finally {
+            moduleRootModel.commit();
+          }
+          moduleMappings.put(module,created);
+        }
+      }
+);
+    }
+  }
+;
+  if (synchronous) {
+    UIUtil.invokeAndWaitIfNeeded(task);
+  }
+ else {
+    UIUtil.invokeLaterIfNeeded(task);
+  }
+}
