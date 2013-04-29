@@ -1,0 +1,58 @@
+{
+  Set<BuildTargetType<?>> targetTypes=new HashSet<BuildTargetType<?>>();
+  Set<BuildTargetType<?>> targetTypesToForceBuild=new HashSet<BuildTargetType<?>>();
+  Set<BuildTarget<?>> targets=new HashSet<BuildTarget<?>>();
+  Map<BuildTarget<?>,Set<File>> files;
+  final TargetTypeRegistry typeRegistry=TargetTypeRegistry.getInstance();
+  for (  TargetTypeBuildScope scope : scopes) {
+    final BuildTargetType<?> targetType=typeRegistry.getTargetType(scope.getTypeId());
+    if (targetType == null) {
+      LOG.info("Unknown target type: " + scope.getTypeId());
+      continue;
+    }
+    if (scope.getForceBuild() || forceClean) {
+      targetTypesToForceBuild.add(targetType);
+    }
+    if (scope.getAllTargets()) {
+      targetTypes.add(targetType);
+    }
+ else {
+      BuildTargetLoader<?> loader=targetType.createLoader(pd.getModel());
+      for (      String targetId : scope.getTargetIdList()) {
+        BuildTarget<?> target=loader.createTarget(targetId);
+        if (target != null) {
+          targets.add(target);
+        }
+ else {
+          LOG.info("Unknown " + targetType + " target id: "+ targetId);
+        }
+      }
+    }
+  }
+  if (includeDependenciesToScope) {
+    includeDependenciesToScope(targetTypes,targets,pd);
+  }
+  final Timestamps timestamps=pd.timestamps.getStorage();
+  if (!paths.isEmpty()) {
+    files=new HashMap<BuildTarget<?>,Set<File>>();
+    for (    String path : paths) {
+      final File file=new File(path);
+      final Collection<BuildRootDescriptor> descriptors=pd.getBuildRootIndex().findAllParentDescriptors(file,null);
+      for (      BuildRootDescriptor descriptor : descriptors) {
+        Set<File> fileSet=files.get(descriptor.getTarget());
+        if (fileSet == null) {
+          fileSet=new THashSet<File>(FileUtil.FILE_HASHING_STRATEGY);
+          files.put(descriptor.getTarget(),fileSet);
+        }
+        fileSet.add(file);
+        if (targetTypesToForceBuild.contains(descriptor.getTarget().getTargetType())) {
+          pd.fsState.markDirty(null,file,descriptor,timestamps,false);
+        }
+      }
+    }
+  }
+ else {
+    files=Collections.emptyMap();
+  }
+  return new CompileScopeImpl(targetTypes,targetTypesToForceBuild,targets,files);
+}
