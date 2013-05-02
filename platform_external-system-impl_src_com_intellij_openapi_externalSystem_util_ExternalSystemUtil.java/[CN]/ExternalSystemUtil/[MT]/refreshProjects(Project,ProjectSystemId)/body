@@ -1,0 +1,40 @@
+{
+  ExternalSystemManager<?,?,?,?,?> manager=ExternalSystemApiUtil.getManager(externalSystemId);
+  if (manager == null) {
+    return;
+  }
+  AbstractExternalSystemSettings<?,?> settings=manager.getSettingsProvider().fun(project);
+  Collection<? extends ExternalProjectSettings> projectsSettings=settings.getLinkedProjectsSettings();
+  if (projectsSettings.isEmpty()) {
+    return;
+  }
+  final ProjectDataManager projectDataManager=ServiceManager.getService(ProjectDataManager.class);
+  final Set<String> externalModuleNames=ContainerUtilRt.newHashSet();
+  ExternalProjectRefreshCallback callback=new ExternalProjectRefreshCallback(){
+    @Override public void onSuccess(    @Nullable DataNode<ProjectData> externalProject){
+      if (externalProject == null) {
+        return;
+      }
+      Collection<DataNode<ModuleData>> moduleNodes=ExternalSystemApiUtil.findAll(externalProject,ProjectKeys.MODULE);
+      for (      DataNode<ModuleData> node : moduleNodes) {
+        externalModuleNames.add(node.getData().getName());
+      }
+      projectDataManager.importData(externalProject.getKey(),Collections.singleton(externalProject),project,false);
+    }
+    @Override public void onFailure(    @NotNull String errorMessage,    @Nullable String errorDetails){
+    }
+  }
+;
+  for (  ExternalProjectSettings setting : projectsSettings) {
+    refreshProject(project,externalSystemId,setting.getExternalProjectPath(),callback,true,false);
+  }
+  PlatformFacade platformFacade=ServiceManager.getService(PlatformFacade.class);
+  List<Module> orphanIdeModules=ContainerUtilRt.newArrayList();
+  String externalSystemIdAsString=externalSystemId.toString();
+  for (  Module module : platformFacade.getModules(project)) {
+    String s=module.getOptionValue(ExternalSystemConstants.EXTERNAL_SYSTEM_ID_KEY);
+    if (externalSystemIdAsString.equals(s) && !externalModuleNames.contains(module.getName())) {
+      orphanIdeModules.add(module);
+    }
+  }
+}
