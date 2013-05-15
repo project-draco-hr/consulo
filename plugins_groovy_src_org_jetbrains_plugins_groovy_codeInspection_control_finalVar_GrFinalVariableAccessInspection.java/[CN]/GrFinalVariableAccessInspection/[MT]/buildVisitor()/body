@@ -1,0 +1,60 @@
+{
+  return new BaseInspectionVisitor(){
+    @Override public void visitMethod(    GrMethod method){
+      super.visitMethod(method);
+      final GrOpenBlock block=method.getBlock();
+      if (block != null) {
+        processLocalVars(block);
+      }
+    }
+    @Override public void visitFile(    GroovyFileBase file){
+      super.visitFile(file);
+      if (file instanceof GroovyFile && file.isScript()) {
+        processLocalVars(file);
+      }
+    }
+    @Override public void visitField(    GrField field){
+      super.visitField(field);
+      final GrExpression initializer=field.getInitializerGroovy();
+      if (initializer != null) {
+        processLocalVars(initializer);
+      }
+      if (field.hasModifierProperty(PsiModifier.FINAL)) {
+        checkFieldIsInitialized(field);
+      }
+    }
+    private void checkFieldIsInitialized(    @NotNull GrField field){
+      if (!isFieldInitialized(field)) {
+        registerError(field.getNameIdentifierGroovy(),GroovyBundle.message("variable.0.might.not.have.been.initialized",field.getName()),LocalQuickFix.EMPTY_ARRAY,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+      }
+    }
+    @Override public void visitClassInitializer(    GrClassInitializer initializer){
+      super.visitClassInitializer(initializer);
+      final GrOpenBlock block=initializer.getBlock();
+      processLocalVars(block);
+    }
+    private void processLocalVars(    GroovyPsiElement scope){
+      MultiMap<PsiElement,GrVariable> scopes=collectVariables(scope);
+      for (      Map.Entry<PsiElement,Collection<GrVariable>> entry : scopes.entrySet()) {
+        final PsiElement scopeToProcess=entry.getKey();
+        final Set<GrVariable> forInParameters=ContainerUtil.newHashSet();
+        final Map<String,GrVariable> variables=ContainerUtil.newHashMap();
+        for (        GrVariable var : entry.getValue()) {
+          variables.put(var.getName(),var);
+          if (var instanceof GrParameter && ((GrParameter)var).getDeclarationScope() instanceof GrForStatement) {
+            forInParameters.add(var);
+          }
+        }
+        final List<ReadWriteVariableInstruction> result=new InvalidWriteAccessSearcher().findInvalidWriteAccess(getFlow(scopeToProcess),variables,forInParameters);
+        if (result != null) {
+          for (          ReadWriteVariableInstruction instruction : result) {
+            if (variables.containsKey(instruction.getVariableName())) {
+              registerError(instruction.getElement(),GroovyBundle.message("cannot.assign.a.value.to.final.field.0",instruction.getVariableName()),LocalQuickFix.EMPTY_ARRAY,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+            }
+          }
+        }
+      }
+    }
+  }
+;
+}
