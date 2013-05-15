@@ -6,6 +6,9 @@
       if (block != null) {
         processLocalVars(block);
       }
+      if (method.isConstructor()) {
+        processFieldsInConstructors(method);
+      }
     }
     @Override public void visitFile(    GroovyFileBase file){
       super.visitFile(file);
@@ -32,6 +35,37 @@
       super.visitClassInitializer(initializer);
       final GrOpenBlock block=initializer.getBlock();
       processLocalVars(block);
+      processFieldsInClassInitializer(initializer);
+    }
+    private void processFieldsInConstructors(    GrMethod constructor){
+      final GrOpenBlock block=constructor.getBlock();
+      if (block == null)       return;
+      final GrTypeDefinition clazz=(GrTypeDefinition)constructor.getContainingClass();
+      if (clazz == null)       return;
+      final GrClassInitializer[] initializers=clazz.getInitializers();
+      final GrField[] fields=clazz.getCodeFields();
+      Set<GrVariable> initializedFields=ContainerUtil.newHashSet();
+      appendFieldInitializedInDeclaration(false,fields,initializedFields);
+      appendFieldsInitializedInClassInitializer(null,false,initializers,fields,initializedFields);
+      appendInitializationFromChainedConstructors(initializedFields,constructor,fields);
+      final Instruction[] flow=buildFlowForField(block);
+      final Map<String,GrVariable> variables=buildVarMap(fields,false);
+      final List<ReadWriteVariableInstruction> invalidWriteAccess=new InvalidWriteAccessSearcher().findInvalidWriteAccess(flow,variables,initializedFields);
+      highlightInvalidWriteAccess(variables,invalidWriteAccess);
+    }
+    private void processFieldsInClassInitializer(    GrClassInitializer initializer){
+      GrTypeDefinition clazz=(GrTypeDefinition)initializer.getContainingClass();
+      if (clazz == null)       return;
+      final boolean isStatic=initializer.isStatic();
+      final GrClassInitializer[] initializers=clazz.getInitializers();
+      final GrField[] fields=clazz.getCodeFields();
+      Set<GrVariable> initializedFields=ContainerUtil.newHashSet();
+      appendFieldInitializedInDeclaration(isStatic,fields,initializedFields);
+      appendFieldsInitializedInClassInitializer(initializer,isStatic,initializers,fields,initializedFields);
+      final Instruction[] flow=buildFlowForField(initializer.getBlock());
+      final Map<String,GrVariable> variables=buildVarMap(fields,isStatic);
+      final List<ReadWriteVariableInstruction> invalidWriteAccess=new InvalidWriteAccessSearcher().findInvalidWriteAccess(flow,variables,initializedFields);
+      highlightInvalidWriteAccess(variables,invalidWriteAccess);
     }
     private void processLocalVars(    GroovyPsiElement scope){
       MultiMap<PsiElement,GrVariable> scopes=collectVariables(scope);
@@ -46,11 +80,14 @@
           }
         }
         final List<ReadWriteVariableInstruction> result=new InvalidWriteAccessSearcher().findInvalidWriteAccess(getFlow(scopeToProcess),variables,forInParameters);
-        if (result != null) {
-          for (          ReadWriteVariableInstruction instruction : result) {
-            if (variables.containsKey(instruction.getVariableName())) {
-              registerError(instruction.getElement(),GroovyBundle.message("cannot.assign.a.value.to.final.field.0",instruction.getVariableName()),LocalQuickFix.EMPTY_ARRAY,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
-            }
+        highlightInvalidWriteAccess(variables,result);
+      }
+    }
+    private void highlightInvalidWriteAccess(    Map<String,GrVariable> variables,    List<ReadWriteVariableInstruction> result){
+      if (result != null) {
+        for (        ReadWriteVariableInstruction instruction : result) {
+          if (variables.containsKey(instruction.getVariableName())) {
+            registerError(instruction.getElement(),GroovyBundle.message("cannot.assign.a.value.to.final.field.0",instruction.getVariableName()),LocalQuickFix.EMPTY_ARRAY,ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
           }
         }
       }
