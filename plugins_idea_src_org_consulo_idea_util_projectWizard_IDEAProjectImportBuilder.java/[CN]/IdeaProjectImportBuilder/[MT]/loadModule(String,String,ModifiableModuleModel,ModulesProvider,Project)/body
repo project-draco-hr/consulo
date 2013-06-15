@@ -1,0 +1,44 @@
+{
+  final boolean fromProjectStructure=originalModel != null;
+  final Document document=JDOMUtil.loadDocument(new File(moduleFilePath));
+  final ModifiableModuleModel newModel=fromProjectStructure ? originalModel : ModuleManager.getInstance(project).getModifiableModel();
+  final Module module=newModel.newModule(moduleFilePath.replace(IdeaModuleFileType.DEFAULT_EXTENSION,ModuleFileType.DEFAULT_EXTENSION));
+  final Element rootElement=document.getRootElement();
+  PathMacroManager.getInstance(module).expandPaths(document.getRootElement());
+  String moduleType=rootElement.getAttributeValue("type");
+  final ModifiableRootModel modifiableModel=ModuleRootManager.getInstance(module).getModifiableModel();
+  enableExtensionsByType(moduleType,modifiableModel);
+  XPath xpathExpression=XPath.newInstance("/module[@version='4']/component[@name='NewModuleRootManager']/*");
+  final List list=xpathExpression.selectNodes(document);
+  for (  Object o : list) {
+    Element element=(Element)o;
+    final String name=element.getName();
+    if ("content".equals(name)) {
+      final String url=element.getAttributeValue("url");
+      final ContentEntry contentEntry=modifiableModel.addContentEntry(url);
+      for (      Element childOfContent : element.getChildren()) {
+        final String nameChildOfContent=childOfContent.getName();
+        if ("sourceFolder".equals(nameChildOfContent)) {
+          String url2=childOfContent.getAttributeValue("url");
+          boolean isTestSource=Boolean.valueOf(childOfContent.getAttributeValue("isTestSource"));
+          contentEntry.addFolder(url2,isTestSource ? ContentFolderType.TEST : ContentFolderType.SOURCE);
+        }
+      }
+    }
+  }
+  new WriteAction<Object>(){
+    @Override protected void run(    Result<Object> result) throws Throwable {
+      modifiableModel.commit();
+    }
+  }
+.execute();
+  if (!fromProjectStructure) {
+    new WriteAction<Object>(){
+      @Override protected void run(      Result<Object> result) throws Throwable {
+        newModel.commit();
+      }
+    }
+.execute();
+  }
+  return module;
+}
