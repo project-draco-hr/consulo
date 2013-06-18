@@ -1,0 +1,66 @@
+{
+  VirtualFile manifestFile=null;
+  final Project project=myContext.getProject();
+  if (mainClassName != null && !mainClassName.isEmpty() || !extractLibrariesToJar) {
+    final VirtualFile directory;
+    try {
+      directory=ApplicationManager.getApplication().runWriteAction(new ThrowableComputable<VirtualFile,IOException>(){
+        @Override public VirtualFile compute() throws IOException {
+          return VfsUtil.createDirectoryIfMissing(directoryForManifest);
+        }
+      }
+);
+    }
+ catch (    IOException e) {
+      LOG.info(e);
+      Messages.showErrorDialog(project,"Cannot create directory '" + directoryForManifest + "': "+ e.getMessage(),CommonBundle.getErrorTitle());
+      return null;
+    }
+    if (directory == null)     return null;
+    manifestFile=ManifestFileUtil.createManifestFile(directory,project);
+    if (manifestFile == null) {
+      return null;
+    }
+    ManifestFileUtil.updateManifest(manifestFile,mainClassName,null,true);
+  }
+  String name=modules.length == 1 ? modules[0].getName() : project.getName();
+  final PackagingElementFactory factory=PackagingElementFactory.getInstance();
+  final CompositePackagingElement<?> archive=factory.createZipArchive(ArtifactUtil.suggestArtifactFileName(name) + ".jar");
+  OrderEnumerator orderEnumerator=ProjectRootManager.getInstance(project).orderEntries(Arrays.asList(modules));
+  final Set<Library> libraries=new THashSet<Library>();
+  if (!includeTests) {
+    orderEnumerator=orderEnumerator.productionOnly();
+  }
+  final ModulesProvider modulesProvider=myContext.getModulesProvider();
+  final OrderEnumerator enumerator=orderEnumerator.using(modulesProvider).withoutSdk().runtimeOnly().recursively();
+  enumerator.forEachLibrary(new CommonProcessors.CollectProcessor<Library>(libraries));
+  enumerator.forEachModule(new Processor<Module>(){
+    @Override public boolean process(    Module module){
+      if (ProductionModuleOutputElementType.ELEMENT_TYPE.isSuitableModule(modulesProvider,module)) {
+        archive.addOrFindChild(factory.createModuleOutput(module));
+      }
+      if (includeTests && TestModuleOutputElementType.ELEMENT_TYPE.isSuitableModule(modulesProvider,module)) {
+        archive.addOrFindChild(factory.createTestModuleOutput(module));
+      }
+      return true;
+    }
+  }
+);
+  final JarArtifactType jarArtifactType=JarArtifactType.getInstance();
+  if (manifestFile != null && !manifestFile.equals(ManifestFileUtil.findManifestFile(archive,myContext,jarArtifactType))) {
+    archive.addFirstChild(factory.createFileCopyWithParentDirectories(manifestFile.getPath(),ManifestFileUtil.MANIFEST_DIR_NAME));
+  }
+  final String artifactName=name + ":jar";
+  if (extractLibrariesToJar) {
+    addExtractedLibrariesToJar(archive,factory,libraries);
+    return new NewArtifactConfiguration(archive,artifactName,jarArtifactType);
+  }
+ else {
+    final ArtifactRootElement<?> root=factory.createArtifactRootElement();
+    List<String> classpath=new ArrayList<String>();
+    root.addOrFindChild(archive);
+    addLibraries(libraries,root,archive,classpath);
+    ManifestFileUtil.updateManifest(manifestFile,mainClassName,classpath,true);
+    return new NewArtifactConfiguration(root,artifactName,PlainArtifactType.getInstance());
+  }
+}
