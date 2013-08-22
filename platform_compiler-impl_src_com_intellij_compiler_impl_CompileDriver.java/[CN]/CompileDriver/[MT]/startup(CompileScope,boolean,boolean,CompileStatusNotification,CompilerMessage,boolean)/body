@@ -24,81 +24,30 @@
     }
     attachAdditionalOutputDirectories(compileContext);
   }
-  final Runnable compileWork;
-  if (useExtProcessBuild) {
-    compileWork=new Runnable(){
-      @Override public void run(){
-        final ProgressIndicator indicator=compileContext.getProgressIndicator();
-        if (indicator.isCanceled() || myProject.isDisposed()) {
-          if (callback != null) {
-            callback.finished(true,0,0,compileContext);
-          }
-          return;
+  final Runnable compileWork=new Runnable(){
+    @Override public void run(){
+      if (compileContext.getProgressIndicator().isCanceled()) {
+        if (callback != null) {
+          callback.finished(true,0,0,compileContext);
         }
-        try {
-          LOG.info("COMPILATION STARTED (BUILD PROCESS)");
-          if (message != null) {
-            compileContext.addMessage(message);
-          }
-          final boolean beforeTasksOk=executeCompileTasks(compileContext,true);
-          final int errorCount=compileContext.getMessageCount(CompilerMessageCategory.ERROR);
-          if (!beforeTasksOk || errorCount > 0) {
-            COMPILE_SERVER_BUILD_STATUS.set(compileContext,errorCount > 0 ? ExitStatus.ERRORS : ExitStatus.CANCELLED);
-            return;
-          }
-          final RequestFuture future=compileInExternalProcess(compileContext,false);
-          if (future != null) {
-            while (!future.waitFor(200L,TimeUnit.MILLISECONDS)) {
-              if (indicator.isCanceled()) {
-                future.cancel(false);
-              }
-            }
-            if (!executeCompileTasks(compileContext,false)) {
-              COMPILE_SERVER_BUILD_STATUS.set(compileContext,ExitStatus.CANCELLED);
-            }
-            if (compileContext.getMessageCount(CompilerMessageCategory.ERROR) > 0) {
-              COMPILE_SERVER_BUILD_STATUS.set(compileContext,ExitStatus.ERRORS);
-            }
-          }
-        }
- catch (        Throwable e) {
-          LOG.error(e);
-        }
- finally {
-          CompilerCacheManager.getInstance(myProject).flushCaches();
-          final long duration=notifyCompilationCompleted(compileContext,callback,COMPILE_SERVER_BUILD_STATUS.get(compileContext),true);
-          CompilerUtil.logDuration("\tCOMPILATION FINISHED (BUILD PROCESS); Errors: " + compileContext.getMessageCount(CompilerMessageCategory.ERROR) + "; warnings: "+ compileContext.getMessageCount(CompilerMessageCategory.WARNING),duration);
-        }
+        return;
       }
-    }
-;
-  }
- else {
-    compileWork=new Runnable(){
-      @Override public void run(){
-        if (compileContext.getProgressIndicator().isCanceled()) {
-          if (callback != null) {
-            callback.finished(true,0,0,compileContext);
-          }
+      try {
+        if (myProject.isDisposed()) {
           return;
         }
-        try {
-          if (myProject.isDisposed()) {
-            return;
-          }
-          LOG.info("COMPILATION STARTED");
-          if (message != null) {
-            compileContext.addMessage(message);
-          }
-          doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
+        LOG.info("COMPILATION STARTED");
+        if (message != null) {
+          compileContext.addMessage(message);
         }
+        doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
+      }
   finally {
-          FileUtil.delete(CompilerPaths.getRebuildMarkerFile(myProject));
-        }
+        FileUtil.delete(CompilerPaths.getRebuildMarkerFile(myProject));
       }
     }
-;
   }
+;
   compileTask.start(compileWork,new Runnable(){
     @Override public void run(){
       if (isRebuild) {
