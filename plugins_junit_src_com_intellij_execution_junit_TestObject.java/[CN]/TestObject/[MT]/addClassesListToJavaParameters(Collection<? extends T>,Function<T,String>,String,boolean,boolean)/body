@@ -5,7 +5,8 @@
       myTempFile.deleteOnExit();
       myJavaParameters.getProgramParametersList().add("@" + myTempFile.getAbsolutePath());
     }
-    final PrintWriter writer=new PrintWriter(myTempFile,"UTF-8");
+    final Map<String,List<String>> perModule=forkPerModule() ? new TreeMap<String,List<String>>() : null;
+    final PrintWriter writer=new PrintWriter(myTempFile,CharsetToolkit.UTF8);
     try {
       writer.println(packageName);
       final List<String> testNames=new ArrayList<String>();
@@ -15,15 +16,54 @@
           LOG.error("invalid element " + element);
           return;
         }
-        testNames.add(name);
+        if (perModule != null && element instanceof PsiElement) {
+          final Module module=ModuleUtilCore.findModuleForPsiElement((PsiElement)element);
+          if (module != null) {
+            final String moduleDir=module.getModuleDirPath();
+            List<String> list=perModule.get(moduleDir);
+            if (list == null) {
+              list=new ArrayList<String>();
+              perModule.put(moduleDir,list);
+            }
+            list.add(name);
+          }
+        }
+ else {
+          testNames.add(name);
+        }
       }
-      Collections.sort(testNames);
+      if (perModule != null) {
+        for (        List<String> perModuleClasses : perModule.values()) {
+          Collections.sort(perModuleClasses);
+          testNames.addAll(perModuleClasses);
+        }
+      }
+ else {
+        Collections.sort(testNames);
+      }
       for (      String testName : testNames) {
         writer.println(testName);
       }
     }
   finally {
       writer.close();
+    }
+    if (perModule != null && perModule.size() > 1) {
+      final PrintWriter wWriter=new PrintWriter(myWorkingDirsFile,CharsetToolkit.UTF8);
+      try {
+        wWriter.println(packageName);
+        for (        String workingDir : perModule.keySet()) {
+          wWriter.println(workingDir);
+          final List<String> classNames=perModule.get(workingDir);
+          wWriter.println(classNames.size());
+          for (          String className : classNames) {
+            wWriter.println(className);
+          }
+        }
+      }
+  finally {
+        wWriter.close();
+      }
     }
   }
  catch (  IOException e) {
