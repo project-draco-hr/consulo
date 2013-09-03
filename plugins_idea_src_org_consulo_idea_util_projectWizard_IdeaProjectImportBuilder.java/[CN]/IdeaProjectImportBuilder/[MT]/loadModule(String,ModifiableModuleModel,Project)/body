@@ -1,0 +1,80 @@
+{
+  final boolean fromProjectStructure=originalModel != null;
+  File file=new File(moduleFilePath);
+  if (!file.exists()) {
+    return null;
+  }
+  final Document document=JDOMUtil.loadDocument(file);
+  final ModifiableModuleModel newModel=fromProjectStructure ? originalModel : ModuleManager.getInstance(project).getModifiableModel();
+  final Module module=newModel.newModule(FileUtil.getNameWithoutExtension(file),file.getParent());
+  final Element rootElement=document.getRootElement();
+  PathMacroManager.getInstance(module).expandPaths(document.getRootElement());
+  String moduleType=rootElement.getAttributeValue("type");
+  final ModifiableRootModel modifiableModel=ModuleRootManager.getInstance(module).getModifiableModel();
+  for (  IdeaModuleTypeToModuleExtensionConverterEP ep : IdeaModuleTypeToModuleExtensionConverterEP.EP_NAME.getExtensions()) {
+    if (ep.getKey().equals(moduleType)) {
+      ep.getInstance().convertTypeToExtension(modifiableModel);
+      break;
+    }
+  }
+  XPath xpathExpression=XPath.newInstance("/module[@version='4']/component[@name='NewModuleRootManager']/*");
+  final List list=xpathExpression.selectNodes(document);
+  for (  Object o : list) {
+    Element element=(Element)o;
+    final String name=element.getName();
+    if ("content".equals(name)) {
+      final String url=element.getAttributeValue("url");
+      final ContentEntry contentEntry=modifiableModel.addContentEntry(url);
+      for (      Element childOfContent : element.getChildren()) {
+        final String nameChildOfContent=childOfContent.getName();
+        if ("sourceFolder".equals(nameChildOfContent)) {
+          String url2=childOfContent.getAttributeValue("url");
+          boolean isTestSource=Boolean.valueOf(childOfContent.getAttributeValue("isTestSource"));
+          contentEntry.addFolder(url2,isTestSource ? ContentFolderType.TEST : ContentFolderType.SOURCE);
+        }
+      }
+    }
+ else     if ("orderEntry".equals(name)) {
+      String type=element.getAttributeValue("type");
+      if ("module".equals(type)) {
+        String moduleName=element.getAttributeValue("module-name");
+        modifiableModel.addInvalidModuleEntry(moduleName);
+      }
+ else       if ("module-library".equals(type)) {
+        final Element libraryElement=element.getChild("library");
+        final LibraryTable moduleLibraryTable=modifiableModel.getModuleLibraryTable();
+        final Library library=moduleLibraryTable.createLibrary(libraryElement.getAttributeValue("name"));
+        for (        Element libraryEntry : libraryElement.getChildren()) {
+          final String libraryEntryName=libraryEntry.getName();
+          if ("CLASSES".equals(libraryEntryName)) {
+            parse(library,libraryEntry,OrderRootType.CLASSES);
+          }
+ else           if ("JAVADOC".equals(libraryEntryName)) {
+            parse(library,libraryEntry,OrderRootType.DOCUMENTATION);
+          }
+ else           if ("SOURCES".equals(libraryEntryName)) {
+            parse(library,libraryEntry,OrderRootType.SOURCES);
+          }
+        }
+      }
+    }
+  }
+  for (  ModuleExtension<?> moduleExtension : modifiableModel.getExtensions()) {
+    if (moduleExtension instanceof ModuleExtensionWithSdk) {
+      if (((ModuleExtensionWithSdk)moduleExtension).getInheritableSdk().isNull()) {
+        continue;
+      }
+      modifiableModel.addModuleExtensionSdkEntry((ModuleExtensionWithSdk<?>)moduleExtension);
+    }
+  }
+  new WriteAction<Object>(){
+    @Override protected void run(    Result<Object> result) throws Throwable {
+      modifiableModel.commit();
+      if (!fromProjectStructure) {
+        newModel.commit();
+      }
+    }
+  }
+.execute();
+  return module;
+}
