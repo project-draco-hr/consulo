@@ -1,0 +1,45 @@
+{
+  Application application=ApplicationManager.getApplication();
+  final Map<DataNode<ModuleData>,Module> moduleMappings=ContainerUtilRt.newHashMap();
+  application.runWriteAction(new Runnable(){
+    @Override public void run(){
+      final ModuleManager moduleManager=ModuleManager.getInstance(project);
+      for (      DataNode<ModuleData> module : toCreate) {
+        importModule(moduleManager,module);
+      }
+    }
+    private void importModule(    @NotNull ModuleManager moduleManager,    @NotNull DataNode<ModuleData> module){
+      ModuleData data=module.getData();
+      final Module created=moduleManager.newModule(data.getName(),data.getModuleDirPath());
+      ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(created);
+      final ModifiableRootModel moduleRootModel=moduleRootManager.getModifiableModel();
+      final MutableModuleExtension extension=(MutableModuleExtension)moduleRootModel.getExtension(data.getModuleExtensionClass());
+      if (extension != null) {
+        extension.setEnabled(true);
+      }
+      created.setOption(ExternalSystemConstants.EXTERNAL_SYSTEM_ID_KEY,data.getOwner().toString());
+      created.setOption(ExternalSystemConstants.LINKED_PROJECT_PATH_KEY,data.getLinkedExternalProjectPath());
+      RootPolicy<Object> visitor=new RootPolicy<Object>(){
+        @Override public Object visitLibraryOrderEntry(        LibraryOrderEntry libraryOrderEntry,        Object value){
+          moduleRootModel.removeOrderEntry(libraryOrderEntry);
+          return value;
+        }
+        @Override public Object visitModuleOrderEntry(        ModuleOrderEntry moduleOrderEntry,        Object value){
+          moduleRootModel.removeOrderEntry(moduleOrderEntry);
+          return value;
+        }
+      }
+;
+      try {
+        for (        OrderEntry orderEntry : moduleRootModel.getOrderEntries()) {
+          orderEntry.accept(visitor,null);
+        }
+      }
+  finally {
+        moduleRootModel.commit();
+      }
+      moduleMappings.put(module,created);
+    }
+  }
+);
+}

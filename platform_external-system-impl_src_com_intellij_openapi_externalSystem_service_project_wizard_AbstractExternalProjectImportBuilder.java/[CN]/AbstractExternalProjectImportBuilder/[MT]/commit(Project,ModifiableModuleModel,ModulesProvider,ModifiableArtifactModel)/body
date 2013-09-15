@@ -1,2 +1,54 @@
 {
+  project.putUserData(ExternalSystemDataKeys.NEWLY_IMPORTED_PROJECT,Boolean.TRUE);
+  final DataNode<ProjectData> externalProjectNode=getExternalProjectNode();
+  if (externalProjectNode != null) {
+    beforeCommit(externalProjectNode,project);
+  }
+  StartupManager.getInstance(project).runWhenProjectIsInitialized(new Runnable(){
+    @SuppressWarnings("unchecked") @Override public void run(){
+      AbstractExternalSystemSettings systemSettings=ExternalSystemApiUtil.getSettings(project,myExternalSystemId);
+      final ExternalProjectSettings projectSettings=getCurrentExternalProjectSettings();
+      Set<ExternalProjectSettings> projects=ContainerUtilRt.newHashSet(systemSettings.getLinkedProjectsSettings());
+      projects.remove(projectSettings);
+      projects.add(projectSettings);
+      systemSettings.copyFrom(myControl.getSystemSettings());
+      systemSettings.setLinkedProjectsSettings(projects);
+      if (externalProjectNode != null) {
+        ExternalSystemUtil.ensureToolWindowInitialized(project,myExternalSystemId);
+        ExternalSystemApiUtil.executeProjectChangeAction(new Runnable(){
+          @Override public void run(){
+            ProjectRootManagerEx.getInstanceEx(project).mergeRootsChangesDuring(new Runnable(){
+              @Override public void run(){
+                myProjectDataManager.importData(externalProjectNode.getKey(),Collections.singleton(externalProjectNode),project,true);
+                myExternalProjectNode=null;
+              }
+            }
+);
+          }
+        }
+);
+        final Runnable resolveDependenciesTask=new Runnable(){
+          @Override public void run(){
+            String progressText=ExternalSystemBundle.message("progress.resolve.libraries",myExternalSystemId.getReadableName());
+            ProgressManager.getInstance().run(new Task.Backgroundable(project,progressText,false){
+              @Override public void run(              @NotNull final ProgressIndicator indicator){
+                ExternalSystemResolveProjectTask task=new ExternalSystemResolveProjectTask(myExternalSystemId,project,projectSettings.getExternalProjectPath(),true);
+                task.execute(indicator);
+                DataNode<ProjectData> projectWithResolvedLibraries=task.getExternalProject();
+                if (projectWithResolvedLibraries == null) {
+                  return;
+                }
+                setupLibraries(projectWithResolvedLibraries,project);
+              }
+            }
+);
+          }
+        }
+;
+        UIUtil.invokeLaterIfNeeded(resolveDependenciesTask);
+      }
+    }
+  }
+);
+  return Collections.emptyList();
 }
