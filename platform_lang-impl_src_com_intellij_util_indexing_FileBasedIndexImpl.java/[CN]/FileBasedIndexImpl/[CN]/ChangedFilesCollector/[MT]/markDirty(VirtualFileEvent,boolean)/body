@@ -7,7 +7,8 @@
   iterateIndexableFiles(eventFile,new Processor<VirtualFile>(){
     @Override public boolean process(    @NotNull final VirtualFile file){
       FileContent fileContent=null;
-      for (      ID<?,?> indexId : myNotRequiringContentIndices) {
+      boolean fileIsDirectory=file.isDirectory();
+      for (      ID<?,?> indexId : fileIsDirectory ? myIndicesForDirectories : myNotRequiringContentIndices) {
         if (getInputFilter(indexId).acceptInput(null,file)) {
           try {
             if (fileContent == null) {
@@ -21,19 +22,32 @@
           }
         }
       }
-      if (!isTooLarge(file)) {
-        for (        ID<?,?> indexId : myIndices.keySet()) {
+      if (!fileIsDirectory && !isTooLarge(file)) {
+        final List<ID<?,?>> candidates=getAffectedIndexCandidates(file);
+        FileType fileType=file.getFileType();
+        boolean scheduleForUpdate=false;
+        boolean resetStamp=false;
+        for (int i=0, size=candidates.size(); i < size; ++i) {
+          final ID<?,?> indexId=candidates.get(i);
           if (needsFileContentLoading(indexId) && getInputFilter(indexId).acceptInput(null,file)) {
-            scheduleForUpdate(file);
-            break;
+            ID id=IndexInfrastructure.getStubId(indexId,fileType);
+            if (IndexingStamp.isFileIndexed(file,id,IndexInfrastructure.getIndexCreationStamp(id))) {
+              IndexingStamp.update(file,id,IndexInfrastructure.INVALID_STAMP2);
+              resetStamp=true;
+            }
+            scheduleForUpdate=true;
           }
+        }
+        if (scheduleForUpdate) {
+          if (resetStamp)           IndexingStamp.flushCache(file);
+          scheduleForUpdate(file);
         }
       }
       return true;
     }
   }
 );
-  IndexingStamp.flushCache(null);
+  IndexingStamp.flushCaches();
   if (!contentChange) {
     if (myUpdatingFiles.decrementAndGet() == 0) {
       ++myFilesModCount;
