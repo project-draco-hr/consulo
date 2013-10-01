@@ -1,26 +1,95 @@
 {
   String namePattern=getNamePattern(base,pattern);
   String qualifierPattern=getQualifierPattern(base,pattern);
-  ChooseByNameModel model=base.getModel();
-  boolean empty=namePattern.isEmpty() || namePattern.equals("@") && model instanceof GotoClassModel2;
-  if (empty && !base.canShowListForEmptyPattern())   return true;
-  Set<String> names=new THashSet<String>(Arrays.asList(base.getNames(everywhere)));
-  if (base.isSearchInAnyPlace() && !namePattern.trim().isEmpty()) {
-    String middleMatchPattern="*" + namePattern;
-    Integer elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,MatchingMode.CASE_SENSITIVE,false);
-    if (elementsConsumed == null)     return false;
-    if (elementsConsumed == 0) {
-      elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,MatchingMode.STRICT_CASE_INSENSITIVE,false);
-      if (elementsConsumed == null)       return false;
-      Integer elementsConsumed2=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,MatchingMode.CASE_INSENSITIVE,false);
-      if (elementsConsumed2 == null)       return false;
-      elementsConsumed+=elementsConsumed2;
+  if (removeModelSpecificMarkup(base,namePattern).isEmpty() && !base.canShowListForEmptyPattern())   return true;
+  final ChooseByNameModel model=base.getModel();
+  String matchingPattern=convertToMatchingPattern(base,namePattern);
+  List<MatchResult> namesList=new ArrayList<MatchResult>();
+  final CollectConsumer<MatchResult> collect=new SynchronizedCollectConsumer<MatchResult>(namesList);
+  long started;
+  if (model instanceof ChooseByNameModelEx) {
+    indicator.checkCanceled();
+    started=System.currentTimeMillis();
+    final MinusculeMatcher matcher=buildPatternMatcher(matchingPattern,NameUtil.MatchingCaseSensitivity.NONE);
+    ((ChooseByNameModelEx)model).processNames(new Processor<String>(){
+      @Override public boolean process(      String sequence){
+        ProgressManager.checkCanceled();
+        MatchResult result=matches(base,pattern,matcher,sequence);
+        if (result != null) {
+          collect.consume(result);
+          return true;
+        }
+        return false;
+      }
     }
-    elementsConsumed=consumeElements(base,everywhere,indicator,consumer,middleMatchPattern,qualifierPattern,names,MatchingMode.CASE_INSENSITIVE,elementsConsumed > 0);
-    return elementsConsumed != null;
+,everywhere);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("loaded + matched:" + (System.currentTimeMillis() - started) + ","+ collect.getResult().size());
+    }
   }
  else {
-    Integer elementsConsumed=consumeElements(base,everywhere,indicator,consumer,namePattern,qualifierPattern,names,MatchingMode.CASE_INSENSITIVE,false);
-    return elementsConsumed != null;
+    String[] names=base.getNames(everywhere);
+    started=System.currentTimeMillis();
+    processNamesByPattern(base,names,matchingPattern,indicator,collect);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("matched:" + (System.currentTimeMillis() - started) + ","+ names.length);
+    }
   }
+  indicator.checkCanceled();
+  started=System.currentTimeMillis();
+  List<MatchResult> results=(List<MatchResult>)collect.getResult();
+  sortNamesList(matchingPattern,results);
+  if (LOG.isDebugEnabled()) {
+    LOG.debug("sorted:" + (System.currentTimeMillis() - started) + ",results:"+ results.size());
+  }
+  indicator.checkCanceled();
+  List<Object> sameNameElements=new SmartList<Object>();
+  final Map<Object,MatchResult> qualifierMatchResults=new THashMap<Object,MatchResult>();
+  Comparator<Object> weightComparator=new Comparator<Object>(){
+    Comparator<Object> modelComparator=model instanceof Comparator ? (Comparator<Object>)model : new PathProximityComparator(myContext.get());
+    @Override public int compare(    Object o1,    Object o2){
+      int result=modelComparator.compare(o1,o2);
+      return result != 0 ? result : qualifierMatchResults.get(o1).compareTo(qualifierMatchResults.get(o2));
+    }
+  }
+;
+  List<Object> qualifierMiddleMatched=new ArrayList<Object>();
+  List<Pair<String,MinusculeMatcher>> patternsAndMatchers=getPatternsAndMatchers(qualifierPattern,base);
+  boolean sortedByMatchingDegree=!(base.getModel() instanceof CustomMatcherModel);
+  boolean afterStartMatch=false;
+  for (  MatchResult result : namesList) {
+    indicator.checkCanceled();
+    String name=result.elementName;
+    boolean needSeparator=sortedByMatchingDegree && !result.startMatch && afterStartMatch;
+    Object[] elements=model instanceof ContributorsBasedGotoByModel ? ((ContributorsBasedGotoByModel)model).getElementsByName(name,everywhere,namePattern,indicator) : model.getElementsByName(name,everywhere,namePattern);
+    if (elements.length > 1) {
+      sameNameElements.clear();
+      qualifierMatchResults.clear();
+      for (      final Object element : elements) {
+        indicator.checkCanceled();
+        MatchResult qualifierResult=matchQualifier(element,base,patternsAndMatchers);
+        if (qualifierResult != null) {
+          sameNameElements.add(element);
+          qualifierMatchResults.put(element,qualifierResult);
+        }
+      }
+      Collections.sort(sameNameElements,weightComparator);
+      for (      Object element : sameNameElements) {
+        if (!qualifierMatchResults.get(element).startMatch) {
+          qualifierMiddleMatched.add(element);
+          continue;
+        }
+        if (needSeparator && !startMiddleMatchVariants(qualifierMiddleMatched,consumer))         return false;
+        if (!consumer.process(element))         return false;
+        needSeparator=false;
+        afterStartMatch=result.startMatch;
+      }
+    }
+ else     if (elements.length == 1 && matchQualifier(elements[0],base,patternsAndMatchers) != null) {
+      if (needSeparator && !startMiddleMatchVariants(qualifierMiddleMatched,consumer))       return false;
+      if (!consumer.process(elements[0]))       return false;
+      afterStartMatch=result.startMatch;
+    }
+  }
+  return ContainerUtil.process(qualifierMiddleMatched,consumer);
 }
