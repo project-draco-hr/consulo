@@ -1,13 +1,13 @@
 {
-  IdeaPluginDescriptor ideaPluginDescriptor=null;
+  IdeaPluginDescriptor descriptor=null;
   if (PluginManager.isPluginInstalled(PluginId.getId(myPluginId))) {
-    ideaPluginDescriptor=PluginManager.getPlugin(PluginId.getId(myPluginId));
-    LOG.assertTrue(ideaPluginDescriptor != null);
-    if (myPluginVersion != null && StringUtil.compareVersionNumbers(ideaPluginDescriptor.getVersion(),myPluginVersion) >= 0) {
+    descriptor=PluginManager.getPlugin(PluginId.getId(myPluginId));
+    LOG.assertTrue(descriptor != null);
+    if (myPluginVersion != null && StringUtil.compareVersionNumbers(descriptor.getVersion(),myPluginVersion) >= 0) {
       LOG.info("Plugin " + myPluginId + ": current version (max) "+ myPluginVersion);
       return false;
     }
-    myOldFile=ideaPluginDescriptor.getPath();
+    myOldFile=descriptor.getPath();
   }
   String errorMessage=IdeBundle.message("unknown.error");
   try {
@@ -18,35 +18,31 @@
     errorMessage=ex.getMessage();
   }
   if (myFile == null) {
-    final String errorMessage1=errorMessage;
+    final String text=IdeBundle.message("error.plugin.was.not.installed",getPluginName(),errorMessage);
+    final String title=IdeBundle.message("title.failed.to.download");
     ApplicationManager.getApplication().invokeLater(new Runnable(){
-      public void run(){
-        Messages.showErrorDialog(IdeBundle.message("error.plugin.was.not.installed",getPluginName(),errorMessage1),IdeBundle.message("title.failed.to.download"));
+      @Override public void run(){
+        Messages.showErrorDialog(text,title);
       }
     }
 );
     return false;
   }
-  IdeaPluginDescriptorImpl descriptor=loadDescriptionFromJar(myFile);
-  if (descriptor != null) {
-    if (InstalledPluginsTableModel.wasUpdated(descriptor.getPluginId()))     return false;
-    myPluginVersion=descriptor.getVersion();
-    if (ideaPluginDescriptor != null && StringUtil.compareVersionNumbers(ideaPluginDescriptor.getVersion(),descriptor.getVersion()) >= 0) {
+  IdeaPluginDescriptorImpl actualDescriptor=loadDescriptionFromJar(myFile);
+  if (actualDescriptor != null) {
+    if (InstalledPluginsTableModel.wasUpdated(actualDescriptor.getPluginId())) {
+      return false;
+    }
+    myPluginVersion=actualDescriptor.getVersion();
+    if (descriptor != null && StringUtil.compareVersionNumbers(descriptor.getVersion(),actualDescriptor.getVersion()) >= 0) {
       LOG.info("Plugin " + myPluginId + ": current version (max) "+ myPluginVersion);
       return false;
     }
-    final BuildNumber currentBuildNumber=ApplicationInfo.getInstance().getBuild();
-    String sinceBuildString=descriptor.getSinceBuild();
-    final BuildNumber sinceBuild=StringUtil.isEmptyOrSpaces(sinceBuildString) ? null : BuildNumber.fromString(sinceBuildString,descriptor.getName());
-    if (sinceBuild != null && sinceBuild.compareTo(currentBuildNumber) > 0) {
+    if (PluginManagerCore.isIncompatible(actualDescriptor)) {
+      LOG.info("Plugin " + myPluginId + " is incompatible with current installation (since: "+ actualDescriptor.getSinceBuild()+ ", until: "+ actualDescriptor.getUntilBuild()+ ")");
       return false;
     }
-    String untilBuildString=descriptor.getUntilBuild();
-    final BuildNumber untilBuild=StringUtil.isEmptyOrSpaces(untilBuildString) ? null : BuildNumber.fromString(untilBuildString,descriptor.getName());
-    if (untilBuild != null && untilBuild.compareTo(currentBuildNumber) < 0) {
-      return false;
-    }
-    setDescriptor(descriptor);
+    setDescriptor(actualDescriptor);
   }
   return true;
 }

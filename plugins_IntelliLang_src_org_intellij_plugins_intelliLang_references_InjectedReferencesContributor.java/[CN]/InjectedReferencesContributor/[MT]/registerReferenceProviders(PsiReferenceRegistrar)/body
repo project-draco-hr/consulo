@@ -1,0 +1,53 @@
+{
+  registrar.registerReferenceProvider(PlatformPatterns.psiElement(),new PsiReferenceProvider(){
+    @NotNull @Override public PsiReference[] getReferencesByElement(    @NotNull final PsiElement element,    @NotNull final ProcessingContext context){
+      ReferenceInjector[] extensions=ReferenceInjector.EXTENSION_POINT_NAME.getExtensions();
+      final List<PsiReference> references=new SmartList<PsiReference>();
+      Configuration configuration=Configuration.getProjectInstance(element.getProject());
+      final Ref<Boolean> injected=new Ref<Boolean>(Boolean.FALSE);
+      for (      ReferenceInjector injector : extensions) {
+        Collection<BaseInjection> injections=configuration.getInjectionsByLanguageId(injector.getId());
+        for (        BaseInjection injection : injections) {
+          if (injection.acceptForReference(element)) {
+            injected.set(Boolean.TRUE);
+            LanguageInjectionSupport support=InjectorUtils.findInjectionSupport(injection.getSupportId());
+            element.putUserData(LanguageInjectionSupport.INJECTOR_SUPPORT,support);
+            List<TextRange> area=injection.getInjectedArea(element);
+            for (            TextRange range : area) {
+              references.addAll(Arrays.asList(injector.getReferences(element,context,range)));
+            }
+          }
+        }
+      }
+      if (element instanceof PsiLanguageInjectionHost) {
+        final TemporaryPlacesRegistry registry=TemporaryPlacesRegistry.getInstance(element.getProject());
+        InjectedLanguage language=registry.getLanguageFor((PsiLanguageInjectionHost)element,element.getContainingFile());
+        if (language != null) {
+          ReferenceInjector injector=ReferenceInjector.findById(language.getID());
+          if (injector != null) {
+            injected.set(Boolean.TRUE);
+            element.putUserData(LanguageInjectionSupport.INJECTOR_SUPPORT,registry.getLanguageInjectionSupport());
+            TextRange range=ElementManipulators.getValueTextRange(element);
+            references.addAll(Arrays.asList(injector.getReferences(element,context,range)));
+          }
+        }
+ else {
+          InjectedLanguageUtil.enumerate(element,element.getContainingFile(),false,new InjectedReferenceVisitor(){
+            @Override public void visitInjectedReference(            @NotNull ReferenceInjector injector,            @NotNull List<PsiLanguageInjectionHost.Shred> places){
+              injected.set(Boolean.TRUE);
+              element.putUserData(LanguageInjectionSupport.INJECTOR_SUPPORT,registry.getLanguageInjectionSupport());
+              for (              PsiLanguageInjectionHost.Shred place : places) {
+                references.addAll(Arrays.asList(injector.getReferences(element,context,place.getRangeInsideHost())));
+              }
+            }
+          }
+);
+        }
+      }
+      PsiReference[] array=references.toArray(new PsiReference[references.size()]);
+      element.putUserData(INJECTED_REFERENCES,injected.get() ? array : null);
+      return array;
+    }
+  }
+);
+}

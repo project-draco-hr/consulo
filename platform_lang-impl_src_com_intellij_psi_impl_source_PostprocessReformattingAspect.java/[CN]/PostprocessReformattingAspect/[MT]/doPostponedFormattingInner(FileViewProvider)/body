@@ -4,24 +4,34 @@
   if (document == null)   return;
   final VirtualFile virtualFile=key.getVirtualFile();
   if (!virtualFile.isValid())   return;
-  final TreeSet<PostprocessFormattingTask> postprocessTasks=new TreeSet<PostprocessFormattingTask>();
-  handleReformatMarkers(key,postprocessTasks);
-  if (astNodes != null)   createActionsMap(astNodes,key,postprocessTasks);
-  if ("true".equals(System.getProperty("check.psi.is.valid")) && ApplicationManager.getApplication().isUnitTestMode()) {
-    checkPsiIsCorrect(key);
-  }
-  while (!postprocessTasks.isEmpty()) {
-    final List<PostponedAction> normalizedActions=normalizeAndReorderPostponedActions(postprocessTasks,document);
-    for (    final PostponedAction normalizedAction : normalizedActions) {
-      CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(myPsiManager.getProject());
-      boolean old=settings.ENABLE_JAVADOC_FORMATTING;
-      settings.ENABLE_JAVADOC_FORMATTING=false;
-      try {
-        normalizedAction.execute(key);
-      }
+  final TreeSet<PostprocessFormattingTask> postProcessTasks=new TreeSet<PostprocessFormattingTask>();
+  Collection<Disposable> toDispose=ContainerUtilRt.newArrayList();
+  try {
+    handleReformatMarkers(key,postProcessTasks);
+    toDispose.addAll(postProcessTasks);
+    if (astNodes != null)     createActionsMap(astNodes,key,postProcessTasks);
+    if (Boolean.getBoolean("check.psi.is.valid") && ApplicationManager.getApplication().isUnitTestMode()) {
+      checkPsiIsCorrect(key);
+    }
+    while (!postProcessTasks.isEmpty()) {
+      final List<PostponedAction> normalizedActions=normalizeAndReorderPostponedActions(postProcessTasks,document);
+      toDispose.addAll(normalizedActions);
+      for (      final PostponedAction normalizedAction : normalizedActions) {
+        CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(myPsiManager.getProject());
+        boolean old=settings.ENABLE_JAVADOC_FORMATTING;
+        settings.ENABLE_JAVADOC_FORMATTING=false;
+        try {
+          normalizedAction.execute(key);
+        }
   finally {
-        settings.ENABLE_JAVADOC_FORMATTING=old;
+          settings.ENABLE_JAVADOC_FORMATTING=old;
+        }
       }
+    }
+  }
+  finally {
+    for (    Disposable disposable : toDispose) {
+      disposable.dispose();
     }
   }
 }

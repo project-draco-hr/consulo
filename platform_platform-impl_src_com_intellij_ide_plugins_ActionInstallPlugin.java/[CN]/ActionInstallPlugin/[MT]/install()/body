@@ -19,6 +19,29 @@
         list.add(pluginNode);
         ourInstallingNodes.add(pluginNode);
       }
+      final InstalledPluginsTableModel pluginsModel=(InstalledPluginsTableModel)installed.getPluginsModel();
+      final Set<IdeaPluginDescriptor> disabled=new HashSet<IdeaPluginDescriptor>();
+      final Set<IdeaPluginDescriptor> disabledDependants=new HashSet<IdeaPluginDescriptor>();
+      for (      PluginNode node : list) {
+        final PluginId pluginId=node.getPluginId();
+        if (pluginsModel.isDisabled(pluginId)) {
+          disabled.add(node);
+        }
+        final List<PluginId> depends=node.getDepends();
+        if (depends != null) {
+          final Set<PluginId> optionalDeps=new HashSet<PluginId>(Arrays.asList(node.getOptionalDependentPluginIds()));
+          for (          PluginId dependantId : depends) {
+            if (optionalDeps.contains(dependantId))             continue;
+            final IdeaPluginDescriptor pluginDescriptor=PluginManager.getPlugin(dependantId);
+            if (pluginDescriptor != null && pluginsModel.isDisabled(dependantId)) {
+              disabledDependants.add(pluginDescriptor);
+            }
+          }
+        }
+      }
+      if (suggestToEnableInstalledPlugins(pluginsModel,disabled,disabledDependants,list)) {
+        installed.setRequireShutdown(true);
+      }
     }
     try {
       final Runnable onInstallRunnable=new Runnable(){
@@ -26,27 +49,7 @@
           installedPluginsToModel(list);
           if (!installed.isDisposed()) {
             getPluginTable().updateUI();
-            final InstalledPluginsTableModel pluginsModel=(InstalledPluginsTableModel)installed.getPluginsModel();
-            final Set<IdeaPluginDescriptor> disabled=new HashSet<IdeaPluginDescriptor>();
-            final Set<IdeaPluginDescriptor> disabledDependants=new HashSet<IdeaPluginDescriptor>();
-            for (            PluginNode node : list) {
-              final PluginId pluginId=node.getPluginId();
-              if (pluginsModel.isDisabled(pluginId)) {
-                disabled.add(node);
-              }
-              final List<PluginId> depends=node.getDepends();
-              if (depends != null) {
-                for (                PluginId dependantId : depends) {
-                  final IdeaPluginDescriptor pluginDescriptor=PluginManager.getPlugin(dependantId);
-                  if (pluginDescriptor != null && pluginsModel.isDisabled(dependantId)) {
-                    disabledDependants.add(pluginDescriptor);
-                  }
-                }
-              }
-            }
-            if (suggestToEnableInstalledPlugins(pluginsModel,disabled,disabledDependants,list)) {
-              installed.setRequireShutdown(true);
-            }
+            installed.setRequireShutdown(true);
           }
  else {
             boolean needToRestart=false;
@@ -58,7 +61,7 @@
               }
             }
             if (needToRestart) {
-              notifyPluginsWereInstalled(list.size() == 1 ? list.get(0).getName() : null);
+              PluginManagerMain.notifyPluginsWereInstalled(list.size() == 1 ? list.get(0).getName() : null);
             }
           }
         }
@@ -71,9 +74,15 @@
       }
 );
     }
- catch (    IOException e1) {
+ catch (    final IOException e1) {
+      ourInstallingNodes.removeAll(list);
       PluginManagerMain.LOG.error(e1);
-      IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"),IdeBundle.message("error.plugin.download.failed"));
+      SwingUtilities.invokeLater(new Runnable(){
+        @Override public void run(){
+          IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"),IdeBundle.message("error.plugin.download.failed"));
+        }
+      }
+);
     }
   }
 }

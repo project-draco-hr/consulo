@@ -12,13 +12,17 @@
   if (psiFile == null)   return false;
   final Document document=FileDocumentManager.getInstance().getDocument(file);
   if (document == null)   return false;
+  final AtomicReference<HighlightInfo> error=new AtomicReference<HighlightInfo>();
+  final AtomicBoolean hasErrorElement=new AtomicBoolean();
   try {
-    GeneralHighlightingPass pass=new GeneralHighlightingPass(myProject,psiFile,document,0,document.getTextLength(),false){
+    GeneralHighlightingPass pass=new GeneralHighlightingPass(myProject,psiFile,document,0,document.getTextLength(),false,new ProperTextRange(0,document.getTextLength()),null,HighlightInfoProcessor.getEmpty()){
       @Override protected HighlightInfoHolder createInfoHolder(      @NotNull final PsiFile file){
-        return new HighlightInfoHolder(file,HighlightInfoFilter.EMPTY_ARRAY){
+        return new HighlightInfoHolder(file){
           @Override public boolean add(          @Nullable HighlightInfo info){
             if (info != null && info.getSeverity() == HighlightSeverity.ERROR) {
-              throw new HaveGotErrorException(info,myHasErrorElement);
+              error.set(info);
+              hasErrorElement.set(myHasErrorElement);
+              throw new ProcessCanceledException();
             }
             return super.add(info);
           }
@@ -29,9 +33,11 @@
 ;
     pass.collectInformation(progressIndicator);
   }
- catch (  HaveGotErrorException e) {
-    ProblemImpl problem=new ProblemImpl(file,e.myHighlightInfo,e.myHasErrorElement);
-    reportProblems(file,Collections.<Problem>singleton(problem));
+ catch (  ProcessCanceledException e) {
+    if (error.get() != null) {
+      ProblemImpl problem=new ProblemImpl(file,error.get(),hasErrorElement.get());
+      reportProblems(file,Collections.<Problem>singleton(problem));
+    }
     return false;
   }
   clearProblems(file);

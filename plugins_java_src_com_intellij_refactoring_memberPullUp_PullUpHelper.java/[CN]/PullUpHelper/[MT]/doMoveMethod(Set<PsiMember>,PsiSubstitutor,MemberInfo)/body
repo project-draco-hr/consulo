@@ -1,0 +1,67 @@
+{
+  PsiElementFactory elementFactory=JavaPsiFacade.getElementFactory(myProject);
+  PsiMethod method=(PsiMethod)info.getMember();
+  PsiMethod sibling=method;
+  PsiMethod anchor=null;
+  while (sibling != null) {
+    sibling=PsiTreeUtil.getNextSiblingOfType(sibling,PsiMethod.class);
+    if (sibling != null) {
+      anchor=MethodSignatureUtil.findMethodInSuperClassBySignatureInDerived(method.getContainingClass(),myTargetSuperClass,sibling.getSignature(PsiSubstitutor.EMPTY),false);
+      if (anchor != null) {
+        break;
+      }
+    }
+  }
+  PsiMethod methodCopy=(PsiMethod)method.copy();
+  if (method.findSuperMethods(myTargetSuperClass).length == 0) {
+    deleteOverrideAnnotationIfFound(methodCopy);
+  }
+  boolean isOriginalMethodAbstract=method.hasModifierProperty(PsiModifier.ABSTRACT) || method.hasModifierProperty(PsiModifier.DEFAULT);
+  if (myIsTargetInterface || info.isToAbstract()) {
+    ChangeContextUtil.clearContextInfo(method);
+    if (!info.isToAbstract() && !method.hasModifierProperty(PsiModifier.ABSTRACT) && PsiUtil.isLanguageLevel8OrHigher(myTargetSuperClass)) {
+      RefactoringUtil.makeMethodDefault(methodCopy);
+      isOriginalMethodAbstract=true;
+    }
+ else {
+      RefactoringUtil.makeMethodAbstract(myTargetSuperClass,methodCopy);
+    }
+    RefactoringUtil.replaceMovedMemberTypeParameters(methodCopy,PsiUtil.typeParametersIterable(mySourceClass),substitutor,elementFactory);
+    myJavaDocPolicy.processCopiedJavaDoc(methodCopy.getDocComment(),method.getDocComment(),isOriginalMethodAbstract);
+    final PsiMember movedElement=anchor != null ? (PsiMember)myTargetSuperClass.addBefore(methodCopy,anchor) : (PsiMember)myTargetSuperClass.add(methodCopy);
+    CodeStyleSettings styleSettings=CodeStyleSettingsManager.getSettings(method.getProject());
+    if (styleSettings.INSERT_OVERRIDE_ANNOTATION) {
+      if (PsiUtil.isLanguageLevel5OrHigher(mySourceClass) && !myTargetSuperClass.isInterface() || PsiUtil.isLanguageLevel6OrHigher(mySourceClass)) {
+        new AddAnnotationFix(Override.class.getName(),method).invoke(method.getProject(),null,mySourceClass.getContainingFile());
+      }
+    }
+    if (!PsiUtil.isLanguageLevel6OrHigher(mySourceClass) && myTargetSuperClass.isInterface()) {
+      if (isOriginalMethodAbstract) {
+        for (        PsiMethod oMethod : OverridingMethodsSearch.search(method)) {
+          deleteOverrideAnnotationIfFound(oMethod);
+        }
+      }
+      deleteOverrideAnnotationIfFound(method);
+    }
+    myMembersAfterMove.add(movedElement);
+    if (isOriginalMethodAbstract) {
+      method.delete();
+    }
+  }
+ else {
+    if (isOriginalMethodAbstract) {
+      PsiUtil.setModifierProperty(myTargetSuperClass,PsiModifier.ABSTRACT,true);
+    }
+    RefactoringUtil.replaceMovedMemberTypeParameters(methodCopy,PsiUtil.typeParametersIterable(mySourceClass),substitutor,elementFactory);
+    fixReferencesToStatic(methodCopy,movedMembers);
+    final PsiMethod superClassMethod=myTargetSuperClass.findMethodBySignature(methodCopy,false);
+    if (superClassMethod != null && superClassMethod.hasModifierProperty(PsiModifier.ABSTRACT)) {
+      superClassMethod.replace(methodCopy);
+    }
+ else {
+      final PsiMember movedElement=anchor != null ? (PsiMember)myTargetSuperClass.addBefore(methodCopy,anchor) : (PsiMember)myTargetSuperClass.add(methodCopy);
+      myMembersAfterMove.add(movedElement);
+    }
+    method.delete();
+  }
+}

@@ -21,12 +21,14 @@
       final PsiMethod interfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
       final MethodSignature signature=interfaceMethod != null ? interfaceMethod.getSignature(LambdaUtil.getSubstitutor(interfaceMethod,resolveResult)) : null;
       final PsiType interfaceMethodReturnType=LambdaUtil.getFunctionalInterfaceReturnType(functionalInterfaceType);
-      final LanguageLevel languageLevel=PsiUtil.getLanguageLevel(PsiMethodReferenceExpressionImpl.this);
+      PsiFile containingFile=getContainingFile();
+      final LanguageLevel languageLevel=PsiUtil.getLanguageLevel(containingFile);
       if (isConstructor && interfaceMethod != null) {
         final PsiTypeParameter[] typeParameters=containingClass.getTypeParameters();
         final boolean isRawSubst=PsiUtil.isRawSubstitutor(containingClass,substitutor);
-        final PsiClassType returnType=JavaPsiFacade.getElementFactory(getProject()).createType(containingClass,isRawSubst ? PsiSubstitutor.EMPTY : substitutor);
-        substitutor=LambdaUtil.inferFromReturnType(typeParameters,returnType,interfaceMethodReturnType,substitutor,languageLevel,PsiMethodReferenceExpressionImpl.this.getProject());
+        Project project=containingClass.getProject();
+        final PsiClassType returnType=JavaPsiFacade.getElementFactory(project).createType(containingClass,isRawSubst ? PsiSubstitutor.EMPTY : substitutor);
+        substitutor=LambdaUtil.inferFromReturnType(typeParameters,returnType,interfaceMethodReturnType,substitutor,languageLevel,project);
         if (containingClass.getConstructors().length == 0) {
           ClassCandidateInfo candidateInfo=null;
           if ((containingClass.getContainingClass() == null || !isLocatedInStaticContext(containingClass)) && signature.getParameterTypes().length == 0 || PsiMethodReferenceUtil.onArrayType(containingClass,signature)) {
@@ -35,20 +37,20 @@
           return candidateInfo == null ? JavaResolveResult.EMPTY_ARRAY : new JavaResolveResult[]{candidateInfo};
         }
       }
-      final MethodReferenceConflictResolver conflictResolver=new MethodReferenceConflictResolver(qualifierResolveResult,signature);
+      final MethodReferenceConflictResolver conflictResolver=new MethodReferenceConflictResolver(qualifierResolveResult,signature,interfaceMethod != null && interfaceMethod.isVarArgs());
       final PsiConflictResolver[] resolvers;
       if (signature != null) {
         final PsiType[] parameterTypes=signature.getParameterTypes();
-        resolvers=new PsiConflictResolver[]{conflictResolver,new MethodRefsSpecificResolver(parameterTypes)};
+        resolvers=new PsiConflictResolver[]{conflictResolver,new MethodRefsSpecificResolver(parameterTypes,languageLevel)};
       }
  else {
         resolvers=new PsiConflictResolver[]{conflictResolver};
       }
-      final MethodCandidatesProcessor processor=new MethodCandidatesProcessor(PsiMethodReferenceExpressionImpl.this,resolvers,new SmartList<CandidateInfo>()){
+      final MethodCandidatesProcessor processor=new MethodCandidatesProcessor(PsiMethodReferenceExpressionImpl.this,containingFile,resolvers,new SmartList<CandidateInfo>()){
         @Override protected MethodCandidateInfo createCandidateInfo(        final PsiMethod method,        final PsiSubstitutor substitutor,        final boolean staticProblem,        final boolean accessible){
           final PsiExpressionList argumentList=getArgumentList();
           return new MethodCandidateInfo(method,substitutor,!accessible,staticProblem,argumentList,myCurrentFileContext,argumentList != null ? argumentList.getExpressionTypes() : null,getTypeArguments(),getLanguageLevel()){
-            @Override public PsiSubstitutor inferTypeArguments(            ParameterTypeInferencePolicy policy){
+            @Override public PsiSubstitutor inferTypeArguments(            @NotNull ParameterTypeInferencePolicy policy,            boolean includeReturnConstraint){
               return inferTypeArgumentsFromInterfaceMethod(signature,interfaceMethodReturnType,method,substitutor,languageLevel);
             }
           }

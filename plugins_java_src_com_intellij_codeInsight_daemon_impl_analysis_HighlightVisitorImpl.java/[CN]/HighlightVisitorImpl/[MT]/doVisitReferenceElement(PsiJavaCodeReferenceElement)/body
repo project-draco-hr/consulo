@@ -1,7 +1,14 @@
 {
   JavaResolveResult result;
   try {
-    result=ref.advancedResolve(true);
+    if (ref instanceof PsiReferenceExpressionImpl) {
+      PsiReferenceExpressionImpl referenceExpression=(PsiReferenceExpressionImpl)ref;
+      JavaResolveResult[] results=JavaResolveUtil.resolveWithContainingFile(referenceExpression,PsiReferenceExpressionImpl.OurGenericsResolver.INSTANCE,true,true,myFile);
+      result=results.length == 1 ? results[0] : JavaResolveResult.EMPTY;
+    }
+ else {
+      result=ref.advancedResolve(true);
+    }
   }
  catch (  IndexNotReadyException e) {
     return null;
@@ -12,9 +19,9 @@
     if (myRefCountHolder != null) {
       myRefCountHolder.registerReference(ref,result);
     }
-    myHolder.add(HighlightUtil.checkReference(ref,result));
+    myHolder.add(HighlightUtil.checkReference(ref,result,myFile,myLanguageLevel));
     if (!myHolder.hasErrorResults() && resolved instanceof PsiTypeParameter) {
-      boolean cannotSelectFromTypeParameter=!JavaVersionService.getInstance().isAtLeast(ref,JavaSdkVersion.JDK_1_7);
+      boolean cannotSelectFromTypeParameter=!myJavaSdkVersion.isAtLeast(JavaSdkVersion.JDK_1_7);
       if (!cannotSelectFromTypeParameter) {
         final PsiClass containingClass=PsiTreeUtil.getParentOfType(ref,PsiClass.class);
         if (containingClass != null) {
@@ -29,12 +36,16 @@
     }
   }
   if (!myHolder.hasErrorResults())   myHolder.add(HighlightClassUtil.checkAbstractInstantiation(ref,resolved));
-  if (!myHolder.hasErrorResults())   myHolder.add(HighlightClassUtil.checkExtendsDuplicate(ref,resolved));
+  if (!myHolder.hasErrorResults())   myHolder.add(HighlightClassUtil.checkExtendsDuplicate(ref,resolved,myFile));
   if (!myHolder.hasErrorResults())   myHolder.add(HighlightClassUtil.checkClassExtendsForeignInnerClass(ref,resolved));
   if (!myHolder.hasErrorResults())   myHolder.add(GenericsHighlightUtil.checkSelectStaticClassFromParameterizedType(resolved,ref));
-  if (!myHolder.hasErrorResults())   myHolder.add(GenericsHighlightUtil.checkParameterizedReferenceTypeArguments(resolved,ref,result.getSubstitutor()));
+  if (!myHolder.hasErrorResults())   myHolder.add(GenericsHighlightUtil.checkParameterizedReferenceTypeArguments(resolved,ref,result.getSubstitutor(),myJavaSdkVersion));
+  if (!myHolder.hasErrorResults())   myHolder.add(GenericsHighlightUtil.checkCannotPassInner(ref));
   if (resolved != null && parent instanceof PsiReferenceList) {
-    if (!myHolder.hasErrorResults())     myHolder.add(HighlightUtil.checkElementInReferenceList(ref,(PsiReferenceList)parent,result));
+    if (!myHolder.hasErrorResults()) {
+      PsiReferenceList referenceList=(PsiReferenceList)parent;
+      myHolder.add(HighlightUtil.checkElementInReferenceList(ref,referenceList,result,myLanguageLevel));
+    }
   }
   if (parent instanceof PsiAnonymousClass && ref.equals(((PsiAnonymousClass)parent).getBaseClassReference())) {
     myHolder.add(GenericsHighlightUtil.checkOverrideEquivalentMethods((PsiClass)parent));
@@ -50,7 +61,7 @@
     if (variable instanceof PsiParameter && ref instanceof PsiExpression && PsiUtil.isAccessedForWriting((PsiExpression)ref)) {
       myReassignedParameters.put((PsiParameter)variable,2);
     }
-    final EditorColorsScheme colorsScheme=myHolder.getColorsScheme();
+    final TextAttributesScheme colorsScheme=myHolder.getColorsScheme();
     if (!variable.hasModifierProperty(PsiModifier.FINAL) && isReassigned(variable)) {
       myHolder.add(HighlightNamesUtil.highlightReassignedVariable(variable,ref));
     }
@@ -90,7 +101,7 @@
       final PsiTypeParameterListOwner owner=((PsiTypeParameter)resolved).getOwner();
       if (owner instanceof PsiClass) {
         final PsiClass outerClass=(PsiClass)owner;
-        if (!HighlightClassUtil.hasEnclosingInstanceInScope(outerClass,ref,true,false)) {
+        if (!InheritanceUtil.hasEnclosingInstanceInScope(outerClass,ref,true,false)) {
           myHolder.add(HighlightClassUtil.reportIllegalEnclosingUsage(ref,aClass,(PsiClass)owner,ref));
         }
       }
