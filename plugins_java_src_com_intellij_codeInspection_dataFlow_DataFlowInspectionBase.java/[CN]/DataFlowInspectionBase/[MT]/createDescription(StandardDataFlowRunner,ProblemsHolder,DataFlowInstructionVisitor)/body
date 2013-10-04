@@ -1,0 +1,43 @@
+{
+  Pair<Set<Instruction>,Set<Instruction>> constConditions=runner.getConstConditionalExpressions();
+  Set<Instruction> trueSet=constConditions.getFirst();
+  Set<Instruction> falseSet=constConditions.getSecond();
+  ArrayList<Instruction> allProblems=new ArrayList<Instruction>();
+  allProblems.addAll(trueSet);
+  allProblems.addAll(falseSet);
+  allProblems.addAll(runner.getCCEInstructions());
+  allProblems.addAll(StandardDataFlowRunner.getRedundantInstanceofs(runner,visitor));
+  HashSet<PsiElement> reportedAnchors=new HashSet<PsiElement>();
+  for (  PsiElement element : visitor.getProblems(NullabilityProblem.callNPE)) {
+    if (reportedAnchors.add(element)) {
+      reportCallMayProduceNpe(holder,(PsiMethodCallExpression)element);
+    }
+  }
+  for (  PsiElement element : visitor.getProblems(NullabilityProblem.fieldAccessNPE)) {
+    if (reportedAnchors.add(element)) {
+      PsiElement parent=element.getParent();
+      PsiElement fieldAccess=parent instanceof PsiArrayAccessExpression || parent instanceof PsiReferenceExpression ? parent : element;
+      reportFieldAccessMayProduceNpe(holder,element,(PsiExpression)fieldAccess);
+    }
+  }
+  for (  Instruction instruction : allProblems) {
+    if (instruction instanceof TypeCastInstruction && reportedAnchors.add(((TypeCastInstruction)instruction).getCastExpression().getCastType())) {
+      reportCastMayFail(holder,(TypeCastInstruction)instruction);
+    }
+ else     if (instruction instanceof BranchingInstruction) {
+      handleBranchingInstruction(holder,visitor,trueSet,falseSet,reportedAnchors,(BranchingInstruction)instruction);
+    }
+  }
+  reportNullableArguments(visitor,holder,reportedAnchors);
+  reportNullableAssignments(visitor,holder,reportedAnchors);
+  reportUnboxedNullables(visitor,holder,reportedAnchors);
+  if (!runner.isInNullableMethod() && runner.isInMethod() && (runner.isInNotNullMethod() || SUGGEST_NULLABLE_ANNOTATIONS)) {
+    reportNullableReturns(runner,visitor,holder,reportedAnchors);
+  }
+  if (SUGGEST_NULLABLE_ANNOTATIONS) {
+    reportNullableArgumentsPassedToNonAnnotated(visitor,holder,reportedAnchors);
+  }
+  if (REPORT_CONSTANT_REFERENCE_VALUES) {
+    reportConstantReferenceValues(holder,visitor,reportedAnchors);
+  }
+}

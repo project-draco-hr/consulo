@@ -1,0 +1,59 @@
+{
+  PsiExpression[] args=expression.getArgumentList().getExpressions();
+  final ControlFlow.ControlFlowOffset exitPoint=getEndOffset(expression);
+  List<GotoInstruction> gotoContractFalse=new SmartList<GotoInstruction>();
+  for (int i=args.length - 1; i >= 0; i--) {
+    ValueConstraint arg=contract.arguments[i];
+    if (arg == ValueConstraint.NULL_VALUE || arg == ValueConstraint.NOT_NULL_VALUE) {
+      addInstruction(new PushInstruction(myFactory.getConstFactory().getNull(),null));
+      addInstruction(new BinopInstruction(JavaTokenType.EQEQ,null,expression.getProject()));
+    }
+ else     if (arg != ValueConstraint.TRUE_VALUE && arg != ValueConstraint.FALSE_VALUE) {
+      addInstruction(new PopInstruction());
+      continue;
+    }
+    boolean expectingTrueOnStack=arg == ValueConstraint.NULL_VALUE || arg == ValueConstraint.TRUE_VALUE;
+    ConditionalGotoInstruction continueCheckingContract=addInstruction(new ConditionalGotoInstruction(null,!expectingTrueOnStack,null));
+    for (int j=0; j < i; j++) {
+      addInstruction(new PopInstruction());
+    }
+    gotoContractFalse.add(addInstruction(new GotoInstruction(null)));
+    continueCheckingContract.setOffset(myCurrentFlow.getInstructionCount());
+  }
+switch (contract.returnValue) {
+case ANY_VALUE:
+    pushUnknown();
+  addInstruction(new GotoInstruction(exitPoint));
+break;
+case NULL_VALUE:
+addInstruction(new PushInstruction(myFactory.getConstFactory().getNull(),null));
+addInstruction(new GotoInstruction(exitPoint));
+break;
+case NOT_NULL_VALUE:
+PsiType type=expression.getType();
+addInstruction(new PushInstruction(myFactory.createTypeValue(type,Nullness.NOT_NULL),null));
+addInstruction(new GotoInstruction(exitPoint));
+break;
+case TRUE_VALUE:
+addInstruction(new PushInstruction(myFactory.getConstFactory().getTrue(),null));
+addInstruction(new GotoInstruction(exitPoint));
+break;
+case FALSE_VALUE:
+addInstruction(new PushInstruction(myFactory.getConstFactory().getFalse(),null));
+addInstruction(new GotoInstruction(exitPoint));
+break;
+case THROW_EXCEPTION:
+ControlFlow.ControlFlowOffset finallyOffset=getFinallyOffset();
+if (finallyOffset != NOT_FOUND) {
+addInstruction(new GosubInstruction(finallyOffset));
+}
+addInstruction(new ReturnInstruction());
+break;
+case SYSTEM_EXIT:
+addInstruction(new ReturnInstruction());
+break;
+}
+for (GotoInstruction instruction : gotoContractFalse) {
+instruction.setOffset(myCurrentFlow.getInstructionCount());
+}
+}

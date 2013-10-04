@@ -17,18 +17,21 @@ synchronized (LOCK) {
       myFoldingAlarm.cancelAllRequests();
       cancelHeavyAlarm();
     }
-    CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
-      @Override public void run(){
-        document.setInBulkUpdate(true);
-        try {
-          document.deleteString(0,document.getTextLength());
-        }
+    final int documentTextLength=document.getTextLength();
+    if (documentTextLength > 0) {
+      CommandProcessor.getInstance().executeCommand(myProject,new Runnable(){
+        @Override public void run(){
+          document.setInBulkUpdate(true);
+          try {
+            document.deleteString(0,documentTextLength);
+          }
   finally {
-          document.setInBulkUpdate(false);
+            document.setInBulkUpdate(false);
+          }
         }
       }
-    }
 ,null,DocCommandGroupId.noneGroupId(document));
+    }
   }
   final String text;
   final Collection<ConsoleViewContentType> contentTypes;
@@ -97,14 +100,32 @@ synchronized (LOCK) {
   myPsiDisposedCheck.performCheck();
   final int newLineCount=document.getLineCount();
   if (cycleUsed) {
-    final int lineCount=LineTokenizer.calcLineCount(text,true);
-    for (Iterator<RangeHighlighter> it=myHyperlinks.getHyperlinks().keySet().iterator(); it.hasNext(); ) {
-      if (!it.next().isValid()) {
-        it.remove();
+    clearHyperlinkAndFoldings();
+    if (!mySpareTimeUpdateStarted) {
+      mySpareTimeUpdateStarted=true;
+      final EditorNotificationPanel comp=new EditorNotificationPanel(){
+{
+          myLabel.setIcon(AllIcons.General.ExclMark);
+          myLabel.setText("Too much output to process");
+        }
       }
+;
+      add(comp,BorderLayout.NORTH);
+      performWhenNoDeferredOutput(new Runnable(){
+        @Override public void run(){
+          try {
+            myHyperlinks.clearHyperlinks();
+            clearHyperlinkAndFoldings();
+            highlightHyperlinksAndFoldings(0,document.getLineCount() - 1);
+          }
+  finally {
+            mySpareTimeUpdateStarted=false;
+            remove(comp);
+          }
+        }
+      }
+);
     }
-    cancelHeavyAlarm();
-    highlightHyperlinksAndFoldings(newLineCount >= lineCount + 1 ? newLineCount - lineCount - 1 : 0,newLineCount - 1);
   }
  else   if (oldLineCount < newLineCount) {
     highlightHyperlinksAndFoldings(oldLineCount - 1,newLineCount - 1);

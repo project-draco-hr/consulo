@@ -1,0 +1,78 @@
+{
+  if (!PsiPolyExpressionUtil.isPolyExpression(myExpression) || myExpression instanceof PsiCallExpression) {
+    return true;
+  }
+  if (myExpression instanceof PsiParenthesizedExpression) {
+    constraints.add(new CheckedExceptionCompatibilityConstraint(((PsiParenthesizedExpression)myExpression).getExpression(),myT));
+    return true;
+  }
+  if (myExpression instanceof PsiConditionalExpression) {
+    final PsiExpression thenExpression=((PsiConditionalExpression)myExpression).getThenExpression();
+    if (thenExpression != null) {
+      constraints.add(new CheckedExceptionCompatibilityConstraint(thenExpression,myT));
+    }
+    final PsiExpression elseExpression=((PsiConditionalExpression)myExpression).getElseExpression();
+    if (elseExpression != null) {
+      constraints.add(new CheckedExceptionCompatibilityConstraint(elseExpression,myT));
+    }
+    return true;
+  }
+  if (myExpression instanceof PsiLambdaExpression || myExpression instanceof PsiMethodReferenceExpression) {
+    if (LambdaHighlightingUtil.checkInterfaceFunctional(myT) != null) {
+      return false;
+    }
+    final PsiMethod interfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(myT);
+    if (interfaceMethod == null) {
+      return false;
+    }
+    final PsiSubstitutor substitutor=LambdaUtil.getSubstitutor(interfaceMethod,PsiUtil.resolveGenericsClassInType(myT));
+    for (    PsiParameter parameter : interfaceMethod.getParameterList().getParameters()) {
+      if (!session.isProperType(substitutor.substitute(parameter.getType())))       return false;
+    }
+    final PsiType returnType=interfaceMethod.getReturnType();
+    LOG.assertTrue(returnType != null,interfaceMethod);
+    if (!session.isProperType(substitutor.substitute(returnType)))     return false;
+    final List<PsiType> expectedThrownTypes=ContainerUtil.map(interfaceMethod.getThrowsList().getReferencedTypes(),new Function<PsiType,PsiType>(){
+      @Override public PsiType fun(      PsiType type){
+        return substitutor.substitute(type);
+      }
+    }
+);
+    final List<PsiType> expectedNonProperThrownTypes=new ArrayList<PsiType>();
+    for (    PsiType type : expectedThrownTypes) {
+      if (!session.isProperType(type)) {
+        expectedNonProperThrownTypes.add(type);
+      }
+    }
+    final List<PsiType> thrownTypes=new ArrayList<PsiType>();
+    if (myExpression instanceof PsiLambdaExpression) {
+    }
+ else {
+      final PsiElement resolve=((PsiMethodReferenceExpression)myExpression).resolve();
+      if (resolve instanceof PsiMethod) {
+        for (        PsiClassType type : ((PsiMethod)resolve).getThrowsList().getReferencedTypes()) {
+          if (!ExceptionUtil.isUncheckedException(type)) {
+            thrownTypes.add(type);
+          }
+        }
+      }
+    }
+    if (expectedNonProperThrownTypes.isEmpty()) {
+      for (      PsiType thrownType : thrownTypes) {
+        if (!isAddressed(expectedThrownTypes,thrownType))         return false;
+      }
+    }
+ else {
+      final ArrayList<PsiType> expectedProperTypes=new ArrayList<PsiType>(expectedThrownTypes);
+      expectedProperTypes.retainAll(expectedNonProperThrownTypes);
+      for (      PsiType thrownType : thrownTypes) {
+        if (!isAddressed(expectedProperTypes,thrownType)) {
+          for (          PsiType expectedNonProperThrownType : expectedNonProperThrownTypes) {
+            constraints.add(new TypeCompatibilityConstraint(expectedNonProperThrownType,thrownType));
+          }
+        }
+      }
+    }
+  }
+  return true;
+}

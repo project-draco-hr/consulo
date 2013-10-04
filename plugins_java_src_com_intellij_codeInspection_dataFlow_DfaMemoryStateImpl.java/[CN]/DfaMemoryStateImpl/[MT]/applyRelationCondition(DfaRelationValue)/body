@@ -1,29 +1,41 @@
 {
   DfaValue dfaLeft=dfaRelation.getLeftOperand();
   DfaValue dfaRight=dfaRelation.getRightOperand();
-  if (dfaRight == null || dfaLeft == null)   return false;
+  if (dfaLeft instanceof DfaUnknownValue || dfaRight instanceof DfaUnknownValue)   return true;
   boolean isNegated=dfaRelation.isNegated();
-  if (dfaLeft instanceof DfaNotNullValue && dfaRight == myFactory.getConstFactory().getNull()) {
+  if (dfaLeft instanceof DfaTypeValue && ((DfaTypeValue)dfaLeft).isNotNull() && dfaRight == myFactory.getConstFactory().getNull()) {
     return isNegated;
   }
   if (dfaRight instanceof DfaTypeValue) {
     if (dfaLeft instanceof DfaVariableValue) {
-      DfaVariableState varState=getVariableState((DfaVariableValue)dfaLeft);
       DfaVariableValue dfaVar=(DfaVariableValue)dfaLeft;
+      if (isUnknownState(dfaVar))       return true;
       if (isNegated) {
-        return varState.addNotInstanceofValue((DfaTypeValue)dfaRight) || applyCondition(compareToNull(dfaVar,false));
+        DfaVariableState newState=getVariableState(dfaVar).withNotInstanceofValue((DfaTypeValue)dfaRight);
+        if (newState != null) {
+          setVariableState(dfaVar,newState);
+          return true;
+        }
+        return applyCondition(compareToNull(dfaVar,false));
       }
-      return applyCondition(compareToNull(dfaVar,true)) && varState.setInstanceofValue((DfaTypeValue)dfaRight);
+      boolean wasUnknown=getVariableState(dfaVar).getNullability() == Nullness.UNKNOWN;
+      if (applyCondition(compareToNull(dfaVar,true))) {
+        DfaVariableState newState=getVariableState(dfaVar).withInstanceofValue((DfaTypeValue)dfaRight);
+        if (newState != null) {
+          if (wasUnknown) {
+            newState=newState.withNullability(Nullness.UNKNOWN);
+          }
+          setVariableState(dfaVar,newState);
+          return true;
+        }
+      }
+      return false;
     }
-    return true;
-  }
-  if (dfaRight instanceof DfaNotNullValue) {
     return true;
   }
   if (isNull(dfaRight) && compareVariableWithNull(dfaLeft) || isNull(dfaLeft) && compareVariableWithNull(dfaRight)) {
     return isNegated;
   }
-  if (dfaLeft instanceof DfaUnknownValue || dfaRight instanceof DfaUnknownValue)   return true;
   if (isEffectivelyNaN(dfaLeft) || isEffectivelyNaN(dfaRight)) {
     applyEquivalenceRelation(dfaRelation,dfaLeft,dfaRight);
     return isNegated;

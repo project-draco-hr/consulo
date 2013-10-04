@@ -1,0 +1,67 @@
+{
+  try {
+    if (!CommonRefactoringUtil.checkReadOnlyStatus(project,context.getOccurrences())) {
+      return false;
+    }
+    checkOccurrences(context.getOccurrences());
+    final boolean isInplace=isInplace(context.getEditor(),context.getPlace());
+    Pass<OccurrencesChooser.ReplaceChoice> callback=new Pass<OccurrencesChooser.ReplaceChoice>(){
+      @Override public void pass(      final OccurrencesChooser.ReplaceChoice choice){
+        final Settings settings=isInplace ? getSettingsForInplace(context,choice) : showDialog(context);
+        if (settings == null)         return;
+        CommandProcessor.getInstance().executeCommand(project,new Runnable(){
+          public void run(){
+            List<RangeMarker> occurrences=ContainerUtil.newArrayList();
+            Document document=editor.getDocument();
+            for (            PsiElement element : context.getOccurrences()) {
+              occurrences.add(createRange(document,element));
+            }
+            RangeMarker expressionRangeMarker=createRange(document,context.getExpression());
+            RangeMarker stringPartRangeMarker=createRange(document,context.getStringPart());
+            RangeMarker varRangeMarker=createRange(document,context.getVar());
+            SmartPsiElementPointer<GrVariable> pointer=ApplicationManager.getApplication().runWriteAction(new Computable<SmartPsiElementPointer<GrVariable>>(){
+              @Override public SmartPsiElementPointer<GrVariable> compute(){
+                GrVariable var=runRefactoring(context,settings);
+                return var != null ? SmartPointerManager.getInstance(context.getProject()).createSmartPsiElementPointer(var) : null;
+              }
+            }
+);
+            GrVariable var=pointer != null ? pointer.getElement() : null;
+            if (isInplace && var != null) {
+              GrInplaceIntroducer introducer=getIntroducer(var,context,settings,occurrences,varRangeMarker,expressionRangeMarker,stringPartRangeMarker);
+              PsiDocumentManager.getInstance(project).doPostponedOperationsAndUnblockDocument(editor.getDocument());
+              introducer.performInplaceRefactoring(introducer.suggestNames(context));
+            }
+          }
+        }
+,getRefactoringName(),getRefactoringName());
+      }
+    }
+;
+    if (isInplace(context.getEditor(),context.getPlace())) {
+      Map<OccurrencesChooser.ReplaceChoice,List<Object>> occurrencesMap=fillChoice(context);
+      new OccurrencesChooser<Object>(editor){
+        @Override protected TextRange getOccurrenceRange(        Object occurrence){
+          if (occurrence instanceof PsiElement) {
+            return ((PsiElement)occurrence).getTextRange();
+          }
+ else           if (occurrence instanceof StringPartInfo) {
+            return ((StringPartInfo)occurrence).getRange();
+          }
+ else {
+            return null;
+          }
+        }
+      }
+.showChooser(callback,occurrencesMap);
+    }
+ else {
+      callback.pass(null);
+    }
+    return true;
+  }
+ catch (  GrRefactoringError e) {
+    CommonRefactoringUtil.showErrorHint(project,editor,RefactoringBundle.getCannotRefactorMessage(e.getMessage()),getRefactoringName(),getHelpID());
+    return false;
+  }
+}

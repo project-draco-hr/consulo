@@ -1,46 +1,40 @@
 {
-  try {
-    startElement(expression);
-    if (processSpecialMethods(expression)) {
-      return;
-    }
-    PsiReferenceExpression methodExpression=expression.getMethodExpression();
-    PsiExpression qualifierExpression=methodExpression.getQualifierExpression();
-    if (qualifierExpression != null) {
-      qualifierExpression.accept(this);
-    }
- else {
-      pushUnknown();
-    }
-    PsiExpression[] expressions=expression.getArgumentList().getExpressions();
-    PsiElement method=methodExpression.resolve();
-    PsiParameter[] parameters=method instanceof PsiMethod ? ((PsiMethod)method).getParameterList().getParameters() : null;
-    for (int i=0; i < expressions.length; i++) {
-      PsiExpression paramExpr=expressions[i];
-      paramExpr.accept(this);
-      if (parameters != null && i < parameters.length) {
-        generateBoxingUnboxingInstructionFor(paramExpr,parameters[i].getType());
-      }
-    }
-    MethodCallInstruction callInstruction=new MethodCallInstruction(expression,createChainedVariableValue(expression));
-    if (!DfaValueFactory.isEffectivelyUnqualified(methodExpression)) {
-      callInstruction.setShouldFlushFields(false);
-    }
-    addInstruction(callInstruction);
-    if (!myCatchStack.isEmpty()) {
-      addMethodThrows(expression.resolveMethod());
-    }
-    if (expressions.length == 1 && method instanceof PsiMethod && "equals".equals(((PsiMethod)method).getName()) && parameters.length == 1 && parameters[0].getType().equalsToText(CommonClassNames.JAVA_LANG_OBJECT) && PsiType.BOOLEAN.equals(((PsiMethod)method).getReturnType())) {
-      addInstruction(new PushInstruction(myFactory.getConstFactory().getFalse(),null));
-      addInstruction(new SwapInstruction());
-      addInstruction(new ConditionalGotoInstruction(getEndOffset(expression),true,null));
-      addInstruction(new PopInstruction());
-      addInstruction(new PushInstruction(myFactory.getConstFactory().getTrue(),null));
-      expressions[0].accept(this);
-      addInstruction(new ApplyNotNullInstruction(expression));
-    }
-  }
-  finally {
+  startElement(expression);
+  if (handleContracts(expression,getCallContracts(expression))) {
     finishElement(expression);
+    return;
   }
+  PsiReferenceExpression methodExpression=expression.getMethodExpression();
+  PsiExpression qualifierExpression=methodExpression.getQualifierExpression();
+  if (qualifierExpression != null) {
+    qualifierExpression.accept(this);
+  }
+ else {
+    pushUnknown();
+  }
+  PsiExpression[] expressions=expression.getArgumentList().getExpressions();
+  PsiElement method=methodExpression.resolve();
+  PsiParameter[] parameters=method instanceof PsiMethod ? ((PsiMethod)method).getParameterList().getParameters() : null;
+  for (int i=0; i < expressions.length; i++) {
+    PsiExpression paramExpr=expressions[i];
+    paramExpr.accept(this);
+    if (parameters != null && i < parameters.length) {
+      generateBoxingUnboxingInstructionFor(paramExpr,parameters[i].getType());
+    }
+  }
+  addConditionalRuntimeThrow();
+  addInstruction(new MethodCallInstruction(expression,createChainedVariableValue(expression)));
+  if (!myCatchStack.isEmpty()) {
+    addMethodThrows(expression.resolveMethod());
+  }
+  if (expressions.length == 1 && method instanceof PsiMethod && "equals".equals(((PsiMethod)method).getName()) && parameters.length == 1 && parameters[0].getType().equalsToText(JAVA_LANG_OBJECT) && PsiType.BOOLEAN.equals(((PsiMethod)method).getReturnType())) {
+    addInstruction(new PushInstruction(myFactory.getConstFactory().getFalse(),null));
+    addInstruction(new SwapInstruction());
+    addInstruction(new ConditionalGotoInstruction(getEndOffset(expression),true,null));
+    addInstruction(new PopInstruction());
+    addInstruction(new PushInstruction(myFactory.getConstFactory().getTrue(),null));
+    expressions[0].accept(this);
+    addInstruction(new ApplyNotNullInstruction(expression));
+  }
+  finishElement(expression);
 }

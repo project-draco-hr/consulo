@@ -1,0 +1,42 @@
+{
+  final PsiLanguageInjectionHost host=findInjectionHost(editor,file);
+  if (host == null)   return;
+  if (defaultFunctionalityWorked(host,injectable.getId()))   return;
+  try {
+    host.putUserData(FIX_KEY,null);
+    Language language=injectable.toLanguage();
+    for (    LanguageInjectionSupport support : InjectorUtils.getActiveInjectionSupports()) {
+      if (support.isApplicableTo(host) && support.addInjectionInPlace(language,host)) {
+        return;
+      }
+    }
+    if (TemporaryPlacesRegistry.getInstance(project).getLanguageInjectionSupport().addInjectionInPlace(language,host)) {
+      final Processor<PsiLanguageInjectionHost> data=host.getUserData(FIX_KEY);
+      String text=StringUtil.escapeXml(language.getDisplayName()) + " was temporarily injected.";
+      if (data != null) {
+        if (!ApplicationManager.getApplication().isUnitTestMode()) {
+          final SmartPsiElementPointer<PsiLanguageInjectionHost> pointer=SmartPointerManager.getInstance(project).createSmartPsiElementPointer(host);
+          final TextRange range=host.getTextRange();
+          HintManager.getInstance().showQuestionHint(editor,text + "<br>Do you want to insert annotation? " + KeymapUtil.getFirstKeyboardShortcutText(ActionManager.getInstance().getAction(IdeActions.ACTION_SHOW_INTENTION_ACTIONS)),range.getStartOffset(),range.getEndOffset(),new QuestionAction(){
+            @Override public boolean execute(){
+              return data.process(pointer.getElement());
+            }
+          }
+);
+        }
+      }
+ else {
+        HintManager.getInstance().showInformationHint(editor,text);
+      }
+    }
+  }
+  finally {
+    if (injectable.getLanguage() != null) {
+      FileContentUtil.reparseFiles(project,Collections.<VirtualFile>emptyList(),true);
+    }
+ else {
+      ((PsiModificationTrackerImpl)PsiManager.getInstance(project).getModificationTracker()).incCounter();
+      DaemonCodeAnalyzer.getInstance(project).restart();
+    }
+  }
+}

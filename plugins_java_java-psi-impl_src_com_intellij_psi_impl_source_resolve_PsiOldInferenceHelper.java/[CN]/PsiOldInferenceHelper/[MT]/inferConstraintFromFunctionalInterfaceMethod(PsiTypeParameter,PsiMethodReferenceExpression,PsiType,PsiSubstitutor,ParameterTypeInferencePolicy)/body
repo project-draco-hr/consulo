@@ -1,0 +1,70 @@
+{
+  final PsiClassType.ClassResolveResult resolveResult=PsiUtil.resolveGenericsClassInType(functionalInterfaceType);
+  final PsiMethod functionalInterfaceMethod=LambdaUtil.getFunctionalInterfaceMethod(resolveResult);
+  if (functionalInterfaceMethod != null) {
+    final PsiSubstitutor subst=LambdaUtil.getSubstitutor(functionalInterfaceMethod,resolveResult);
+    final PsiParameter[] methodParameters=functionalInterfaceMethod.getParameterList().getParameters();
+    PsiType[] methodParamTypes=new PsiType[methodParameters.length];
+    for (int i=0; i < methodParameters.length; i++) {
+      methodParamTypes[i]=GenericsUtil.eliminateWildcards(subst.substitute(methodParameters[i].getType()));
+    }
+    if (methodParamsDependOn(typeParam,methodReferenceExpression,functionalInterfaceType,methodParameters,subst)) {
+      return null;
+    }
+    final PsiType[] args=new PsiType[methodParameters.length];
+    Map<PsiMethodReferenceExpression,PsiType> map=PsiMethodReferenceUtil.ourRefs.get();
+    if (map == null) {
+      map=new HashMap<PsiMethodReferenceExpression,PsiType>();
+      PsiMethodReferenceUtil.ourRefs.set(map);
+    }
+    final PsiType added=map.put(methodReferenceExpression,functionalInterfaceType);
+    final JavaResolveResult methReferenceResolveResult;
+    try {
+      methReferenceResolveResult=methodReferenceExpression.advancedResolve(false);
+    }
+  finally {
+      if (added == null) {
+        map.remove(methodReferenceExpression);
+      }
+    }
+    final PsiElement resolved=methReferenceResolveResult.getElement();
+    if (resolved instanceof PsiMethod) {
+      final PsiMethod method=(PsiMethod)resolved;
+      final PsiParameter[] parameters=method.getParameterList().getParameters();
+      boolean hasReceiver=false;
+      if (methodParamTypes.length == parameters.length + 1) {
+        if (!PsiMethodReferenceUtil.isReceiverType(methodParamTypes[0],method.getContainingClass(),methReferenceResolveResult.getSubstitutor()))         return null;
+        hasReceiver=true;
+      }
+ else       if (parameters.length != methodParameters.length) {
+        return null;
+      }
+      for (int i=0; i < parameters.length; i++) {
+        args[i]=methReferenceResolveResult.getSubstitutor().substitute(subst.substitute(parameters[i].getType()));
+      }
+      final PsiType[] typesToInfer=hasReceiver ? ArrayUtil.remove(methodParamTypes,0) : methodParamTypes;
+      final Pair<PsiType,ConstraintType> constraint=inferTypeForMethodTypeParameterInner(typeParam,typesToInfer,args,subst,null,DefaultParameterTypeInferencePolicy.INSTANCE);
+      if (constraint != null) {
+        return constraint;
+      }
+      PsiType functionalInterfaceReturnType=functionalInterfaceMethod.getReturnType();
+      if (functionalInterfaceReturnType != null && functionalInterfaceReturnType != PsiType.VOID) {
+        functionalInterfaceReturnType=GenericsUtil.eliminateWildcards(subst.substitute(functionalInterfaceReturnType));
+        final PsiType argType;
+        if (method.isConstructor()) {
+          argType=JavaPsiFacade.getElementFactory(functionalInterfaceMethod.getProject()).createType(method.getContainingClass(),methReferenceResolveResult.getSubstitutor());
+        }
+ else {
+          argType=methReferenceResolveResult.getSubstitutor().substitute(subst.substitute(method.getReturnType()));
+        }
+        final Pair<PsiType,ConstraintType> typeParameterConstraint=getSubstitutionForTypeParameterConstraint(typeParam,functionalInterfaceReturnType,argType,true,PsiUtil.getLanguageLevel(functionalInterfaceMethod));
+        if (typeParameterConstraint != null && typeParameterConstraint.getSecond() != ConstraintType.EQUALS && method.isConstructor()) {
+          final Pair<PsiType,ConstraintType> constraintFromParent=inferMethodTypeParameterFromParent(typeParam,partialSubstitutor,methodReferenceExpression.getParent().getParent(),policy);
+          if (constraintFromParent != null && constraintFromParent.getSecond() == ConstraintType.EQUALS)           return constraintFromParent;
+        }
+        return typeParameterConstraint;
+      }
+    }
+  }
+  return null;
+}
