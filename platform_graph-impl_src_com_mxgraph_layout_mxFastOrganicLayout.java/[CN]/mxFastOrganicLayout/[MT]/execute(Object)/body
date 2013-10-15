@@ -1,0 +1,115 @@
+{
+  mxIGraphModel model=graph.getModel();
+  Object[] vertices=graph.getChildVertices(parent);
+  List<Object> tmp=new ArrayList<Object>(vertices.length);
+  for (int i=0; i < vertices.length; i++) {
+    if (!isVertexIgnored(vertices[i])) {
+      tmp.add(vertices[i]);
+    }
+  }
+  vertexArray=tmp.toArray();
+  mxRectangle initialBounds=(useInputOrigin) ? graph.getBoundsForCells(vertexArray,false,false,true) : null;
+  int n=vertexArray.length;
+  dispX=new double[n];
+  dispY=new double[n];
+  cellLocation=new double[n][];
+  isMoveable=new boolean[n];
+  neighbours=new int[n][];
+  radius=new double[n];
+  radiusSquared=new double[n];
+  minDistanceLimitSquared=minDistanceLimit * minDistanceLimit;
+  if (forceConstant < 0.001) {
+    forceConstant=0.001;
+  }
+  forceConstantSquared=forceConstant * forceConstant;
+  for (int i=0; i < vertexArray.length; i++) {
+    Object vertex=vertexArray[i];
+    cellLocation[i]=new double[2];
+    indices.put(vertex,new Integer(i));
+    mxRectangle bounds=getVertexBounds(vertex);
+    double width=bounds.getWidth();
+    double height=bounds.getHeight();
+    double x=bounds.getX();
+    double y=bounds.getY();
+    cellLocation[i][0]=x + width / 2.0;
+    cellLocation[i][1]=y + height / 2.0;
+    radius[i]=Math.min(width,height);
+    radiusSquared[i]=radius[i] * radius[i];
+  }
+  model.beginUpdate();
+  try {
+    for (int i=0; i < n; i++) {
+      dispX[i]=0;
+      dispY[i]=0;
+      isMoveable[i]=isVertexMovable(vertexArray[i]);
+      Object[] edges=graph.getConnections(vertexArray[i],parent);
+      for (int k=0; k < edges.length; k++) {
+        if (isResetEdges()) {
+          graph.resetEdge(edges[k]);
+        }
+        if (isDisableEdgeStyle()) {
+          setEdgeStyleEnabled(edges[k],false);
+        }
+      }
+      Object[] cells=graph.getOpposites(edges,vertexArray[i]);
+      neighbours[i]=new int[cells.length];
+      for (int j=0; j < cells.length; j++) {
+        Integer index=indices.get(cells[j]);
+        if (index != null) {
+          neighbours[i][j]=index.intValue();
+        }
+ else {
+          neighbours[i][j]=i;
+        }
+      }
+    }
+    temperature=initialTemp;
+    if (maxIterations == 0) {
+      maxIterations=20.0 * Math.sqrt(n);
+    }
+    for (iteration=0; iteration < maxIterations; iteration++) {
+      if (!allowedToRun) {
+        return;
+      }
+      calcRepulsion();
+      calcAttraction();
+      calcPositions();
+      reduceTemperature();
+    }
+    Double minx=null;
+    Double miny=null;
+    for (int i=0; i < vertexArray.length; i++) {
+      Object vertex=vertexArray[i];
+      mxGeometry geo=model.getGeometry(vertex);
+      if (geo != null) {
+        cellLocation[i][0]-=geo.getWidth() / 2.0;
+        cellLocation[i][1]-=geo.getHeight() / 2.0;
+        double x=graph.snap(cellLocation[i][0]);
+        double y=graph.snap(cellLocation[i][1]);
+        setVertexLocation(vertex,x,y);
+        if (minx == null) {
+          minx=new Double(x);
+        }
+ else {
+          minx=new Double(Math.min(minx.doubleValue(),x));
+        }
+        if (miny == null) {
+          miny=new Double(y);
+        }
+ else {
+          miny=new Double(Math.min(miny.doubleValue(),y));
+        }
+      }
+    }
+    double dx=(minx != null) ? -minx.doubleValue() - 1 : 0;
+    double dy=(miny != null) ? -miny.doubleValue() - 1 : 0;
+    if (initialBounds != null) {
+      dx+=initialBounds.getX();
+      dy+=initialBounds.getY();
+    }
+    graph.moveCells(vertexArray,dx,dy);
+  }
+  finally {
+    model.endUpdate();
+  }
+}

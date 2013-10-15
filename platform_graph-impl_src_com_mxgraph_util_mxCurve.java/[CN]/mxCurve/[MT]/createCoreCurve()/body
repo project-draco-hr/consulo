@@ -1,0 +1,114 @@
+{
+  valid=false;
+  if (guidePoints == null || guidePoints.isEmpty()) {
+    return;
+  }
+  for (int i=0; i < guidePoints.size(); i++) {
+    if (guidePoints.get(i) == null) {
+      return;
+    }
+  }
+  minXBounds=minYBounds=10000000;
+  maxXBounds=maxYBounds=0;
+  mxSpline spline=new mxSpline(guidePoints);
+  double lengthSpline=spline.getLength();
+  if (Double.isNaN(lengthSpline) || !spline.checkValues() || lengthSpline < 1) {
+    return;
+  }
+  mxSpline1D splineX=spline.getSplineX();
+  mxSpline1D splineY=spline.getSplineY();
+  double baseInterval=12.0 / lengthSpline;
+  double minInterval=1.0 / lengthSpline;
+  double interval=baseInterval;
+  double minDeviation=0.15;
+  double maxDeviation=0.3;
+  double preferedDeviation=(maxDeviation + minDeviation) / 2.0;
+  double x1=-1.0;
+  double x2=-1.0;
+  double y1=-1.0;
+  double y2=-1.0;
+  double intervalChange=1;
+  List<mxPoint> coreCurve=new ArrayList<mxPoint>();
+  List<Double> coreIntervals=new ArrayList<Double>();
+  boolean twoLoopsComplete=false;
+  for (double t=0; t <= 1.5; t+=interval) {
+    if (t > 1.0) {
+      t=1.0001;
+      mxPoint endControlPoint=guidePoints.get(guidePoints.size() - 1);
+      mxPoint finalPoint=new mxPoint(endControlPoint.getX(),endControlPoint.getY());
+      coreCurve.add(finalPoint);
+      coreIntervals.add(t);
+      updateBounds(endControlPoint.getX(),endControlPoint.getY());
+      break;
+    }
+    boolean currentPointAccepted=true;
+    double newX=splineX.getFastValue(t);
+    double newY=splineY.getFastValue(t);
+    if (x1 != -1.0 && twoLoopsComplete && t != 1.0001) {
+      double diffX=Math.abs(((x2 - x1) * intervalChange + x2) - newX);
+      double diffY=Math.abs(((y2 - y1) * intervalChange + y2) - newY);
+      if ((diffX > maxDeviation || diffY > maxDeviation) && interval != minInterval) {
+        double overshootProportion=maxDeviation / Math.max(diffX,diffY);
+        if (interval * overshootProportion <= minInterval) {
+          intervalChange=minInterval / interval;
+        }
+ else {
+          intervalChange=overshootProportion;
+        }
+        t-=interval;
+        interval*=intervalChange;
+        currentPointAccepted=false;
+      }
+ else       if (diffX < minDeviation && diffY < minDeviation) {
+        intervalChange=1.4;
+        interval*=intervalChange;
+      }
+ else {
+        double errorRatio=preferedDeviation / Math.max(diffX,diffY);
+        intervalChange=errorRatio / 4.0;
+        interval*=intervalChange;
+      }
+      if (currentPointAccepted) {
+        x1=x2;
+        y1=y2;
+        x2=newX;
+        y2=newY;
+      }
+    }
+ else     if (x1 == -1.0) {
+      x1=x2=newX;
+      y1=y2=newY;
+    }
+ else     if (x1 == x2 && y1 == y2) {
+      x2=newX;
+      y2=newY;
+      twoLoopsComplete=true;
+    }
+    if (currentPointAccepted) {
+      mxPoint newPoint=new mxPoint(newX,newY);
+      coreCurve.add(newPoint);
+      coreIntervals.add(t);
+      updateBounds(newX,newY);
+    }
+  }
+  if (coreCurve.size() < 2) {
+    return;
+  }
+  mxPoint[] corePoints=new mxPoint[coreCurve.size()];
+  int count=0;
+  for (  mxPoint point : coreCurve) {
+    corePoints[count++]=point;
+  }
+  points=new Hashtable<String,mxPoint[]>();
+  curveLengths=new Hashtable<String,Double>();
+  points.put(CORE_CURVE,corePoints);
+  curveLengths.put(CORE_CURVE,lengthSpline);
+  double[] coreIntervalsArray=new double[coreIntervals.size()];
+  count=0;
+  for (  Double tempInterval : coreIntervals) {
+    coreIntervalsArray[count++]=tempInterval.doubleValue();
+  }
+  intervals=new Hashtable<String,double[]>();
+  intervals.put(CORE_CURVE,coreIntervalsArray);
+  valid=true;
+}

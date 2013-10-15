@@ -1,0 +1,148 @@
+{
+  mxIGraphModel model=graph.getModel();
+  mxGraphView view=graph.getView();
+  Object[] vertices=graph.getChildVertices(parent);
+  HashSet<Object> vertexSet=new HashSet<Object>(Arrays.asList(vertices));
+  HashSet<Object> validEdges=new HashSet<Object>();
+  for (int i=0; i < vertices.length; i++) {
+    Object[] edges=mxGraphModel.getEdges(model,vertices[i],false,true,false);
+    for (int j=0; j < edges.length; j++) {
+      if (view.getVisibleTerminal(edges[j],true) == vertices[i] && vertexSet.contains(view.getVisibleTerminal(edges[j],false))) {
+        validEdges.add(edges[j]);
+      }
+    }
+  }
+  Object[] edges=validEdges.toArray();
+  mxRectangle totalBounds=null;
+  mxRectangle bounds=null;
+  Map<Object,Integer> vertexMap=new Hashtable<Object,Integer>();
+  v=new CellWrapper[vertices.length];
+  for (int i=0; i < vertices.length; i++) {
+    v[i]=new CellWrapper(vertices[i]);
+    vertexMap.put(vertices[i],new Integer(i));
+    bounds=getVertexBounds(vertices[i]);
+    if (totalBounds == null) {
+      totalBounds=(mxRectangle)bounds.clone();
+    }
+ else {
+      totalBounds.add(bounds);
+    }
+    double width=bounds.getWidth();
+    double height=bounds.getHeight();
+    v[i].x=bounds.getX() + width / 2.0;
+    v[i].y=bounds.getY() + height / 2.0;
+    if (approxNodeDimensions) {
+      v[i].radiusSquared=Math.min(width,height);
+      v[i].radiusSquared*=v[i].radiusSquared;
+    }
+ else {
+      v[i].radiusSquared=width * width;
+      v[i].heightSquared=height * height;
+    }
+  }
+  if (averageNodeArea == 0.0) {
+    if (boundsWidth == 0.0 && totalBounds != null) {
+      boundsX=totalBounds.getX();
+      boundsY=totalBounds.getY();
+      boundsWidth=totalBounds.getWidth();
+      boundsHeight=totalBounds.getHeight();
+    }
+  }
+ else {
+    double newArea=averageNodeArea * vertices.length;
+    double squareLength=Math.sqrt(newArea);
+    if (bounds != null) {
+      double centreX=totalBounds.getX() + totalBounds.getWidth() / 2.0;
+      double centreY=totalBounds.getY() + totalBounds.getHeight() / 2.0;
+      boundsX=centreX - squareLength / 2.0;
+      boundsY=centreY - squareLength / 2.0;
+    }
+ else {
+      boundsX=0;
+      boundsY=0;
+    }
+    boundsWidth=squareLength;
+    boundsHeight=squareLength;
+    if (boundsX < 0.0 || boundsY < 0.0) {
+      double maxNegativeAxis=Math.min(boundsX,boundsY);
+      double axisOffset=-maxNegativeAxis;
+      boundsX+=axisOffset;
+      boundsY+=axisOffset;
+    }
+  }
+  if (initialMoveRadius == 0.0) {
+    initialMoveRadius=Math.max(boundsWidth,boundsHeight) / 2.0;
+  }
+  moveRadius=initialMoveRadius;
+  minDistanceLimitSquared=minDistanceLimit * minDistanceLimit;
+  maxDistanceLimitSquared=maxDistanceLimit * maxDistanceLimit;
+  unchangedEnergyRoundCount=0;
+  e=new CellWrapper[edges.length];
+  for (int i=0; i < e.length; i++) {
+    e[i]=new CellWrapper(edges[i]);
+    Object sourceCell=model.getTerminal(edges[i],true);
+    Object targetCell=model.getTerminal(edges[i],false);
+    Integer source=null;
+    Integer target=null;
+    if (sourceCell != null) {
+      source=vertexMap.get(sourceCell);
+    }
+    if (targetCell != null) {
+      target=vertexMap.get(targetCell);
+    }
+    if (source != null) {
+      e[i].source=source.intValue();
+    }
+ else {
+      e[i].source=-1;
+    }
+    if (target != null) {
+      e[i].target=target.intValue();
+    }
+ else {
+      e[i].target=-1;
+    }
+  }
+  for (int i=0; i < v.length; i++) {
+    v[i].relevantEdges=getRelevantEdges(i);
+    v[i].connectedEdges=getConnectedEdges(i);
+  }
+  xNormTry=new double[triesPerCell];
+  yNormTry=new double[triesPerCell];
+  for (int i=0; i < triesPerCell; i++) {
+    double angle=i * ((2.0 * Math.PI) / triesPerCell);
+    xNormTry[i]=Math.cos(angle);
+    yNormTry[i]=Math.sin(angle);
+  }
+  int childCount=model.getChildCount(parent);
+  for (int i=0; i < childCount; i++) {
+    Object cell=model.getChildAt(parent,i);
+    if (!isEdgeIgnored(cell)) {
+      if (isResetEdges()) {
+        graph.resetEdge(cell);
+      }
+      if (isDisableEdgeStyle()) {
+        setEdgeStyleEnabled(cell,false);
+      }
+    }
+  }
+  for (iteration=0; iteration < maxIterations; iteration++) {
+    performRound();
+  }
+  double[][] result=new double[v.length][2];
+  for (int i=0; i < v.length; i++) {
+    vertices[i]=v[i].cell;
+    bounds=getVertexBounds(vertices[i]);
+    result[i][0]=v[i].x - bounds.getWidth() / 2;
+    result[i][1]=v[i].y - bounds.getHeight() / 2;
+  }
+  model.beginUpdate();
+  try {
+    for (int i=0; i < vertices.length; i++) {
+      setVertexLocation(vertices[i],result[i][0],result[i][1]);
+    }
+  }
+  finally {
+    model.endUpdate();
+  }
+}

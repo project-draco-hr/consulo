@@ -1,0 +1,186 @@
+{
+  double scale=state.getView().getScale();
+  Font font=mxUtils.getFont(style,scale);
+  FontMetrics fm=mxUtils.getFontMetrics(font);
+  int descent=0;
+  int ascent=0;
+  if (fm != null) {
+    descent=fm.getDescent();
+    ascent=fm.getAscent();
+  }
+  if (labelGlyphs == null || (!label.equals(lastValue))) {
+    labelGlyphs=new LabelGlyphCache[label.length()];
+  }
+  if (!label.equals(lastValue) || !font.equals(lastFont)) {
+    char[] labelChars=label.toCharArray();
+    ArrayList<LabelGlyphCache> glyphList=new ArrayList<LabelGlyphCache>();
+    boolean bidiRequired=Bidi.requiresBidi(labelChars,0,labelChars.length);
+    labelSize=0;
+    if (bidiRequired) {
+      Bidi bidi=new Bidi(label,Bidi.DIRECTION_DEFAULT_LEFT_TO_RIGHT);
+      int runCount=bidi.getRunCount();
+      if (rtlGlyphVectors == null || rtlGlyphVectors.length != runCount) {
+        rtlGlyphVectors=new GlyphVector[runCount];
+      }
+      for (int i=0; i < bidi.getRunCount(); i++) {
+        final String labelSection=label.substring(bidi.getRunStart(i),bidi.getRunLimit(i));
+        rtlGlyphVectors[i]=font.layoutGlyphVector(mxCurveLabelShape.frc,labelSection.toCharArray(),0,labelSection.length(),Font.LAYOUT_RIGHT_TO_LEFT);
+      }
+      int charCount=0;
+      for (      GlyphVector gv : rtlGlyphVectors) {
+        float vectorOffset=0.0f;
+        for (int j=0; j < gv.getNumGlyphs(); j++) {
+          Shape shape=gv.getGlyphOutline(j,-vectorOffset,0);
+          LabelGlyphCache qlyph=new LabelGlyphCache();
+          glyphList.add(qlyph);
+          qlyph.glyphShape=shape;
+          mxRectangle size=new mxRectangle(gv.getGlyphLogicalBounds(j).getBounds2D());
+          qlyph.labelGlyphBounds=size;
+          labelSize+=size.getWidth();
+          vectorOffset+=size.getWidth();
+          charCount++;
+        }
+      }
+    }
+ else {
+      rtlGlyphVectors=null;
+      BreakIterator it=BreakIterator.getCharacterInstance(Locale.getDefault());
+      it.setText(label);
+      for (int i=0; i < label.length(); ) {
+        int next=it.next();
+        int characterLen=1;
+        if (next != BreakIterator.DONE) {
+          characterLen=next - i;
+        }
+        String glyph=label.substring(i,i + characterLen);
+        LabelGlyphCache labelGlyph=new LabelGlyphCache();
+        glyphList.add(labelGlyph);
+        labelGlyph.glyph=glyph;
+        GlyphVector vector=font.createGlyphVector(frc,glyph);
+        labelGlyph.glyphShape=vector.getOutline();
+        if (fm == null) {
+          mxRectangle size=new mxRectangle(font.getStringBounds(glyph,mxCurveLabelShape.frc));
+          labelGlyph.labelGlyphBounds=size;
+          labelSize+=size.getWidth();
+        }
+ else {
+          double width=fm.stringWidth(glyph);
+          labelGlyph.labelGlyphBounds=new mxRectangle(0,0,width,ascent);
+          labelSize+=width;
+        }
+        i+=characterLen;
+      }
+    }
+    lastValue=label;
+    lastFont=font;
+    lastPoints=curve.getGuidePoints();
+    this.labelGlyphs=glyphList.toArray(new LabelGlyphCache[glyphList.size()]);
+  }
+  labelPosition.startBuffer=LABEL_BUFFER * scale;
+  labelPosition.endBuffer=LABEL_BUFFER * scale;
+  calculationLabelPosition(style,label);
+  if (curve.isLabelReversed()) {
+    double temp=labelPosition.startBuffer;
+    labelPosition.startBuffer=labelPosition.endBuffer;
+    labelPosition.endBuffer=temp;
+  }
+  double curveLength=curve.getCurveLength(mxCurve.LABEL_CURVE);
+  double currentPos=labelPosition.startBuffer / curveLength;
+  double endPos=1.0 - (labelPosition.endBuffer / curveLength);
+  mxRectangle overallLabelBounds=null;
+  centerVisibleIndex=0;
+  double currentCurveDelta=0.0;
+  double curveDeltaSignificant=0.3;
+  double curveDeltaMax=0.5;
+  mxLine nextParallel=null;
+  for (int j=0; j < labelGlyphs.length; j++) {
+    if (currentPos > endPos) {
+      labelGlyphs[j].visible=false;
+      continue;
+    }
+    mxLine parallel=nextParallel;
+    if (currentCurveDelta > curveDeltaSignificant || nextParallel == null) {
+      parallel=curve.getCurveParallel(mxCurve.LABEL_CURVE,currentPos);
+      currentCurveDelta=0.0;
+      nextParallel=null;
+    }
+    labelGlyphs[j].glyphGeometry=parallel;
+    if (parallel == mxCurve.INVALID_POSITION) {
+      continue;
+    }
+    final double w=labelGlyphs[j].labelGlyphBounds.getWidth();
+    final double h=labelGlyphs[j].labelGlyphBounds.getHeight();
+    final double x=parallel.getEndPoint().getX();
+    final double y=parallel.getEndPoint().getY();
+    double p1X=parallel.getX() - (descent * y);
+    double minX=p1X, maxX=p1X;
+    double p1Y=parallel.getY() + (descent * x);
+    double minY=p1Y, maxY=p1Y;
+    double p2X=p1X + ((h + descent) * y);
+    double p2Y=p1Y - ((h + descent) * x);
+    minX=Math.min(minX,p2X);
+    maxX=Math.max(maxX,p2X);
+    minY=Math.min(minY,p2Y);
+    maxY=Math.max(maxY,p2Y);
+    double p3X=p1X + (w * x);
+    double p3Y=p1Y + (w * y);
+    minX=Math.min(minX,p3X);
+    maxX=Math.max(maxX,p3X);
+    minY=Math.min(minY,p3Y);
+    maxY=Math.max(maxY,p3Y);
+    double p4X=p2X + (w * x);
+    double p4Y=p2Y + (w * y);
+    minX=Math.min(minX,p4X);
+    maxX=Math.max(maxX,p4X);
+    minY=Math.min(minY,p4Y);
+    maxY=Math.max(maxY,p4Y);
+    minX-=2 * scale;
+    minY-=2 * scale;
+    maxX+=2 * scale;
+    maxY+=2 * scale;
+    postprocessGlyph(curve,label,j,currentPos);
+    double currentPosCandidate=currentPos + (labelGlyphs[j].labelGlyphBounds.getWidth() + labelPosition.defaultInterGlyphSpace) / curveLength;
+    nextParallel=curve.getCurveParallel(mxCurve.LABEL_CURVE,currentPosCandidate);
+    currentPos=currentPosCandidate;
+    mxPoint nextVector=nextParallel.getEndPoint();
+    double end2X=nextVector.getX();
+    double end2Y=nextVector.getY();
+    if (nextParallel != mxCurve.INVALID_POSITION && j + 1 < label.length()) {
+      double deltaX=Math.abs(x - end2X);
+      double deltaY=Math.abs(y - end2Y);
+      currentCurveDelta=Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    }
+    if (currentCurveDelta > curveDeltaSignificant) {
+      int ccw=Line2D.relativeCCW(0,0,x,y,end2X,end2Y);
+      if (ccw == 1) {
+        if (currentCurveDelta > curveDeltaMax) {
+          currentCurveDelta=curveDeltaMax;
+        }
+        double textBuffer=currentCurveDelta * CURVE_TEXT_STRETCH_FACTOR / curveLength;
+        currentPos+=textBuffer;
+        endPos+=textBuffer;
+      }
+    }
+    if (labelGlyphs[j].drawingBounds != null) {
+      labelGlyphs[j].drawingBounds.setRect(minX,minY,maxX - minX,maxY - minY);
+    }
+ else {
+      labelGlyphs[j].drawingBounds=new mxRectangle(minX,minY,maxX - minX,maxY - minY);
+    }
+    if (overallLabelBounds == null) {
+      overallLabelBounds=(mxRectangle)labelGlyphs[j].drawingBounds.clone();
+    }
+ else {
+      overallLabelBounds.add(labelGlyphs[j].drawingBounds);
+    }
+    labelGlyphs[j].visible=true;
+    centerVisibleIndex++;
+  }
+  centerVisibleIndex/=2;
+  if (overallLabelBounds == null) {
+    mxLine labelCenter=curve.getCurveParallel(mxCurve.LABEL_CURVE,0.5);
+    overallLabelBounds=new mxRectangle(labelCenter.getX(),labelCenter.getY(),1,1);
+  }
+  this.labelBounds=overallLabelBounds;
+  return overallLabelBounds;
+}

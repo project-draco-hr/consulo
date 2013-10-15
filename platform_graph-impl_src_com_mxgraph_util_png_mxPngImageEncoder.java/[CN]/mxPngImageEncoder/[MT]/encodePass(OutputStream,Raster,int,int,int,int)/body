@@ -1,0 +1,83 @@
+{
+  int minX=ras.getMinX();
+  int minY=ras.getMinY();
+  int width=ras.getWidth();
+  int height=ras.getHeight();
+  xOffset*=numBands;
+  xSkip*=numBands;
+  int samplesPerByte=8 / bitDepth;
+  int numSamples=width * numBands;
+  int[] samples=new int[numSamples];
+  int pixels=(numSamples - xOffset + xSkip - 1) / xSkip;
+  int bytesPerRow=pixels * numBands;
+  if (bitDepth < 8) {
+    bytesPerRow=(bytesPerRow + samplesPerByte - 1) / samplesPerByte;
+  }
+ else   if (bitDepth == 16) {
+    bytesPerRow*=2;
+  }
+  if (bytesPerRow == 0) {
+    return;
+  }
+  currRow=new byte[bytesPerRow + bpp];
+  prevRow=new byte[bytesPerRow + bpp];
+  filteredRows=new byte[5][bytesPerRow + bpp];
+  int maxValue=(1 << bitDepth) - 1;
+  for (int row=minY + yOffset; row < minY + height; row+=ySkip) {
+    ras.getPixels(minX,row,width,1,samples);
+    if (compressGray) {
+      int shift=8 - bitDepth;
+      for (int i=0; i < width; i++) {
+        samples[i]>>=shift;
+      }
+    }
+    int count=bpp;
+    int pos=0;
+    int tmp=0;
+switch (bitDepth) {
+case 1:
+case 2:
+case 4:
+      int mask=samplesPerByte - 1;
+    for (int s=xOffset; s < numSamples; s+=xSkip) {
+      int shiftSamp=samples[s] >> bitShift;
+      int val=shiftSamp > maxValue ? maxValue : shiftSamp;
+      tmp=(tmp << bitDepth) | val;
+      if (pos++ == mask) {
+        currRow[count++]=(byte)tmp;
+        tmp=0;
+        pos=0;
+      }
+    }
+  if (pos != 0) {
+    tmp<<=(samplesPerByte - pos) * bitDepth;
+    currRow[count++]=(byte)tmp;
+  }
+break;
+case 8:
+for (int s=xOffset; s < numSamples; s+=xSkip) {
+for (int b=0; b < numBands; b++) {
+  int sampShift=samples[s + b] >> bitShift;
+  currRow[count++]=(byte)(sampShift > maxValue ? maxValue : sampShift);
+}
+}
+break;
+case 16:
+for (int s=xOffset; s < numSamples; s+=xSkip) {
+for (int b=0; b < numBands; b++) {
+int sampShift=samples[s + b] >> bitShift;
+int val=sampShift > maxValue ? maxValue : sampShift;
+currRow[count++]=(byte)(val >> 8);
+currRow[count++]=(byte)(val & 0xff);
+}
+}
+break;
+}
+int filterType=param.filterRow(currRow,prevRow,filteredRows,bytesPerRow,bpp);
+os.write(filterType);
+os.write(filteredRows[filterType],bpp,bytesPerRow);
+byte[] swap=currRow;
+currRow=prevRow;
+prevRow=swap;
+}
+}
