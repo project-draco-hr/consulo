@@ -1,28 +1,70 @@
 {
   if (myProject.isDefault())   return null;
-  final ProjectBuilder builder=runModuleWizard(parent,anImport);
-  if (builder != null) {
-    final List<Module> modules=new ArrayList<Module>();
-    final List<Module> commitedModules;
-    if (builder instanceof ProjectImportBuilder<?>) {
-      final ModifiableArtifactModel artifactModel=ProjectStructureConfigurable.getInstance(myProject).getArtifactsStructureConfigurable().getModifiableArtifactModel();
-      commitedModules=((ProjectImportBuilder<?>)builder).commit(myProject,myModuleModel,this,artifactModel);
-    }
+  if (anImport || !EarlyAccessProgramManager.getInstance().getState(NewModuleAction.NewModuleWizard.class)) {
+    final ProjectBuilder builder=runModuleWizard(parent,anImport);
+    if (builder != null) {
+      final List<Module> modules=new ArrayList<Module>();
+      final List<Module> commitedModules;
+      if (builder instanceof ProjectImportBuilder<?>) {
+        final ModifiableArtifactModel artifactModel=ProjectStructureConfigurable.getInstance(myProject).getArtifactsStructureConfigurable().getModifiableArtifactModel();
+        commitedModules=((ProjectImportBuilder<?>)builder).commit(myProject,myModuleModel,this,artifactModel);
+      }
  else {
-      commitedModules=builder.commit(myProject,myModuleModel,this);
+        commitedModules=builder.commit(myProject,myModuleModel,this);
+      }
+      if (commitedModules != null) {
+        modules.addAll(commitedModules);
+      }
+      ApplicationManager.getApplication().runWriteAction(new Runnable(){
+        @Override public void run(){
+          for (          Module module : modules) {
+            getOrCreateModuleEditor(module);
+          }
+        }
+      }
+);
+      return modules;
     }
-    if (commitedModules != null) {
-      modules.addAll(commitedModules);
+  }
+ else {
+    FileChooserDescriptor fileChooserDescriptor=new FileChooserDescriptor(false,true,false,false,false,false){
+      @Override public boolean isFileSelectable(      VirtualFile file){
+        if (!super.isFileSelectable(file)) {
+          return false;
+        }
+        for (        Module module : myModuleModel.getModules()) {
+          VirtualFile moduleDir=module.getModuleDir();
+          if (moduleDir != null && moduleDir.equals(file)) {
+            return false;
+          }
+        }
+        return true;
+      }
     }
+;
+    fileChooserDescriptor.setTitle(ProjectBundle.message("choose.module.home"));
+    VirtualFile moduleDir=FileChooser.chooseFile(fileChooserDescriptor,myProject,null);
+    if (moduleDir == null) {
+      return null;
+    }
+    final Module module=myModuleModel.newModule(moduleDir.getNameWithoutExtension(),moduleDir.getPath());
+    final ModifiableRootModel modifiableModel=ModuleRootManager.getInstance(module).getModifiableModel();
+    modifiableModel.addContentEntry(moduleDir);
+    new WriteAction<Object>(){
+      @Override protected void run(      Result<Object> result) throws Throwable {
+        modifiableModel.commit();
+      }
+    }
+.execute();
     ApplicationManager.getApplication().runWriteAction(new Runnable(){
       @Override public void run(){
-        for (        Module module : modules) {
-          getOrCreateModuleEditor(module);
-        }
+        getOrCreateModuleEditor(module);
+        Collections.sort(myModuleEditors,myModuleEditorComparator);
       }
     }
 );
-    return modules;
+    processModuleCountChanged();
+    return Collections.singletonList(module);
   }
   return null;
 }
