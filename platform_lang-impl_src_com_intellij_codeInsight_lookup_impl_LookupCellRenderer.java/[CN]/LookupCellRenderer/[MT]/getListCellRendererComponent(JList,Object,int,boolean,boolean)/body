@@ -1,5 +1,5 @@
 {
-  boolean nonFocusedSelection=isSelected && !myLookup.isFocused() && myLookup.isSemiFocused();
+  boolean nonFocusedSelection=isSelected && myLookup.getFocusDegree() == LookupImpl.FocusDegree.SEMI_FOCUSED;
   if (!myLookup.isFocused()) {
     isSelected=false;
   }
@@ -8,26 +8,45 @@
   final Color foreground=getForegroundColor(isSelected);
   final Color background=nonFocusedSelection ? SELECTED_NON_FOCUSED_BACKGROUND_COLOR : isSelected ? SELECTED_BACKGROUND_COLOR : BACKGROUND_COLOR;
   int allowedWidth=list.getWidth() - AFTER_TAIL - AFTER_TYPE- getIconIndent();
-  final LookupElementPresentation presentation=new RealLookupElementPresentation(isSelected ? getMaxWidth() : allowedWidth,myNormalMetrics,myBoldMetrics,myLookup);
-  if (item.isValid()) {
-    item.renderElement(presentation);
-  }
+  FontMetrics normalMetrics=getRealFontMetrics(item,false);
+  FontMetrics boldMetrics=getRealFontMetrics(item,true);
+  final LookupElementPresentation presentation=new RealLookupElementPresentation(isSelected ? getMaxWidth() : allowedWidth,normalMetrics,boldMetrics,myLookup);
+  AccessToken token=ReadAction.start();
+  try {
+    if (item.isValid()) {
+      try {
+        item.renderElement(presentation);
+      }
+ catch (      Exception e) {
+        LOG.error(e);
+      }
+catch (      Error e) {
+        LOG.error(e);
+      }
+    }
  else {
-    presentation.setItemTextForeground(JBColor.RED);
-    presentation.setItemText("Invalid");
+      presentation.setItemTextForeground(JBColor.RED);
+      presentation.setItemText("Invalid");
+    }
+  }
+  finally {
+    token.finish();
   }
   myNameComponent.clear();
   myNameComponent.setIcon(augmentIcon(presentation.getIcon(),myEmptyIcon));
   myNameComponent.setBackground(background);
   allowedWidth-=setItemTextLabel(item,new JBColor(isSelected ? SELECTED_FOREGROUND_COLOR : presentation.getItemTextForeground(),foreground),isSelected,presentation,allowedWidth);
+  Font customFont=myLookup.getCustomFont(item,false);
+  myTailComponent.setFont(customFont != null ? customFont : myNormalFont);
+  myTypeLabel.setFont(customFont != null ? customFont : myNormalFont);
   myTypeLabel.clear();
   if (allowedWidth > 0) {
-    allowedWidth-=setTypeTextLabel(item,background,foreground,presentation,isSelected ? getMaxWidth() : allowedWidth,isSelected);
+    allowedWidth-=setTypeTextLabel(item,background,foreground,presentation,isSelected ? getMaxWidth() : allowedWidth,isSelected,nonFocusedSelection,normalMetrics);
   }
   myTailComponent.clear();
   myTailComponent.setBackground(background);
   if (isSelected || allowedWidth >= 0) {
-    setTailTextLabel(isSelected,presentation,foreground,isSelected ? getMaxWidth() : allowedWidth,nonFocusedSelection);
+    setTailTextLabel(isSelected,presentation,foreground,isSelected ? getMaxWidth() : allowedWidth,nonFocusedSelection,normalMetrics);
   }
   if (mySelected.containsKey(index)) {
     if (!isSelected && mySelected.get(index)) {
@@ -36,18 +55,21 @@
   }
   mySelected.put(index,isSelected);
   final double w=myNameComponent.getPreferredSize().getWidth() + myTailComponent.getPreferredSize().getWidth() + myTypeLabel.getPreferredSize().getWidth();
-  myPanel.removeAll();
-  if (isSelected && w > list.getWidth()) {
-    myPanel.setLayout(new BoxLayout(myPanel,BoxLayout.X_AXIS));
-    myPanel.add(myNameComponent);
-    myPanel.add(myTailComponent);
-    myPanel.add(myTypeLabel);
-  }
+  boolean useBoxLayout=isSelected && w > list.getWidth() && ((JBList)list).getExpandableItemsHandler().isEnabled();
+  if (useBoxLayout != myPanel.getLayout() instanceof BoxLayout) {
+    myPanel.removeAll();
+    if (useBoxLayout) {
+      myPanel.setLayout(new BoxLayout(myPanel,BoxLayout.X_AXIS));
+      myPanel.add(myNameComponent);
+      myPanel.add(myTailComponent);
+      myPanel.add(myTypeLabel);
+    }
  else {
-    myPanel.setLayout(new BorderLayout());
-    myPanel.add(myNameComponent,BorderLayout.WEST);
-    myPanel.add(myTailComponent,BorderLayout.CENTER);
-    myPanel.add(myTypeLabel,BorderLayout.EAST);
+      myPanel.setLayout(new BorderLayout());
+      myPanel.add(myNameComponent,BorderLayout.WEST);
+      myPanel.add(myTailComponent,BorderLayout.CENTER);
+      myPanel.add(myTypeLabel,BorderLayout.EAST);
+    }
   }
   return myPanel;
 }
