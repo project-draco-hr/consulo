@@ -1,13 +1,41 @@
 {
-  VirtualFile compilerOutput=CompilerPathsManager.getInstance(myProject).getCompilerOutput(module,ContentFolderType.PRODUCTION);
-  try {
-    String canonicalPath=compilerOutput.getCanonicalPath();
-    if (FileUtil.pathsEqual(outputDir,canonicalPath)) {
-      return;
+  final Ref<CacheCorruptedException> exRef=new Ref<CacheCorruptedException>(null);
+  final ModuleFileIndex fileIndex=ModuleRootManager.getInstance(module).getFileIndex();
+  final GlobalSearchScope srcRootScope=GlobalSearchScope.moduleScope(module).intersectWith(GlobalSearchScopes.directoryScope(myProject,sourceRoot,true));
+  final Collection<FileType> registeredInputTypes=CompilerManager.getInstance(myProject).getRegisteredInputTypes(myTranslatingCompiler);
+  final ContentIterator contentIterator=new ContentIterator(){
+    public boolean processFile(    final VirtualFile child){
+      try {
+        if (child.isValid()) {
+          if (!child.isDirectory() && registeredInputTypes.contains(child.getFileType())) {
+            updateOutputItemsList(outputDir,child,sourceRoot,packagePrefix,filesToRefresh,results,srcRootScope);
+          }
+        }
+        return true;
+      }
+ catch (      CacheCorruptedException e) {
+        exRef.set(e);
+        return false;
+      }
     }
-    FileUtil.copyDir(new File(outputDir),new File(canonicalPath));
   }
- catch (  IOException e) {
-    throw new CacheCorruptedException(e);
+;
+  if (fileIndex.isInContent(from)) {
+    fileIndex.iterateContentUnderDirectory(from,contentIterator);
+  }
+ else {
+    VfsUtilCore.visitChildrenRecursively(from,new VirtualFileVisitor(){
+      @Override public boolean visitFile(      @NotNull VirtualFile file){
+        if (!file.isDirectory()) {
+          contentIterator.processFile(file);
+        }
+        return true;
+      }
+    }
+);
+  }
+  final CacheCorruptedException exc=exRef.get();
+  if (exc != null) {
+    throw exc;
   }
 }

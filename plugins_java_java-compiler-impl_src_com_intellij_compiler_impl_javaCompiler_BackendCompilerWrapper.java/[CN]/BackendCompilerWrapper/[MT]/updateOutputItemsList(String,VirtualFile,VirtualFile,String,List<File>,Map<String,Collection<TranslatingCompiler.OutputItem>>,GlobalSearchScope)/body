@@ -1,0 +1,62 @@
+{
+  final Set<CompiledClass> paths=myFileNameToSourceMap.get(srcFile.getName());
+  if (paths == null || paths.isEmpty()) {
+    return;
+  }
+  final String filePath="/" + calcPackagePath(srcFile,sourceRoot,packagePrefix);
+  for (  final CompiledClass cc : paths) {
+    myCompileContext.getProgressIndicator().checkCanceled();
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Checking [pathToClass; relPathToSource] = " + cc);
+    }
+    boolean pathsEquals=FileUtil.pathsEqual(filePath,cc.relativePathToSource);
+    if (!pathsEquals) {
+      final String qName=cc.qName;
+      if (qName != null) {
+        pathsEquals=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+          public Boolean compute(){
+            final JavaPsiFacade facade=JavaPsiFacade.getInstance(myProject);
+            PsiClass psiClass=facade.findClass(qName,srcRootScope);
+            if (psiClass == null) {
+              final int dollarIndex=qName.indexOf("$");
+              if (dollarIndex >= 0) {
+                final String topLevelClassName=qName.substring(0,dollarIndex);
+                psiClass=facade.findClass(topLevelClassName,srcRootScope);
+              }
+            }
+            if (psiClass != null) {
+              final VirtualFile vFile=psiClass.getContainingFile().getVirtualFile();
+              return vFile != null && vFile.equals(srcFile);
+            }
+            return false;
+          }
+        }
+);
+      }
+    }
+    if (pathsEquals) {
+      final String outputPath=cc.pathToClass.replace(File.separatorChar,'/');
+      final Pair<String,String> realLocation=moveToRealLocation(outputDir,outputPath,srcFile,filesToRefresh);
+      if (realLocation != null) {
+        Collection<TranslatingCompiler.OutputItem> outputs=results.get(realLocation.getFirst());
+        if (outputs == null) {
+          outputs=new ArrayList<TranslatingCompiler.OutputItem>();
+          results.put(realLocation.getFirst(),outputs);
+        }
+        outputs.add(new OutputItemImpl(realLocation.getSecond(),srcFile));
+        if (PACKAGE_ANNOTATION_FILE_NAME.equals(srcFile.getName())) {
+          myProcessedPackageInfos.add(srcFile);
+        }
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Added output item: [outputDir; outputPath; sourceFile]  = [" + realLocation.getFirst() + "; "+ realLocation.getSecond()+ "; "+ srcFile.getPresentableUrl()+ "]");
+        }
+      }
+ else {
+        myCompileContext.addMessage(CompilerMessageCategory.ERROR,"Failed to copy from temporary location to output directory: " + outputPath + " (see idea.log for details)",null,-1,-1);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Failed to move to real location: " + outputPath + "; from "+ outputDir);
+        }
+      }
+    }
+  }
+}
