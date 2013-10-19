@@ -3,77 +3,56 @@
     final Module[] scopeModules=scope.getAffectedModules();
     final List<String> modulesWithoutOutputPathSpecified=new ArrayList<String>();
     boolean isProjectCompilePathSpecified=true;
-    final List<String> modulesWithoutJdkAssigned=new ArrayList<String>();
     final Set<File> nonExistingOutputPaths=new HashSet<File>();
     final CompilerManager compilerManager=CompilerManager.getInstance(myProject);
-    final boolean useOutOfProcessBuild=useOutOfProcessBuild();
+    final boolean useOutOfProcessBuild=false;
     for (    final Module module : scopeModules) {
       if (!compilerManager.isValidationEnabled(module)) {
         continue;
       }
-      final boolean hasSources=hasSources(module,false);
-      final boolean hasTestSources=hasSources(module,true);
-      if (!hasSources && !hasTestSources) {
+      boolean isEmpty=true;
+      for (      ContentFolderType contentFolderType : ContentFolderType.ALL_SOURCE_ROOTS) {
+        if (hasContent(module,contentFolderType)) {
+          isEmpty=false;
+          break;
+        }
+      }
+      if (isEmpty) {
         continue;
       }
-      final String outputPath=getModuleOutputPath(module,false);
-      final String testsOutputPath=getModuleOutputPath(module,true);
-      if (outputPath == null && testsOutputPath == null) {
-        modulesWithoutOutputPathSpecified.add(module.getName());
-      }
- else {
-        if (outputPath != null) {
-          if (!useOutOfProcessBuild) {
+      for (      ContentFolderType contentFolderType : ContentFolderType.ALL_SOURCE_ROOTS) {
+        if (hasContent(module,contentFolderType)) {
+          final String outputPath=getModuleOutputPath(module,contentFolderType);
+          if (outputPath != null) {
             final File file=new File(FileUtil.toSystemDependentName(outputPath));
             if (!file.exists()) {
               nonExistingOutputPaths.add(file);
             }
           }
-        }
  else {
-          if (hasSources) {
             modulesWithoutOutputPathSpecified.add(module.getName());
           }
         }
-        if (testsOutputPath != null) {
-          if (!useOutOfProcessBuild) {
-            final File f=new File(FileUtil.toSystemDependentName(testsOutputPath));
-            if (!f.exists()) {
-              nonExistingOutputPaths.add(f);
+      }
+      for (      AdditionalOutputDirectoriesProvider provider : AdditionalOutputDirectoriesProvider.EP_NAME.getExtensions()) {
+        for (        String path : provider.getOutputDirectories(myProject,module)) {
+          if (path == null) {
+            final CompilerPathsManager extension=CompilerPathsManager.getInstance(module.getProject());
+            if (extension == null || extension.getCompilerOutputUrl() == null) {
+              isProjectCompilePathSpecified=false;
+            }
+ else {
+              modulesWithoutOutputPathSpecified.add(module.getName());
             }
           }
-        }
  else {
-          if (hasTestSources) {
-            modulesWithoutOutputPathSpecified.add(module.getName());
-          }
-        }
-        if (!useOutOfProcessBuild) {
-          for (          AdditionalOutputDirectoriesProvider provider : AdditionalOutputDirectoriesProvider.EP_NAME.getExtensions()) {
-            for (            String path : provider.getOutputDirectories(myProject,module)) {
-              if (path == null) {
-                final CompilerPathsManager extension=CompilerPathsManager.getInstance(module.getProject());
-                if (extension == null || extension.getCompilerOutputUrl() == null) {
-                  isProjectCompilePathSpecified=false;
-                }
- else {
-                  modulesWithoutOutputPathSpecified.add(module.getName());
-                }
-              }
- else {
-                final File file=new File(path);
-                if (!file.exists()) {
-                  nonExistingOutputPaths.add(file);
-                }
-              }
+            final File file=new File(path);
+            if (!file.exists()) {
+              nonExistingOutputPaths.add(file);
             }
           }
         }
       }
-    }
-    if (!modulesWithoutJdkAssigned.isEmpty()) {
-      showNotSpecifiedError("error.jdk.not.specified",modulesWithoutJdkAssigned,ProjectBundle.message("modules.classpath.title"));
-      return false;
     }
     if (!isProjectCompilePathSpecified) {
       final String message=CompilerBundle.message("error.project.output.not.specified");
