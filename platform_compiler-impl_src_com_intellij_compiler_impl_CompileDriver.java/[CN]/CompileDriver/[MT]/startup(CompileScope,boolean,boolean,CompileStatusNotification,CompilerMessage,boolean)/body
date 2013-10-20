@@ -1,19 +1,20 @@
 {
   ApplicationManager.getApplication().assertIsDispatchThread();
   ProblemsViewImpl.SERVICE.getInstance(myProject).clearOldMessages(null);
-  final boolean useExtProcessBuild=useOutOfProcessBuild();
+  final boolean useExtProcessBuild=false;
   final String contentName=forceCompile ? CompilerBundle.message("compiler.content.name.compile") : CompilerBundle.message("compiler.content.name.make");
-  final CompilerTask compileTask=new CompilerTask(myProject,contentName,ApplicationManager.getApplication().isUnitTestMode(),true,true,isCompilationStartedAutomatically(scope));
+  final boolean isUnitTestMode=ApplicationManager.getApplication().isUnitTestMode();
+  final CompilerTask compileTask=new CompilerTask(myProject,contentName,isUnitTestMode,true,true,isCompilationStartedAutomatically(scope));
   StatusBar.Info.set("",myProject,"Compiler");
   if (useExtProcessBuild) {
     myProject.save();
-    if (!ApplicationManager.getApplication().isUnitTestMode()) {
+    if (!isUnitTestMode) {
       ApplicationManager.getApplication().saveSettings();
     }
   }
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
   FileDocumentManager.getInstance().saveAllDocuments();
-  final DependencyCache dependencyCache=useExtProcessBuild ? null : createDependencyCache();
+  final CompositeDependencyCache dependencyCache=useExtProcessBuild ? null : createDependencyCache();
   final CompileContextImpl compileContext=new CompileContextImpl(myProject,compileTask,scope,dependencyCache,!isRebuild && !forceCompile,isRebuild);
   if (!useExtProcessBuild) {
     for (    Map.Entry<Pair<IntermediateOutputCompiler,Module>,Pair<VirtualFile,VirtualFile>> entry : myGenerationCompilerModuleToOutputDirMap.entrySet()) {
@@ -23,7 +24,7 @@
       compileContext.assignModule(outputs.getFirst(),module,false,key.getFirst());
       compileContext.assignModule(outputs.getSecond(),module,true,key.getFirst());
     }
-    attachAdditionalOutputDirectories(compileContext);
+    attachAnnotationProcessorsOutputDirectories(compileContext);
   }
   final Runnable compileWork=new Runnable(){
     @Override public void run(){
@@ -41,6 +42,11 @@
         if (message != null) {
           compileContext.addMessage(message);
         }
+ else {
+          if (!isUnitTestMode) {
+          }
+        }
+        TranslatingCompilerFilesMonitor.getInstance().ensureInitializationCompleted(myProject,compileContext.getProgressIndicator());
         doCompile(compileContext,isRebuild,forceCompile,callback,checkCachesVersion);
       }
   finally {

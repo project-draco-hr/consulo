@@ -2,6 +2,7 @@
   final Type[] args=Type.getArgumentTypes(desc);
   final Type returnType=Type.getReturnType(desc);
   final MethodVisitor v=cv.visitMethod(access,name,desc,signature,exceptions);
+  final Map<Integer,String> paramNames=myMethodParamNames.get(myClassName + '.' + name+ desc);
   return new MethodVisitor(Opcodes.ASM4,v){
     private final List<Integer> myNotNullParams=new ArrayList<Integer>();
     private int mySyntheticCount=0;
@@ -9,43 +10,45 @@
     private String myMessage=null;
     private Label myStartGeneratedCodeLabel;
     public AnnotationVisitor visitParameterAnnotation(    final int parameter,    final String anno,    final boolean visible){
-      final AnnotationVisitor av=mv.visitParameterAnnotation(parameter,anno,visible);
+      AnnotationVisitor av=mv.visitParameterAnnotation(parameter,anno,visible);
       if (isReferenceType(args[parameter]) && anno.equals(NOT_NULL_TYPE)) {
         myNotNullParams.add(new Integer(parameter));
+        av=new AnnotationVisitor(Opcodes.ASM4,av){
+          @Override public void visit(          String methodName,          Object o){
+            if (ANNOTATION_DEFAULT_METHOD.equals(methodName)) {
+              String message=(String)o;
+              if (!message.isEmpty()) {
+                myMessage=message;
+              }
+            }
+            super.visit(methodName,o);
+          }
+        }
+;
       }
  else       if (anno.equals(SYNTHETIC_TYPE)) {
         mySyntheticCount++;
       }
-      return new AnnotationVisitor(Opcodes.ASM4,av){
-        @Override public void visit(        String methodName,        Object o){
-          if (ANNOTATION_DEFAULT_METHOD.equals(methodName)) {
-            String message=(String)o;
-            if (!message.isEmpty()) {
-              myMessage=message;
-            }
-          }
-          super.visit(methodName,o);
-        }
-      }
-;
+      return av;
     }
     @Override public AnnotationVisitor visitAnnotation(    String anno,    boolean isRuntime){
-      final AnnotationVisitor av=mv.visitAnnotation(anno,isRuntime);
+      AnnotationVisitor av=mv.visitAnnotation(anno,isRuntime);
       if (isReferenceType(returnType) && anno.equals(NOT_NULL_TYPE)) {
         myIsNotNull=true;
-      }
-      return new AnnotationVisitor(Opcodes.ASM4,av){
-        @Override public void visit(        String methodName,        Object o){
-          if (ANNOTATION_DEFAULT_METHOD.equals(methodName)) {
-            String message=(String)o;
-            if (!message.isEmpty()) {
-              myMessage=message;
+        av=new AnnotationVisitor(Opcodes.ASM4,av){
+          @Override public void visit(          String methodName,          Object o){
+            if (ANNOTATION_DEFAULT_METHOD.equals(methodName)) {
+              String message=(String)o;
+              if (!message.isEmpty()) {
+                myMessage=message;
+              }
             }
+            super.visit(methodName,o);
           }
-          super.visit(methodName,o);
         }
-      }
 ;
+      }
+      return av;
     }
     @Override public void visitCode(){
       if (myNotNullParams.size() > 0) {
@@ -60,12 +63,14 @@
         mv.visitVarInsn(ALOAD,var);
         Label end=new Label();
         mv.visitJumpInsn(IFNONNULL,end);
-        generateThrow(IAE_CLASS_NAME,myMessage == null ? String.format(NULL_ARG_MESSAGE,param - mySyntheticCount,myClassName,name) : myMessage,end);
+        String paramName=paramNames == null ? null : paramNames.get(param);
+        String descrPattern=myMessage != null ? myMessage : paramName != null ? NULL_ARG_MESSAGE_NAMED : NULL_ARG_MESSAGE_INDEXED;
+        String[] args=myMessage != null ? EMPTY_STRING_ARRAY : new String[]{paramName != null ? paramName : String.valueOf(param - mySyntheticCount),myClassName,name};
+        generateThrow(IAE_CLASS_NAME,end,descrPattern,args);
       }
     }
     @Override public void visitLocalVariable(    String name,    String desc,    String signature,    Label start,    Label end,    int index){
-      final boolean isStatic=(access & ACC_STATIC) != 0;
-      final boolean isParameter=isStatic ? index < args.length : index <= args.length;
+      final boolean isParameter=getParameterIndex(index,access,args) >= 0;
       final Label label=(isParameter && myStartGeneratedCodeLabel != null) ? myStartGeneratedCodeLabel : start;
       mv.visitLocalVariable(name,desc,signature,label,end,index);
     }
@@ -75,15 +80,26 @@
           mv.visitInsn(DUP);
           final Label skipLabel=new Label();
           mv.visitJumpInsn(IFNONNULL,skipLabel);
-          generateThrow(ISE_CLASS_NAME,myMessage == null ? String.format(NULL_RESULT_MESSAGE,myClassName,name) : myMessage,skipLabel);
+          String descrPattern=myMessage != null ? myMessage : NULL_RESULT_MESSAGE;
+          String[] args=myMessage != null ? EMPTY_STRING_ARRAY : new String[]{myClassName,name};
+          generateThrow(ISE_CLASS_NAME,skipLabel,descrPattern,args);
         }
       }
       mv.visitInsn(opcode);
     }
-    private void generateThrow(    final String exceptionClass,    final String descr,    final Label end){
+    private void generateThrow(    final String exceptionClass,    final Label end,    final String descrPattern,    final String[] args){
       mv.visitTypeInsn(NEW,exceptionClass);
       mv.visitInsn(DUP);
-      mv.visitLdcInsn(descr);
+      mv.visitLdcInsn(descrPattern);
+      mv.visitLdcInsn(args.length);
+      mv.visitTypeInsn(ANEWARRAY,OBJECT_CLASS_NAME);
+      for (int i=0; i < args.length; i++) {
+        mv.visitInsn(DUP);
+        mv.visitLdcInsn(i);
+        mv.visitLdcInsn(args[i]);
+        mv.visitInsn(AASTORE);
+      }
+      mv.visitMethodInsn(INVOKESTATIC,STRING_CLASS_NAME,"format","(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;");
       mv.visitMethodInsn(INVOKESPECIAL,exceptionClass,CONSTRUCTOR_NAME,EXCEPTION_INIT_SIGNATURE);
       mv.visitInsn(ATHROW);
       mv.visitLabel(end);
