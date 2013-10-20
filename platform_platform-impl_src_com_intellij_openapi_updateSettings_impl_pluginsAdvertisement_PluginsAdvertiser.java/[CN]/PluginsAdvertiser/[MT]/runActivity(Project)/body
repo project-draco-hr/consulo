@@ -1,0 +1,74 @@
+{
+  if (!UpdateSettings.getInstance().CHECK_NEEDED)   return;
+  final UnknownFeaturesCollector collectorSuggester=UnknownFeaturesCollector.getInstance(project);
+  final Set<UnknownFeature> unknownFeatures=collectorSuggester.getUnknownFeatures();
+  final KnownExtensions extensions=loadExtensions();
+  if (extensions != null && unknownFeatures.isEmpty())   return;
+  final Runnable runnable=new Runnable(){
+    public void run(){
+      final Application application=ApplicationManager.getApplication();
+      if (application.isUnitTestMode() || application.isHeadlessEnvironment())       return;
+      ProgressManager.getInstance().run(new Task.Backgroundable(project,"Search for non-bundled plugins in plugin repository..."){
+        private final Set<PluginDownloader> myPlugins=new HashSet<PluginDownloader>();
+        private List<IdeaPluginDescriptor> myAllPlugins;
+        @Override public void run(        @NotNull ProgressIndicator indicator){
+          if (extensions == null) {
+            loadSupportedExtensions();
+          }
+          int idx=0;
+          final Set<PluginId> ids=new HashSet<PluginId>();
+          for (          UnknownFeature feature : unknownFeatures) {
+            indicator.setText("Searching for plugin supporting \'" + feature.getImplementationName() + "\'");
+            final List<PluginId> pluginId=retrieve(feature);
+            if (pluginId != null) {
+              final List<String> disabledPlugins=PluginManagerCore.getDisabledPlugins();
+              for (              PluginId id : pluginId) {
+                if (!disabledPlugins.contains(id.getIdString())) {
+                  ids.add(id);
+                }
+              }
+            }
+            indicator.setFraction(((double)idx++) / unknownFeatures.size());
+          }
+          try {
+            myAllPlugins=RepositoryHelper.loadPluginsFromRepository(indicator);
+            for (            IdeaPluginDescriptor loadedPlugin : myAllPlugins) {
+              if (ids.contains(loadedPlugin.getPluginId())) {
+                myPlugins.add(PluginDownloader.createDownloader(loadedPlugin));
+              }
+            }
+          }
+ catch (          Exception ignore) {
+          }
+        }
+        @Override public void onSuccess(){
+          if (!myPlugins.isEmpty()) {
+            final String displayId="Plugins Suggestion";
+            new NotificationGroup(displayId,NotificationDisplayType.STICKY_BALLOON,true).createNotification(displayId,"Features covered by non-bundled plugins are detected.<br>" + "<a href=\"configure\">Configure plugins...</a><br>" + "<a href=\"ignore\">Ignore All</a>",NotificationType.INFORMATION,new NotificationListener(){
+              @Override public void hyperlinkUpdate(              @NotNull Notification notification,              @NotNull HyperlinkEvent event){
+                if (event.getEventType() == HyperlinkEvent.EventType.ACTIVATED) {
+                  final String description=event.getDescription();
+                  if ("ignore".equals(description)) {
+                    for (                    UnknownFeature feature : unknownFeatures) {
+                      collectorSuggester.ignoreFeature(feature);
+                    }
+                    notification.expire();
+                  }
+ else                   if ("configure".equals(description)) {
+                    LOG.assertTrue(myAllPlugins != null);
+                    notification.expire();
+                    new PluginsAdvertiserDialog(myProject,myPlugins.toArray(new PluginDownloader[myPlugins.size()]),myAllPlugins).show();
+                  }
+                }
+              }
+            }
+).notify(project);
+          }
+        }
+      }
+);
+    }
+  }
+;
+  SwingUtilities.invokeLater(runnable);
+}
