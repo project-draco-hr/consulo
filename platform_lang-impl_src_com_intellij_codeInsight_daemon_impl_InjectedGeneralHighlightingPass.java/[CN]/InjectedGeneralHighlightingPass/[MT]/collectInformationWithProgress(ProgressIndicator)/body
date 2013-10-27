@@ -1,0 +1,49 @@
+{
+  final Set<HighlightInfo> gotHighlights=new THashSet<HighlightInfo>(100);
+  final List<PsiElement> inside=new ArrayList<PsiElement>();
+  final List<PsiElement> outside=new ArrayList<PsiElement>();
+  List<ProperTextRange> insideRanges=new ArrayList<ProperTextRange>();
+  List<ProperTextRange> outsideRanges=new ArrayList<ProperTextRange>();
+  Divider.divideInsideAndOutside(myFile,myStartOffset,myEndOffset,myPriorityRange,inside,insideRanges,outside,outsideRanges,false,FILE_FILTER);
+  Set<HighlightInfo> injectedResult=new THashSet<HighlightInfo>();
+  Set<PsiFile> injected=getInjectedPsiFiles(inside,outside,progress);
+  setProgressLimit(injected.size());
+  if (!addInjectedPsiHighlights(injected,progress,Collections.synchronizedSet(injectedResult))) {
+    throw new ProcessCanceledException();
+  }
+  final List<HighlightInfo> injectionsOutside=new ArrayList<HighlightInfo>(gotHighlights.size());
+  Set<HighlightInfo> result;
+synchronized (injectedResult) {
+    result=injectedResult;
+  }
+  for (  HighlightInfo info : result) {
+    if (myStartOffset <= info.getStartOffset() && info.getEndOffset() <= myEndOffset) {
+      gotHighlights.add(info);
+    }
+ else {
+      injectionsOutside.add(info);
+    }
+  }
+  if (!injectionsOutside.isEmpty()) {
+    final ProperTextRange priorityIntersection=myPriorityRange.intersection(new TextRange(myStartOffset,myEndOffset));
+    if ((!inside.isEmpty() || !gotHighlights.isEmpty()) && priorityIntersection != null) {
+      final List<HighlightInfo> toApplyInside=new ArrayList<HighlightInfo>(gotHighlights);
+      myHighlights.addAll(toApplyInside);
+      gotHighlights.clear();
+      myHighlightInfoProcessor.highlightsInsideVisiblePartAreProduced(myHighlightingSession,toApplyInside,myPriorityRange,myRestrictRange);
+    }
+    List<HighlightInfo> toApply=new ArrayList<HighlightInfo>();
+    for (    HighlightInfo info : gotHighlights) {
+      if (!myRestrictRange.containsRange(info.getStartOffset(),info.getEndOffset()))       continue;
+      if (!myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset())) {
+        toApply.add(info);
+      }
+    }
+    toApply.addAll(injectionsOutside);
+    myHighlightInfoProcessor.highlightsOutsideVisiblePartAreProduced(myHighlightingSession,toApply,myRestrictRange,new ProperTextRange(0,myDocument.getTextLength()));
+  }
+ else {
+    myHighlights.addAll(gotHighlights);
+    myHighlightInfoProcessor.highlightsInsideVisiblePartAreProduced(myHighlightingSession,myHighlights,myRestrictRange,myRestrictRange);
+  }
+}

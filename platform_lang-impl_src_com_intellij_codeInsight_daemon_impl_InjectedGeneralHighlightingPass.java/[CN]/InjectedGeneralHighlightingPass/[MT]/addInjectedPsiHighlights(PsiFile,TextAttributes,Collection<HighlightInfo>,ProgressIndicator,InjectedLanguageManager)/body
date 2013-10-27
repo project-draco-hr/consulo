@@ -1,0 +1,51 @@
+{
+  DocumentWindow documentWindow=(DocumentWindow)PsiDocumentManager.getInstance(myProject).getCachedDocument(injectedPsi);
+  if (documentWindow == null)   return true;
+  Place places=InjectedLanguageUtil.getShreds(injectedPsi);
+  for (  PsiLanguageInjectionHost.Shred place : places) {
+    TextRange textRange=place.getRangeInsideHost().shiftRight(place.getHost().getTextRange().getStartOffset());
+    if (textRange.isEmpty())     continue;
+    String desc=injectedPsi.getLanguage().getDisplayName() + ": " + injectedPsi.getText();
+    HighlightInfo.Builder builder=HighlightInfo.newHighlightInfo(HighlightInfoType.INJECTED_LANGUAGE_BACKGROUND).range(textRange);
+    if (injectedAttributes != null) {
+      builder.textAttributes(injectedAttributes);
+    }
+    builder.unescapedToolTip(desc);
+    HighlightInfo info=builder.createUnconditionally();
+    info.setFromInjection(true);
+    outInfos.add(info);
+  }
+  HighlightInfoHolder holder=createInfoHolder(injectedPsi);
+  runHighlightVisitorsForInjected(injectedPsi,holder,progress);
+  for (int i=0; i < holder.size(); i++) {
+    HighlightInfo info=holder.get(i);
+    final int startOffset=documentWindow.injectedToHost(info.startOffset);
+    final TextRange fixedTextRange=getFixedTextRange(documentWindow,startOffset);
+    addPatchedInfos(info,injectedPsi,documentWindow,injectedLanguageManager,fixedTextRange,outInfos);
+  }
+  int injectedStart=holder.size();
+  highlightInjectedSyntax(injectedPsi,holder);
+  for (int i=injectedStart; i < holder.size(); i++) {
+    HighlightInfo info=holder.get(i);
+    final int startOffset=info.startOffset;
+    final TextRange fixedTextRange=getFixedTextRange(documentWindow,startOffset);
+    if (fixedTextRange == null) {
+      info.setFromInjection(true);
+      outInfos.add(info);
+    }
+ else {
+      HighlightInfo patched=new HighlightInfo(info.forcedTextAttributes,info.forcedTextAttributesKey,info.type,fixedTextRange.getStartOffset(),fixedTextRange.getEndOffset(),info.getDescription(),info.getToolTip(),info.type.getSeverity(null),info.isAfterEndOfLine(),null,false,0,info.getProblemGroup(),info.getGutterIconRenderer());
+      patched.setFromInjection(true);
+      outInfos.add(patched);
+    }
+  }
+  if (!isDumbMode()) {
+    List<HighlightInfo> todos=new ArrayList<HighlightInfo>();
+    highlightTodos(injectedPsi,injectedPsi.getText(),0,injectedPsi.getTextLength(),progress,myPriorityRange,todos,todos);
+    for (    HighlightInfo info : todos) {
+      addPatchedInfos(info,injectedPsi,documentWindow,injectedLanguageManager,null,outInfos);
+    }
+  }
+  advanceProgress(1);
+  return true;
+}
