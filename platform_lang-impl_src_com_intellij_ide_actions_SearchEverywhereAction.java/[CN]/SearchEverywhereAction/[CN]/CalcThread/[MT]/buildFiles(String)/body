@@ -1,36 +1,56 @@
 {
   int filesCounter=0;
-  List<MatchResult> matches=collectResults(pattern,myFiles,myFileModel);
-  final List<VirtualFile> files=new ArrayList<VirtualFile>();
-  FindSymbolParameters parameters=FindSymbolParameters.wrap(pattern,project,false);
-  final int maxFiles=8;
-  for (  MatchResult o : matches) {
-    if (filesCounter > maxFiles)     break;
-    Object[] objects=myFileModel.getElementsByName(o.elementName,parameters,myProgressIndicator);
-    for (    Object object : objects) {
-      if (!myListModel.contains(object)) {
-        if (object instanceof PsiFile) {
-          object=((PsiFile)object).getVirtualFile();
-        }
-        if (object instanceof VirtualFile && !myAlreadyAddedFiles.contains((VirtualFile)object) && !((VirtualFile)object).isDirectory()) {
-          files.add((VirtualFile)object);
+  if (myFiles == null) {
+    myFiles=myFileModel.getNames(false);
+  }
+  final Set<Object> elements=new LinkedHashSet<Object>();
+  final GlobalSearchScope scope=GlobalSearchScope.projectScope(project);
+  myFileChooseByName.getProvider().filterElements(myFileChooseByName,pattern,true,myProgressIndicator,new Processor<Object>(){
+    @Override public boolean process(    Object o){
+      VirtualFile file=null;
+      if (o instanceof VirtualFile) {
+        file=(VirtualFile)o;
+      }
+ else       if (o instanceof PsiFile) {
+        file=((PsiFile)o).getVirtualFile();
+      }
+ else       if (o instanceof PsiDirectory) {
+        file=((PsiDirectory)o).getVirtualFile();
+      }
+      if (file != null && scope.accept(file)) {
+        elements.add(o);
+      }
+      return elements.size() < 30;
+    }
+  }
+);
+  final List<Object> files=new ArrayList<Object>();
+  for (  Object object : elements) {
+    if (filesCounter > MAX_FILES)     break;
+    if (!myListModel.contains(object)) {
+      if (object instanceof PsiFile) {
+        object=((PsiFile)object).getVirtualFile();
+      }
+      if ((object instanceof VirtualFile && !myAlreadyAddedFiles.contains(object)) || object instanceof PsiDirectory) {
+        files.add(object);
+        if (object instanceof VirtualFile) {
           myAlreadyAddedFiles.add((VirtualFile)object);
-          filesCounter++;
-          if (filesCounter > maxFiles)           break;
         }
+        filesCounter++;
+        if (filesCounter > MAX_FILES)         break;
       }
     }
   }
   myProgressIndicator.checkCanceled();
   if (files.size() > 0) {
-    UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    UIUtil.invokeLaterIfNeeded(new Runnable(){
       @Override public void run(){
         if (!myProgressIndicator.isCanceled()) {
           myTitleIndexes.files=myListModel.size();
           for (          Object file : files) {
             myListModel.addElement(file);
           }
-          myMoreFilesIndex=files.size() >= maxFiles ? myListModel.size() - 1 : -1;
+          myMoreFilesIndex=files.size() >= MAX_FILES ? myListModel.size() - 1 : -1;
         }
       }
     }
