@@ -1,0 +1,95 @@
+{
+  final MultiMap<VirtualFile,OrderEntry> depEntries=new MultiMap<VirtualFile,OrderEntry>();
+  final MultiMap<VirtualFile,OrderEntry> libClassRootEntries=new MultiMap<VirtualFile,OrderEntry>();
+  final MultiMap<VirtualFile,OrderEntry> libSourceRootEntries=new MultiMap<VirtualFile,OrderEntry>();
+  for (  final Module module : ModuleManager.getInstance(project).getModules()) {
+    final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
+    final OrderEntry[] orderEntries=moduleRootManager.getOrderEntries();
+    final ContentEntry[] contentEntries=moduleRootManager.getContentEntries();
+    final VirtualFile[] contentRoots=moduleRootManager.getContentRoots();
+    for (    final VirtualFile contentRoot : contentRoots) {
+      myRoots.put(contentRoot,getOrCreateDirectoryInfo(contentRoot).with(module,contentRoot,null,null,(byte)0,null));
+    }
+    for (    ContentEntry contentEntry : contentEntries) {
+      Collections.addAll(myProjectExcludedRoots,contentEntry.getFolderFiles(ContentFolderScopes.of(ExcludedContentFolderTypeProvider.getInstance())));
+      ContentFolder[] sourceFolders=contentEntry.getFolders(ContentFolderScopes.productionAndTest());
+      for (      final ContentFolder sourceFolder : sourceFolders) {
+        final VirtualFile sourceFolderRoot=sourceFolder.getFile();
+        if (sourceFolderRoot != null) {
+          final DirectoryInfo info=getOrCreateDirectoryInfo(sourceFolderRoot);
+          VirtualFile contentRoot=null;
+          for (          VirtualFile root : contentRoots) {
+            if (VfsUtilCore.isAncestor(root,sourceFolderRoot,false)) {
+              contentRoot=root;
+              break;
+            }
+          }
+          int rootTypeId=getRootTypeId(sourceFolder.getType());
+          int sourceRootTypeData=DirectoryInfo.createSourceRootTypeData(true,info.isInLibrarySource(),rootTypeId);
+          DirectoryInfo info1=info.with(module,contentRoot,sourceFolderRoot,null,sourceRootTypeData,null);
+          myRoots.put(sourceFolderRoot,info1);
+          initializePrefix(sourceFolderRoot,"");
+        }
+      }
+    }
+    for (    OrderEntry orderEntry : orderEntries) {
+      if (orderEntry instanceof ModuleOrderEntry) {
+        final Module depModule=((ModuleOrderEntry)orderEntry).getModule();
+        if (depModule != null) {
+          VirtualFile[] importedClassRoots=OrderEnumerator.orderEntries(depModule).exportedOnly().recursively().classes().usingCache().getRoots();
+          for (          VirtualFile importedClassRoot : importedClassRoots) {
+            depEntries.putValue(importedClassRoot,orderEntry);
+          }
+        }
+        for (        VirtualFile sourceRoot : orderEntry.getFiles(OrderRootType.SOURCES)) {
+          depEntries.putValue(sourceRoot,orderEntry);
+        }
+      }
+ else       if (orderEntry instanceof ModuleSourceOrderEntry) {
+        final VirtualFile[] sourceRoots=((ModuleSourceOrderEntry)orderEntry).getRootModel().getSourceRoots();
+        for (        VirtualFile sourceRoot : sourceRoots) {
+          fillMapWithOrderEntries(sourceRoot,Arrays.asList(orderEntry),orderEntry.getOwnerModule(),null,null);
+        }
+      }
+ else       if (orderEntry instanceof LibraryOrSdkOrderEntry) {
+        final LibraryOrSdkOrderEntry entry=(LibraryOrSdkOrderEntry)orderEntry;
+        final VirtualFile[] sourceRoots=entry.getRootFiles(OrderRootType.SOURCES);
+        final VirtualFile[] classRoots=entry.getRootFiles(OrderRootType.CLASSES);
+        for (        final VirtualFile classRoot : classRoots) {
+          libClassRootEntries.putValue(classRoot,orderEntry);
+          final DirectoryInfo info=getOrCreateDirectoryInfo(classRoot).with(null,null,null,classRoot,(byte)0,null);
+          myRoots.put(classRoot,info);
+          if (!info.isInModuleSource() && !info.isInLibrarySource()) {
+            initializePrefix(classRoot,"");
+          }
+        }
+        for (        final VirtualFile sourceRoot : sourceRoots) {
+          libSourceRootEntries.putValue(sourceRoot,orderEntry);
+          final DirectoryInfo info=getOrCreateDirectoryInfo(sourceRoot);
+          int sourceRootTypeData=DirectoryInfo.createSourceRootTypeData(info.isInModuleSource(),true,getRootTypeId(ProductionContentFolderTypeProvider.getInstance()));
+          myRoots.put(sourceRoot,info.with(null,null,sourceRoot,null,sourceRootTypeData,null));
+          initializePrefix(sourceRoot,"");
+        }
+        if (orderEntry instanceof LibraryOrderEntry) {
+          Library library=((LibraryOrderEntry)orderEntry).getLibrary();
+          if (library != null) {
+            Collections.addAll(myLibraryExcludedRoots,((LibraryEx)library).getExcludedRoots());
+          }
+        }
+      }
+    }
+  }
+  for (  DirectoryIndexExcludePolicy policy : Extensions.getExtensions(DirectoryIndexExcludePolicy.EP_NAME,project)) {
+    Collections.addAll(myProjectExcludedRoots,policy.getExcludeRootsForProject());
+  }
+  for (  Map.Entry<VirtualFile,Collection<OrderEntry>> mapEntry : depEntries.entrySet()) {
+    fillMapWithOrderEntries(mapEntry.getKey(),mapEntry.getValue(),null,null,null);
+  }
+  for (  Map.Entry<VirtualFile,Collection<OrderEntry>> mapEntry : libClassRootEntries.entrySet()) {
+    fillMapWithOrderEntries(mapEntry.getKey(),mapEntry.getValue(),null,mapEntry.getKey(),null);
+  }
+  for (  Map.Entry<VirtualFile,Collection<OrderEntry>> mapEntry : libSourceRootEntries.entrySet()) {
+    fillMapWithOrderEntries(mapEntry.getKey(),mapEntry.getValue(),null,null,mapEntry.getKey());
+  }
+  mergeWithParentInfos();
+}
