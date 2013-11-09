@@ -1,0 +1,82 @@
+{
+  myProject=project;
+  myFileEditor=fileEditor;
+  myStructureViewDelegate=structureView;
+  DaemonCodeAnalyzer.getInstance(myProject).disableUpdateByTimer(this);
+  IdeFocusManager.getInstance(myProject).typeAheadUntil(myTreeHasBuilt);
+  Disposer.register(this,myStructureViewDelegate);
+  if (myFileEditor instanceof TextEditor) {
+    Editor e=((TextEditor)myFileEditor).getEditor();
+    myPsiFile=PsiDocumentManager.getInstance(myProject).getPsiFile(e.getDocument());
+  }
+  if (myStructureViewDelegate instanceof StructureViewComposite) {
+    StructureViewComposite.StructureViewDescriptor[] views=((StructureViewComposite)myStructureViewDelegate).getStructureViews();
+    myBaseTreeModel=new StructureViewCompositeModel(myPsiFile,views);
+    Disposer.register(this,(Disposable)myBaseTreeModel);
+  }
+ else {
+    myBaseTreeModel=myStructureViewDelegate.getTreeModel();
+  }
+  if (applySortAndFilter) {
+    myTreeActionsOwner=new TreeStructureActionsOwner(myBaseTreeModel);
+    myTreeModel=new TreeModelWrapper(myBaseTreeModel,myTreeActionsOwner);
+  }
+ else {
+    myTreeActionsOwner=null;
+    myTreeModel=myStructureViewDelegate.getTreeModel();
+  }
+  myTreeStructure=new SmartTreeStructure(project,myTreeModel){
+    @Override public void rebuildTree(){
+      if (ApplicationManager.getApplication().isUnitTestMode() || !myPopup.isDisposed()) {
+        super.rebuildTree();
+      }
+    }
+    @Override public boolean isToBuildChildrenInBackground(    final Object element){
+      return getRootElement() == element;
+    }
+    @Override protected TreeElementWrapper createTree(){
+      return new StructureViewComponent.StructureViewTreeElementWrapper(myProject,myModel.getRoot(),myModel);
+    }
+    @NonNls @Override public String toString(){
+      return "structure view tree structure(model=" + myTreeModel + ")";
+    }
+  }
+;
+  myTree=new FileStructureTree(myTreeStructure.getRootElement(),Registry.is("fast.tree.expand.in.structure.view"));
+  myTree.setCellRenderer(new NodeRenderer());
+  mySpeedSearch=new MyTreeSpeedSearch();
+  mySpeedSearch.setComparator(new SpeedSearchComparator(false,true));
+  final FileStructurePopupFilter filter=new FileStructurePopupFilter();
+  myFilteringStructure=new FilteringTreeStructure(filter,myTreeStructure,ApplicationManager.getApplication().isUnitTestMode());
+  myAbstractTreeBuilder=new FilteringTreeBuilder(myTree,filter,myFilteringStructure,null){
+    @Override public void initRootNode(){
+    }
+    @Override protected boolean validateNode(    Object child){
+      return StructureViewComponent.isValid(child);
+    }
+    @Override public void revalidateTree(){
+    }
+    @Override public boolean isToEnsureSelectionOnFocusGained(){
+      return false;
+    }
+  }
+;
+  myTreeExpander=new DefaultTreeExpander(myTree);
+  final ModelListener modelListener=new ModelListener(){
+    @Override public void onModelChanged(){
+      myAbstractTreeBuilder.queueUpdate();
+    }
+  }
+;
+  myTreeModel.addModelListener(modelListener);
+  Disposer.register(this,new Disposable(){
+    @Override public void dispose(){
+      myTreeModel.removeModelListener(modelListener);
+    }
+  }
+);
+  myAbstractTreeBuilder.getUi().getUpdater().setDelay(1);
+  myInitialPsiElement=getCurrentElement(myPsiFile);
+  Disposer.register(this,myAbstractTreeBuilder);
+  TreeUtil.installActions(myTree);
+}
