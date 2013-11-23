@@ -1,0 +1,56 @@
+{
+  if (singles.isEmpty()) {
+    return AsyncFutureFactory.wrap(true);
+  }
+  if (singles.size() == 1) {
+    final Collection<? extends RequestWithProcessor> requests=singles.values();
+    if (requests.size() == 1) {
+      final RequestWithProcessor theOnly=requests.iterator().next();
+      return processSingleRequestAsync(theOnly.request,theOnly.refProcessor);
+    }
+  }
+  if (progress != null) {
+    progress.pushState();
+    progress.setText(PsiBundle.message("psi.scanning.files.progress"));
+  }
+  final MultiMap<VirtualFile,RequestWithProcessor> intersectionCandidateFiles=createMultiMap();
+  final MultiMap<VirtualFile,RequestWithProcessor> restCandidateFiles=createMultiMap();
+  collectFiles(singles,progress,intersectionCandidateFiles,restCandidateFiles);
+  if (intersectionCandidateFiles.isEmpty() && restCandidateFiles.isEmpty()) {
+    return AsyncFutureFactory.wrap(true);
+  }
+  if (progress != null) {
+    final Set<String> allWords=new TreeSet<String>();
+    for (    RequestWithProcessor singleRequest : localProcessors.keySet()) {
+      allWords.add(singleRequest.request.word);
+    }
+    progress.setText(PsiBundle.message("psi.search.for.word.progress",getPresentableWordsDescription(allWords)));
+  }
+  AsyncFuture<Boolean> result;
+  if (intersectionCandidateFiles.isEmpty()) {
+    result=processCandidatesAsync(progress,localProcessors,restCandidateFiles,restCandidateFiles.size(),0);
+  }
+ else {
+    int totalSize=restCandidateFiles.size() + intersectionCandidateFiles.size();
+    AsyncFuture<Boolean> intersectionResult=processCandidatesAsync(progress,localProcessors,intersectionCandidateFiles,totalSize,0);
+    try {
+      if (intersectionResult.get()) {
+        AsyncFuture<Boolean> restResult=processCandidatesAsync(progress,localProcessors,restCandidateFiles,totalSize,intersectionCandidateFiles.size());
+        result=bind(intersectionResult,restResult);
+      }
+ else {
+        result=intersectionResult;
+      }
+    }
+ catch (    ExecutionException e) {
+      Throwable cause=e.getCause();
+      if (cause instanceof RuntimeException)       throw (RuntimeException)cause;
+      if (cause instanceof Error)       throw (Error)cause;
+      result=AsyncFutureFactory.wrapException(cause);
+    }
+catch (    InterruptedException e) {
+      result=AsyncFutureFactory.wrapException(e);
+    }
+  }
+  return popStateAfter(result,progress);
+}

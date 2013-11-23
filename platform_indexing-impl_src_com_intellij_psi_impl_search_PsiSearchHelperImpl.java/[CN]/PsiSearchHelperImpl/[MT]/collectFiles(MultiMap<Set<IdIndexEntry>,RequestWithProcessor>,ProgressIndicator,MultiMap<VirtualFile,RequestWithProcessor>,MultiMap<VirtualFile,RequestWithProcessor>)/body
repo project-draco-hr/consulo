@@ -1,0 +1,37 @@
+{
+  for (  final Set<IdIndexEntry> keys : singles.keySet()) {
+    if (keys.isEmpty()) {
+      continue;
+    }
+    final Collection<RequestWithProcessor> data=singles.get(keys);
+    final GlobalSearchScope commonScope=uniteScopes(data);
+    final Set<VirtualFile> intersectionWithContainerNameFiles=intersectionWithContainerNameFiles(commonScope,data,keys);
+    List<VirtualFile> files=new ArrayList<VirtualFile>();
+    CommonProcessors.CollectProcessor<VirtualFile> processor=new CommonProcessors.CollectProcessor<VirtualFile>(files);
+    processFilesContainingAllKeys(myManager.getProject(),commonScope,null,keys,processor);
+    for (    final VirtualFile file : files) {
+      checkCanceled(progress);
+      for (      final IdIndexEntry entry : keys) {
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          @Override public void run(){
+            FileBasedIndex.getInstance().processValues(IdIndex.NAME,entry,file,new FileBasedIndex.ValueProcessor<Integer>(){
+              @Override public boolean process(              VirtualFile file,              Integer value){
+                int mask=value.intValue();
+                for (                RequestWithProcessor single : data) {
+                  final PsiSearchRequest request=single.request;
+                  if ((mask & request.searchContext) != 0 && ((GlobalSearchScope)request.searchScope).contains(file)) {
+                    MultiMap<VirtualFile,RequestWithProcessor> result=intersectionWithContainerNameFiles == null || !intersectionWithContainerNameFiles.contains(file) ? restResult : intersectionResult;
+                    result.putValue(file,single);
+                  }
+                }
+                return true;
+              }
+            }
+,commonScope);
+          }
+        }
+);
+      }
+    }
+  }
+}

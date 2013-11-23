@@ -3,8 +3,37 @@
   List<VFileEvent> validated=validateEvents(events);
   BulkFileListener publisher=myEventsBus.syncPublisher(VirtualFileManager.VFS_CHANGES);
   publisher.before(validated);
+  THashMap<VirtualFile,List<VFileEvent>> parentToChildrenEventsChanges=null;
   for (  VFileEvent event : validated) {
-    applyEvent(event);
+    VirtualFile changedParent=null;
+    if (event instanceof VFileCreateEvent) {
+      changedParent=((VFileCreateEvent)event).getParent();
+      ((VFileCreateEvent)event).resetCache();
+    }
+ else     if (event instanceof VFileDeleteEvent) {
+      changedParent=((VFileDeleteEvent)event).getFile().getParent();
+    }
+    if (changedParent != null) {
+      if (parentToChildrenEventsChanges == null)       parentToChildrenEventsChanges=new THashMap<VirtualFile,List<VFileEvent>>();
+      List<VFileEvent> parentChildrenChanges=parentToChildrenEventsChanges.get(changedParent);
+      if (parentChildrenChanges == null) {
+        parentToChildrenEventsChanges.put(changedParent,parentChildrenChanges=new SmartList<VFileEvent>());
+      }
+      parentChildrenChanges.add(event);
+    }
+ else {
+      applyEvent(event);
+    }
+  }
+  if (parentToChildrenEventsChanges != null) {
+    parentToChildrenEventsChanges.forEachEntry(new TObjectObjectProcedure<VirtualFile,List<VFileEvent>>(){
+      @Override public boolean execute(      VirtualFile parent,      List<VFileEvent> childrenEvents){
+        applyChildrenChangeEvents(parent,childrenEvents);
+        return true;
+      }
+    }
+);
+    parentToChildrenEventsChanges.clear();
   }
   publisher.after(validated);
 }

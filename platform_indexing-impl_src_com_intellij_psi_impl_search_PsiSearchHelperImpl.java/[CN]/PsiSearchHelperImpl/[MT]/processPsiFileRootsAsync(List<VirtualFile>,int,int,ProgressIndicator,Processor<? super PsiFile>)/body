@@ -1,0 +1,39 @@
+{
+  myManager.startBatchFilesProcessingMode();
+  final AtomicInteger counter=new AtomicInteger(alreadyProcessedFiles);
+  final AtomicBoolean canceled=new AtomicBoolean(false);
+  AsyncFutureResult<Boolean> asyncFutureResult=AsyncFutureFactory.getInstance().createAsyncFutureResult();
+  final List<VirtualFile> failedFiles=Collections.synchronizedList(new SmartList<VirtualFile>());
+  try {
+    boolean completed=JobLauncher.getInstance().invokeConcurrentlyUnderProgress(files,progress,false,false,new Processor<VirtualFile>(){
+      @Override public boolean process(      final VirtualFile vfile){
+        try {
+          TooManyUsagesStatus.getFrom(progress).pauseProcessingIfTooManyUsages();
+          processVirtualFile(vfile,progress,localProcessor,canceled,counter,totalSize);
+        }
+ catch (        CannotRunReadActionException action) {
+          failedFiles.add(vfile);
+        }
+        return !canceled.get();
+      }
+    }
+);
+    if (!failedFiles.isEmpty()) {
+      for (      final VirtualFile vfile : failedFiles) {
+        TooManyUsagesStatus.getFrom(progress).pauseProcessingIfTooManyUsages();
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          @Override public void run(){
+            processVirtualFile(vfile,progress,localProcessor,canceled,counter,totalSize);
+          }
+        }
+);
+      }
+    }
+    asyncFutureResult.set(completed);
+    myManager.finishBatchFilesProcessingMode();
+  }
+ catch (  Throwable t) {
+    asyncFutureResult.setException(t);
+  }
+  return asyncFutureResult;
+}
