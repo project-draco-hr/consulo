@@ -1,0 +1,68 @@
+{
+  l.lock();
+  try {
+    myCache.clear();
+    if (myBuildKeyHashToVirtualFileMapping && idFilter != null) {
+      TIntHashSet hashMaskSet=null;
+      long l=System.currentTimeMillis();
+      File fileWithCaches=getSavedProjectFileValueIds(myLastScannedId,scope);
+      final boolean useCachedHashIds=ENABLE_CACHED_HASH_IDS && (scope instanceof ProjectScopeImpl || scope instanceof ProjectAndLibrariesScope) && fileWithCaches != null;
+      int id=myKeyHashToVirtualFileMapping.getLargestId();
+      if (useCachedHashIds && id == myLastScannedId) {
+        try {
+          hashMaskSet=loadHashedIds(fileWithCaches);
+        }
+ catch (        IOException ex) {
+          LOG.info(ex);
+        }
+      }
+      if (hashMaskSet == null) {
+        if (useCachedHashIds && myLastScannedId != 0) {
+          FileUtil.asyncDelete(fileWithCaches);
+        }
+        hashMaskSet=new TIntHashSet(1000);
+        final TIntHashSet finalHashMaskSet=hashMaskSet;
+        myKeyHashToVirtualFileMapping.iterateData(new Processor<int[]>(){
+          @Override public boolean process(          int[] key){
+            if (!idFilter.containsFileId(key[1]))             return true;
+            finalHashMaskSet.add(key[0]);
+            ProgressManager.checkCanceled();
+            return true;
+          }
+        }
+);
+        if (useCachedHashIds) {
+          saveHashedIds(hashMaskSet,id,scope);
+        }
+      }
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Scanned keyHashToVirtualFileMapping of " + myStorageFile + " for "+ (System.currentTimeMillis() - l));
+      }
+      final TIntHashSet finalHashMaskSet=hashMaskSet;
+      return myMap.processKeys(new Processor<Key>(){
+        @Override public boolean process(        Key key){
+          if (!finalHashMaskSet.contains(myKeyDescriptor.getHashCode(key)))           return true;
+          return processor.process(key);
+        }
+      }
+);
+    }
+    return myMap.processKeys(processor);
+  }
+ catch (  IOException e) {
+    throw new StorageException(e);
+  }
+catch (  RuntimeException e) {
+    final Throwable cause=e.getCause();
+    if (cause instanceof IOException) {
+      throw new StorageException(cause);
+    }
+    if (cause instanceof StorageException) {
+      throw (StorageException)cause;
+    }
+    throw e;
+  }
+ finally {
+    l.unlock();
+  }
+}
