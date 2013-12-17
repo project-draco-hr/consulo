@@ -7,13 +7,14 @@
     Pair<Boolean,Collection<PsiFile>> fastWords=getFilesForFastWordSearch(findModel,project,psiDirectory,fileMaskRegExp,module,fileIndex);
     final Collection<PsiFile> filesForFastWordSearch=fastWords.getSecond();
     if (fastWords.getFirst() && canOptimizeForFastWordSearch(findModel))     return filesForFastWordSearch;
-    final GlobalSearchScope customScope=toGlobal(project,findModel.getCustomScope());
+    SearchScope customScope=findModel.getCustomScope();
+    final GlobalSearchScope globalCustomScope=toGlobal(project,customScope);
 class EnumContentIterator implements ContentIterator {
-      final List<PsiFile> myFiles=new ArrayList<PsiFile>(filesForFastWordSearch);
+      final Set<PsiFile> myFiles=new LinkedHashSet<PsiFile>(filesForFastWordSearch);
       final PsiManager psiManager=PsiManager.getInstance(project);
       @Override public boolean processFile(      @NotNull VirtualFile virtualFile){
         ProgressManager.checkCanceled();
-        if (!virtualFile.isDirectory() && (fileMaskRegExp == null || fileMaskRegExp.matcher(virtualFile.getName()).matches()) && (customScope == null || customScope.contains(virtualFile))) {
+        if (!virtualFile.isDirectory() && (fileMaskRegExp == null || fileMaskRegExp.matcher(virtualFile.getName()).matches()) && (globalCustomScope == null || globalCustomScope.contains(virtualFile))) {
           final PsiFile psiFile=psiManager.findFile(virtualFile);
           if (psiFile != null && !filesForFastWordSearch.contains(psiFile)) {
             myFiles.add(psiFile);
@@ -26,12 +27,17 @@ class EnumContentIterator implements ContentIterator {
       }
     }
     EnumContentIterator iterator=new EnumContentIterator();
+    if (customScope instanceof LocalSearchScope) {
+      for (      VirtualFile file : getLocalScopeFiles((LocalSearchScope)customScope)) {
+        iterator.processFile(file);
+      }
+    }
     if (psiDirectory == null) {
       boolean success=fileIndex.iterateContent(iterator);
-      if (success && customScope != null && customScope.isSearchInLibraries()) {
+      if (success && globalCustomScope != null && globalCustomScope.isSearchInLibraries()) {
         OrderEnumerator enumerator=module == null ? OrderEnumerator.orderEntries(project) : OrderEnumerator.orderEntries(module);
         final VirtualFile[] librarySources=enumerator.withoutModuleSourceEntries().withoutDepModules().getSourceRoots();
-        iterateAll(librarySources,customScope,iterator);
+        iterateAll(librarySources,globalCustomScope,iterator);
       }
     }
  else {
