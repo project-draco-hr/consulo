@@ -5,8 +5,8 @@
     return;
   }
   PsiDocumentManager.getInstance(project).commitAllDocuments();
-  final Editor editor=PlatformDataKeys.EDITOR.getData(dataContext);
-  final VirtualFile[] files=PlatformDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
+  final Editor editor=CommonDataKeys.EDITOR.getData(dataContext);
+  final VirtualFile[] files=CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
   if (files == null) {
     return;
   }
@@ -22,15 +22,18 @@
  else   if (areFiles(files)) {
     final ReadonlyStatusHandler.OperationStatus operationStatus=ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(files);
     if (!operationStatus.hasReadonlyFiles()) {
-      final ReformatFilesDialog reformatFilesDialog=new ReformatFilesDialog(project,files);
-      reformatFilesDialog.show();
-      if (!reformatFilesDialog.isOK())       return;
-      if (reformatFilesDialog.optimizeImports() && !DumbService.getInstance(project).isDumb()) {
-        new ReformatAndOptimizeImportsProcessor(project,convertToPsiFiles(files,project),reformatFilesDialog.isProcessOnlyChangedText()).run();
+      ReformatFilesOptions selectedFlags=getReformatFilesOptions(project,files);
+      if (selectedFlags == null)       return;
+      final boolean processOnlyChangedText=selectedFlags.isProcessOnlyChangedText();
+      final boolean shouldOptimizeImports=selectedFlags.isOptimizeImports() && !DumbService.getInstance(project).isDumb();
+      AbstractLayoutCodeProcessor processor=new ReformatCodeProcessor(project,convertToPsiFiles(files,project),null,processOnlyChangedText);
+      if (shouldOptimizeImports) {
+        processor=new OptimizeImportsProcessor(processor);
       }
- else {
-        new ReformatCodeProcessor(project,convertToPsiFiles(files,project),null,reformatFilesDialog.isProcessOnlyChangedText()).run();
+      if (selectedFlags.isRearrangeEntries()) {
+        processor=new RearrangeCodeProcessor(processor,null);
       }
+      processor.run();
     }
     return;
   }
@@ -38,35 +41,13 @@
     Project projectContext=PlatformDataKeys.PROJECT_CONTEXT.getData(dataContext);
     Module moduleContext=LangDataKeys.MODULE_CONTEXT.getData(dataContext);
     if (projectContext != null || moduleContext != null) {
-      final String text;
-      if (moduleContext != null) {
-        text=CodeInsightBundle.message("process.scope.module",moduleContext.getModuleDirPath());
-      }
- else {
-        text=CodeInsightBundle.message("process.scope.project",project.getPresentableUrl());
-      }
-      LayoutProjectCodeDialog dialog=new LayoutProjectCodeDialog(project,moduleContext,CodeInsightBundle.message("process.reformat.code"),text,true);
-      dialog.show();
-      if (!dialog.isOK())       return;
-      if (dialog.isOptimizeImports() && !DumbService.getInstance(project).isDumb()) {
-        if (moduleContext != null) {
-          new ReformatAndOptimizeImportsProcessor(project,moduleContext,dialog.isProcessOnlyChangedText()).run();
-        }
- else {
-          new ReformatAndOptimizeImportsProcessor(project,dialog.isProcessOnlyChangedText()).run();
-        }
-      }
- else {
-        if (moduleContext != null) {
-          new ReformatCodeProcessor(project,moduleContext,dialog.isProcessOnlyChangedText()).run();
-        }
- else {
-          new ReformatCodeProcessor(project,dialog.isProcessOnlyChangedText()).run();
-        }
+      ReformatFilesOptions selectedFlags=getLayoutProjectOptions(project,moduleContext);
+      if (selectedFlags != null) {
+        reformatModule(project,moduleContext,selectedFlags);
       }
       return;
     }
-    PsiElement element=LangDataKeys.PSI_ELEMENT.getData(dataContext);
+    PsiElement element=CommonDataKeys.PSI_ELEMENT.getData(dataContext);
     if (element == null)     return;
     if (element instanceof PsiDirectoryContainer) {
       dir=((PsiDirectoryContainer)element).getDirectories()[0];
@@ -83,26 +64,24 @@
   boolean optimizeImports=ReformatFilesDialog.isOptmizeImportsOptionOn();
   boolean processWholeFile=false;
   boolean processChangedTextOnly=PropertiesComponent.getInstance().getBoolean(LayoutCodeConstants.PROCESS_CHANGED_TEXT_KEY,false);
-  boolean rearrangeEntries=PropertiesComponent.getInstance().getBoolean(LayoutCodeConstants.REARRANGE_ENTRIES_KEY,false);
+  boolean rearrangeEntries=getLastSavedRearrangeCbState(project,file);
   final boolean showDialog=EditorSettingsExternalizable.getInstance().getOptions().SHOW_REFORMAT_DIALOG;
   if (showDialog || (file == null && dir != null)) {
-    final LayoutCodeDialog dialog=new LayoutCodeDialog(project,CodeInsightBundle.message("process.reformat.code"),file,dir,hasSelection ? Boolean.TRUE : Boolean.FALSE,HELP_ID);
-    dialog.show();
-    if (!dialog.isOK())     return;
-    final boolean showDialogAtFuture=!dialog.isDoNotAskMe();
-    EditorSettingsExternalizable.getInstance().getOptions().SHOW_REFORMAT_DIALOG=showDialogAtFuture;
-    updateShowDialogSetting(dialog,"\"Reformat Code\" dialog disabled");
-    optimizeImports=dialog.isOptimizeImports();
-    rearrangeEntries=dialog.isRearrangeEntries();
-    processWholeFile=dialog.isProcessWholeFile();
-    processChangedTextOnly=dialog.isProcessOnlyChangedText();
-    if (dialog.isProcessDirectory()) {
+    LayoutCodeOptions selectedFlags=getLayoutCodeOptions(project,file,dir,hasSelection);
+    if (selectedFlags == null)     return;
+    optimizeImports=selectedFlags.isOptimizeImports();
+    rearrangeEntries=selectedFlags.isRearrangeEntries();
+    processWholeFile=selectedFlags.isProcessWholeFile();
+    processChangedTextOnly=selectedFlags.isProcessOnlyChangedText();
+    if (selectedFlags.isProcessDirectory()) {
+      AbstractLayoutCodeProcessor processor=new ReformatCodeProcessor(project,dir,selectedFlags.isIncludeSubdirectories(),processChangedTextOnly);
       if (optimizeImports) {
-        new ReformatAndOptimizeImportsProcessor(project,dir,dialog.isIncludeSubdirectories(),processChangedTextOnly).run();
+        processor=new OptimizeImportsProcessor(processor);
       }
- else {
-        new ReformatCodeProcessor(project,dir,dialog.isIncludeSubdirectories(),processChangedTextOnly).run();
+      if (selectedFlags.isRearrangeEntries()) {
+        processor=new RearrangeCodeProcessor(processor,null);
       }
+      processor.run();
       return;
     }
   }
@@ -115,10 +94,10 @@
   }
   if (optimizeImports && range == null) {
     if (file != null || dir == null) {
-      new ReformatAndOptimizeImportsProcessor(project,file,processChangedTextOnly).run();
+      new OptimizeImportsProcessor(new ReformatCodeProcessor(project,file,null,processChangedTextOnly)).run();
     }
  else {
-      new ReformatAndOptimizeImportsProcessor(project,dir,true,processChangedTextOnly).run();
+      new OptimizeImportsProcessor(new ReformatCodeProcessor(project,dir,true,processChangedTextOnly)).run();
     }
   }
  else {
