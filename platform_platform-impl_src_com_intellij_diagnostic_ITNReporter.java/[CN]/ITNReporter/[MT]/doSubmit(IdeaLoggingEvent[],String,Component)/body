@@ -1,0 +1,59 @@
+{
+  final DataContext dataContext=DataManager.getInstance().getDataContext(component);
+  final Project project=CommonDataKeys.PROJECT.getData(dataContext);
+  final IdeaLoggingEvent ideaLoggingEvent=ideaLoggingEvents[0];
+  final String throwableText=ideaLoggingEvent.getThrowableText();
+  String description=throwableText.substring(0,Math.min(Math.max(80,throwableText.length()),80));
+  @SuppressWarnings("ThrowableResultOfMethodCallIgnored") Integer signature=ideaLoggingEvent.getThrowable().getStackTrace()[0].hashCode();
+  String existing=findExisting(signature);
+  if (existing != null) {
+    final SubmittedReportInfo reportInfo=new SubmittedReportInfo(SERVER_URL + "issue/" + existing,existing,DUPLICATE);
+    popupResultInfo(reportInfo,project);
+    return reportInfo;
+  }
+  @NonNls StringBuilder descBuilder=new StringBuilder();
+  String platformBuild=ApplicationInfo.getInstance().getBuild().asString();
+  descBuilder.append("Platform Version: ").append(platformBuild).append('\n');
+  String affectedVersion=null;
+  Throwable t=ideaLoggingEvent.getThrowable();
+  final PluginId pluginId=IdeErrorsDialog.findPluginId(t);
+  if (pluginId != null) {
+    final IdeaPluginDescriptor ideaPluginDescriptor=PluginManager.getPlugin(pluginId);
+    if (ideaPluginDescriptor != null && !ideaPluginDescriptor.isBundled()) {
+      descBuilder.append("Plugin ").append(ideaPluginDescriptor.getName()).append(" version: ").append(ideaPluginDescriptor.getVersion()).append("\n");
+      affectedVersion=ideaPluginDescriptor.getVersion();
+    }
+  }
+  if (addInfo == null) {
+    addInfo="<none>";
+  }
+  descBuilder.append("\n\nDescription: ").append(addInfo);
+  for (  IdeaLoggingEvent e : ideaLoggingEvents) {
+    descBuilder.append("\n\n").append(e.toString());
+  }
+  String result=submit(description,descBuilder.toString(),affectedVersion);
+  LOGGER.info("Error submitted, response: " + result);
+  if (result == null) {
+    return new SubmittedReportInfo(SERVER_ISSUE_URL,"",FAILED);
+  }
+  String ResultString=null;
+  try {
+    Pattern regex=Pattern.compile("id=\"([^\"]+)\"",Pattern.DOTALL | Pattern.MULTILINE);
+    Matcher regexMatcher=regex.matcher(result);
+    if (regexMatcher.find()) {
+      ResultString=regexMatcher.group(1);
+    }
+  }
+ catch (  PatternSyntaxException ex) {
+  }
+  SubmittedReportInfo.SubmissionStatus status=NEW_ISSUE;
+  if (ResultString == null) {
+    return new SubmittedReportInfo(SERVER_ISSUE_URL,"",FAILED);
+  }
+  final SubmittedReportInfo reportInfo=new SubmittedReportInfo(SERVER_URL + "issue/" + ResultString,ResultString,status);
+  if (signature != 0) {
+    runCommand(ResultString,"Exception Signature " + signature);
+  }
+  popupResultInfo(reportInfo,project);
+  return reportInfo;
+}
