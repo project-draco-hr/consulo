@@ -1,30 +1,22 @@
 {
   Document document=task.document;
-  final TextBlock textBlock=TextBlock.get(file);
-  if (textBlock.isEmpty())   return null;
   final long startDocModificationTimeStamp=document.getModificationStamp();
   final FileElement myTreeElementBeingReparsedSoItWontBeCollected=((PsiFileImpl)file).calcTreeElement();
-  if (textBlock.isEmpty())   return null;
-  final CharSequence chars=document.getCharsSequence();
+  final CharSequence chars=document.getImmutableCharSequence();
   final Boolean data=document.getUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY);
   if (data != null) {
     document.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,null);
     file.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,data);
   }
-  final String oldPsiText=ApplicationManager.getApplication().isInternal() && ApplicationManager.getApplication().isUnitTestMode() ? myTreeElementBeingReparsedSoItWontBeCollected.getText() : null;
-  final TextRange changedPsiRange=getChangedPsiRange(file,textBlock.getStartOffset(),textBlock.getPsiEndOffset(),document.getTextLength());
-  if (!assertBeforeCommit(document,file,textBlock,chars,oldPsiText,myTreeElementBeingReparsedSoItWontBeCollected)) {
-    return new Processor<Document>(){
-      @Override public boolean process(      Document document){
-        VirtualFile vFile=FileDocumentManager.getInstance().getFile(document);
-        log("Recovering from assertBeforeCommit",task,synchronously,vFile,vFile != null && vFile.isValid());
-        if (vFile != null && vFile.isValid()) {
-          FileContentUtilCore.reparseFiles(Arrays.asList(vFile));
-        }
-        return true;
-      }
-    }
-;
+  final String oldPsiText=myTreeElementBeingReparsedSoItWontBeCollected.getText();
+  int commonPrefixLength=StringUtil.commonPrefixLength(oldPsiText,chars);
+  final TextRange changedPsiRange;
+  if (commonPrefixLength == chars.length() && chars.length() == oldPsiText.length()) {
+    changedPsiRange=getChangedPsiRange(file,0,0,chars.length());
+  }
+ else {
+    int commonSuffixLength=StringUtil.commonSuffixLength(oldPsiText,chars);
+    changedPsiRange=getChangedPsiRange(file,commonPrefixLength,oldPsiText.length() - commonSuffixLength,chars.length());
   }
   BlockSupport blockSupport=BlockSupport.getInstance(file.getProject());
   final DiffLog diffLog=blockSupport.reparseRange(file,changedPsiRange,chars,task.indicator);
@@ -32,23 +24,18 @@
     @Override public boolean process(    Document document){
       ApplicationManager.getApplication().assertWriteAccessAllowed();
       log("Finishing",task,synchronously,document.getModificationStamp(),startDocModificationTimeStamp);
-      if (document.getModificationStamp() != startDocModificationTimeStamp) {
+      if (document.getModificationStamp() != startDocModificationTimeStamp || ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(file.getProject())).getCachedViewProvider(document) != file.getViewProvider()) {
         return false;
       }
-      try {
-        CodeStyleManager.getInstance(file.getProject()).performActionWithFormatterDisabled(new Runnable(){
-          @Override public void run(){
+      CodeStyleManager.getInstance(file.getProject()).performActionWithFormatterDisabled(new Runnable(){
+        @Override public void run(){
 synchronized (PsiLock.LOCK) {
-              doActualPsiChange(file,diffLog);
-            }
+            doActualPsiChange(file,diffLog);
           }
         }
+      }
 );
-        assertAfterCommit(document,file,oldPsiText,myTreeElementBeingReparsedSoItWontBeCollected);
-      }
-  finally {
-        textBlock.clear();
-      }
+      assertAfterCommit(document,file,oldPsiText,myTreeElementBeingReparsedSoItWontBeCollected);
       return true;
     }
   }
