@@ -1,47 +1,55 @@
 {
+  ApplicationManagerEx.getApplicationEx().assertIsDispatchThread();
+  final Project project=editor.getProject();
+  if (project == null || project.isDisposed())   return;
   if (!PROCESSED_EDITORS.add(editor)) {
     return;
   }
-  final Project project=editor.getProject();
-  if (project == null)   return;
   final int offset=editor.getCaretModel().getOffset();
+  final PsiFile psiFile=PsiUtilBase.getPsiFileInEditor(editor,project);
   JobLauncher.getInstance().submitToJobThread(Job.DEFAULT_PRIORITY,new Runnable(){
     @Override public void run(){
-      final PsiFile injected;
-      try {
-        injected=ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>(){
-          @Override public PsiFile compute(){
-            if (isReallyDisposed(editor,project))             return null;
-            PsiFile psiFile=PsiUtilBase.getPsiFileInEditor(editor,project);
-            return psiFile == null || psiFile instanceof PsiCompiledElement ? null : getInjectedFileIfAny(editor,project,offset,psiFile,alarm);
-          }
-        }
-);
-      }
- catch (      RuntimeException e) {
-        ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
-          @Override public void run(){
-            PROCESSED_EDITORS.remove(editor);
-          }
-        }
-);
-        throw e;
-      }
-      ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
+      if (!ApplicationManagerEx.getApplicationEx().tryRunReadAction(new Runnable(){
         @Override public void run(){
+          final PsiFile injected;
           try {
-            if (!isReallyDisposed(editor,project)) {
-              Editor newEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor,injected);
-              BraceHighlightingHandler handler=new BraceHighlightingHandler(project,newEditor,alarm,injected);
-              processor.process(handler);
+            injected=psiFile == null || psiFile instanceof PsiCompiledElement || isReallyDisposed(editor,project) ? null : getInjectedFileIfAny(editor,project,offset,psiFile,alarm);
+          }
+ catch (          RuntimeException e) {
+            ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
+              @Override public void run(){
+                PROCESSED_EDITORS.remove(editor);
+              }
+            }
+);
+            throw e;
+          }
+          ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
+            @Override public void run(){
+              try {
+                if (!isReallyDisposed(editor,project)) {
+                  Editor newEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor,injected);
+                  BraceHighlightingHandler handler=new BraceHighlightingHandler(project,newEditor,alarm,injected);
+                  processor.process(handler);
+                }
+              }
+  finally {
+                PROCESSED_EDITORS.remove(editor);
+              }
             }
           }
-  finally {
-            PROCESSED_EDITORS.remove(editor);
-          }
+,ModalityState.stateForComponent(editor.getComponent()));
         }
       }
+)) {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            PROCESSED_EDITORS.remove(editor);
+            lookForInjectedAndMatchBracesInOtherThread(editor,alarm,processor);
+          }
+        }
 ,ModalityState.stateForComponent(editor.getComponent()));
+      }
     }
   }
 );
