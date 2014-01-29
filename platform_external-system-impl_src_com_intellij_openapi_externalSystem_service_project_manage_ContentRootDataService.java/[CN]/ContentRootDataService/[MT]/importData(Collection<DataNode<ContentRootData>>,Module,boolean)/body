@@ -1,6 +1,6 @@
 {
-  ExternalSystemApiUtil.executeProjectChangeAction(synchronous,new Runnable(){
-    @Override public void run(){
+  ExternalSystemApiUtil.executeProjectChangeAction(synchronous,new DisposeAwareProjectChange(module){
+    @Override public void execute(){
       final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
       final ModifiableRootModel model=moduleRootManager.getModifiableModel();
       final ContentEntry[] contentEntries=model.getContentEntries();
@@ -8,26 +8,46 @@
       for (      ContentEntry contentEntry : contentEntries) {
         contentEntriesMap.put(contentEntry.getUrl(),contentEntry);
       }
+      boolean createEmptyContentRootDirectories=false;
+      if (!datas.isEmpty()) {
+        ProjectSystemId projectSystemId=datas.iterator().next().getData().getOwner();
+        AbstractExternalSystemSettings externalSystemSettings=ExternalSystemApiUtil.getSettings(module.getProject(),projectSystemId);
+        String path=module.getOptionValue(ExternalSystemConstants.ROOT_PROJECT_PATH_KEY);
+        if (path != null) {
+          ExternalProjectSettings projectSettings=externalSystemSettings.getLinkedProjectSettings(path);
+          createEmptyContentRootDirectories=projectSettings != null && projectSettings.isCreateEmptyContentRootDirectories();
+        }
+      }
       try {
-        for (        DataNode<ContentRootData> data : datas) {
-          ContentRootData contentRoot=data.getData();
-          ContentEntry contentEntry=findOrCreateContentRoot(model,contentRoot.getRootPath());
+        for (        final DataNode<ContentRootData> data : datas) {
+          final ContentRootData contentRoot=data.getData();
+          final ContentEntry contentEntry=findOrCreateContentRoot(model,contentRoot.getRootPath());
+          for (          ContentFolder contentFolder : contentEntry.getFolders(ContentFolderScopes.all())) {
+            contentEntry.removeFolder(contentFolder);
+          }
           LOG.info(String.format("Importing content root '%s' for module '%s'",contentRoot.getRootPath(),module.getName()));
-          final Set<String> retainedPaths=ContainerUtilRt.newHashSet();
           for (          String path : contentRoot.getPaths(ExternalSystemSourceType.SOURCE)) {
-            createSourceRootIfAbsent(contentEntry,path,module.getName());
-            retainedPaths.add(ExternalSystemApiUtil.toCanonicalPath(path));
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),ProductionContentFolderTypeProvider.getInstance(),false,createEmptyContentRootDirectories);
           }
           for (          String path : contentRoot.getPaths(ExternalSystemSourceType.TEST)) {
-            createTestRootIfAbsent(contentEntry,path,module.getName());
-            retainedPaths.add(ExternalSystemApiUtil.toCanonicalPath(path));
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),TestContentFolderTypeProvider.getInstance(),false,createEmptyContentRootDirectories);
+          }
+          for (          String path : contentRoot.getPaths(ExternalSystemSourceType.RESOURCE)) {
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),ProductionResourceContentFolderTypeProvider.getInstance(),false,createEmptyContentRootDirectories);
+          }
+          for (          String path : contentRoot.getPaths(ExternalSystemSourceType.TEST_RESOURCE)) {
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),TestResourceContentFolderTypeProvider.getInstance(),false,createEmptyContentRootDirectories);
+          }
+          for (          String path : contentRoot.getPaths(ExternalSystemSourceType.SOURCE_GENERATED)) {
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),ProductionContentFolderTypeProvider.getInstance(),true,createEmptyContentRootDirectories);
+          }
+          for (          String path : contentRoot.getPaths(ExternalSystemSourceType.TEST_GENERATED)) {
+            createSourceRootIfAbsent(contentEntry,path,module.getName(),TestContentFolderTypeProvider.getInstance(),true,createEmptyContentRootDirectories);
           }
           for (          String path : contentRoot.getPaths(ExternalSystemSourceType.EXCLUDED)) {
             createExcludedRootIfAbsent(contentEntry,path,module.getName());
-            retainedPaths.add(ExternalSystemApiUtil.toCanonicalPath(path));
           }
           contentEntriesMap.remove(contentEntry.getUrl());
-          removeOutdatedContentFolders(contentEntry,retainedPaths);
         }
         for (        ContentEntry contentEntry : contentEntriesMap.values()) {
           model.removeContentEntry(contentEntry);

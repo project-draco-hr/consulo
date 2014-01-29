@@ -1,5 +1,5 @@
 {
-  if (myFilesToRefresh.isEmpty()) {
+  if (myFilesToRefresh.isEmpty() || myProject.isDisposed()) {
     return;
   }
   Map<ProjectSystemId,Set<String>> copy=ContainerUtilRt.newHashMap();
@@ -32,9 +32,23 @@
   finally {
     documentLock.unlock();
   }
+  boolean scheduleRefresh=false;
+  ExternalSystemProcessingManager processingManager=ServiceManager.getService(ExternalSystemProcessingManager.class);
   for (  Map.Entry<ProjectSystemId,Set<String>> entry : copy.entrySet()) {
     for (    String path : entry.getValue()) {
-      ExternalSystemUtil.refreshProject(myProject,entry.getKey(),path,myRefreshCallback,true,false,false);
+      final ExternalSystemTask resolveTask=processingManager.findTask(ExternalSystemTaskType.RESOLVE_PROJECT,entry.getKey(),path);
+      final ExternalSystemTaskState taskState=resolveTask == null ? null : resolveTask.getState();
+      if (taskState == null || taskState.isStopped() || (taskState == ExternalSystemTaskState.IN_PROGRESS && resolveTask.cancel())) {
+        ExternalSystemUtil.refreshProject(myProject,entry.getKey(),path,myRefreshCallback,false,ProgressExecutionMode.IN_BACKGROUND_ASYNC,false);
+      }
+ else       if (taskState != ExternalSystemTaskState.NOT_STARTED) {
+        scheduleRefresh=true;
+        addPath(entry.getKey(),path);
+      }
     }
+  }
+  if (scheduleRefresh) {
+    myVfsAlarm.cancelAllRequests();
+    myVfsAlarm.addRequest(myFilesRequest,ExternalSystemConstants.AUTO_IMPORT_DELAY_MILLIS);
   }
 }

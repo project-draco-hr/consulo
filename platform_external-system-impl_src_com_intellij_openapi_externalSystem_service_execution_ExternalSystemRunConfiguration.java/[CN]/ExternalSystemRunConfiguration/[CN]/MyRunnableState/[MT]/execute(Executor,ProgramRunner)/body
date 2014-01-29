@@ -1,8 +1,7 @@
 {
+  if (myProject.isDisposed())   return null;
   ExternalSystemUtil.updateRecentTasks(new ExternalTaskExecutionInfo(mySettings.clone(),executor.getId()),myProject);
   ConsoleView console=new TextConsoleBuilderImpl(myProject).getConsole();
-  final MyProcessHandler processHandler=new MyProcessHandler();
-  console.attachToProcess(processHandler);
   final List<ExternalTaskPojo> tasks=ContainerUtilRt.newArrayList();
   for (  String taskName : mySettings.getTaskNames()) {
     tasks.add(new ExternalTaskPojo(taskName,mySettings.getExternalProjectPath(),null));
@@ -10,24 +9,24 @@
   if (tasks.isEmpty()) {
     throw new ExecutionException(ExternalSystemBundle.message("run.error.undefined.task"));
   }
-  String vmOptions;
+  String debuggerSetup=null;
   if (myDebugPort > 0) {
-    String debuggerSetup="-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=" + myDebugPort;
-    String regular=mySettings.getVmOptions();
-    vmOptions=regular == null ? debuggerSetup : regular + " " + debuggerSetup;
+    debuggerSetup="-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=" + myDebugPort;
   }
- else {
-    vmOptions=mySettings.getVmOptions();
-  }
-  final ExternalSystemExecuteTaskTask task=new ExternalSystemExecuteTaskTask(mySettings.getExternalSystemId(),myProject,tasks,vmOptions);
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  FileDocumentManager.getInstance().saveAllDocuments();
+  final ExternalSystemExecuteTaskTask task=new ExternalSystemExecuteTaskTask(mySettings.getExternalSystemId(),myProject,tasks,mySettings.getVmOptions(),mySettings.getScriptParameters(),debuggerSetup);
+  final MyProcessHandler processHandler=new MyProcessHandler(task);
+  console.attachToProcess(processHandler);
   ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
     @Override public void run(){
+      final String startDateTime=DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
       final String greeting;
       if (mySettings.getTaskNames().size() > 1) {
-        greeting=ExternalSystemBundle.message("run.text.starting.multiple.task",StringUtil.join(mySettings.getTaskNames()," "));
+        greeting=ExternalSystemBundle.message("run.text.starting.multiple.task",startDateTime,StringUtil.join(mySettings.getTaskNames()," "));
       }
  else {
-        greeting=ExternalSystemBundle.message("run.text.starting.single.task",StringUtil.join(mySettings.getTaskNames()," "));
+        greeting=ExternalSystemBundle.message("run.text.starting.single.task",startDateTime,StringUtil.join(mySettings.getTaskNames()," "));
       }
       processHandler.notifyTextAvailable(greeting,ProcessOutputTypes.SYSTEM);
       task.execute(new ExternalSystemTaskNotificationListenerAdapter(){
@@ -39,7 +38,22 @@
           }
           processHandler.notifyTextAvailable(text,stdOut ? ProcessOutputTypes.STDOUT : ProcessOutputTypes.STDERR);
         }
+        @Override public void onFailure(        @NotNull ExternalSystemTaskId id,        @NotNull Exception e){
+          String exceptionMessage=ExceptionUtil.getMessage(e);
+          String text=exceptionMessage == null ? e.toString() : exceptionMessage;
+          processHandler.notifyTextAvailable(text + '\n',ProcessOutputTypes.STDERR);
+          processHandler.notifyProcessTerminated(0);
+        }
         @Override public void onEnd(        @NotNull ExternalSystemTaskId id){
+          final String endDateTime=DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
+          final String farewell;
+          if (mySettings.getTaskNames().size() > 1) {
+            farewell=ExternalSystemBundle.message("run.text.ended.multiple.task",endDateTime,StringUtil.join(mySettings.getTaskNames()," "));
+          }
+ else {
+            farewell=ExternalSystemBundle.message("run.text.ended.single.task",endDateTime,StringUtil.join(mySettings.getTaskNames()," "));
+          }
+          processHandler.notifyTextAvailable(farewell,ProcessOutputTypes.SYSTEM);
           processHandler.notifyProcessTerminated(0);
         }
       }
