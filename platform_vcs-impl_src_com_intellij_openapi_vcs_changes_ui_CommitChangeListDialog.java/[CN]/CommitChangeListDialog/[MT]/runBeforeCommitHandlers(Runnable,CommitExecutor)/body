@@ -1,6 +1,6 @@
 {
-  Runnable proceedRunnable=new Runnable(){
-    public void run(){
+  final Computable<CheckinHandler.ReturnResult> proceedRunnable=new Computable<CheckinHandler.ReturnResult>(){
+    @Override public CheckinHandler.ReturnResult compute(){
       FileDocumentManager.getInstance().saveAllDocuments();
       for (      CheckinHandler handler : myHandlers) {
         if (!(handler.acceptExecutor(executor)))         continue;
@@ -8,21 +8,28 @@
         if (result == CheckinHandler.ReturnResult.COMMIT)         continue;
         if (result == CheckinHandler.ReturnResult.CANCEL) {
           restartUpdate();
-          return;
+          return CheckinHandler.ReturnResult.CANCEL;
         }
         if (result == CheckinHandler.ReturnResult.CLOSE_WINDOW) {
           final ChangeList changeList=myBrowser.getSelectedChangeList();
           CommitHelper.moveToFailedList(changeList,getCommitMessage(),getIncludedChanges(),VcsBundle.message("commit.dialog.rejected.commit.template",changeList.getName()),myProject);
           doCancelAction();
-          return;
+          return CheckinHandler.ReturnResult.CLOSE_WINDOW;
         }
       }
       okAction.run();
+      return CheckinHandler.ReturnResult.COMMIT;
     }
   }
 ;
   stopUpdate();
-  Runnable runnable=proceedRunnable;
+  final Ref<CheckinHandler.ReturnResult> compoundResultRef=Ref.create();
+  Runnable runnable=new Runnable(){
+    @Override public void run(){
+      compoundResultRef.set(proceedRunnable.compute());
+    }
+  }
+;
   for (  final CheckinHandler handler : myHandlers) {
     if (handler instanceof CheckinMetaHandler) {
       final Runnable previousRunnable=runnable;
@@ -35,4 +42,5 @@
     }
   }
   runnable.run();
+  return compoundResultRef.get();
 }
