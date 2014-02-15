@@ -1,0 +1,49 @@
+{
+  myChangedFilesCollector.ensureAllInvalidateTasksCompleted();
+  final VirtualFile file=content.getVirtualFile();
+  FileTypeManagerImpl.cacheFileType(file,file.getFileType());
+  try {
+    PsiFile psiFile=null;
+    FileContentImpl fc=null;
+    final List<ID<?,?>> affectedIndexCandidates=getAffectedIndexCandidates(file);
+    for (int i=0, size=affectedIndexCandidates.size(); i < size; ++i) {
+      final ID<?,?> indexId=affectedIndexCandidates.get(i);
+      if (shouldIndexFile(project,file,indexId)) {
+        if (fc == null) {
+          byte[] currentBytes;
+          try {
+            currentBytes=content.getBytes();
+          }
+ catch (          IOException e) {
+            currentBytes=ArrayUtil.EMPTY_BYTE_ARRAY;
+          }
+          fc=new FileContentImpl(file,currentBytes);
+          if (project == null) {
+            project=ProjectUtil.guessProjectForFile(file);
+          }
+          psiFile=content.getUserData(IndexingDataKeys.PSI_FILE);
+          initFileContent(fc,project,psiFile);
+        }
+        try {
+          ProgressManager.checkCanceled();
+          updateSingleIndex(indexId,file,fc);
+        }
+ catch (        ProcessCanceledException e) {
+          cleanFileContent(fc,psiFile);
+          myChangedFilesCollector.scheduleForUpdate(file);
+          throw e;
+        }
+catch (        StorageException e) {
+          requestRebuild(indexId);
+          LOG.info(e);
+        }
+      }
+    }
+    if (psiFile != null) {
+      psiFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
+    }
+  }
+  finally {
+    FileTypeManagerImpl.cacheFileType(file,null);
+  }
+}
