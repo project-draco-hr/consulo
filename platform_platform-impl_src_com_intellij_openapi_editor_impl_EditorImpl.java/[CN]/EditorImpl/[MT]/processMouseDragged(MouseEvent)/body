@@ -5,7 +5,7 @@
   if (getMouseEventArea(e) == EditorMouseEventArea.LINE_MARKERS_AREA) {
     if (myDragOnGutterSelectionStartLine >= 0) {
       mySelectionModel.removeSelection();
-      myCaretModel.moveToOffset(myDocument.getLineStartOffset(myDragOnGutterSelectionStartLine));
+      myCaretModel.moveToOffset(myDragOnGutterSelectionStartLine < myDocument.getLineCount() ? myDocument.getLineStartOffset(myDragOnGutterSelectionStartLine) : myDocument.getTextLength());
     }
     myDragOnGutterSelectionStartLine=-1;
   }
@@ -40,8 +40,17 @@
     VisualPosition oldVisLeadSelectionStart=selectionModel.getLeadSelectionPosition();
     int oldCaretOffset=getCaretModel().getOffset();
     LogicalPosition oldLogicalCaret=getCaretModel().getLogicalPosition();
-    moveCaretToScreenPos(x,y);
-    getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    boolean multiCaretSelection=myCaretModel.supportsMultipleCarets() && (isColumnMode() || e.isAltDown());
+    LogicalPosition newLogicalCaret=getLogicalPositionForScreenPos(x,y,!multiCaretSelection);
+    if (multiCaretSelection) {
+      myMultiSelectionInProgress=true;
+      myTargetMultiSelectionPosition=xyToVisualPosition(new Point(Math.max(x,0),Math.max(y,0)));
+      getScrollingModel().scrollTo(newLogicalCaret,ScrollType.RELATIVE);
+    }
+ else {
+      getCaretModel().moveToLogicalPosition(newLogicalCaret);
+      getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+    }
     int newCaretOffset=getCaretModel().getOffset();
     VisualPosition newVisualCaret=getCaretModel().getVisualPosition();
     int caretShift=newCaretOffset - mySavedSelectionStart;
@@ -50,15 +59,20 @@
     }
  else {
       if (isColumnMode() || e.isAltDown()) {
-        final LogicalPosition blockStart=selectionModel.hasBlockSelection() ? selectionModel.getBlockStart() : oldLogicalCaret;
-        selectionModel.setBlockSelection(blockStart,getCaretModel().getLogicalPosition());
+        if (myCaretModel.supportsMultipleCarets()) {
+          selectionModel.setBlockSelection(myLastMousePressedLocation,newLogicalCaret);
+        }
+ else {
+          final LogicalPosition blockStart=selectionModel.hasBlockSelection() ? selectionModel.getBlockStart() : oldLogicalCaret;
+          selectionModel.setBlockSelection(blockStart,getCaretModel().getLogicalPosition());
+        }
       }
  else {
         if (getMouseSelectionState() != MOUSE_SELECTION_STATE_NONE) {
           if (caretShift < 0) {
             int newSelection=newCaretOffset;
             if (getMouseSelectionState() == MOUSE_SELECTION_STATE_WORD_SELECTED) {
-              newSelection=mySelectionModel.getWordAtCaretStart();
+              newSelection=myCaretModel.getWordAtCaretStart();
             }
  else {
               if (getMouseSelectionState() == MOUSE_SELECTION_STATE_LINE_SELECTED) {
@@ -72,7 +86,7 @@
  else {
             int newSelection=newCaretOffset;
             if (getMouseSelectionState() == MOUSE_SELECTION_STATE_WORD_SELECTED) {
-              newSelection=mySelectionModel.getWordAtCaretEnd();
+              newSelection=myCaretModel.getWordAtCaretEnd();
             }
  else {
               if (getMouseSelectionState() == MOUSE_SELECTION_STATE_LINE_SELECTED) {

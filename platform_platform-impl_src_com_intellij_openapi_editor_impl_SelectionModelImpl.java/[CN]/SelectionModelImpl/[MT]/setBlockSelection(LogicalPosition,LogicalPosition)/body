@@ -1,30 +1,74 @@
 {
-  removeSelection();
-  int oldStartLine=0;
-  int oldEndLine=0;
-  if (hasBlockSelection()) {
-    oldStartLine=myBlockStart.line;
-    oldEndLine=myBlockEnd.line;
-    if (oldStartLine > oldEndLine) {
-      int t=oldStartLine;
-      oldStartLine=oldEndLine;
-      oldEndLine=t;
+  if (myEditor.getCaretModel().supportsMultipleCarets()) {
+    int startLine=Math.max(Math.min(blockStart.line,myEditor.getDocument().getLineCount() - 1),0);
+    int endLine=Math.max(Math.min(blockEnd.line,myEditor.getDocument().getLineCount() - 1),0);
+    int step=endLine < startLine ? -1 : 1;
+    int count=1 + Math.abs(endLine - startLine);
+    List<LogicalPosition> positions=new LinkedList<LogicalPosition>();
+    List<TextRange> selections=new LinkedList<TextRange>();
+    boolean hasSelection=false;
+    for (int line=startLine, i=0; i < count; i++, line+=step) {
+      int startColumn=blockStart.column;
+      int endColumn=blockEnd.column;
+      int lineEndOffset=myEditor.getDocument().getLineEndOffset(line);
+      int lineWidth=myEditor.offsetToLogicalPosition(lineEndOffset).column;
+      if (startColumn > lineWidth && endColumn > lineWidth) {
+        LogicalPosition caretPos=new LogicalPosition(line,Math.min(startColumn,endColumn));
+        positions.add(caretPos);
+        selections.add(new TextRange(lineEndOffset,lineEndOffset));
+      }
+ else {
+        LogicalPosition startPos=new LogicalPosition(line,Math.min(startColumn,lineWidth));
+        LogicalPosition endPos=new LogicalPosition(line,Math.min(endColumn,lineWidth));
+        int startOffset=myEditor.logicalPositionToOffset(startPos);
+        int endOffset=myEditor.logicalPositionToOffset(endPos);
+        positions.add(endPos);
+        selections.add(new TextRange(Math.min(startOffset,endOffset),Math.max(startOffset,endOffset)));
+        hasSelection|=startOffset != endOffset;
+      }
     }
+    if (hasSelection && !myEditor.isColumnMode()) {
+      Iterator<LogicalPosition> positionIterator=positions.iterator();
+      Iterator<TextRange> selectionIterator=selections.iterator();
+      while (selectionIterator.hasNext()) {
+        TextRange selection=selectionIterator.next();
+        positionIterator.next();
+        if (selection.isEmpty()) {
+          selectionIterator.remove();
+          positionIterator.remove();
+        }
+      }
+    }
+    myEditor.getCaretModel().setCaretsAndSelections(positions,selections);
   }
-  int newStartLine=blockStart.line;
-  int newEndLine=blockEnd.line;
-  if (newStartLine > newEndLine) {
-    int t=newStartLine;
-    newStartLine=newEndLine;
-    newEndLine=t;
+ else {
+    removeSelection();
+    int oldStartLine=0;
+    int oldEndLine=0;
+    if (hasBlockSelection()) {
+      oldStartLine=myBlockStart.line;
+      oldEndLine=myBlockEnd.line;
+      if (oldStartLine > oldEndLine) {
+        int t=oldStartLine;
+        oldStartLine=oldEndLine;
+        oldEndLine=t;
+      }
+    }
+    int newStartLine=blockStart.line;
+    int newEndLine=blockEnd.line;
+    if (newStartLine > newEndLine) {
+      int t=newStartLine;
+      newStartLine=newEndLine;
+      newEndLine=t;
+    }
+    myEditor.repaintLines(Math.min(oldStartLine,newStartLine),Math.max(newEndLine,oldEndLine));
+    final int[] oldStarts=getBlockSelectionStarts();
+    final int[] oldEnds=getBlockSelectionEnds();
+    myBlockStart=blockStart;
+    myBlockEnd=blockEnd;
+    recalculateBlockOffsets();
+    final int[] newStarts=getBlockSelectionStarts();
+    final int[] newEnds=getBlockSelectionEnds();
+    broadcastSelectionEvent(new SelectionEvent(myEditor,oldStarts,oldEnds,newStarts,newEnds));
   }
-  myEditor.repaintLines(Math.min(oldStartLine,newStartLine),Math.max(newEndLine,oldEndLine));
-  final int[] oldStarts=getBlockSelectionStarts();
-  final int[] oldEnds=getBlockSelectionEnds();
-  myBlockStart=blockStart;
-  myBlockEnd=blockEnd;
-  recalculateBlockOffsets();
-  final int[] newStarts=getBlockSelectionStarts();
-  final int[] newEnds=getBlockSelectionEnds();
-  broadcastSelectionEvent(new SelectionEvent(myEditor,oldStarts,oldEnds,newStarts,newEnds));
 }

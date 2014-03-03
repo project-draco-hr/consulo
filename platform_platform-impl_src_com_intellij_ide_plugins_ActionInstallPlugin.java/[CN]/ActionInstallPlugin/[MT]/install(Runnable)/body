@@ -1,0 +1,99 @@
+{
+  IdeaPluginDescriptor[] selection=getPluginTable().getSelectedObjects();
+  if (userConfirm(selection)) {
+    final ArrayList<PluginNode> list=new ArrayList<PluginNode>();
+    final PluginTableModel pluginTableModel=host.getPluginsModel();
+    for (    IdeaPluginDescriptor descr : selection) {
+      PluginNode pluginNode=null;
+      if (descr instanceof PluginNode) {
+        pluginNode=(PluginNode)descr;
+      }
+ else       if (descr instanceof IdeaPluginDescriptorImpl) {
+        final PluginId pluginId=descr.getPluginId();
+        pluginNode=new PluginNode(pluginId);
+        pluginNode.setName(descr.getName());
+        pluginNode.setDepends(Arrays.asList(descr.getDependentPluginIds()),descr.getOptionalDependentPluginIds());
+        pluginNode.setSize("-1");
+        pluginNode.setRepositoryName(((InstalledPluginsTableModel)pluginTableModel).getPluginHostUrl(pluginId.getIdString()));
+      }
+      if (pluginNode != null) {
+        list.add(pluginNode);
+        ourInstallingNodes.add(pluginNode);
+      }
+      final InstalledPluginsTableModel pluginsModel=(InstalledPluginsTableModel)installed.getPluginsModel();
+      final Set<IdeaPluginDescriptor> disabled=new HashSet<IdeaPluginDescriptor>();
+      final Set<IdeaPluginDescriptor> disabledDependants=new HashSet<IdeaPluginDescriptor>();
+      for (      PluginNode node : list) {
+        final PluginId pluginId=node.getPluginId();
+        if (pluginsModel.isDisabled(pluginId)) {
+          disabled.add(node);
+        }
+        final List<PluginId> depends=node.getDepends();
+        if (depends != null) {
+          final Set<PluginId> optionalDeps=new HashSet<PluginId>(Arrays.asList(node.getOptionalDependentPluginIds()));
+          for (          PluginId dependantId : depends) {
+            if (optionalDeps.contains(dependantId))             continue;
+            final IdeaPluginDescriptor pluginDescriptor=PluginManager.getPlugin(dependantId);
+            if (pluginDescriptor != null && pluginsModel.isDisabled(dependantId)) {
+              disabledDependants.add(pluginDescriptor);
+            }
+          }
+        }
+      }
+      if (suggestToEnableInstalledPlugins(pluginsModel,disabled,disabledDependants,list)) {
+        installed.setRequireShutdown(true);
+      }
+    }
+    try {
+      final Consumer<Set<PluginNode>> onInstallRunnable=new Consumer<Set<PluginNode>>(){
+        @Override public void consume(        final Set<PluginNode> pluginNodes){
+          UIUtil.invokeLaterIfNeeded(new Runnable(){
+            @Override public void run(){
+              installedPluginsToModel(pluginNodes);
+            }
+          }
+);
+          if (!installed.isDisposed()) {
+            UIUtil.invokeLaterIfNeeded(new Runnable(){
+              @Override public void run(){
+                getPluginTable().updateUI();
+                installed.setRequireShutdown(true);
+              }
+            }
+);
+          }
+ else {
+            boolean needToRestart=false;
+            for (            PluginNode node : pluginNodes) {
+              final IdeaPluginDescriptor pluginDescriptor=PluginManager.getPlugin(node.getPluginId());
+              if (pluginDescriptor == null || pluginDescriptor.isEnabled()) {
+                needToRestart=true;
+                break;
+              }
+            }
+            if (needToRestart) {
+              PluginManagerMain.notifyPluginsWereInstalled(pluginNodes,null);
+            }
+          }
+        }
+      }
+;
+      PluginManagerMain.downloadPlugins(list,host.getPluginsModel().view,onInstallRunnable,new Consumer<Set<PluginNode>>(){
+        @Override public void consume(        Set<PluginNode> pluginNodes){
+          ourInstallingNodes.removeAll(list);
+        }
+      }
+);
+    }
+ catch (    final IOException e1) {
+      ourInstallingNodes.removeAll(list);
+      PluginManagerMain.LOG.error(e1);
+      SwingUtilities.invokeLater(new Runnable(){
+        @Override public void run(){
+          IOExceptionDialog.showErrorDialog(IdeBundle.message("action.download.and.install.plugin"),IdeBundle.message("error.plugin.download.failed"));
+        }
+      }
+);
+    }
+  }
+}

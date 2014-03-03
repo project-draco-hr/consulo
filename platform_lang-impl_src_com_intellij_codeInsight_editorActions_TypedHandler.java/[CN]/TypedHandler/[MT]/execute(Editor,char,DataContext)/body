@@ -1,13 +1,7 @@
 {
   Project project=CommonDataKeys.PROJECT.getData(dataContext);
-  if (project == null || editor.isColumnMode()) {
-    if (myOriginalHandler != null) {
-      myOriginalHandler.execute(editor,charTyped,dataContext);
-    }
-    return;
-  }
-  PsiFile file=PsiUtilBase.getPsiFileInEditor(editor,project);
-  if (file == null) {
+  PsiFile file;
+  if (project == null || editor.isColumnMode() || (file=PsiUtilBase.getPsiFileInEditor(editor,project)) == null) {
     if (myOriginalHandler != null) {
       myOriginalHandler.execute(editor,charTyped,dataContext);
     }
@@ -17,6 +11,7 @@
   if (!FileDocumentManager.getInstance().requestWriting(editor.getDocument(),project)) {
     return;
   }
+  Editor originalEditor=editor;
   Editor injectedEditor=injectedEditorIfCharTypedIsSignificant(charTyped,editor,file);
   if (injectedEditor != editor) {
     file=PsiDocumentManager.getInstance(project).getPsiFile(injectedEditor.getDocument());
@@ -36,12 +31,12 @@
     autoPopupParameterInfo(editor,charTyped,project,file);
   }
   if (!editor.isInsertMode()) {
-    myOriginalHandler.execute(editor,charTyped,dataContext);
+    if (myOriginalHandler != null) {
+      myOriginalHandler.execute(originalEditor,charTyped,dataContext);
+    }
     return;
   }
-  if (editor.getSelectionModel().hasSelection()) {
-    EditorModificationUtil.deleteSelectedText(editor);
-  }
+  EditorModificationUtil.deleteSelectedTextForAllCarets(editor);
   FileType fileType=getFileType(file,editor);
   for (  TypedHandlerDelegate delegate : delegates) {
     final TypedHandlerDelegate.Result result=delegate.beforeCharTyped(charTyped,project,editor,file,fileType);
@@ -52,7 +47,7 @@
       break;
     }
   }
-  if (!editor.getSelectionModel().hasBlockSelection()) {
+  if (!editor.getSelectionModel().hasBlockSelection() && editor.getCaretModel().getAllCarets().size() == 1) {
     if (')' == charTyped || ']' == charTyped || '}' == charTyped) {
       if (FileTypes.PLAIN_TEXT != fileType) {
         if (handleRParen(editor,fileType,charTyped))         return;
@@ -63,9 +58,11 @@
     }
   }
   long modificationStampBeforeTyping=editor.getDocument().getModificationStamp();
-  myOriginalHandler.execute(editor,charTyped,dataContext);
+  if (myOriginalHandler != null) {
+    myOriginalHandler.execute(originalEditor,charTyped,dataContext);
+  }
   AutoHardWrapHandler.getInstance().wrapLineIfNecessary(editor,dataContext,modificationStampBeforeTyping);
-  if (('(' == charTyped || '[' == charTyped || '{' == charTyped) && CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && !editor.getSelectionModel().hasBlockSelection()&& fileType != FileTypes.PLAIN_TEXT) {
+  if (('(' == charTyped || '[' == charTyped || '{' == charTyped) && CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && !editor.getSelectionModel().hasBlockSelection()&& editor.getCaretModel().getAllCarets().size() == 1 && fileType != FileTypes.PLAIN_TEXT) {
     handleAfterLParen(editor,fileType,charTyped);
   }
  else   if ('}' == charTyped) {

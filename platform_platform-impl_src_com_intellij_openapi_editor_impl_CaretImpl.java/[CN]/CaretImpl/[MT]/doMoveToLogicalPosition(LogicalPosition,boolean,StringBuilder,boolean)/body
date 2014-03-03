@@ -1,0 +1,142 @@
+{
+  assertIsDispatchThread();
+  if (debugBuffer != null) {
+    debugBuffer.append("Start moveToLogicalPosition(). Locate before soft wrap: " + locateBeforeSoftWrap + ", position: "+ pos+ "\n");
+  }
+  myDesiredX=-1;
+  validateCallContext();
+  int column=pos.column;
+  int line=pos.line;
+  int softWrapLinesBefore=pos.softWrapLinesBeforeCurrentLogicalLine;
+  int softWrapLinesCurrent=pos.softWrapLinesOnCurrentLogicalLine;
+  int softWrapColumns=pos.softWrapColumnDiff;
+  Document doc=myEditor.getDocument();
+  if (column < 0) {
+    if (debugBuffer != null) {
+      debugBuffer.append("Resetting target logical column to zero as it is negative (").append(column).append(")\n");
+    }
+    column=0;
+    softWrapColumns=0;
+  }
+  if (line < 0) {
+    if (debugBuffer != null) {
+      debugBuffer.append("Resetting target logical line to zero as it is negative (").append(line).append(")\n");
+    }
+    line=0;
+    softWrapLinesBefore=0;
+    softWrapLinesCurrent=0;
+  }
+  int lineCount=doc.getLineCount();
+  if (lineCount == 0) {
+    if (debugBuffer != null) {
+      debugBuffer.append("Resetting target logical line to zero as the document is empty\n");
+    }
+    line=0;
+  }
+ else   if (line > lineCount - 1) {
+    if (debugBuffer != null) {
+      debugBuffer.append("Resetting target logical line (" + line + ") to "+ (lineCount - 1)+ " as it is greater than total document lines number\n");
+    }
+    line=lineCount - 1;
+    softWrapLinesBefore=0;
+    softWrapLinesCurrent=0;
+  }
+  EditorSettings editorSettings=myEditor.getSettings();
+  if (!editorSettings.isVirtualSpace() && line < lineCount && !myEditor.getSelectionModel().hasBlockSelection()) {
+    int lineEndOffset=doc.getLineEndOffset(line);
+    final LogicalPosition endLinePosition=myEditor.offsetToLogicalPosition(lineEndOffset);
+    int lineEndColumnNumber=endLinePosition.column;
+    if (column > lineEndColumnNumber) {
+      int oldColumn=column;
+      column=lineEndColumnNumber;
+      if (softWrapColumns != 0) {
+        softWrapColumns-=column - lineEndColumnNumber;
+      }
+      if (debugBuffer != null) {
+        debugBuffer.append("Resetting target logical column (" + oldColumn + ") to "+ lineEndColumnNumber+ " because caret is not allowed to be located after line end (offset: "+ lineEndOffset+ ", "+ "logical position: "+ endLinePosition+ "). Current soft wrap columns value: "+ softWrapColumns+ "\n");
+      }
+    }
+  }
+  myEditor.getFoldingModel().flushCaretPosition();
+  VerticalInfo oldInfo=myCaretInfo;
+  LogicalPosition oldCaretPosition=myLogicalCaret;
+  LogicalPosition logicalPositionToUse;
+  if (pos.visualPositionAware) {
+    logicalPositionToUse=new LogicalPosition(line,column,softWrapLinesBefore,softWrapLinesCurrent,softWrapColumns,pos.foldedLines,pos.foldingColumnDiff);
+  }
+ else {
+    logicalPositionToUse=new LogicalPosition(line,column);
+  }
+  setCurrentLogicalCaret(logicalPositionToUse);
+  final int offset=myEditor.logicalPositionToOffset(myLogicalCaret);
+  if (debugBuffer != null) {
+    debugBuffer.append("Resulting logical position to use: " + myLogicalCaret + ". It's mapped to offset "+ offset+ "\n");
+  }
+  FoldRegion collapsedAt=myEditor.getFoldingModel().getCollapsedRegionAtOffset(offset);
+  if (collapsedAt != null && offset > collapsedAt.getStartOffset()) {
+    if (debugBuffer != null) {
+      debugBuffer.append("Scheduling expansion of fold region ").append(collapsedAt).append("\n");
+    }
+    Runnable runnable=new Runnable(){
+      @Override public void run(){
+        FoldRegion[] allCollapsedAt=myEditor.getFoldingModel().fetchCollapsedAt(offset);
+        for (        FoldRegion foldRange : allCollapsedAt) {
+          foldRange.setExpanded(true);
+        }
+      }
+    }
+;
+    mySkipChangeRequests=true;
+    try {
+      myEditor.getFoldingModel().runBatchFoldingOperation(runnable,false);
+    }
+  finally {
+      mySkipChangeRequests=false;
+    }
+  }
+  setLastColumnNumber(myLogicalCaret.column);
+  myVisibleCaret=myEditor.logicalToVisualPosition(myLogicalCaret);
+  updateOffsetsFromLogicalPosition();
+  if (debugBuffer != null) {
+    debugBuffer.append("Storing offset " + myOffset + " (mapped from logical position "+ myLogicalCaret+ ")\n");
+  }
+  LOG.assertTrue(myOffset >= 0 && myOffset <= myEditor.getDocument().getTextLength());
+  updateVisualLineInfo();
+  myEditor.updateCaretCursor();
+  requestRepaint(oldInfo);
+  if (locateBeforeSoftWrap && SoftWrapHelper.isCaretAfterSoftWrap(myEditor)) {
+    int lineToUse=myVisibleCaret.line - 1;
+    if (lineToUse >= 0) {
+      final VisualPosition visualPosition=new VisualPosition(lineToUse,EditorUtil.getLastVisualLineColumnNumber(myEditor,lineToUse));
+      if (debugBuffer != null) {
+        debugBuffer.append("Adjusting caret position by moving it before soft wrap. Moving to visual position " + visualPosition + "\n");
+      }
+      final LogicalPosition logicalPosition=myEditor.visualToLogicalPosition(visualPosition);
+      final int tmpOffset=myEditor.logicalPositionToOffset(logicalPosition);
+      if (tmpOffset == myOffset) {
+        boolean restore=myReportCaretMoves;
+        myReportCaretMoves=false;
+        try {
+          moveToVisualPosition(visualPosition);
+          return null;
+        }
+  finally {
+          myReportCaretMoves=restore;
+        }
+      }
+ else {
+        LogMessageEx.error(LOG,"Invalid editor dimension mapping",String.format("Expected to map visual position '%s' to offset %d but got the following: -> logical position '%s'; -> offset %d. " + "State: %s",visualPosition,myOffset,logicalPosition,tmpOffset,myEditor.dumpState()));
+      }
+    }
+  }
+  if (!oldCaretPosition.toVisualPosition().equals(myLogicalCaret.toVisualPosition())) {
+    CaretEvent event=new CaretEvent(myEditor,myEditor.getCaretModel().supportsMultipleCarets() ? this : null,oldCaretPosition,myLogicalCaret);
+    if (fireListeners) {
+      myEditor.getCaretModel().fireCaretPositionChanged(event);
+    }
+ else {
+      return event;
+    }
+  }
+  return null;
+}
