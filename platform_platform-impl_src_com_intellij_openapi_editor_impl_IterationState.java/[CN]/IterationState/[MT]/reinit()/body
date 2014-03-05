@@ -2,7 +2,7 @@
   if (myHighlighterIterator.atEnd()) {
     return;
   }
-  boolean isInSelection=hasSelection && myStartOffset >= mySelectionStart && myStartOffset < mySelectionEnd;
+  boolean isInSelection=isInSelection();
   boolean isInCaretRow=myStartOffset >= myCaretRowStart && myStartOffset < myCaretRowEnd;
   boolean isInGuardedBlock=myDocument.getOffsetGuard(myStartOffset) != null;
   TextAttributes syntax=myHighlighterIterator.getTextAttributes();
@@ -22,11 +22,15 @@
   }
   List<TextAttributes> cachedAttributes=myCachedAttributesList;
   cachedAttributes.clear();
+  int selectionAttributesIndex=-1;
   for (int i=0; i < size; i++) {
     RangeHighlighterEx highlighter=myCurrentHighlighters.get(i);
-    if (selection != null && highlighter.getLayer() < HighlighterLayer.SELECTION) {
-      cachedAttributes.add(selection);
-      selection=null;
+    if (highlighter.getLayer() < HighlighterLayer.SELECTION) {
+      selectionAttributesIndex=cachedAttributes.size();
+      if (selection != null) {
+        cachedAttributes.add(selection);
+        selection=null;
+      }
     }
     if (syntax != null && highlighter.getLayer() < HighlighterLayer.SYNTAX) {
       if (fold != null) {
@@ -49,6 +53,9 @@
       cachedAttributes.add(textAttributes);
     }
   }
+  if (selectionAttributesIndex < 0) {
+    selectionAttributesIndex=cachedAttributes.size();
+  }
   if (selection != null)   cachedAttributes.add(selection);
   if (fold != null)   cachedAttributes.add(fold);
   if (guard != null)   cachedAttributes.add(guard);
@@ -59,12 +66,16 @@
   Color effect=null;
   EffectType effectType=null;
   int fontType=0;
+  boolean selectionBackgroundIsPotentiallyVisible=cachedAttributes.isEmpty();
   for (int i=0; i < cachedAttributes.size(); i++) {
     TextAttributes attrs=cachedAttributes.get(i);
     if (fore == null) {
       fore=ifDiffers(attrs.getForegroundColor(),myDefaultForeground);
     }
     if (back == null) {
+      if (isInSelection && i == selectionAttributesIndex || !isInSelection && i >= selectionAttributesIndex) {
+        selectionBackgroundIsPotentiallyVisible=true;
+      }
       back=ifDiffers(attrs.getBackgroundColor(),myDefaultBackground);
     }
     if (fontType == Font.PLAIN) {
@@ -79,4 +90,13 @@
   if (back == null)   back=myDefaultBackground;
   if (effectType == null)   effectType=EffectType.BOXED;
   myMergedAttributes.setAttributes(fore,back,effect,null,effectType,fontType);
+  myCurrentBackgroundColor=back;
+  if (selectionBackgroundIsPotentiallyVisible && myCurrentVirtualSelectionIndex < mySelectionStarts.length && myStartOffset == mySelectionEnds[myCurrentVirtualSelectionIndex]) {
+    myCurrentLineHasVirtualSelection=true;
+    myCurrentPastLineEndBackgroundSegment=myVirtualSelectionStarts[myCurrentVirtualSelectionIndex] > 0 ? 0 : 1;
+  }
+ else {
+    myCurrentLineHasVirtualSelection=false;
+    myCurrentPastLineEndBackgroundSegment=0;
+  }
 }

@@ -3,22 +3,32 @@
   int lineShift=above ? -1 : 1;
   final CaretImpl clone=cloneWithoutSelection();
   final int newSelectionStartOffset, newSelectionEndOffset;
+  final VisualPosition newSelectionStartPosition, newSelectionEndPosition;
   final boolean hasNewSelection;
   if (hasSelection()) {
-    LogicalPosition selectionStart=myEditor.offsetToLogicalPosition(getSelectionStart());
-    LogicalPosition selectionEnd=myEditor.offsetToLogicalPosition(getSelectionEnd());
-    LogicalPosition newSelectionStart=new LogicalPosition(selectionStart.line + lineShift,selectionStart.column);
-    LogicalPosition newSelectionEnd=new LogicalPosition(selectionEnd.line + lineShift,selectionEnd.column);
-    newSelectionStartOffset=getTruncatedOffset(newSelectionStart);
-    newSelectionEndOffset=getTruncatedOffset(newSelectionEnd);
-    hasNewSelection=newSelectionStartOffset != newSelectionEndOffset;
+    VisualPosition startPosition=getSelectionStartPosition();
+    VisualPosition endPosition=getSelectionEndPosition();
+    VisualPosition leadPosition=getLeadSelectionPosition();
+    boolean leadIsStart=leadPosition.equals(startPosition);
+    boolean leadIsEnd=leadPosition.equals(endPosition);
+    LogicalPosition selectionStart=myEditor.visualToLogicalPosition(leadIsStart || leadIsEnd ? leadPosition : startPosition);
+    LogicalPosition selectionEnd=myEditor.visualToLogicalPosition(leadIsEnd ? startPosition : endPosition);
+    LogicalPosition newSelectionStart=truncate(new LogicalPosition(selectionStart.line + lineShift,selectionStart.column));
+    LogicalPosition newSelectionEnd=truncate(new LogicalPosition(selectionEnd.line + lineShift,selectionEnd.column));
+    newSelectionStartOffset=myEditor.logicalPositionToOffset(newSelectionStart);
+    newSelectionEndOffset=myEditor.logicalPositionToOffset(newSelectionEnd);
+    newSelectionStartPosition=myEditor.logicalToVisualPosition(newSelectionStart);
+    newSelectionEndPosition=myEditor.logicalToVisualPosition(newSelectionEnd);
+    hasNewSelection=!newSelectionStart.equals(newSelectionEnd);
   }
  else {
     newSelectionStartOffset=0;
     newSelectionEndOffset=0;
+    newSelectionStartPosition=null;
+    newSelectionEndPosition=null;
     hasNewSelection=false;
   }
-  LogicalPosition oldPosition=hasSelection() && !hasNewSelection ? myEditor.offsetToLogicalPosition(getSelectionStart()) : getLogicalPosition();
+  LogicalPosition oldPosition=getLogicalPosition();
   int newLine=oldPosition.line + lineShift;
   if (newLine < 0 || newLine >= myEditor.getDocument().getLineCount()) {
     Disposer.dispose(clone);
@@ -26,10 +36,10 @@
   }
   clone.moveToLogicalPosition(new LogicalPosition(newLine,oldPosition.column),false,null,false);
   if (myEditor.getCaretModel().addCaret(clone)) {
-    if (hasSelection() && hasNewSelection) {
+    if (hasNewSelection) {
       myEditor.getCaretModel().doWithCaretMerging(new Runnable(){
         @Override public void run(){
-          clone.setSelection(Math.min(newSelectionStartOffset,newSelectionEndOffset),Math.max(newSelectionStartOffset,newSelectionEndOffset));
+          clone.setSelection(newSelectionStartPosition,newSelectionStartOffset,newSelectionEndPosition,newSelectionEndOffset);
         }
       }
 );
