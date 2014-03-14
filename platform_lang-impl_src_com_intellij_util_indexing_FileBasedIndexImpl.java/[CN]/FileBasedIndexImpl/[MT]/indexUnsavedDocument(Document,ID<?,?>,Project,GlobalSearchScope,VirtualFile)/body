@@ -23,32 +23,38 @@
   final long previousDocStamp=myLastIndexedDocStamps.getAndSet(document,requestedIndexId,currentDocStamp);
   if (currentDocStamp != previousDocStamp) {
     final CharSequence contentText=content.getText();
-    if (!isTooLarge(vFile,contentText.length()) && getAffectedIndexCandidates(vFile).contains(requestedIndexId) && getInputFilter(requestedIndexId).acceptInput(project,vFile)) {
-      WeakReference<FileContentImpl> previousContentRef=document.getUserData(ourFileContentKey);
-      FileContentImpl previousContent=com.intellij.reference.SoftReference.dereference(previousContentRef);
-      final FileContentImpl newFc;
-      if (previousContent != null && previousContent.getStamp() == currentDocStamp) {
-        newFc=previousContent;
-      }
+    FileTypeManagerImpl.cacheFileType(vFile,getFileType(vFile));
+    try {
+      if (!isTooLarge(vFile,contentText.length()) && getAffectedIndexCandidates(vFile).contains(requestedIndexId) && getInputFilter(requestedIndexId).acceptInput(project,vFile)) {
+        WeakReference<FileContentImpl> previousContentRef=document.getUserData(ourFileContentKey);
+        FileContentImpl previousContent=com.intellij.reference.SoftReference.dereference(previousContentRef);
+        final FileContentImpl newFc;
+        if (previousContent != null && previousContent.getStamp() == currentDocStamp) {
+          newFc=previousContent;
+        }
  else {
-        newFc=new FileContentImpl(vFile,contentText,vFile.getCharset(),currentDocStamp);
-        document.putUserData(ourFileContentKey,new WeakReference<FileContentImpl>(newFc));
-      }
-      initFileContent(newFc,project,dominantContentFile);
-      if (content instanceof AuthenticContent) {
-        newFc.putUserData(PlatformIdTableBuilding.EDITOR_HIGHLIGHTER,EditorHighlighterCache.getEditorHighlighterForCachesBuilding(document));
-      }
-      final int inputId=Math.abs(getFileId(vFile));
-      try {
-        getIndex(requestedIndexId).update(inputId,newFc).compute();
-      }
- catch (      ProcessCanceledException pce) {
-        myLastIndexedDocStamps.getAndSet(document,requestedIndexId,previousDocStamp);
-        throw pce;
-      }
+          newFc=new FileContentImpl(vFile,contentText,vFile.getCharset(),currentDocStamp);
+          document.putUserData(ourFileContentKey,new WeakReference<FileContentImpl>(newFc));
+        }
+        initFileContent(newFc,project,dominantContentFile);
+        if (content instanceof AuthenticContent) {
+          newFc.putUserData(PlatformIdTableBuilding.EDITOR_HIGHLIGHTER,EditorHighlighterCache.getEditorHighlighterForCachesBuilding(document));
+        }
+        final int inputId=Math.abs(getFileId(vFile));
+        try {
+          getIndex(requestedIndexId).update(inputId,newFc).compute();
+        }
+ catch (        ProcessCanceledException pce) {
+          myLastIndexedDocStamps.getAndSet(document,requestedIndexId,previousDocStamp);
+          throw pce;
+        }
  finally {
-        cleanFileContent(newFc,dominantContentFile);
+          cleanFileContent(newFc,dominantContentFile);
+        }
       }
+    }
+  finally {
+      FileTypeManagerImpl.cacheFileType(vFile,null);
     }
   }
   return true;

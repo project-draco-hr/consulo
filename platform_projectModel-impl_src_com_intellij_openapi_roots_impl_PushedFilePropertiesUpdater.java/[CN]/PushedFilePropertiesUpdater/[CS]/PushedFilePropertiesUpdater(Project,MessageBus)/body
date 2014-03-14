@@ -1,0 +1,55 @@
+{
+  myProject=project;
+  myPushers=Extensions.getExtensions(FilePropertyPusher.EP_NAME);
+  myFilePushers=ContainerUtil.findAllAsArray(myPushers,new Condition<FilePropertyPusher>(){
+    @Override public boolean value(    FilePropertyPusher pusher){
+      return !pusher.pushDirectoriesOnly();
+    }
+  }
+);
+  StartupManager.getInstance(project).registerPreStartupActivity(new Runnable(){
+    @Override public void run(){
+      long l=System.currentTimeMillis();
+      pushAll(myPushers);
+      LOG.info("File properties pushed in " + (System.currentTimeMillis() - l) + " ms");
+      final MessageBusConnection connection=bus.connect();
+      connection.subscribe(ProjectTopics.PROJECT_ROOTS,new ModuleRootAdapter(){
+        @Override public void rootsChanged(        final ModuleRootEvent event){
+          pushAll(myPushers);
+          for (          FilePropertyPusher pusher : myPushers) {
+            pusher.afterRootsChanged(project);
+          }
+        }
+      }
+);
+      connection.subscribe(VirtualFileManager.VFS_CHANGES,new BulkVirtualFileListenerAdapter(new VirtualFileAdapter(){
+        @Override public void fileCreated(        @NotNull final VirtualFileEvent event){
+          final VirtualFile file=event.getFile();
+          final FilePropertyPusher[] pushers=file.isDirectory() ? myPushers : myFilePushers;
+          pushRecursively(file,project,pushers);
+        }
+        @Override public void fileMoved(        @NotNull final VirtualFileMoveEvent event){
+          final VirtualFile file=event.getFile();
+          final FilePropertyPusher[] pushers=file.isDirectory() ? myPushers : myFilePushers;
+          for (          FilePropertyPusher pusher : pushers) {
+            file.putUserData(pusher.getFileDataKey(),null);
+          }
+          pushRecursively(file,project,pushers);
+        }
+      }
+));
+      for (      final FilePropertyPusher pusher : myPushers) {
+        pusher.initExtra(project,bus,new FilePropertyPusher.Engine(){
+          @Override public void pushAll(){
+            PushedFilePropertiesUpdater.this.pushAll(pusher);
+          }
+          @Override public void pushRecursively(          VirtualFile file,          Project project){
+            PushedFilePropertiesUpdater.this.pushRecursively(file,project,pusher);
+          }
+        }
+);
+      }
+    }
+  }
+);
+}
