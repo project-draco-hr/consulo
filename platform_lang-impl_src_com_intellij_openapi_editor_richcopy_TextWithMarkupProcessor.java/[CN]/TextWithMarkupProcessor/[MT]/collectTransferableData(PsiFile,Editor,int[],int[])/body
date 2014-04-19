@@ -1,0 +1,73 @@
+{
+  if (!Registry.is("editor.richcopy.enable")) {
+    return null;
+  }
+  try {
+    RichCopySettings settings=RichCopySettings.getInstance();
+    Document document=editor.getDocument();
+    final int indentSymbolsToStrip;
+    final int firstLineStartOffset;
+    if (settings.isStripIndents() && startOffsets.length == 1) {
+      Pair<Integer,Integer> p=calcIndentSymbolsToStrip(document,startOffsets[0],endOffsets[0]);
+      firstLineStartOffset=p.first;
+      indentSymbolsToStrip=p.second;
+    }
+ else {
+      firstLineStartOffset=startOffsets[0];
+      indentSymbolsToStrip=0;
+    }
+    logInitial(document,startOffsets,endOffsets,indentSymbolsToStrip,firstLineStartOffset);
+    CharSequence text=document.getCharsSequence();
+    EditorColorsScheme schemeToUse=settings.getColorsScheme(editor.getColorsScheme());
+    EditorHighlighter highlighter=HighlighterFactory.createHighlighter(file.getVirtualFile(),schemeToUse,file.getProject());
+    highlighter.setText(text);
+    MarkupModel markupModel=DocumentMarkupModel.forDocument(document,file.getProject(),false);
+    myBuilders.getMulticaster().init(schemeToUse.getDefaultForeground(),schemeToUse.getDefaultBackground(),FontMapper.getPhysicalFontName(schemeToUse.getEditorFontName()),schemeToUse.getEditorFontSize());
+    EventDispatcher<TextWithMarkupBuilder> activeBuilders=EventDispatcher.create(TextWithMarkupBuilder.class);
+    activeBuilders.getListeners().addAll(myBuilders.getListeners());
+    Context context=new Context(activeBuilders.getMulticaster(),text,schemeToUse,indentSymbolsToStrip);
+    outer:     for (int i=0; i < startOffsets.length; i++) {
+      int startOffsetToUse;
+      if (i == 0) {
+        startOffsetToUse=firstLineStartOffset;
+      }
+ else {
+        startOffsetToUse=startOffsets[i];
+        activeBuilders.getMulticaster().addTextFragment("\n",0,1);
+      }
+      int endOffsetToUse=endOffsets[i];
+      context.reset();
+      if (endOffsetToUse <= startOffsetToUse) {
+        continue;
+      }
+      DisposableIterator<SegmentInfo> it=aggregateSyntaxInfo(schemeToUse,wrap(highlighter,text,schemeToUse,startOffsetToUse,endOffsetToUse),wrap(markupModel,text,schemeToUse,startOffsetToUse,endOffsetToUse));
+      try {
+        while (it.hasNext()) {
+          Iterator<TextWithMarkupBuilder> builderIterator=activeBuilders.getListeners().iterator();
+          while (builderIterator.hasNext()) {
+            if (builderIterator.next().isOverflowed()) {
+              builderIterator.remove();
+              if (activeBuilders.getListeners().isEmpty()) {
+                break outer;
+              }
+            }
+          }
+          SegmentInfo info=it.next();
+          if (info.startOffset >= endOffsetToUse) {
+            break;
+          }
+          context.onNewData(info);
+        }
+      }
+  finally {
+        it.dispose();
+      }
+      context.onIterationEnd(endOffsetToUse);
+    }
+    myBuilders.getMulticaster().complete();
+  }
+ catch (  Exception e) {
+    LOG.error(e);
+  }
+  return null;
+}
