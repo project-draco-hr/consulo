@@ -1,0 +1,42 @@
+{
+  Map<VirtualFile,OrderEntry[]> result=myOrderEntries;
+  if (result != null)   return result;
+  MultiMap<VirtualFile,OrderEntry> libClassRootEntries=MultiMap.createSmartList();
+  MultiMap<VirtualFile,OrderEntry> libSourceRootEntries=MultiMap.createSmartList();
+  MultiMap<VirtualFile,OrderEntry> depEntries=MultiMap.createSmartList();
+  for (  final Module module : ModuleManager.getInstance(myProject).getModules()) {
+    final ModuleRootManager moduleRootManager=ModuleRootManager.getInstance(module);
+    for (    OrderEntry orderEntry : moduleRootManager.getOrderEntries()) {
+      if (orderEntry instanceof ModuleOrderEntry) {
+        final Module depModule=((ModuleOrderEntry)orderEntry).getModule();
+        if (depModule != null) {
+          VirtualFile[] importedClassRoots=OrderEnumerator.orderEntries(depModule).exportedOnly().recursively().classes().usingCache().getRoots();
+          for (          VirtualFile importedClassRoot : importedClassRoots) {
+            depEntries.putValue(importedClassRoot,orderEntry);
+          }
+        }
+        for (        VirtualFile sourceRoot : orderEntry.getFiles(OrderRootType.SOURCES)) {
+          depEntries.putValue(sourceRoot,orderEntry);
+        }
+      }
+ else       if (orderEntry instanceof LibraryOrSdkOrderEntry) {
+        final LibraryOrSdkOrderEntry entry=(LibraryOrSdkOrderEntry)orderEntry;
+        for (        final VirtualFile sourceRoot : entry.getRootFiles(OrderRootType.SOURCES)) {
+          libSourceRootEntries.putValue(sourceRoot,orderEntry);
+        }
+        for (        final VirtualFile classRoot : entry.getRootFiles(OrderRootType.CLASSES)) {
+          libClassRootEntries.putValue(classRoot,orderEntry);
+        }
+      }
+    }
+  }
+  RootInfo rootInfo=buildRootInfo(myProject);
+  result=ContainerUtil.newHashMap();
+  Set<VirtualFile> allRoots=rootInfo.getAllRoots();
+  for (  VirtualFile file : allRoots) {
+    List<VirtualFile> hierarchy=getHierarchy(file,allRoots,rootInfo);
+    result.put(file,hierarchy == null ? OrderEntry.EMPTY_ARRAY : calcOrderEntries(rootInfo,depEntries,libClassRootEntries,libSourceRootEntries,hierarchy));
+  }
+  myOrderEntries=result;
+  return result;
+}
