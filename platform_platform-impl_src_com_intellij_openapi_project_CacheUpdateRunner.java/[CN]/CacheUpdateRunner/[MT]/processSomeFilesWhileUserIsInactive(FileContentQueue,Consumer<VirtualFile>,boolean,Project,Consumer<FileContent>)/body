@@ -1,0 +1,42 @@
+{
+  final ProgressIndicatorBase innerIndicator=new ProgressIndicatorBase(){
+    @Override protected boolean isCancelable(){
+      return true;
+    }
+  }
+;
+  final ApplicationAdapter canceller=new ApplicationAdapter(){
+    @Override public void beforeWriteActionStart(    Object action){
+      innerIndicator.cancel();
+    }
+  }
+;
+  final Application application=ApplicationManager.getApplication();
+  application.addApplicationListener(canceller);
+  final AtomicBoolean isFinished=new AtomicBoolean();
+  try {
+    int threadsCount=Registry.intValue("caches.indexerThreadsCount");
+    if (threadsCount <= 0) {
+      threadsCount=Math.max(1,Math.min(PROC_COUNT - 1,4));
+    }
+    if (threadsCount == 1) {
+      Runnable process=new MyRunnable(innerIndicator,queue,isFinished,progressUpdater,processInReadAction,project,fileProcessor);
+      ProgressManager.getInstance().runProcess(process,innerIndicator);
+    }
+ else {
+      AtomicBoolean[] finishedRefs=new AtomicBoolean[threadsCount];
+      Future<?>[] futures=new Future<?>[threadsCount];
+      for (int i=0; i < threadsCount; i++) {
+        AtomicBoolean ref=new AtomicBoolean();
+        finishedRefs[i]=ref;
+        Runnable process=new MyRunnable(innerIndicator,queue,ref,progressUpdater,processInReadAction,project,fileProcessor);
+        futures[i]=ApplicationManager.getApplication().executeOnPooledThread(getProcessWrapper(process));
+      }
+      isFinished.set(waitForAll(finishedRefs,futures));
+    }
+  }
+  finally {
+    application.removeApplicationListener(canceller);
+  }
+  return isFinished.get();
+}
