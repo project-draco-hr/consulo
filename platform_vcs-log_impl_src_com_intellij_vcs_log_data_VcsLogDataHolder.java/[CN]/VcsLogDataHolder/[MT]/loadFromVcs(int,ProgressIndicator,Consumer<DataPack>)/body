@@ -1,5 +1,6 @@
 {
-  Map<VirtualFile,List<TimedVcsCommit>> logsToBuild=ContainerUtil.newHashMap();
+  StopWatch methodSW=StopWatch.start("loadFromVcs");
+  Map<VirtualFile,List<? extends TimedVcsCommit>> logsToBuild=ContainerUtil.newHashMap();
   Map<VirtualFile,Collection<VcsRef>> refsByRoot=ContainerUtil.newHashMap();
   for (  Map.Entry<VirtualFile,RecentCommitsInfo> entry : collectInfoFromVcs(true,commitCount)) {
     VirtualFile root=entry.getKey();
@@ -7,13 +8,19 @@
     logsToBuild.put(root,info.firstBlockCommits);
     refsByRoot.put(root,info.newRefs);
   }
-  List<TimedVcsCommit> compoundLog=myMultiRepoJoiner.join(logsToBuild.values());
-  DataPack dataPack=DataPack.build(compoundLog,collectAllRefs(refsByRoot),indicator);
+  StopWatch sw=StopWatch.start("multi-repo join");
+  List<? extends TimedVcsCommit> compoundLog=myMultiRepoJoiner.join(logsToBuild.values());
+  sw.report();
+  sw=StopWatch.start("DataPack.build");
+  DataPack dataPack=DataPack.build(convertToGraphCommits(compoundLog),collectAllRefs(refsByRoot),indicator,myIndexGetter,myHashGetter,myLogProviders);
+  sw.report();
   if (myLogData != null && myLogData.isFullLogReady()) {
     myLogData=new LogData(myLogData.getLogs(),myLogData.getRefs(),compoundLog,dataPack,true);
   }
  else {
     myLogData=new LogData(logsToBuild,refsByRoot,compoundLog,dataPack,false);
   }
+  myContainingBranchesGetter.clearCache();
   handleOnSuccessInEdt(onSuccess,dataPack);
+  methodSW.report();
 }
