@@ -23,18 +23,19 @@
   descriptions.add(pathLabel,BorderLayout.CENTER);
   twManager=ToolWindowManager.getInstance(project);
   DefaultListModel twModel=new DefaultListModel();
-  for (  String id : twManager.getToolWindowIds()) {
-    final ToolWindow tw=twManager.getToolWindow(id);
+  List<ActivateToolWindowAction> actions=ToolWindowsGroup.getToolWindowActions(project);
+  List<ToolWindow> windows=ContainerUtil.newArrayList();
+  for (  ActivateToolWindowAction action : actions) {
+    ToolWindow tw=twManager.getToolWindow(action.getToolWindowId());
     if (tw.isAvailable()) {
-      ids.put(tw,id);
+      windows.add(tw);
     }
   }
-  final ArrayList<ToolWindow> windows=new ArrayList<ToolWindow>(ids.keySet());
   twShortcuts=createShortcuts(windows);
   final Map<ToolWindow,String> map=ContainerUtil.reverseMap(twShortcuts);
   Collections.sort(windows,new Comparator<ToolWindow>(){
     @Override public int compare(    ToolWindow o1,    ToolWindow o2){
-      return map.get(o1).compareTo(map.get(o2));
+      return StringUtil.compare(map.get(o1),map.get(o2),false);
     }
   }
 );
@@ -45,7 +46,7 @@
   if (pinned) {
     new NameFilteringListModel<ToolWindow>(toolWindows,new Function<ToolWindow,String>(){
       @Override public String fun(      ToolWindow window){
-        return ids.get(window);
+        return window.getStripeTitle();
       }
     }
 ,new Condition<String>(){
@@ -57,7 +58,7 @@
   }
   toolWindows.setBorder(IdeBorderFactory.createEmptyBorder(5,5,5,20));
   toolWindows.setSelectionMode(pinned ? ListSelectionModel.MULTIPLE_INTERVAL_SELECTION : ListSelectionModel.SINGLE_SELECTION);
-  toolWindows.setCellRenderer(new SwitcherToolWindowsListRenderer(mySpeedSearch,ids,map,myPinned){
+  toolWindows.setCellRenderer(new SwitcherToolWindowsListRenderer(mySpeedSearch,map,myPinned){
     @Override public Component getListCellRendererComponent(    JList list,    Object value,    int index,    boolean selected,    boolean hasFocus){
       final JComponent renderer=(JComponent)super.getListCellRendererComponent(list,value,index,selected,hasFocus);
       if (selected) {
@@ -107,7 +108,11 @@
     final int maxFiles=Math.max(editors.size(),recentFiles.length);
     final int len=isPinnedMode() ? recentFiles.length : Math.min(toolWindows.getModel().getSize(),maxFiles);
     boolean firstRecentMarked=false;
+    final List<VirtualFile> selectedFiles=Arrays.asList(editorManager.getSelectedFiles());
     for (int i=0; i < len; i++) {
+      if (isPinnedMode() && selectedFiles.contains(recentFiles[i])) {
+        continue;
+      }
       final FileInfo info=new FileInfo(recentFiles[i],null);
       boolean add=true;
       if (isPinnedMode()) {
@@ -189,15 +194,11 @@
 );
     }
     private void updatePathLabel(){
-      final Object[] values=files.getSelectedValues();
+      Object[] values=files.getSelectedValues();
       if (values != null && values.length == 1) {
-        final VirtualFile parent=((FileInfo)values[0]).first.getParent();
-        if (parent != null) {
-          pathLabel.setText(getTitle2Text(FileUtil.getLocationRelativeToUserHome(parent.getPresentableUrl())));
-        }
- else {
-          pathLabel.setText(" ");
-        }
+        VirtualFile file=((FileInfo)values[0]).first;
+        String presentableUrl=ObjectUtils.notNull(file.getParent(),file).getPresentableUrl();
+        pathLabel.setText(getTitle2Text(FileUtil.getLocationRelativeToUserHome(presentableUrl)));
       }
  else {
         pathLabel.setText(" ");
@@ -239,9 +240,9 @@
   this.add(toolWindows,BorderLayout.WEST);
   if (filesModel.size() > 0) {
     files.setAlignmentY(1f);
-    if (files.getModel().getSize() > 30) {
+    if (files.getModel().getSize() > 20) {
       final JScrollPane pane=ScrollPaneFactory.createScrollPane(files,true);
-      pane.setPreferredSize(new Dimension(files.getPreferredSize().width + 10,30 * 20));
+      pane.setPreferredSize(new Dimension(files.getPreferredSize().width + 10,20 * 20));
       pane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
       this.add(pane,BorderLayout.EAST);
     }
@@ -259,7 +260,6 @@
   final boolean isAlt=(modifiers & Event.ALT_MASK) != 0;
   ALT_KEY=isAlt ? VK_CONTROL : VK_ALT;
   CTRL_KEY=isAlt ? VK_ALT : VK_CONTROL;
-  final IdeFrameImpl ideFrame=WindowManagerEx.getInstanceEx().getFrame(project);
   myPopup=JBPopupFactory.getInstance().createComponentPopupBuilder(this,this).setResizable(pinned).setModalContext(false).setFocusable(true).setRequestFocus(true).setTitle(title).setCancelOnWindowDeactivation(true).setCancelOnOtherWindowOpen(true).setMovable(pinned).setCancelKeyEnabled(false).setCancelCallback(new Computable<Boolean>(){
     public Boolean compute(){
       SWITCHER=null;
@@ -291,14 +291,7 @@
     }
 .registerCustomShortcutSet(CustomShortcutSet.fromString("ESCAPE"),this,myPopup);
   }
-  Component comp=null;
-  final EditorWindow result=FileEditorManagerEx.getInstanceEx(project).getActiveWindow().getResult();
-  if (result != null) {
-    comp=result.getOwner();
-  }
-  if (comp == null) {
-    comp=ideFrame.getContentPane();
-  }
+  final Window window=KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow();
   myAlarm=new Alarm(Alarm.ThreadToUse.SWING_THREAD,myPopup);
-  myPopup.showInCenterOf(comp);
+  myPopup.showInCenterOf(window);
 }
