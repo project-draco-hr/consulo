@@ -1,0 +1,59 @@
+{
+  String stringToFind=myFindModel.getStringToFind();
+  if (stringToFind.isEmpty() || DumbService.getInstance(myProject).isDumb()) {
+    return Collections.emptySet();
+  }
+  SearchScope customScope=myFindModel.getCustomScope();
+  GlobalSearchScope scope=myPsiDirectory != null ? GlobalSearchScopesCore.directoryScope(myPsiDirectory,true) : myModule != null ? myModule.getModuleContentScope() : customScope instanceof GlobalSearchScope ? (GlobalSearchScope)customScope : toGlobal(customScope);
+  if (scope == null) {
+    scope=ProjectScope.getContentScope(myProject);
+  }
+  final Set<PsiFile> resultFiles=new LinkedHashSet<PsiFile>();
+  if (TrigramIndex.ENABLED) {
+    final Set<Integer> keys=ContainerUtil.newTroveSet();
+    TrigramBuilder.processTrigrams(stringToFind,new TrigramBuilder.TrigramProcessor(){
+      @Override public boolean execute(      int value){
+        keys.add(value);
+        return true;
+      }
+    }
+);
+    if (!keys.isEmpty()) {
+      final List<VirtualFile> hits=new ArrayList<VirtualFile>();
+      final GlobalSearchScope finalScope=scope;
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        public void run(){
+          FileBasedIndex.getInstance().getFilesWithKey(TrigramIndex.INDEX_ID,keys,new CommonProcessors.CollectProcessor<VirtualFile>(hits),finalScope);
+        }
+      }
+);
+      for (      VirtualFile hit : hits) {
+        if (myFileMask.value(hit)) {
+          PsiFile file=findFile(hit);
+          if (file != null) {
+            resultFiles.add(file);
+          }
+        }
+      }
+      return resultFiles;
+    }
+  }
+  PsiSearchHelperImpl helper=(PsiSearchHelperImpl)PsiSearchHelper.SERVICE.getInstance(myProject);
+  helper.processFilesWithText(scope,UsageSearchContext.ANY,myFindModel.isCaseSensitive(),stringToFind,new Processor<VirtualFile>(){
+    @Override public boolean process(    VirtualFile file){
+      if (myFileMask.value(file)) {
+        ContainerUtil.addIfNotNull(resultFiles,findFile(file));
+      }
+      return true;
+    }
+  }
+);
+  CacheManager cacheManager=CacheManager.SERVICE.getInstance(myProject);
+  PsiFile[] filesWithWord=cacheManager.getFilesWithWord(stringToFind,UsageSearchContext.ANY,scope,myFindModel.isCaseSensitive());
+  for (  PsiFile file : filesWithWord) {
+    if (myFileMask.value(file.getVirtualFile())) {
+      resultFiles.add(file);
+    }
+  }
+  return resultFiles;
+}

@@ -1,31 +1,56 @@
 {
+  final long valueOffset;
+  final int id;
   myEnumerator.lockStorage();
   try {
     myAppendCache.remove(key);
-    final int id=tryEnumerate(key);
-    if (id == PersistentEnumerator.NULL_ID) {
+    if (myDirectlyStoreLongFileOffsetMode) {
+      valueOffset=((PersistentBTreeEnumerator<Key>)myEnumerator).getNonnegativeValue(key);
+      if (myIntMapping) {
+        return (Value)(Integer)(int)valueOffset;
+      }
+      id=-1;
+    }
+ else {
+      id=tryEnumerate(key);
+      if (id == PersistentEnumerator.NULL_ID) {
+        return null;
+      }
+      if (myIntMapping) {
+        return (Value)(Integer)myEnumerator.myStorage.getInt(id + myParentValueRefOffset);
+      }
+      valueOffset=readValueId(id);
+    }
+    if (valueOffset == NULL_ADDR) {
       return null;
-    }
-    final long oldHeader=readValueId(id);
-    if (oldHeader == PersistentEnumerator.NULL_ID) {
-      return null;
-    }
-    PersistentHashMapValueStorage.ReadResult readResult=myValueStorage.readBytes(oldHeader);
-    if (readResult.offset != oldHeader) {
-      myEnumerator.markDirty(true);
-      updateValueId(id,readResult.offset,oldHeader,key,0);
-      myLiveAndGarbageKeysCounter++;
-      myReadCompactionGarbageSize+=readResult.buffer.length;
-    }
-    final DataInputStream input=new DataInputStream(new UnsyncByteArrayInputStream(readResult.buffer));
-    try {
-      return myValueExternalizer.read(input);
-    }
-  finally {
-      input.close();
     }
   }
   finally {
     myEnumerator.unlockStorage();
+  }
+  PersistentHashMapValueStorage.ReadResult readResult=myValueStorage.readBytes(valueOffset);
+  if (readResult.offset != valueOffset) {
+    myEnumerator.lockStorage();
+    try {
+      myEnumerator.markDirty(true);
+      if (myDirectlyStoreLongFileOffsetMode) {
+        ((PersistentBTreeEnumerator<Key>)myEnumerator).putNonnegativeValue(key,readResult.offset);
+      }
+ else {
+        updateValueId(id,readResult.offset,valueOffset,key,0);
+      }
+      myLiveAndGarbageKeysCounter++;
+      myReadCompactionGarbageSize+=readResult.buffer.length;
+    }
+  finally {
+      myEnumerator.unlockStorage();
+    }
+  }
+  final DataInputStream input=new DataInputStream(new UnsyncByteArrayInputStream(readResult.buffer));
+  try {
+    return myValueExternalizer.read(input);
+  }
+  finally {
+    input.close();
   }
 }
