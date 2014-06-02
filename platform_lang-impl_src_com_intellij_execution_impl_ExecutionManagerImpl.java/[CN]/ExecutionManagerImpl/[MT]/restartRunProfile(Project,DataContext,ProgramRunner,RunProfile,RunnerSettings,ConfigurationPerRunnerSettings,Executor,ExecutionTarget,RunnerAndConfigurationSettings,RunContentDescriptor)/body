@@ -1,0 +1,50 @@
+{
+  final ProgramRunner runner=r != null ? r : RunnerRegistry.getInstance().getRunner(executor.getId(),configuration != null && configuration.getConfiguration() != null ? configuration.getConfiguration() : runProfile);
+  if (configuration != null && runner == null) {
+    LOG.error("Cannot find runner for " + configuration.getName());
+    return;
+  }
+  final List<RunContentDescriptor> runningConfigurationsOfTheSameType=new ArrayList<RunContentDescriptor>();
+  final List<RunContentDescriptor> runningIncompatibleConfigurations=new ArrayList<RunContentDescriptor>();
+  if (configuration != null) {
+    runningIncompatibleConfigurations.addAll(getIncompatibleRunningDescriptors(configuration));
+  }
+  if (configuration != null && configuration.isSingleton()) {
+    runningConfigurationsOfTheSameType.addAll(getRunningDescriptorsOfTheSameConfigType(configuration));
+  }
+ else   if (currentDescriptor != null) {
+    runningConfigurationsOfTheSameType.add(currentDescriptor);
+  }
+  final List<RunContentDescriptor> runningConfigurationsToStop=ContainerUtil.concat(runningConfigurationsOfTheSameType,runningIncompatibleConfigurations);
+  if (!runningConfigurationsToStop.isEmpty()) {
+    if (configuration != null) {
+      if (!runningConfigurationsOfTheSameType.isEmpty() && (runningConfigurationsOfTheSameType.size() > 1 || currentDescriptor == null || runningConfigurationsOfTheSameType.get(0) != currentDescriptor) && !userApprovesStopForSameTypeConfigurations(project,configuration.getName(),runningConfigurationsOfTheSameType.size())) {
+        return;
+      }
+      if (!runningIncompatibleConfigurations.isEmpty() && !userApprovesStopForIncompatibleConfigurations(myProject,configuration.getName(),runningIncompatibleConfigurations)) {
+        return;
+      }
+    }
+    for (    RunContentDescriptor descriptor : runningConfigurationsToStop) {
+      stop(descriptor);
+    }
+  }
+  Runnable runnable=new Runnable(){
+    @Override public void run(){
+      if (runner != null && ExecutorRegistry.getInstance().isStarting(project,executor.getId(),runner.getRunnerId())) {
+        awaitingTerminationAlarm.addRequest(this,100);
+        return;
+      }
+      for (      RunContentDescriptor descriptor : runningConfigurationsOfTheSameType) {
+        ProcessHandler processHandler=descriptor.getProcessHandler();
+        if (processHandler != null && !processHandler.isProcessTerminated()) {
+          awaitingTerminationAlarm.addRequest(this,100);
+          return;
+        }
+      }
+      start(project,context,runner,runProfile,runnerSettings,configurationPerRunnerSettings,configuration,executor,target,currentDescriptor);
+    }
+  }
+;
+  awaitingTerminationAlarm.addRequest(runnable,50);
+}
