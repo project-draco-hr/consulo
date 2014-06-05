@@ -2,12 +2,32 @@
   super(project,true);
   myModuleCreation=virtualFile != null;
   setTitle(myModuleCreation ? IdeBundle.message("title.add.module") : IdeBundle.message("title.new.project"));
-  DListItem root=DListItem.builder().withItems(DListItem.builder().withName("Java").withIcon(AllIcons.Nodes.Static).withItems(DListItem.builder().withName("Hello World").withIcon(AllIcons.Nodes.Class)),DListItem.builder().withName("C#").withIcon(AllIcons.Nodes.TypeAlias).withItems(DListItem.builder().withName("ASP").withIcon(AllIcons.Nodes.Artifact)),DListItem.builder().withName("Empty").withIcon(AllIcons.FileTypes.Text)).create();
+  val context=new NewModuleContext();
+  for (  NewModuleBuilder newModuleBuilder : NewModuleBuilder.EP_NAME.getExtensions()) {
+    newModuleBuilder.setupContext(context);
+  }
+  DListItem.Builder root=DListItem.builder();
+  Map<String,DListItem.Builder> map=new HashMap<String,DListItem.Builder>();
+  for (  Pair<String[],NewModuleBuilderProcessor> pair : context.getSetup()) {
+    String[] path=pair.getFirst();
+    NewModuleBuilderProcessor processor=pair.getSecond();
+    DListItem.Builder prev=root;
+    for (int i=0; i < path.length; i++) {
+      String item=path[i];
+      DListItem.Builder builder=map.get(item);
+      if (builder == null) {
+        Pair<String,Icon> itemInfo=context.getItem(item);
+        map.put(item,builder=DListItem.builder().withName(itemInfo.getFirst()).withIcon(itemInfo.getSecond()).withAttach(processor));
+      }
+      prev.withItems(builder);
+      prev=builder;
+    }
+  }
   mySplitter=new JBSplitter(0.3f);
-  mySplitter.setSplitterProportionKey("#CreateProjectOrModuleDialog.Splitter");
-  DListWithChildren list=new DListWithChildren();
-  list.select(root);
-  mySplitter.setFirstComponent(new JBScrollPane(list));
+  mySplitter.setSplitterProportionKey("#NewProjectOrModuleDialogWithSetup.Splitter");
+  myListWithChildren=new DListWithChildren();
+  myListWithChildren.select(root.create());
+  mySplitter.setFirstComponent(new JBScrollPane(myListWithChildren));
   final JPanel panel=new JPanel(new VerticalFlowLayout());
   myNameField=new JTextField();
   myLocationField=new TextFieldWithBrowseButton();
@@ -20,20 +40,30 @@
     new LocationNameFieldsBinding(project,myLocationField,myNameField,ProjectUtil.getBaseDir(),"Select Directory");
   }
   panel.add(new SeparatorComponent());
+  final JPanel etcPanel=new JPanel(new BorderLayout());
+  panel.add(etcPanel);
   final JPanel nullPanel=new JPanel(new BorderLayout());
   mySplitter.setSecondComponent(nullPanel);
-  list.setConsumer(new Consumer<DListItem>(){
+  myListWithChildren.setConsumer(new Consumer<DListItem>(){
     @Override public void consume(    DListItem dListItem){
+      NewModuleBuilderProcessor processor=dListItem == null ? null : (NewModuleBuilderProcessor)dListItem.getAttach();
+      if (processor != null) {
+        myConfigurationPanel=processor.createConfigurationPanel();
+        etcPanel.add(myConfigurationPanel,BorderLayout.NORTH);
+      }
+ else {
+        myConfigurationPanel=nullPanel;
+        etcPanel.removeAll();
+      }
+      myProcessor=processor;
       if (dListItem != null) {
         mySplitter.setSecondComponent(panel);
       }
  else {
         mySplitter.setSecondComponent(nullPanel);
       }
-      mySplitter.invalidate();
     }
   }
 );
-  setSize(800,600);
   init();
 }
