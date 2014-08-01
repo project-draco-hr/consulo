@@ -1,28 +1,36 @@
 {
-  if (!CodeInsightSettings.getInstance().INDENTING_BACKSPACE || !StringUtil.isWhiteSpace(c)) {
+  if (!isApplicable) {
     return false;
   }
-  LanguageCodeStyleSettingsProvider codeStyleSettingsProvider=LanguageCodeStyleSettingsProvider.forLanguage(file.getLanguage());
-  if (codeStyleSettingsProvider != null && codeStyleSettingsProvider.isIndentBasedLanguageSemantics()) {
-    return false;
-  }
+  Project project=file.getProject();
   Document document=editor.getDocument();
-  int caretOffset=editor.getCaretModel().getOffset();
+  CaretModel caretModel=editor.getCaretModel();
+  int caretOffset=caretModel.getOffset();
   int offset=CharArrayUtil.shiftForward(document.getCharsSequence(),caretOffset," \t");
   int beforeWhitespaceOffset=CharArrayUtil.shiftBackward(document.getCharsSequence(),offset - 1," \t") + 1;
-  LogicalPosition logicalPosition=caretOffset < offset ? editor.offsetToLogicalPosition(offset) : editor.getCaretModel().getLogicalPosition();
+  LogicalPosition logicalPosition=caretOffset < offset ? editor.offsetToLogicalPosition(offset) : caretModel.getLogicalPosition();
   int lineStartOffset=document.getLineStartOffset(logicalPosition.line);
   if (lineStartOffset < beforeWhitespaceOffset) {
-    if (caretWasAtLineStart && beforeWhitespaceOffset < offset) {
-      document.deleteString(beforeWhitespaceOffset,offset);
-      return true;
-    }
+    if (caretWasAtLineStart && beforeWhitespaceOffset <= offset) {
+      String spacing;
+      if (precalculatedSpacing == null) {
+        PsiDocumentManager.getInstance(project).commitDocument(document);
+        spacing=getSpacing(file,offset);
+      }
  else {
-      return false;
+        spacing=precalculatedSpacing;
+      }
+      if (beforeWhitespaceOffset < offset || !spacing.isEmpty()) {
+        document.replaceString(beforeWhitespaceOffset,offset,spacing);
+        caretModel.moveToOffset(beforeWhitespaceOffset + spacing.length());
+        return true;
+      }
     }
+    return false;
   }
-  CodeStyleFacade codeStyleFacade=CodeStyleFacade.getInstance(editor.getProject());
-  String indent=codeStyleFacade.getLineIndent(document,lineStartOffset);
+  PsiDocumentManager.getInstance(project).commitDocument(document);
+  CodeStyleFacade codeStyleFacade=CodeStyleFacade.getInstance(project);
+  String indent=codeStyleFacade.getLineIndent(document,offset);
   if (indent == null) {
     return false;
   }
@@ -30,16 +38,14 @@
   int targetColumn=getWidth(indent,tabSize);
   if (logicalPosition.column == targetColumn) {
     if (caretOffset < offset) {
-      editor.getCaretModel().moveToLogicalPosition(logicalPosition);
+      caretModel.moveToLogicalPosition(logicalPosition);
       return true;
     }
- else {
-      return false;
-    }
+    return false;
   }
   if (caretWasAtLineStart || logicalPosition.column > targetColumn) {
-    smartReplace(document,lineStartOffset,offset,indent);
-    editor.getCaretModel().moveToLogicalPosition(new LogicalPosition(logicalPosition.line,targetColumn));
+    document.replaceString(lineStartOffset,offset,indent);
+    caretModel.moveToLogicalPosition(new LogicalPosition(logicalPosition.line,targetColumn));
     return true;
   }
   if (logicalPosition.line == 0) {
@@ -49,12 +55,13 @@
   int prevLineEndOffset=document.getLineEndOffset(logicalPosition.line - 1);
   int targetOffset=CharArrayUtil.shiftBackward(document.getCharsSequence(),prevLineEndOffset - 1," \t") + 1;
   if (prevLineStartOffset < targetOffset) {
-    document.deleteString(targetOffset,offset);
-    editor.getCaretModel().moveToOffset(targetOffset);
+    String spacing=getSpacing(file,offset);
+    document.replaceString(targetOffset,offset,spacing);
+    caretModel.moveToOffset(targetOffset + spacing.length());
   }
  else {
-    smartReplace(document,prevLineStartOffset,offset,indent);
-    editor.getCaretModel().moveToLogicalPosition(new LogicalPosition(logicalPosition.line - 1,targetColumn));
+    document.replaceString(prevLineStartOffset,offset,indent);
+    caretModel.moveToLogicalPosition(new LogicalPosition(logicalPosition.line - 1,targetColumn));
   }
   return true;
 }
