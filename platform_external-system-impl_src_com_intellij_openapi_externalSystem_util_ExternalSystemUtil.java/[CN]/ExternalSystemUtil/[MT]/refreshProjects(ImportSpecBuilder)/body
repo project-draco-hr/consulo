@@ -1,0 +1,37 @@
+{
+  ImportSpec spec=specBuilder.build();
+  ExternalSystemManager<?,?,?,?,?> manager=ExternalSystemApiUtil.getManager(spec.getExternalSystemId());
+  if (manager == null) {
+    return;
+  }
+  AbstractExternalSystemSettings<?,?,?> settings=manager.getSettingsProvider().fun(spec.getProject());
+  final Collection<? extends ExternalProjectSettings> projectsSettings=settings.getLinkedProjectsSettings();
+  if (projectsSettings.isEmpty()) {
+    return;
+  }
+  final ProjectDataManager projectDataManager=ServiceManager.getService(ProjectDataManager.class);
+  final int[] counter=new int[1];
+  ExternalProjectRefreshCallback callback=new MyMultiExternalProjectRefreshCallback(spec.getProject(),projectDataManager,counter,spec.getExternalSystemId());
+  Map<String,Long> modificationStamps=manager.getLocalSettingsProvider().fun(spec.getProject()).getExternalConfigModificationStamps();
+  Set<String> toRefresh=ContainerUtilRt.newHashSet();
+  for (  ExternalProjectSettings setting : projectsSettings) {
+    if (!setting.isUseAutoImport() && spec.isWhenAutoImportEnabled())     continue;
+    if (spec.isForceWhenUptodate()) {
+      toRefresh.add(setting.getExternalProjectPath());
+    }
+ else {
+      Long oldModificationStamp=modificationStamps.get(setting.getExternalProjectPath());
+      long currentModificationStamp=getTimeStamp(setting,spec.getExternalSystemId());
+      if (oldModificationStamp == null || oldModificationStamp < currentModificationStamp) {
+        toRefresh.add(setting.getExternalProjectPath());
+      }
+    }
+  }
+  if (!toRefresh.isEmpty()) {
+    ExternalSystemNotificationManager.getInstance(spec.getProject()).clearNotifications(null,NotificationSource.PROJECT_SYNC,spec.getExternalSystemId());
+    counter[0]=toRefresh.size();
+    for (    String path : toRefresh) {
+      refreshProject(spec.getProject(),spec.getExternalSystemId(),path,callback,false,spec.getProgressExecutionMode());
+    }
+  }
+}
