@@ -1,0 +1,75 @@
+{
+  if (!EarlyAccessProgramManager.is(XDebuggerInlineEapDescriptor.class)) {
+    return null;
+  }
+  final Map<Pair<VirtualFile,Integer>,Set<XValueNodeImpl>> map=project.getUserData(XVariablesView.DEBUG_VARIABLES);
+  final Map<VirtualFile,Long> timestamps=project.getUserData(XVariablesView.DEBUG_VARIABLES_TIMESTAMPS);
+  final Document doc=FileDocumentManager.getInstance().getDocument(file);
+  if (map == null || timestamps == null || doc == null) {
+    return null;
+  }
+  Map<Variable,VariableValue> oldValues=project.getUserData(CACHE);
+  if (oldValues == null) {
+    oldValues=new HashMap<Variable,VariableValue>();
+    project.putUserData(CACHE,oldValues);
+  }
+  final Long timestamp=timestamps.get(file);
+  if (timestamp == null || timestamp < doc.getModificationStamp()) {
+    return null;
+  }
+  Set<XValueNodeImpl> values=map.get(Pair.create(file,lineNumber));
+  if (values != null && !values.isEmpty()) {
+    final int bpLine=getCurrentBreakPointLine(values);
+    ArrayList<LineExtensionInfo> result=new ArrayList<LineExtensionInfo>();
+    for (    XValueNodeImpl value : values) {
+      SimpleColoredText text=new SimpleColoredText();
+      XValueTextRendererImpl renderer=new XValueTextRendererImpl(text);
+      final XValuePresentation presentation=value.getValuePresentation();
+      if (presentation == null)       continue;
+      try {
+        if (presentation instanceof XValueCompactPresentation) {
+          ((XValueCompactPresentation)presentation).renderValue(renderer,value);
+        }
+ else {
+          presentation.renderValue(renderer);
+        }
+        if (StringUtil.isEmpty(text.toString())) {
+          final String type=value.getValuePresentation().getType();
+          if (!StringUtil.isEmpty(type)) {
+            text.append(type,SimpleTextAttributes.REGULAR_ATTRIBUTES);
+          }
+        }
+      }
+ catch (      Exception e) {
+        continue;
+      }
+      final Color color=bpLine == lineNumber ? new JBColor(Gray._180,new Color(147,217,186)) : getForeground();
+      final String name=value.getName();
+      if (StringUtil.isEmpty(text.toString())) {
+        continue;
+      }
+      result.add(new LineExtensionInfo("  " + name + ": ",color,null,null,Font.PLAIN));
+      Variable var=new Variable(name,lineNumber);
+      VariableValue variableValue=oldValues.get(var);
+      if (variableValue == null) {
+        variableValue=new VariableValue(text.toString(),null,value.hashCode());
+        oldValues.put(var,variableValue);
+      }
+      if (variableValue.valueNodeHashCode != value.hashCode()) {
+        variableValue.old=variableValue.actual;
+        variableValue.actual=text.toString();
+        variableValue.valueNodeHashCode=value.hashCode();
+      }
+      if (!variableValue.isChanged()) {
+        for (        String s : text.getTexts()) {
+          result.add(new LineExtensionInfo(s,color,null,null,Font.PLAIN));
+        }
+      }
+ else {
+        variableValue.produceChangedParts(result);
+      }
+    }
+    return result;
+  }
+  return null;
+}

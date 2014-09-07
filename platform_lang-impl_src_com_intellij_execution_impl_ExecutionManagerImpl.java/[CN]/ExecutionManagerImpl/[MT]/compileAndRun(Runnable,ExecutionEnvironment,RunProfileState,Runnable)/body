@@ -1,60 +1,57 @@
 {
-  long id=env.getExecutionId();
+  long id=environment.getExecutionId();
   if (id == 0) {
-    id=env.assignNewExecutionId();
+    id=environment.assignNewExecutionId();
   }
-  RunProfile profile=env.getRunProfile();
-  if (profile instanceof RunConfiguration) {
-    final RunConfiguration runConfiguration=(RunConfiguration)profile;
-    final RunManagerImpl runManager=RunManagerImpl.getInstanceImpl(myProject);
-    final List<BeforeRunTask> activeTasks=new ArrayList<BeforeRunTask>();
-    activeTasks.addAll(runManager.getBeforeRunTasks(runConfiguration));
-    DataContext context=env.getDataContext();
+  RunProfile profile=environment.getRunProfile();
+  if (!(profile instanceof RunConfiguration)) {
+    startRunnable.run();
+    return;
+  }
+  final RunConfiguration runConfiguration=(RunConfiguration)profile;
+  final List<BeforeRunTask> beforeRunTasks=RunManagerEx.getInstanceEx(myProject).getBeforeRunTasks(runConfiguration);
+  if (beforeRunTasks.isEmpty()) {
+    startRunnable.run();
+  }
+ else {
+    DataContext context=environment.getDataContext();
     final DataContext projectContext=context != null ? context : SimpleDataContext.getProjectContext(myProject);
-    if (!activeTasks.isEmpty()) {
-      final long finalId=id;
-      final Long executionSessionId=new Long(id);
-      ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
-        /** 
+    final long finalId=id;
+    final Long executionSessionId=new Long(id);
+    ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+      /** 
  * @noinspection SSBasedInspection
  */
-        @Override public void run(){
-          for (          BeforeRunTask task : activeTasks) {
-            if (myProject.isDisposed()) {
-              return;
-            }
-            BeforeRunTaskProvider<BeforeRunTask> provider=BeforeRunTaskProvider.getProvider(myProject,task.getProviderId());
-            if (provider == null) {
-              LOG.warn("Cannot find BeforeRunTaskProvider for id='" + task.getProviderId() + "'");
-              continue;
-            }
-            ExecutionEnvironment taskEnvironment=new ExecutionEnvironmentBuilder(env).setContentToReuse(null).build();
-            taskEnvironment.setExecutionId(finalId);
-            EXECUTION_SESSION_ID_KEY.set(taskEnvironment,executionSessionId);
-            if (!provider.executeTask(projectContext,runConfiguration,taskEnvironment,task)) {
-              if (onCancelRunnable != null) {
-                SwingUtilities.invokeLater(onCancelRunnable);
-              }
-              return;
-            }
+      @Override public void run(){
+        for (        BeforeRunTask task : beforeRunTasks) {
+          if (myProject.isDisposed()) {
+            return;
           }
-          SwingUtilities.invokeLater(new Runnable(){
-            @Override public void run(){
-              if (!myProject.isDisposed()) {
-                DumbService.getInstance(myProject).runWhenSmart(startRunnable);
-              }
-            }
+          @SuppressWarnings("unchecked") BeforeRunTaskProvider<BeforeRunTask> provider=BeforeRunTaskProvider.getProvider(myProject,task.getProviderId());
+          if (provider == null) {
+            LOG.warn("Cannot find BeforeRunTaskProvider for id='" + task.getProviderId() + "'");
+            continue;
           }
-);
+          ExecutionEnvironment taskEnvironment=new ExecutionEnvironmentBuilder(environment).contentToReuse(null).build();
+          taskEnvironment.setExecutionId(finalId);
+          EXECUTION_SESSION_ID_KEY.set(taskEnvironment,executionSessionId);
+          if (!provider.executeTask(projectContext,runConfiguration,taskEnvironment,task)) {
+            if (onCancelRunnable != null) {
+              SwingUtilities.invokeLater(onCancelRunnable);
+            }
+            return;
+          }
         }
-      }
+        SwingUtilities.invokeLater(new Runnable(){
+          @Override public void run(){
+            if (!myProject.isDisposed()) {
+              DumbService.getInstance(myProject).runWhenSmart(startRunnable);
+            }
+          }
+        }
 );
+      }
     }
- else {
-      startRunnable.run();
-    }
-  }
- else {
-    startRunnable.run();
+);
   }
 }
