@@ -1,0 +1,58 @@
+{
+  if (isEmpty(element)) {
+    try {
+      deleteFile(file,requestor,cachedVirtualFile);
+    }
+ catch (    IOException e) {
+      throw new StateStorageException(e);
+    }
+    return null;
+  }
+  VirtualFile virtualFile=cachedVirtualFile == null || !cachedVirtualFile.isValid() ? null : cachedVirtualFile;
+  Parent document=!wrapAsDocument || element instanceof Document ? element : new Document((Element)element);
+  try {
+    BufferExposingByteArrayOutputStream byteOut;
+    if (file.exists()) {
+      if (virtualFile == null) {
+        virtualFile=LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file);
+      }
+      Pair<byte[],String> pair=loadFile(virtualFile);
+      byteOut=writeToBytes(document,pair.second);
+      if (equal(pair.first,byteOut)) {
+        return null;
+      }
+    }
+ else {
+      FileUtil.createParentDirs(file);
+      byteOut=writeToBytes(document,SystemProperties.getLineSeparator());
+    }
+    AccessToken token=ApplicationManager.getApplication().acquireWriteActionLock(DocumentRunnable.IgnoreDocumentRunnable.class);
+    try {
+      if (virtualFile == null) {
+        virtualFile=getOrCreateVirtualFile(requestor,file);
+      }
+      OutputStream virtualFileOut=virtualFile.getOutputStream(requestor);
+      try {
+        byteOut.writeTo(virtualFileOut);
+      }
+  finally {
+        virtualFileOut.close();
+      }
+      return virtualFile;
+    }
+ catch (    FileNotFoundException e) {
+      if (virtualFile == null) {
+        throw e;
+      }
+ else {
+        throw new ReadOnlyModificationException(virtualFile);
+      }
+    }
+ finally {
+      token.finish();
+    }
+  }
+ catch (  IOException e) {
+    throw new StateStorageException(e);
+  }
+}
