@@ -2,28 +2,32 @@
   if (dir == null || !dir.exists()) {
     return;
   }
+  StringInterner interner=new StringInterner();
   for (  VirtualFile file : dir.getChildren()) {
-    if (!StringUtil.endsWithIgnoreCase(file.getName(),".xml")) {
+    if (!isStorageFile(file)) {
       continue;
     }
     try {
-      final Document document=JDOMUtil.loadDocument(file.contentsToByteArray());
-      final Element element=document.getRootElement();
+      Element element=JDOMUtil.loadDocument(file.contentsToByteArray()).getRootElement();
+      String name=StorageData.getComponentNameIfValid(element);
+      if (name == null) {
+        continue;
+      }
       if (!element.getName().equals(StorageData.COMPONENT)) {
         LOG.error("Incorrect root tag name (" + element.getName() + ") in "+ file.getPresentableUrl());
         continue;
       }
-      String componentName=element.getAttributeValue(StorageData.NAME);
-      if (componentName == null) {
-        LOG.error("Component name isn't specified in " + file.getPresentableUrl());
+      List<Element> elementChildren=element.getChildren();
+      if (elementChildren.isEmpty()) {
         continue;
       }
+      Element state=(Element)elementChildren.get(0).detach();
+      JDOMUtil.internElement(state,interner);
       if (pathMacroSubstitutor != null) {
-        pathMacroSubstitutor.expandPaths(element);
-        final Set<String> unknownMacros=PathMacrosCollector.getMacroNames(element);
-        pathMacroSubstitutor.addUnknownMacros(componentName,unknownMacros);
+        pathMacroSubstitutor.expandPaths(state);
+        pathMacroSubstitutor.addUnknownMacros(name,PathMacrosCollector.getMacroNames(state));
       }
-      put(componentName,new File(file.getPath()),element,true);
+      setState(name,file.getName(),state);
     }
  catch (    IOException e) {
       LOG.info("Unable to load state",e);

@@ -2,27 +2,18 @@
   myProgressManager=progressManager;
   Application app=ApplicationManager.getApplication();
   MessageBus messageBus=app.getMessageBus();
-  MessageBusConnection connection=messageBus.connect(app);
-  connection.subscribe(StateStorage.STORAGE_TOPIC,new StateStorage.Listener(){
-    @Override public void storageFileChanged(    @NotNull final VirtualFileEvent event,    @NotNull final StateStorage storage){
-      VirtualFile file=event.getFile();
-      if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
-        saveChangedProjectFile(file,null,storage);
-      }
+  messageBus.connect(app).subscribe(StateStorage.STORAGE_TOPIC,new StateStorage.Listener(){
+    @Override public void storageFileChanged(    @NotNull VirtualFileEvent event,    @NotNull StateStorage storage){
+      projectStorageFileChanged(event,storage,null);
     }
   }
 );
   final ProjectManagerListener busPublisher=messageBus.syncPublisher(TOPIC);
   addProjectManagerListener(new ProjectManagerListener(){
     @Override public void projectOpened(    final Project project){
-      MessageBus messageBus=project.getMessageBus();
-      MessageBusConnection connection=messageBus.connect(project);
-      connection.subscribe(StateStorage.STORAGE_TOPIC,new StateStorage.Listener(){
-        @Override public void storageFileChanged(        @NotNull final VirtualFileEvent event,        @NotNull final StateStorage storage){
-          VirtualFile file=event.getFile();
-          if (!file.isDirectory() && !(event.getRequestor() instanceof StateStorage.SaveSession)) {
-            saveChangedProjectFile(file,project,storage);
-          }
+      project.getMessageBus().connect(project).subscribe(StateStorage.PROJECT_STORAGE_TOPIC,new StateStorage.Listener(){
+        @Override public void storageFileChanged(        @NotNull VirtualFileEvent event,        @NotNull StateStorage storage){
+          projectStorageFileChanged(event,storage,project);
         }
       }
 );
@@ -53,5 +44,14 @@
     }
   }
 );
-  registerExternalProjectFileListener(virtualFileManager);
+  virtualFileManager.addVirtualFileManagerListener(new VirtualFileManagerAdapter(){
+    @Override public void beforeRefreshStart(    boolean asynchronous){
+      blockReloadingProjectOnExternalChanges();
+    }
+    @Override public void afterRefreshFinish(    boolean asynchronous){
+      unblockReloadingProjectOnExternalChanges();
+    }
+  }
+);
+  myChangedFilesAlarm=new SingleAlarm(restartApplicationOrReloadProjectTask,300);
 }
