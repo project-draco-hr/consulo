@@ -1,0 +1,71 @@
+{
+  super(project,true);
+  myModuleCreation=virtualFile != null;
+  setTitle(myModuleCreation ? IdeBundle.message("title.add.module") : IdeBundle.message("title.new.project"));
+  val context=new NewModuleContext();
+  for (  NewModuleBuilder newModuleBuilder : NewModuleBuilder.EP_NAME.getExtensions()) {
+    newModuleBuilder.setupContext(context);
+  }
+  DListItem.Builder root=DListItem.builder();
+  Map<String,DListItem.Builder> map=new HashMap<String,DListItem.Builder>();
+  for (  Pair<String[],NewModuleBuilderProcessor> pair : context.getSetup()) {
+    String[] path=pair.getFirst();
+    NewModuleBuilderProcessor processor=pair.getSecond();
+    DListItem.Builder prev=root;
+    for (int i=0; i < path.length; i++) {
+      String item=path[i];
+      DListItem.Builder builder=map.get(item);
+      if (builder == null) {
+        Pair<String,Icon> itemInfo=context.getItem(item);
+        map.put(item,builder=DListItem.builder().withName(itemInfo.getFirst()).withIcon(itemInfo.getSecond()).withAttach(processor));
+        prev.withItems(builder);
+      }
+      prev=builder;
+    }
+  }
+  mySplitter=new JBSplitter(0.3f);
+  mySplitter.setSplitterProportionKey("#NewProjectOrModuleDialogWithSetup.Splitter");
+  myListWithChildren=new DListWithChildren();
+  myListWithChildren.select(root.create());
+  mySplitter.setFirstComponent(new JBScrollPane(myListWithChildren));
+  final JPanel panel=new JPanel(new VerticalFlowLayout());
+  myNameField=new JTextField();
+  myLocationField=new TextFieldWithBrowseButton();
+  panel.add(LabeledComponent.create(myNameField,"Name").setLabelLocation(BorderLayout.WEST));
+  if (virtualFile != null) {
+    myNameField.setText(virtualFile.getName());
+  }
+ else {
+    panel.add(LabeledComponent.create(myLocationField,"Path").setLabelLocation(BorderLayout.WEST));
+    new LocationNameFieldsBinding(project,myLocationField,myNameField,ProjectUtil.getBaseDir(),"Select Directory");
+  }
+  panel.add(new SeparatorComponent());
+  final JPanel etcPanel=new JPanel(new BorderLayout());
+  panel.add(etcPanel);
+  final JPanel nullPanel=new JPanel(new BorderLayout());
+  mySplitter.setSecondComponent(nullPanel);
+  myListWithChildren.setConsumer(new Consumer<DListItem>(){
+    @Override public void consume(    final DListItem dListItem){
+      myProcessor=dListItem == null ? null : (NewModuleBuilderProcessor)dListItem.getAttach();
+      SwingUtilities.invokeLater(new Runnable(){
+        @Override public void run(){
+          myConfigurationPanel=nullPanel;
+          etcPanel.removeAll();
+          mySplitter.setSecondComponent(nullPanel);
+          if (dListItem != null) {
+            if (myProcessor != null) {
+              myConfigurationPanel=myProcessor.createConfigurationPanel();
+              etcPanel.add(myConfigurationPanel,BorderLayout.NORTH);
+            }
+            mySplitter.setSecondComponent(panel);
+          }
+        }
+      }
+);
+      setOKActionEnabled(myProcessor != null);
+    }
+  }
+);
+  setOKActionEnabled(false);
+  init();
+}

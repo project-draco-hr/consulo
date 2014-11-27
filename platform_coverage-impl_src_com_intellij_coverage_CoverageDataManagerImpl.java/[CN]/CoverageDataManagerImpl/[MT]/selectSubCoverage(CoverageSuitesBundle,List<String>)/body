@@ -1,0 +1,82 @@
+{
+  suite.restoreCoverageData();
+  final ProjectData data=suite.getCoverageData();
+  if (data == null)   return;
+  mySubCoverageIsActive=true;
+  final Map<String,Set<Integer>> executionTrace=new HashMap<String,Set<Integer>>();
+  for (  CoverageSuite coverageSuite : suite.getSuites()) {
+    final String fileName=coverageSuite.getCoverageDataFileName();
+    final File tracesDir=getTracesDirectory(fileName);
+    for (    String testName : testNames) {
+      final File file=new File(tracesDir,FileUtil.sanitizeFileName(testName) + ".tr");
+      if (file.exists()) {
+        DataInputStream in=null;
+        try {
+          in=new DataInputStream(new FileInputStream(file));
+          int traceSize=in.readInt();
+          for (int i=0; i < traceSize; i++) {
+            final String className=in.readUTF();
+            final int linesSize=in.readInt();
+            Set<Integer> lines=executionTrace.get(className);
+            if (lines == null) {
+              lines=new HashSet<Integer>();
+              executionTrace.put(className,lines);
+            }
+            for (int l=0; l < linesSize; l++) {
+              lines.add(in.readInt());
+            }
+          }
+        }
+ catch (        Exception e) {
+          LOG.error(e);
+        }
+ finally {
+          try {
+            in.close();
+          }
+ catch (          IOException e) {
+            LOG.error(e);
+          }
+        }
+      }
+    }
+  }
+  final ProjectData projectData=new ProjectData();
+  for (  String className : executionTrace.keySet()) {
+    ClassData loadedClassData=projectData.getClassData(className);
+    if (loadedClassData == null) {
+      loadedClassData=projectData.getOrCreateClassData(className);
+    }
+    final Set<Integer> lineNumbers=executionTrace.get(className);
+    final ClassData oldData=data.getClassData(className);
+    LOG.assertTrue(oldData != null,"missed className: \"" + className + "\"");
+    final Object[] oldLines=oldData.getLines();
+    LOG.assertTrue(oldLines != null);
+    int maxNumber=oldLines.length;
+    for (    Integer lineNumber : lineNumbers) {
+      if (lineNumber >= maxNumber) {
+        maxNumber=lineNumber + 1;
+      }
+    }
+    final LineData[] lines=new LineData[maxNumber];
+    for (    Integer line : lineNumbers) {
+      final int lineIdx=line.intValue() - 1;
+      String methodSig=null;
+      if (lineIdx < oldData.getLines().length) {
+        final LineData oldLineData=oldData.getLineData(lineIdx);
+        if (oldLineData != null) {
+          methodSig=oldLineData.getMethodSignature();
+        }
+      }
+      final LineData lineData=new LineData(lineIdx,methodSig);
+      if (methodSig != null) {
+        loadedClassData.registerMethodSignature(lineData);
+      }
+      lineData.setStatus(LineCoverage.FULL);
+      lines[lineIdx]=lineData;
+    }
+    loadedClassData.setLines(lines);
+  }
+  suite.setCoverageData(projectData);
+  renewCoverageData(suite);
+}

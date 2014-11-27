@@ -1,46 +1,47 @@
 {
   cleanProcessedFlag(file);
   IndexingStamp.flushCache(file);
-  Collection<ID<?,?>> existingIndexedIds=IndexingStamp.getIndexedIds(file);
-  for (  ID<?,?> indexId : existingIndexedIds) {
-    if (myNotRequiringContentIndices.contains(indexId)) {
-      try {
-        updateSingleIndex(indexId,file,null);
-      }
- catch (      StorageException e) {
-        LOG.info(e);
-        requestRebuild(indexId);
+  List<ID<?,?>> nontrivialFileIndexedStates=IndexingStamp.getNontrivialFileIndexedStates(file);
+  if (!markForReindex) {
+    for (    ID<?,?> indexId : nontrivialFileIndexedStates) {
+      if (myNotRequiringContentIndices.contains(indexId)) {
+        try {
+          updateSingleIndex(indexId,file,null);
+        }
+ catch (        StorageException e) {
+          LOG.info(e);
+          requestRebuild(indexId);
+        }
       }
     }
+    myFilesToUpdate.remove(file);
   }
-  Collection<ID<?,?>> indexedIdsToUpdate=ContainerUtil.intersection(existingIndexedIds,myRequiringContentIndices);
+  Collection<ID<?,?>> fileIndexedStatesToUpdate=ContainerUtil.intersection(nontrivialFileIndexedStates,myRequiringContentIndices);
   if (markForReindex) {
-    if (!indexedIdsToUpdate.isEmpty()) {
+    if (!fileIndexedStatesToUpdate.isEmpty()) {
+      final List<ID<?,?>> finalNontrivialFileIndexedStates=nontrivialFileIndexedStates;
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         @Override public void run(){
-          IndexingStamp.removeAllIndexedState(file);
+          for (int i=0, size=finalNontrivialFileIndexedStates.size(); i < size; ++i) {
+            final ID<?,?> indexId=finalNontrivialFileIndexedStates.get(i);
+            if (needsFileContentLoading(indexId) && IndexingStamp.isFileIndexedStateCurrent(file,indexId)) {
+              IndexingStamp.setFileIndexedStateOutdated(file,indexId);
+            }
+          }
         }
       }
 );
       if (!isTooLarge(file))       scheduleForUpdate(file);
     }
   }
- else {
-    boolean removed=myFilesToUpdate.remove(file);
-    if (removed) {
-      List<ID<?,?>> affectedContentIndices=calculateAffectedContentIndices(null,file);
-      affectedContentIndices.addAll(indexedIdsToUpdate);
-      indexedIdsToUpdate=affectedContentIndices;
-    }
-    if (!indexedIdsToUpdate.isEmpty()) {
-      final Collection<ID<?,?>> finalIndexedIdsToUpdate=indexedIdsToUpdate;
-      myFutureInvalidations.offer(new InvalidationTask(file){
-        @Override public void run(){
-          removeFileDataFromIndices(finalIndexedIdsToUpdate,file);
-        }
+ else   if (!fileIndexedStatesToUpdate.isEmpty()) {
+    final Collection<ID<?,?>> finalFileIndexedStatesToUpdate=fileIndexedStatesToUpdate;
+    myFutureInvalidations.offer(new InvalidationTask(file){
+      @Override public void run(){
+        removeFileDataFromIndices(finalFileIndexedStatesToUpdate,file);
       }
-);
     }
+);
   }
   IndexingStamp.flushCache(file);
 }

@@ -1,0 +1,76 @@
+{
+  VirtualFile baseDir=virtualFile;
+  if (!baseDir.isDirectory()) {
+    baseDir=virtualFile.getParent();
+    while (baseDir != null) {
+      if (new File(FileUtil.toSystemDependentName(baseDir.getPath()),Project.DIRECTORY_STORE_FOLDER).exists()) {
+        break;
+      }
+      baseDir=baseDir.getParent();
+    }
+    if (baseDir == null) {
+      baseDir=virtualFile.getParent();
+    }
+  }
+  final File projectDir=new File(FileUtil.toSystemDependentName(baseDir.getPath()),Project.DIRECTORY_STORE_FOLDER);
+  Project[] openProjects=ProjectManager.getInstance().getOpenProjects();
+  if (!forceOpenInNewFrame && openProjects.length > 0) {
+    if (projectToClose == null) {
+      projectToClose=openProjects[openProjects.length - 1];
+    }
+    int exitCode=ProjectUtil.confirmOpenNewProject(false);
+    if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
+      if (!ProjectUtil.closeAndDispose(projectToClose))       return null;
+    }
+ else     if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
+      return null;
+    }
+  }
+  boolean runConfigurators=true;
+  final ProjectManagerEx projectManager=ProjectManagerEx.getInstanceEx();
+  Project project=null;
+  if (projectDir.exists()) {
+    try {
+      for (      ProjectOpenProcessor processor : ProjectOpenProcessor.EXTENSION_POINT_NAME.getExtensions()) {
+        processor.refreshProjectFiles(projectDir);
+      }
+      project=projectManager.convertAndLoadProject(baseDir.getPath());
+      if (project == null) {
+        WelcomeFrame.showIfNoProjectOpened();
+        return null;
+      }
+      final Module[] modules=ModuleManager.getInstance(project).getModules();
+      if (modules.length > 0) {
+        runConfigurators=false;
+      }
+    }
+ catch (    Exception e) {
+      LOGGER.error(e);
+    }
+  }
+ else {
+    projectDir.mkdirs();
+  }
+  if (project == null) {
+    project=projectManager.newProject(projectDir.getParentFile().getName(),projectDir.getParent(),true,false);
+  }
+  if (project == null)   return null;
+  ProjectBaseDirectory.getInstance(project).setBaseDir(baseDir);
+  openProjectToolWindow(project);
+  openFileFromCommandLine(project,virtualFile,line);
+  if (!projectManager.openProject(project)) {
+    WelcomeFrame.showIfNoProjectOpened();
+    final Project finalProject=project;
+    ApplicationManager.getApplication().runWriteAction(new Runnable(){
+      @Override public void run(){
+        Disposer.dispose(finalProject);
+      }
+    }
+);
+    return project;
+  }
+  if (callback != null && runConfigurators) {
+    callback.consume(project);
+  }
+  return project;
+}

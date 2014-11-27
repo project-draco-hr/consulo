@@ -1,29 +1,39 @@
 {
   PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-  if (myPsiElements.isEmpty() && myRangeMarkers.isEmpty()) {
+  if (myPsiElements.isEmpty() && myRangeMarkers.isEmpty() && mySerializedElements.isEmpty()) {
     throw new WriteExternalException();
   }
-  for (  SmartPsiElementPointer<PsiElement> ptr : myPsiElements) {
-    PsiElement psiElement=ptr.getElement();
-    if (psiElement == null || !psiElement.isValid()) {
-      continue;
+  if (mySerializedElements.isEmpty()) {
+    for (    SmartPsiElementPointer<PsiElement> ptr : myPsiElements) {
+      PsiElement psiElement=ptr.getElement();
+      if (psiElement == null || !psiElement.isValid()) {
+        continue;
+      }
+      FoldingInfo fi=psiElement.getUserData(FOLDING_INFO_KEY);
+      boolean state=fi != null && fi.expanded;
+      String signature=FoldingPolicy.getSignature(psiElement);
+      if (signature == null) {
+        continue;
+      }
+      PsiElement restoredElement=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature);
+      if (!psiElement.equals(restoredElement)) {
+        StringBuilder trace=new StringBuilder();
+        PsiElement restoredAgain=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature,trace);
+        LOG.error("element: " + psiElement + "("+ psiElement.getText()+ "); restoredElement: "+ restoredElement+ "; signature: '"+ signature+ "'; file: "+ psiElement.getContainingFile()+ "; restored again: "+ restoredAgain+ "; restore produces same results: "+ (restoredAgain == restoredElement)+ "; trace:\n"+ trace);
+      }
+      Element e=new Element(ELEMENT_TAG);
+      e.setAttribute(SIGNATURE_ATT,signature);
+      e.setAttribute(EXPANDED_ATT,Boolean.toString(state));
+      element.addContent(e);
     }
-    FoldingInfo fi=psiElement.getUserData(FOLDING_INFO_KEY);
-    boolean state=fi != null && fi.expanded;
-    String signature=FoldingPolicy.getSignature(psiElement);
-    if (signature == null) {
-      continue;
+  }
+ else {
+    for (    SerializedPsiElement entry : mySerializedElements) {
+      Element e=new Element(ELEMENT_TAG);
+      e.setAttribute(SIGNATURE_ATT,entry.mySerializedElement);
+      e.setAttribute(EXPANDED_ATT,Boolean.toString(entry.myFoldingInfo.getExpanded()));
+      element.addContent(e);
     }
-    PsiElement restoredElement=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature);
-    if (!psiElement.equals(restoredElement)) {
-      StringBuilder trace=new StringBuilder();
-      PsiElement restoredAgain=FoldingPolicy.restoreBySignature(psiElement.getContainingFile(),signature,trace);
-      LOG.error("element: " + psiElement + "("+ psiElement.getText()+ "); restoredElement: "+ restoredElement+ "; signature: '"+ signature+ "'; file: "+ psiElement.getContainingFile()+ "; restored again: "+ restoredAgain+ "; restore produces same results: "+ (restoredAgain == restoredElement)+ "; trace:\n"+ trace);
-    }
-    Element e=new Element(ELEMENT_TAG);
-    e.setAttribute(SIGNATURE_ATT,signature);
-    e.setAttribute(EXPANDED_ATT,Boolean.toString(state));
-    element.addContent(e);
   }
   String date=null;
   for (  RangeMarker marker : myRangeMarkers) {

@@ -1,23 +1,41 @@
 {
+  long newValueOffset=-1;
+  if (!myIntMapping) {
+    final BufferExposingByteArrayOutputStream bytes=new BufferExposingByteArrayOutputStream();
+    AppendStream appenderStream=ourFlyweightAppenderStream.getValue();
+    appenderStream.setOut(bytes);
+    myValueExternalizer.save(appenderStream,value);
+    appenderStream.setOut(null);
+    newValueOffset=myValueStorage.appendBytes(bytes.getInternalBuffer(),0,bytes.size(),0);
+  }
   myEnumerator.lockStorage();
   try {
     myEnumerator.markDirty(true);
     myAppendCache.remove(key);
-    final BufferExposingByteArrayOutputStream bytes=new BufferExposingByteArrayOutputStream();
-    if (myFlyweightAppenderStream == null)     myFlyweightAppenderStream=new AppendStream();
-    myFlyweightAppenderStream.setOut(bytes);
-    myValueExternalizer.save(myFlyweightAppenderStream,value);
-    myFlyweightAppenderStream.setOut(null);
-    final int id=enumerate(key);
-    long oldheader=readValueId(id);
-    if (oldheader != NULL_ADDR) {
+    long oldValueOffset;
+    if (myDirectlyStoreLongFileOffsetMode) {
+      if (myIntMapping) {
+        ((PersistentBTreeEnumerator<Key>)myEnumerator).putNonnegativeValue(key,(Integer)value);
+        return;
+      }
+      oldValueOffset=((PersistentBTreeEnumerator<Key>)myEnumerator).getNonnegativeValue(key);
+      ((PersistentBTreeEnumerator<Key>)myEnumerator).putNonnegativeValue(key,newValueOffset);
+    }
+ else {
+      final int id=enumerate(key);
+      if (myIntMapping) {
+        myEnumerator.myStorage.putInt(id + myParentValueRefOffset,(Integer)value);
+        return;
+      }
+      oldValueOffset=readValueId(id);
+      updateValueId(id,newValueOffset,oldValueOffset,key,0);
+    }
+    if (oldValueOffset != NULL_ADDR) {
       myLiveAndGarbageKeysCounter++;
     }
  else {
       myLiveAndGarbageKeysCounter+=LIVE_KEY_MASK;
     }
-    long header=myValueStorage.appendBytes(bytes.getInternalBuffer(),0,bytes.size(),0);
-    updateValueId(id,header,oldheader,key,0);
   }
   finally {
     myEnumerator.unlockStorage();

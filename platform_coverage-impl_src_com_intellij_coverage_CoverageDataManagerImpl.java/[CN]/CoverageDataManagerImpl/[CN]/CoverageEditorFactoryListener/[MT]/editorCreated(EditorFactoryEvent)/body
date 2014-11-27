@@ -1,0 +1,43 @@
+{
+synchronized (myLock) {
+    if (myIsProjectClosing)     return;
+  }
+  final Editor editor=event.getEditor();
+  if (editor.getProject() != myProject)   return;
+  final PsiFile psiFile=ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>(){
+    @Nullable @Override public PsiFile compute(){
+      if (myProject.isDisposed())       return null;
+      final PsiDocumentManager documentManager=PsiDocumentManager.getInstance(myProject);
+      final Document document=editor.getDocument();
+      return documentManager.getPsiFile(document);
+    }
+  }
+);
+  if (psiFile != null && myCurrentSuitesBundle != null && psiFile.isPhysical()) {
+    final CoverageEngine engine=myCurrentSuitesBundle.getCoverageEngine();
+    if (!engine.coverageEditorHighlightingApplicableTo(psiFile)) {
+      return;
+    }
+    SrcFileAnnotator annotator=getAnnotator(editor);
+    if (annotator == null) {
+      annotator=new SrcFileAnnotator(psiFile,editor);
+    }
+    final SrcFileAnnotator finalAnnotator=annotator;
+synchronized (ANNOTATORS_LOCK) {
+      myAnnotators.put(editor,finalAnnotator);
+    }
+    final Runnable request=new Runnable(){
+      @Override public void run(){
+        if (myProject.isDisposed())         return;
+        if (myCurrentSuitesBundle != null) {
+          if (engine.acceptedByFilters(psiFile,myCurrentSuitesBundle)) {
+            finalAnnotator.showCoverageInformation(myCurrentSuitesBundle);
+          }
+        }
+      }
+    }
+;
+    myCurrentEditors.put(editor,request);
+    myAlarm.addRequest(request,100);
+  }
+}

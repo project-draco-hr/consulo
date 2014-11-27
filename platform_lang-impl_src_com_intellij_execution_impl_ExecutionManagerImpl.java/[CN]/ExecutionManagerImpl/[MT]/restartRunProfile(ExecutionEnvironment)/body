@@ -1,0 +1,49 @@
+{
+  RunnerAndConfigurationSettings configuration=environment.getRunnerAndConfigurationSettings();
+  List<RunContentDescriptor> runningIncompatible;
+  if (configuration == null) {
+    runningIncompatible=Collections.emptyList();
+  }
+ else {
+    runningIncompatible=getIncompatibleRunningDescriptors(configuration);
+  }
+  RunContentDescriptor contentToReuse=environment.getContentToReuse();
+  final List<RunContentDescriptor> runningOfTheSameType=new SmartList<RunContentDescriptor>();
+  if (configuration != null && configuration.isSingleton()) {
+    runningOfTheSameType.addAll(getRunningDescriptorsOfTheSameConfigType(configuration));
+  }
+ else   if (isProcessRunning(contentToReuse)) {
+    runningOfTheSameType.add(contentToReuse);
+  }
+  List<RunContentDescriptor> runningToStop=ContainerUtil.concat(runningOfTheSameType,runningIncompatible);
+  if (!runningToStop.isEmpty()) {
+    if (configuration != null) {
+      if (!runningOfTheSameType.isEmpty() && (runningOfTheSameType.size() > 1 || contentToReuse == null || runningOfTheSameType.get(0) != contentToReuse) && !userApprovesStopForSameTypeConfigurations(environment.getProject(),configuration.getName(),runningOfTheSameType.size())) {
+        return;
+      }
+      if (!runningIncompatible.isEmpty() && !userApprovesStopForIncompatibleConfigurations(myProject,configuration.getName(),runningIncompatible)) {
+        return;
+      }
+    }
+    for (    RunContentDescriptor descriptor : runningToStop) {
+      stop(descriptor);
+    }
+  }
+  awaitingTerminationAlarm.addRequest(new Runnable(){
+    @Override public void run(){
+      if (ExecutorRegistry.getInstance().isStarting(environment)) {
+        awaitingTerminationAlarm.addRequest(this,100);
+        return;
+      }
+      for (      RunContentDescriptor descriptor : runningOfTheSameType) {
+        ProcessHandler processHandler=descriptor.getProcessHandler();
+        if (processHandler != null && !processHandler.isProcessTerminated()) {
+          awaitingTerminationAlarm.addRequest(this,100);
+          return;
+        }
+      }
+      start(environment);
+    }
+  }
+,50);
+}

@@ -1,0 +1,98 @@
+{
+  final Pair<ProgramRunner,ExecutionEnvironment> pair=createRunner(taskSettings,executorId,project,externalSystemId);
+  if (pair == null)   return;
+  final ProgramRunner runner=pair.first;
+  final ExecutionEnvironment environment=pair.second;
+  final TaskUnderProgress task=new TaskUnderProgress(){
+    @Override public void execute(    @NotNull ProgressIndicator indicator){
+      final Semaphore targetDone=new Semaphore();
+      final Ref<Boolean> result=new Ref<Boolean>(false);
+      final Disposable disposable=Disposer.newDisposable();
+      project.getMessageBus().connect(disposable).subscribe(ExecutionManager.EXECUTION_TOPIC,new ExecutionAdapter(){
+        public void processStartScheduled(        final String executorIdLocal,        final ExecutionEnvironment environmentLocal){
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            targetDone.down();
+          }
+        }
+        public void processNotStarted(        final String executorIdLocal,        @NotNull final ExecutionEnvironment environmentLocal){
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            targetDone.up();
+          }
+        }
+        public void processStarted(        final String executorIdLocal,        @NotNull final ExecutionEnvironment environmentLocal,        @NotNull final ProcessHandler handler){
+          if (executorId.equals(executorIdLocal) && environment.equals(environmentLocal)) {
+            handler.addProcessListener(new ProcessAdapter(){
+              public void processTerminated(              ProcessEvent event){
+                result.set(event.getExitCode() == 0);
+                targetDone.up();
+              }
+            }
+);
+          }
+        }
+      }
+);
+      try {
+        ApplicationManager.getApplication().invokeAndWait(new Runnable(){
+          @Override public void run(){
+            try {
+              runner.execute(environment);
+            }
+ catch (            ExecutionException e) {
+              targetDone.up();
+              LOG.error(e);
+            }
+          }
+        }
+,ModalityState.NON_MODAL);
+      }
+ catch (      Exception e) {
+        LOG.error(e);
+        Disposer.dispose(disposable);
+        return;
+      }
+      targetDone.waitFor();
+      Disposer.dispose(disposable);
+      if (callback != null) {
+        if (result.get()) {
+          callback.onSuccess();
+        }
+ else {
+          callback.onFailure();
+        }
+      }
+    }
+  }
+;
+  UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+    @Override public void run(){
+      final String title=AbstractExternalSystemTaskConfigurationType.generateName(project,taskSettings);
+switch (progressExecutionMode) {
+case MODAL_SYNC:
+        new Task.Modal(project,title,true){
+          @Override public void run(          @NotNull ProgressIndicator indicator){
+            task.execute(indicator);
+          }
+        }
+.queue();
+      break;
+case IN_BACKGROUND_ASYNC:
+    new Task.Backgroundable(project,title){
+      @Override public void run(      @NotNull ProgressIndicator indicator){
+        task.execute(indicator);
+      }
+    }
+.queue();
+  break;
+case START_IN_FOREGROUND_ASYNC:
+new Task.Backgroundable(project,title,true,PerformInBackgroundOption.DEAF){
+  @Override public void run(  @NotNull ProgressIndicator indicator){
+    task.execute(indicator);
+  }
+}
+.queue();
+}
+}
+}
+);
+}

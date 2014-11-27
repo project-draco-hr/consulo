@@ -1,3 +1,66 @@
 {
-  startRunProfile(starter,state,env.getProject(),env.getExecutor(),env);
+  final Project project=environment.getProject();
+  final RunContentDescriptor reuseContent=getContentManager().getReuseContent(environment);
+  if (reuseContent != null) {
+    reuseContent.setExecutionId(environment.getExecutionId());
+  }
+  final Executor executor=environment.getExecutor();
+  project.getMessageBus().syncPublisher(EXECUTION_TOPIC).processStartScheduled(executor.getId(),environment);
+  Runnable startRunnable=new Runnable(){
+    @Override public void run(){
+      if (project.isDisposed()) {
+        return;
+      }
+      RunProfile profile=environment.getRunProfile();
+      boolean started=false;
+      try {
+        project.getMessageBus().syncPublisher(EXECUTION_TOPIC).processStarting(executor.getId(),environment);
+        final RunContentDescriptor descriptor=starter.execute(project,executor,state,reuseContent,environment);
+        if (descriptor != null) {
+          environment.setContentToReuse(descriptor);
+          final Trinity<RunContentDescriptor,RunnerAndConfigurationSettings,Executor> trinity=Trinity.create(descriptor,environment.getRunnerAndConfigurationSettings(),executor);
+          myRunningConfigurations.add(trinity);
+          Disposer.register(descriptor,new Disposable(){
+            @Override public void dispose(){
+              myRunningConfigurations.remove(trinity);
+            }
+          }
+);
+          getContentManager().showRunContent(executor,descriptor,reuseContent);
+          final ProcessHandler processHandler=descriptor.getProcessHandler();
+          if (processHandler != null) {
+            if (!processHandler.isStartNotified()) {
+              processHandler.startNotify();
+            }
+            project.getMessageBus().syncPublisher(EXECUTION_TOPIC).processStarted(executor.getId(),environment,processHandler);
+            started=true;
+            processHandler.addProcessListener(new ProcessExecutionListener(project,profile,processHandler));
+          }
+        }
+      }
+ catch (      ExecutionException e) {
+        ExecutionUtil.handleExecutionError(project,executor.getToolWindowId(),profile,e);
+        LOG.info(e);
+      }
+ finally {
+        if (!started) {
+          project.getMessageBus().syncPublisher(EXECUTION_TOPIC).processNotStarted(executor.getId(),environment);
+        }
+      }
+    }
+  }
+;
+  if (ApplicationManager.getApplication().isUnitTestMode()) {
+    startRunnable.run();
+  }
+ else {
+    compileAndRun(startRunnable,environment,state,new Runnable(){
+      @Override public void run(){
+        if (!project.isDisposed()) {
+          project.getMessageBus().syncPublisher(EXECUTION_TOPIC).processNotStarted(executor.getId(),environment);
+        }
+      }
+    }
+);
+  }
 }

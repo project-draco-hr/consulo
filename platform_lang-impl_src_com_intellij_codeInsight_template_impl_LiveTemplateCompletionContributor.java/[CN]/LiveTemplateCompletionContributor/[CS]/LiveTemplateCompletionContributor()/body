@@ -5,32 +5,34 @@
       if (file instanceof PsiPlainTextFile && parameters.getEditor().getComponent().getParent() instanceof EditorTextField) {
         return;
       }
-      final int offset=parameters.getOffset();
-      final List<TemplateImpl> templates=listApplicableTemplates(file,offset);
       Editor editor=parameters.getEditor();
+      int offset=editor.getCaretModel().getOffset();
+      final List<TemplateImpl> availableTemplates=TemplateManagerImpl.listApplicableTemplates(file,offset,false);
+      final Map<TemplateImpl,String> templates=filterTemplatesByPrefix(availableTemplates,editor,offset,false,false);
       if (showAllTemplates()) {
-        final MultiMap<String,CustomLiveTemplateLookupElement> customTemplates=listApplicableCustomTemplates(editor,file,offset);
-        final Ref<Boolean> templatesShown=Ref.create(false);
+        final AtomicBoolean templatesShown=new AtomicBoolean(false);
         final CompletionResultSet finalResult=result;
         result.runRemainingContributors(parameters,new Consumer<CompletionResult>(){
           @Override public void consume(          CompletionResult completionResult){
             finalResult.passResult(completionResult);
-            ensureTemplatesShown(templatesShown,templates,customTemplates,finalResult);
+            ensureTemplatesShown(templatesShown,templates,parameters,finalResult);
           }
         }
 );
-        ensureTemplatesShown(templatesShown,templates,customTemplates,result);
+        ensureTemplatesShown(templatesShown,templates,parameters,result);
         return;
       }
       if (parameters.getInvocationCount() > 0)       return;
-      String templatePrefix=findLiveTemplatePrefix(file,editor,result.getPrefixMatcher().getPrefix());
-      final TemplateImpl template=findApplicableTemplate(file,offset,templatePrefix);
-      if (template != null) {
-        result=result.withPrefixMatcher(template.getKey());
-        result.addElement(new LiveTemplateLookupElementImpl(template,true));
+      if (!customTemplateAvailableAndHasCompletionItem(null,editor,file,offset)) {
+        TemplateImpl template=findFullMatchedApplicableTemplate(editor,offset,availableTemplates);
+        if (template != null) {
+          result.withPrefixMatcher(result.getPrefixMatcher().cloneWithPrefix(template.getKey())).addElement(new LiveTemplateLookupElementImpl(template,true));
+        }
       }
-      for (      final TemplateImpl possible : templates) {
-        result.restartCompletionOnPrefixChange(possible.getKey());
+      for (      Map.Entry<TemplateImpl,String> possible : templates.entrySet()) {
+        String templateKey=possible.getKey().getKey();
+        String currentPrefix=possible.getValue();
+        result.withPrefixMatcher(result.getPrefixMatcher().cloneWithPrefix(currentPrefix)).restartCompletionOnPrefixChange(templateKey);
       }
     }
   }

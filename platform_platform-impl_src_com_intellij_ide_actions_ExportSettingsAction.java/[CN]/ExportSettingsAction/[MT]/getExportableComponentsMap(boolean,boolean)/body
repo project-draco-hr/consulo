@@ -1,0 +1,69 @@
+{
+  ExportableApplicationComponent[] components1=ApplicationManager.getApplication().getComponents(ExportableApplicationComponent.class);
+  List<ExportableComponent> components2=ServiceBean.loadServicesFromBeans(ExportableComponent.EXTENSION_POINT,ExportableComponent.class);
+  final MultiMap<File,ExportableComponent> result=MultiMap.createLinkedSet();
+  for (  ExportableComponent component : ContainerUtil.concat(Arrays.asList(components1),components2)) {
+    for (    File exportFile : component.getExportFiles()) {
+      result.putValue(exportFile,component);
+    }
+  }
+  if (onlyExisting) {
+    for (Iterator<File> it=result.keySet().iterator(); it.hasNext(); ) {
+      if (!it.next().exists()) {
+        it.remove();
+      }
+    }
+  }
+  ApplicationImpl application=(ApplicationImpl)ApplicationManager.getApplication();
+  final StateStorageManager storageManager=application.getStateStore().getStateStorageManager();
+  ServiceManagerImpl.processAllImplementationClasses(application,new PairProcessor<Class<?>,PluginDescriptor>(){
+    @Override public boolean process(    @NotNull Class<?> aClass,    @Nullable PluginDescriptor pluginDescriptor){
+      State stateAnnotation=aClass.getAnnotation(State.class);
+      if (stateAnnotation != null && !StringUtil.isEmpty(stateAnnotation.name())) {
+        if (ExportableComponent.class.isAssignableFrom(aClass)) {
+          return true;
+        }
+        int storageIndex;
+        Storage[] storages=stateAnnotation.storages();
+        if (storages.length == 1) {
+          storageIndex=0;
+        }
+ else         if (storages.length > 1 && (stateAnnotation.storageChooser() == LastStorageChooserForWrite.class || stateAnnotation.storageChooser() == LastStorageChooserForWrite.ElementStateLastStorageChooserForWrite.class)) {
+          storageIndex=storages.length - 1;
+        }
+ else {
+          return true;
+        }
+        Storage storage=storages[storageIndex];
+        if (storage.roamingType() != RoamingType.DISABLED && storage.storageClass().equals(StateStorage.class) && storage.scheme() == StorageScheme.DEFAULT && !StringUtil.isEmpty(storage.file()) && storage.file().startsWith(StoragePathMacros.APP_CONFIG)) {
+          File file=new File(storageManager.expandMacros(storage.file()));
+          File additionalExportFile=null;
+          if (!StringUtil.isEmpty(stateAnnotation.additionalExportFile())) {
+            additionalExportFile=new File(storageManager.expandMacros(stateAnnotation.additionalExportFile()));
+            if (onlyExisting && !additionalExportFile.exists()) {
+              additionalExportFile=null;
+            }
+          }
+          boolean fileExists=!onlyExisting || file.exists();
+          if (fileExists || additionalExportFile != null) {
+            File[] files;
+            if (additionalExportFile == null) {
+              files=new File[]{file};
+            }
+ else {
+              files=fileExists ? new File[]{file,additionalExportFile} : new File[]{additionalExportFile};
+            }
+            ExportableComponentItem item=new ExportableComponentItem(files,computePresentableNames ? getComponentPresentableName(stateAnnotation,aClass,pluginDescriptor) : "",storage.roamingType());
+            result.putValue(file,item);
+            if (additionalExportFile != null) {
+              result.putValue(additionalExportFile,item);
+            }
+          }
+        }
+      }
+      return true;
+    }
+  }
+);
+  return result;
+}

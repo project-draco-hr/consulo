@@ -1,0 +1,56 @@
+{
+  if (!index.isInContent(dir)) {
+    return null;
+  }
+  if (visitedDirs.contains(dir)) {
+    return null;
+  }
+  visitedDirs.add(dir);
+  final boolean isInTestSrcContent=index.isInTestSourceContent(dir);
+  if (!trackTestFolders && isInTestSrcContent) {
+    return null;
+  }
+  final VirtualFile[] children=dataManager.doInReadActionIfProjectOpen(new Computable<VirtualFile[]>(){
+    public VirtualFile[] compute(){
+      return dir.getChildren();
+    }
+  }
+);
+  if (children == null) {
+    return null;
+  }
+  final DirCoverageInfo dirCoverageInfo=new DirCoverageInfo();
+  for (  VirtualFile fileOrDir : children) {
+    if (fileOrDir.isDirectory()) {
+      final DirCoverageInfo childCoverageInfo=collectFolderCoverage(fileOrDir,dataManager,annotator,projectInfo,trackTestFolders,index,coverageEngine,visitedDirs,normalizedFiles2Files);
+      if (childCoverageInfo != null) {
+        dirCoverageInfo.totalFilesCount+=childCoverageInfo.totalFilesCount;
+        dirCoverageInfo.coveredFilesCount+=childCoverageInfo.coveredFilesCount;
+        dirCoverageInfo.totalLineCount+=childCoverageInfo.totalLineCount;
+        dirCoverageInfo.coveredLineCount+=childCoverageInfo.coveredLineCount;
+      }
+    }
+ else     if (coverageEngine.coverageProjectViewStatisticsApplicableTo(fileOrDir)) {
+      final FileCoverageInfo fileInfo=collectBaseFileCoverage(fileOrDir,annotator,projectInfo,normalizedFiles2Files);
+      if (fileInfo != null) {
+        dirCoverageInfo.totalLineCount+=fileInfo.totalLineCount;
+        dirCoverageInfo.totalFilesCount++;
+        if (fileInfo.coveredLineCount > 0) {
+          dirCoverageInfo.coveredFilesCount++;
+          dirCoverageInfo.coveredLineCount+=fileInfo.coveredLineCount;
+        }
+      }
+    }
+  }
+  if (dirCoverageInfo.totalFilesCount == 0) {
+    return null;
+  }
+  final String dirPath=normalizeFilePath(dir.getPath());
+  if (isInTestSrcContent) {
+    annotator.annotateTestDirectory(dirPath,dirCoverageInfo);
+  }
+ else {
+    annotator.annotateSourceDirectory(dirPath,dirCoverageInfo);
+  }
+  return dirCoverageInfo;
+}

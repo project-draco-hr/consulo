@@ -3,55 +3,47 @@
   Frame frame=state.frameStack.pollLast();
   if (frame == null || level != frame.level) {
     LOG.error("Unbalanced error section: got " + frame + ", expected level "+ level);
-    if (frame != null) {
-      state.FRAMES.recycle(frame);
-    }
+    if (frame != null)     state.FRAMES.recycle(frame);
     close_marker_impl_(frame,marker,elementType,result);
     return;
   }
   if (((frame.modifiers & _AND_) | (frame.modifiers & _NOT_)) != 0) {
     close_marker_impl_(frame,marker,null,false);
     state.predicateCount--;
-    if ((frame.modifiers & _NOT_) != 0) {
-      state.predicateSign=!state.predicateSign;
-    }
+    if ((frame.modifiers & _NOT_) != 0)     state.predicateSign=!state.predicateSign;
     state.FRAMES.recycle(frame);
     return;
   }
   exit_section_impl_(state,frame,builder_,marker,elementType,result,pinned);
-  int initialOffset=builder_.getCurrentOffset();
+  int initialPos=builder_.rawTokenIndex();
   boolean willFail=!result && !pinned;
-  if (willFail && initialOffset == frame.offset && state.lastExpectedVariantOffset == frame.offset && frame.name != null && state.variants.size() - frame.variantCount > 1) {
+  if (willFail && initialPos == frame.position && state.lastExpectedVariantPos == frame.position && frame.name != null && state.variants.size() - frame.variantCount > 1) {
     state.clearVariants(true,frame.variantCount);
-    addVariantInner(state,initialOffset,frame.name);
+    addVariantInner(state,initialPos,frame.name);
   }
   if (!state.suppressErrors && eatMore != null) {
     state.suppressErrors=true;
     final boolean eatMoreFlagOnce=!builder_.eof() && eatMore.parse(builder_,frame.level + 1);
-    final int lastErrorPos=getLastVariantOffset(state,initialOffset);
-    boolean eatMoreFlag=eatMoreFlagOnce || !result && frame.offset == initialOffset && lastErrorPos > frame.offset;
-    final LighterASTNode latestDoneMarker=(pinned || result) && (state.altMode || lastErrorPos > initialOffset || level == 0) && eatMoreFlagOnce ? builder_.getLatestDoneMarker() : null;
+    final int lastErrorPos=getLastVariantPos(state,initialPos);
+    boolean eatMoreFlag=eatMoreFlagOnce || !result && frame.position == initialPos && lastErrorPos > frame.position;
+    PsiBuilderImpl.ProductionMarker latestDoneMarker=(pinned || result) && (state.altMode || elementType != null) && eatMoreFlagOnce ? (PsiBuilderImpl.ProductionMarker)builder_.getLatestDoneMarker() : null;
     PsiBuilder.Marker extensionMarker=null;
     IElementType extensionTokenType=null;
-    if (latestDoneMarker instanceof PsiBuilder.Marker && frame.offset >= latestDoneMarker.getStartOffset()) {
+    if (latestDoneMarker instanceof PsiBuilder.Marker && frame.position >= latestDoneMarker.getStartIndex() && frame.position <= latestDoneMarker.getEndIndex()) {
       extensionMarker=((PsiBuilder.Marker)latestDoneMarker).precede();
       extensionTokenType=latestDoneMarker.getTokenType();
       ((PsiBuilder.Marker)latestDoneMarker).drop();
     }
     int parenCount=0;
-    while ((eatMoreFlag || parenCount > 0) && builder_.getCurrentOffset() < lastErrorPos) {
+    while ((eatMoreFlag || parenCount > 0) && builder_.rawTokenIndex() < lastErrorPos) {
       if (state.braces != null) {
-        if (builder_.getTokenType() == state.braces[0].getLeftBraceType()) {
-          parenCount++;
-        }
- else         if (builder_.getTokenType() == state.braces[0].getRightBraceType()) {
-          parenCount--;
-        }
+        if (builder_.getTokenType() == state.braces[0].getLeftBraceType())         parenCount++;
+ else         if (builder_.getTokenType() == state.braces[0].getRightBraceType())         parenCount--;
       }
       builder_.advanceLexer();
       eatMoreFlag=eatMore.parse(builder_,frame.level + 1);
     }
-    boolean errorReported=frame.errorReportedAt == initialOffset || !result && frame.errorReportedAt >= frame.offset;
+    boolean errorReported=frame.errorReportedAt == initialPos || !result && frame.errorReportedAt >= frame.position;
     if (errorReported) {
       if (eatMoreFlag) {
         builder_.advanceLexer();
@@ -62,7 +54,7 @@
       errorReported=reportError(builder_,state,frame,true,true);
       parseAsTree(state,builder_,frame.level + 1,DUMMY_BLOCK,true,TOKEN_ADVANCER,eatMore);
     }
- else     if (eatMoreFlagOnce || (!result && frame.offset != builder_.getCurrentOffset())) {
+ else     if (eatMoreFlagOnce || (!result && frame.position != builder_.rawTokenIndex())) {
       errorReported=reportError(builder_,state,frame,true,false);
     }
     if (extensionMarker != null) {
@@ -72,11 +64,11 @@
     if (errorReported || result) {
       state.clearVariants(true,0);
       state.clearVariants(false,0);
-      state.lastExpectedVariantOffset=-1;
+      state.lastExpectedVariantPos=-1;
     }
   }
  else   if (!result && pinned && frame.errorReportedAt < 0) {
-    if (getLastVariantOffset(state,initialOffset) == initialOffset) {
+    if (getLastVariantPos(state,initialPos) == initialPos) {
       reportError(builder_,state,frame,false,false);
     }
   }

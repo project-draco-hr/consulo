@@ -1,0 +1,67 @@
+{
+  final DataContext context=e.getDataContext();
+  final Project project=CommonDataKeys.PROJECT.getData(context);
+  LOG.assertTrue(project != null);
+  final Editor editor=CommonDataKeys.EDITOR.getData(context);
+  LOG.assertTrue(editor != null);
+  final CoverageSuitesBundle currentSuite=CoverageDataManager.getInstance(project).getCurrentSuitesBundle();
+  LOG.assertTrue(currentSuite != null);
+  final File[] traceFiles=getTraceFiles(project);
+  final Set<String> tests=new HashSet<String>();
+  Runnable runnable=new Runnable(){
+    public void run(){
+      for (      File traceFile : traceFiles) {
+        DataInputStream in=null;
+        try {
+          in=new DataInputStream(new FileInputStream(traceFile));
+          extractTests(traceFile,in,tests);
+        }
+ catch (        Exception ex) {
+          LOG.error(traceFile.getName(),ex);
+        }
+ finally {
+          try {
+            in.close();
+          }
+ catch (          IOException ex) {
+            LOG.error(ex);
+          }
+        }
+      }
+    }
+  }
+;
+  if (ProgressManager.getInstance().runProcessWithProgressSynchronously(runnable,"Extract information about tests",false,project)) {
+    final String[] testNames=ArrayUtil.toStringArray(tests);
+    Arrays.sort(testNames);
+    if (testNames.length == 0) {
+      HintManager.getInstance().showErrorHint(editor,"Failed to load covered tests");
+      return;
+    }
+    final List<PsiElement> elements=currentSuite.getCoverageEngine().findTestsByNames(testNames,project);
+    final ImplementationViewComponent component;
+    final String title="Tests covering line " + myClassFQName + ":"+ myLineData.getLineNumber();
+    final ComponentPopupBuilder popupBuilder;
+    if (!elements.isEmpty()) {
+      component=new ImplementationViewComponent(PsiUtilCore.toPsiElementArray(elements),0);
+      popupBuilder=JBPopupFactory.getInstance().createComponentPopupBuilder(component,component.getPreferredFocusableComponent()).setDimensionServiceKey(project,"ShowTestsPopup",false).setCouldPin(new Processor<JBPopup>(){
+        @Override public boolean process(        JBPopup popup){
+          component.showInUsageView();
+          popup.cancel();
+          return false;
+        }
+      }
+);
+    }
+ else {
+      component=null;
+      final JPanel panel=new PanelWithText("Following test" + (testNames.length > 1 ? "s" : "") + " could not be found: "+ StringUtil.join(testNames,",").replace("_","."));
+      popupBuilder=JBPopupFactory.getInstance().createComponentPopupBuilder(panel,null);
+    }
+    final JBPopup popup=popupBuilder.setRequestFocusCondition(project,NotLookupOrSearchCondition.INSTANCE).setProject(project).setResizable(true).setMovable(true).setTitle(title).createPopup();
+    popup.showInBestPositionFor(editor);
+    if (component != null) {
+      component.setHint(popup,title);
+    }
+  }
+}
