@@ -1,36 +1,44 @@
 {
   LOG.debug("IDEA-wide proxy selector asked for " + uri.toString());
-  final String scheme=uri.getScheme();
+  String scheme=uri.getScheme();
   if (!("http".equals(scheme) || "https".equals(scheme))) {
-    LOG.debug("IDEA-wide proxy selector returns no proxies: not http/https scheme: " + scheme);
+    LOG.debug("No proxy: not http/https scheme: " + scheme);
     return CommonProxy.NO_PROXY_LIST;
   }
   if (myHttpConfigurable.USE_HTTP_PROXY) {
     if (isProxyException(uri)) {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("IDEA-wide proxy selector detected that uri matches proxy exceptions: uri: " + uri.toString() + ", proxy exceptions string: '"+ myHttpConfigurable.PROXY_EXCEPTIONS+ "'");
-      }
+      LOG.debug("No proxy: URI '",uri,"' matches proxy exceptions [",myHttpConfigurable.PROXY_EXCEPTIONS,"]");
       return CommonProxy.NO_PROXY_LIST;
     }
-    final Proxy proxy=new Proxy(myHttpConfigurable.PROXY_TYPE_IS_SOCKS ? Proxy.Type.SOCKS : Proxy.Type.HTTP,new InetSocketAddress(myHttpConfigurable.PROXY_HOST,myHttpConfigurable.PROXY_PORT));
-    LOG.debug("IDEA-wide proxy selector returns defined proxy: " + proxy);
+    if (myHttpConfigurable.PROXY_PORT < 0 || myHttpConfigurable.PROXY_PORT > 65535) {
+      LOG.debug("No proxy: invalid port: " + myHttpConfigurable.PROXY_PORT);
+      return CommonProxy.NO_PROXY_LIST;
+    }
+    Proxy.Type type=myHttpConfigurable.PROXY_TYPE_IS_SOCKS ? Proxy.Type.SOCKS : Proxy.Type.HTTP;
+    Proxy proxy=new Proxy(type,new InetSocketAddress(myHttpConfigurable.PROXY_HOST,myHttpConfigurable.PROXY_PORT));
+    LOG.debug("Defined proxy: ",proxy);
     myHttpConfigurable.LAST_ERROR=null;
     return Collections.singletonList(proxy);
   }
- else   if (myHttpConfigurable.USE_PROXY_PAC) {
+  if (myHttpConfigurable.USE_PROXY_PAC) {
     ProxySelector pacProxySelector=myPacProxySelector.get();
-    if (pacProxySelector == null) {
-      final ProxySearch proxySearch=ProxySearch.getDefaultProxySearch();
+    if (myHttpConfigurable.USE_PAC_URL && !StringUtil.isEmpty(myHttpConfigurable.PAC_URL)) {
+      myPacProxySelector.set(new PacProxySelector(new UrlPacScriptSource(myHttpConfigurable.PAC_URL)));
+    }
+ else     if (pacProxySelector == null) {
+      ProxySearch proxySearch=ProxySearch.getDefaultProxySearch();
       proxySearch.setPacCacheSettings(32,10 * 60 * 1000);
       pacProxySelector=proxySearch.getProxySelector();
       myPacProxySelector.lazySet(pacProxySelector);
     }
     if (pacProxySelector != null) {
-      final List<Proxy> select=pacProxySelector.select(uri);
-      LOG.debug("IDEA-wide proxy selector found autodetected proxies: " + select);
+      List<Proxy> select=pacProxySelector.select(uri);
+      LOG.debug("Autodetected proxies: ",select);
       return select;
     }
-    LOG.debug("IDEA-wide proxy selector found no autodetected proxies");
+ else {
+      LOG.debug("No proxies detected");
+    }
   }
   return CommonProxy.NO_PROXY_LIST;
 }
