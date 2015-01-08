@@ -1,0 +1,140 @@
+{
+  int n=tab.length, stride;
+  if ((stride=(NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) {
+    stride=MIN_TRANSFER_STRIDE;
+  }
+  if (nextTab == null) {
+    try {
+      @SuppressWarnings("unchecked") Node<V>[] nt=(Node<V>[])new Node<?>[n << 1];
+      nextTab=nt;
+    }
+ catch (    Throwable ex) {
+      sizeCtl=Integer.MAX_VALUE;
+      return;
+    }
+    nextTable=nextTab;
+    transferIndex=n;
+  }
+  int nextn=nextTab.length;
+  ForwardingNode<V> fwd=new ForwardingNode<V>(nextTab);
+  boolean advance=true;
+  boolean finishing=false;
+  for (int i=0, bound=0; ; ) {
+    Node<V> f;
+    int fh;
+    while (advance) {
+      int nextIndex, nextBound;
+      if (--i >= bound || finishing) {
+        advance=false;
+      }
+ else       if ((nextIndex=transferIndex) <= 0) {
+        i=-1;
+        advance=false;
+      }
+ else       if (U.compareAndSwapInt(this,TRANSFERINDEX,nextIndex,nextBound=(nextIndex > stride ? nextIndex - stride : 0))) {
+        bound=nextBound;
+        i=nextIndex - 1;
+        advance=false;
+      }
+    }
+    if (i < 0 || i >= n || i + n >= nextn) {
+      int sc;
+      if (finishing) {
+        nextTable=null;
+        table=nextTab;
+        sizeCtl=(n << 1) - (n >>> 1);
+        return;
+      }
+      if (U.compareAndSwapInt(this,SIZECTL,sc=sizeCtl,sc - 1)) {
+        if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT) {
+          return;
+        }
+        finishing=advance=true;
+        i=n;
+      }
+    }
+ else     if ((f=tabAt(tab,i)) == null) {
+      advance=casTabAt(tab,i,null,fwd);
+    }
+ else     if ((fh=f.hash) == MOVED) {
+      advance=true;
+    }
+ else {
+synchronized (f) {
+        if (tabAt(tab,i) == f) {
+          Node<V> ln, hn;
+          if (fh >= 0) {
+            int runBit=fh & n;
+            Node<V> lastRun=f;
+            for (Node<V> p=f.next; p != null; p=p.next) {
+              int b=p.hash & n;
+              if (b != runBit) {
+                runBit=b;
+                lastRun=p;
+              }
+            }
+            if (runBit == 0) {
+              ln=lastRun;
+              hn=null;
+            }
+ else {
+              hn=lastRun;
+              ln=null;
+            }
+            for (Node<V> p=f; p != lastRun; p=p.next) {
+              int ph=p.hash;
+              int pk=p.key;
+              V pv=p.val;
+              if ((ph & n) == 0) {
+                ln=new Node<V>(ph,pk,pv,ln);
+              }
+ else {
+                hn=new Node<V>(ph,pk,pv,hn);
+              }
+            }
+            setTabAt(nextTab,i,ln);
+            setTabAt(nextTab,i + n,hn);
+            setTabAt(tab,i,fwd);
+            advance=true;
+          }
+ else           if (f instanceof TreeBin) {
+            TreeBin<V> t=(TreeBin<V>)f;
+            TreeNode<V> lo=null, loTail=null;
+            TreeNode<V> hi=null, hiTail=null;
+            int lc=0, hc=0;
+            for (Node<V> e=t.first; e != null; e=e.next) {
+              int h=e.hash;
+              TreeNode<V> p=new TreeNode<V>(h,e.key,e.val,null,null);
+              if ((h & n) == 0) {
+                if ((p.prev=loTail) == null) {
+                  lo=p;
+                }
+ else {
+                  loTail.next=p;
+                }
+                loTail=p;
+                ++lc;
+              }
+ else {
+                if ((p.prev=hiTail) == null) {
+                  hi=p;
+                }
+ else {
+                  hiTail.next=p;
+                }
+                hiTail=p;
+                ++hc;
+              }
+            }
+            ln=(lc <= UNTREEIFY_THRESHOLD) ? untreeify(lo) : (hc != 0) ? new TreeBin<V>(lo) : t;
+            hn=(hc <= UNTREEIFY_THRESHOLD) ? untreeify(hi) : (lc != 0) ? new TreeBin<V>(hi) : t;
+            setTabAt(nextTab,i,ln);
+            setTabAt(nextTab,i + n,hn);
+            setTabAt(tab,i,fwd);
+            advance=true;
+          }
+        }
+      }
+    }
+  }
+}

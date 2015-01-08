@@ -1,6 +1,8 @@
 {
   assertIsDispatchThread();
-  if (myExceptionalThreadWithReadAccessRunnable != null || isUnitTestMode() || isHeadlessEnvironment()) {
+  boolean writeAccessAllowed=isInsideWriteActionEDTOnly();
+  if (writeAccessAllowed || isHeadlessEnvironment() && !isUnitTestMode()) {
+    LOG.debug("Starting process with progress from within write action makes no sense");
     try {
       ProgressManager.getInstance().runProcess(process,new EmptyProgressIndicator());
     }
@@ -12,49 +14,30 @@
   final ProgressWindow progress=new ProgressWindow(canBeCanceled,false,project,parentComponent,cancelText);
   Disposer.register(this,progress);
   progress.setTitle(progressTitle);
-  try {
-    myExceptionalThreadWithReadAccessRunnable=process;
-    final AtomicBoolean threadStarted=new AtomicBoolean();
-    SwingUtilities.invokeLater(new Runnable(){
-      @Override public void run(){
-        if (myExceptionalThreadWithReadAccessRunnable != process) {
-          LOG.error("myExceptionalThreadWithReadAccessRunnable != process, process = " + myExceptionalThreadWithReadAccessRunnable);
-        }
-        executeOnPooledThread(new Runnable(){
-          @Override public void run(){
-            if (myExceptionalThreadWithReadAccessRunnable != process) {
-              LOG.error("myExceptionalThreadWithReadAccessRunnable != process, process = " + myExceptionalThreadWithReadAccessRunnable);
-            }
-            final boolean old=setExceptionalThreadWithReadAccessFlag(true);
-            LOG.assertTrue(isReadAccessAllowed());
-            try {
-              ProgressManager.getInstance().runProcess(process,progress);
-            }
- catch (            ProcessCanceledException e) {
-              progress.cancel();
-            }
-catch (            RuntimeException e) {
-              progress.cancel();
-              throw e;
-            }
- finally {
-              setExceptionalThreadWithReadAccessFlag(old);
-              makeChangesVisibleToEDT();
-            }
+  final AtomicBoolean threadStarted=new AtomicBoolean();
+  SwingUtilities.invokeLater(new Runnable(){
+    @Override public void run(){
+      executeOnPooledThread(new Runnable(){
+        @Override public void run(){
+          try {
+            ProgressManager.getInstance().runProcess(process,progress);
+          }
+ catch (          ProcessCanceledException e) {
+            progress.cancel();
+          }
+catch (          RuntimeException e) {
+            progress.cancel();
+            throw e;
           }
         }
-);
-        threadStarted.set(true);
       }
-    }
 );
-    progress.startBlocking();
-    LOG.assertTrue(threadStarted.get());
-    LOG.assertTrue(!progress.isRunning());
+      threadStarted.set(true);
+    }
   }
-  finally {
-    myExceptionalThreadWithReadAccessRunnable=null;
-    makeChangesVisibleToEDT();
-  }
+);
+  progress.startBlocking();
+  LOG.assertTrue(threadStarted.get());
+  LOG.assertTrue(!progress.isRunning());
   return !progress.isCanceled();
 }

@@ -1,0 +1,49 @@
+{
+  final List<LookupElement> items=indicator.getLookup().getItems();
+  if (items.isEmpty()) {
+    LookupManager.getInstance(indicator.getProject()).hideActiveLookup();
+    Caret nextCaret=getNextCaretToProcess(indicator.getEditor());
+    if (nextCaret != null) {
+      invokeCompletion(indicator.getProject(),indicator.getEditor(),indicator.getParameters().getInvocationCount(),hasModifiers,false,nextCaret);
+    }
+ else {
+      indicator.handleEmptyLookup(true);
+      checkNotSync(indicator,items);
+    }
+    return;
+  }
+  LOG.assertTrue(!indicator.isRunning(),"running");
+  LOG.assertTrue(!indicator.isCanceled(),"canceled");
+  try {
+    final AutoCompletionDecision decision=shouldAutoComplete(indicator,items);
+    if (decision == AutoCompletionDecision.SHOW_LOOKUP) {
+      CompletionServiceImpl.setCompletionPhase(new CompletionPhase.ItemsCalculated(indicator));
+      indicator.getLookup().setCalculating(false);
+      indicator.showLookup();
+    }
+ else     if (decision instanceof AutoCompletionDecision.InsertItem) {
+      final Runnable restorePrefix=rememberDocumentState(indicator.getEditor());
+      final LookupElement item=((AutoCompletionDecision.InsertItem)decision).getElement();
+      CommandProcessor.getInstance().executeCommand(indicator.getProject(),new Runnable(){
+        @Override public void run(){
+          indicator.setMergeCommand();
+          indicator.getLookup().finishLookup(Lookup.AUTO_INSERT_SELECT_CHAR,item);
+        }
+      }
+,"Autocompletion",null);
+      if (CompletionService.getCompletionService().getCurrentCompletion() == null && !CompletionServiceImpl.isPhase(CompletionPhase.CommittingDocuments.class)) {
+        CompletionServiceImpl.setCompletionPhase(hasModifiers ? new CompletionPhase.InsertedSingleItem(indicator,restorePrefix) : CompletionPhase.NoCompletion);
+      }
+    }
+ else     if (decision == AutoCompletionDecision.CLOSE_LOOKUP) {
+      LookupManager.getInstance(indicator.getProject()).hideActiveLookup();
+    }
+  }
+ catch (  Throwable e) {
+    CompletionServiceImpl.setCompletionPhase(CompletionPhase.NoCompletion);
+    LOG.error(e);
+  }
+ finally {
+    checkNotSync(indicator,items);
+  }
+}

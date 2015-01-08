@@ -1,8 +1,12 @@
 {
   myConfig=config;
   final String componentKey=config.getInterfaceClass();
-  myDelegate=new CachingComponentAdapter(new ConstructorInjectionComponentAdapter(componentKey,implementationClass,null,true)){
-    @Override public Object getComponentInstance(    PicoContainer picoContainer) throws PicoInitializationException, PicoIntrospectionException {
+  myDelegate=new ConstructorInjectionComponentAdapter(componentKey,implementationClass,null,true){
+    @Override public Object getComponentInstance(    PicoContainer picoContainer) throws PicoInitializationException, PicoIntrospectionException, ProcessCanceledException {
+      ProgressIndicator indicator=getProgressIndicator();
+      if (indicator != null) {
+        indicator.checkCanceled();
+      }
       Object componentInstance=null;
       try {
         long startTime=myInitialized ? 0 : System.nanoTime();
@@ -19,13 +23,13 @@
           try {
             myInitializing=true;
             myComponentsRegistry.registerComponentInstance(componentInstance);
-            initComponent(componentInstance);
-            long endTime=System.nanoTime();
-            long ms=(endTime - startTime) / 1000000;
-            if (ms > 10) {
-              if (logSlowComponents()) {
-                LOG.info(componentInstance.getClass().getName() + " initialized in " + ms+ " ms");
-              }
+            initializeComponent(componentInstance,false);
+            if (componentInstance instanceof BaseComponent) {
+              ((BaseComponent)componentInstance).initComponent();
+            }
+            long ms=(System.nanoTime() - startTime) / 1000000;
+            if (ms > 10 && logSlowComponents()) {
+              LOG.info(componentInstance.getClass().getName() + " initialized in " + ms+ " ms");
             }
           }
   finally {
@@ -41,7 +45,7 @@ catch (      StateStorageException e) {
         throw e;
       }
 catch (      Throwable t) {
-        handleInitComponentError(t,componentInstance == null,componentKey,config);
+        handleInitComponentError(t,componentKey,config);
       }
       return componentInstance;
     }
