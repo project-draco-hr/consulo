@@ -1,41 +1,24 @@
 {
   try {
-    URI fileURL=file.toURI();
-    URL jarURL=new URL("jar:" + StringUtil.replace(fileURL.toASCIIString(),"!","%21") + "!/META-INF/"+ fileName);
-    IdeaPluginDescriptorImpl descriptor=new IdeaPluginDescriptorImpl(file);
-    FileInputStream in=new FileInputStream(file);
-    ZipInputStream zipStream=new ZipInputStream(in);
+    String fileURL=StringUtil.replace(file.toURI().toASCIIString(),"!","%21");
+    URL jarURL=new URL("jar:" + fileURL + "!/META-INF/"+ fileName);
+    ZipFile zipFile=ZipFileCache.acquire(file.getPath());
     try {
-      ZipEntry entry=zipStream.getNextEntry();
-      if (entry == null) {
-        return null;
-      }
-      if (entry.getName().equals(JarMemoryLoader.SIZE_ENTRY)) {
-        entry=zipStream.getNextEntry();
-        if (entry.getName().equals("META-INF/" + fileName)) {
-          byte[] content=FileUtil.loadBytes(zipStream,(int)entry.getSize());
-          Document document=JDOMUtil.loadDocument(new ByteArrayInputStream(content));
-          descriptor.readExternal(document,jarURL);
-          return descriptor;
-        }
+      ZipEntry entry=zipFile.getEntry("META-INF/" + fileName);
+      if (entry != null) {
+        Document document=JDOMUtil.loadDocument(zipFile.getInputStream(entry));
+        IdeaPluginDescriptorImpl descriptor=new IdeaPluginDescriptorImpl(file);
+        descriptor.readExternal(document,jarURL);
+        return descriptor;
       }
     }
   finally {
-      zipStream.close();
-      in.close();
+      ZipFileCache.release(zipFile);
     }
-    descriptor.readExternal(jarURL);
-    return descriptor;
   }
  catch (  XmlSerializationException e) {
     getLogger().info("Cannot load " + file,e);
-    prepareLoadingPluginsErrorMessage("Plugin file " + file.getName() + " contains invalid plugin descriptor file.");
-  }
-catch (  FileNotFoundException e) {
-    return null;
-  }
-catch (  Exception e) {
-    getLogger().info("Cannot load " + file,e);
+    prepareLoadingPluginsErrorMessage("File '" + file.getName() + "' contains invalid plugin descriptor.");
   }
 catch (  Throwable e) {
     getLogger().info("Cannot load " + file,e);
