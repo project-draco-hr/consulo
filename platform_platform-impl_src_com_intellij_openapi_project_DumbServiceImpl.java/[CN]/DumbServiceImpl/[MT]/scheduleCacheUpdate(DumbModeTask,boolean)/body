@@ -1,0 +1,69 @@
+{
+  if (LOG.isDebugEnabled())   LOG.debug("Scheduling task " + task,new Throwable());
+  final Application application=ApplicationManager.getApplication();
+  if (application.isUnitTestMode() || application.isHeadlessEnvironment() || !forceDumbMode && !myDumb && application.isReadAccessAllowed()) {
+    final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+    if (indicator != null) {
+      indicator.pushState();
+    }
+    AccessToken token=HeavyProcessLatch.INSTANCE.processStarted("Performing indexing task");
+    try {
+      task.performInDumbMode(indicator != null ? indicator : new EmptyProgressIndicator());
+    }
+  finally {
+      token.finish();
+      if (indicator != null) {
+        indicator.popState();
+      }
+      Disposer.dispose(task);
+    }
+    return;
+  }
+  UIUtil.invokeLaterIfNeeded(new DumbAwareRunnable(){
+    @Override public void run(){
+      if (myProject.isDisposed()) {
+        return;
+      }
+      final ProgressIndicatorBase indicator=new ProgressIndicatorBase(){
+        @Override protected void delegateRunningChange(        @NotNull AbstractProgressIndicatorExBase.IndicatorAction action){
+        }
+      }
+;
+      myProgresses.put(task,indicator);
+      Disposer.register(task,new Disposable(){
+        @Override public void dispose(){
+          application.assertIsDispatchThread();
+          myProgresses.remove(task);
+        }
+      }
+);
+      myUpdatesQueue.addLast(task);
+      if (!myDumb) {
+        boolean startSuccess=application.runWriteAction(new Computable<Boolean>(){
+          @Override public Boolean compute(){
+            myDumb=true;
+            try {
+              myPublisher.enteredDumbMode();
+            }
+ catch (            Throwable e) {
+              LOG.error(e);
+            }
+            try {
+              startBackgroundProcess();
+            }
+ catch (            Throwable e) {
+              LOG.error("Failed to start background index update task",e);
+              return false;
+            }
+            return true;
+          }
+        }
+);
+        if (!startSuccess) {
+          updateFinished();
+        }
+      }
+    }
+  }
+);
+}
