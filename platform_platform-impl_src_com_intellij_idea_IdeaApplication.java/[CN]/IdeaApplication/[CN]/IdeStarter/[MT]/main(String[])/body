@@ -1,6 +1,6 @@
 {
   SystemDock.updateMenu();
-  ApplicationEx app=ApplicationManagerEx.getApplicationEx();
+  final ApplicationEx app=ApplicationManagerEx.getApplicationEx();
   WindowManagerImpl windowManager=(WindowManagerImpl)WindowManager.getInstance();
   IdeEventQueue.getInstance().setWindowManager(windowManager);
   Ref<Boolean> willOpenProject=new Ref<Boolean>(Boolean.FALSE);
@@ -8,18 +8,6 @@
   lifecyclePublisher.appFrameCreated(args,willOpenProject);
   LOG.info("App initialization took " + (System.nanoTime() - PluginManager.startupStart) / 1000000 + " ms");
   PluginManagerCore.dumpPluginClassStatistics();
-  app.invokeAndWait(new Runnable(){
-    @Override public void run(){
-      if (mySplash != null) {
-        mySplash.dispose();
-        mySplash=null;
-      }
-    }
-  }
-,ModalityState.NON_MODAL);
-  if (Registry.is("ide.firstStartup") && !SandboxUtil.isInsideSandbox()) {
-    CustomizeUtil.show(true);
-  }
   if (!willOpenProject.get()) {
     WelcomeFrame.showNow();
     lifecyclePublisher.welcomeScreenDisplayed();
@@ -29,23 +17,28 @@
   }
   app.invokeLater(new Runnable(){
     @Override public void run(){
+      if (mySplash != null) {
+        mySplash.dispose();
+        mySplash=null;
+      }
+    }
+  }
+,ModalityState.NON_MODAL);
+  app.invokeLater(new Runnable(){
+    @Override public void run(){
+      Project projectFromCommandLine=null;
       if (myPerformProjectLoad) {
-        loadProject();
+        projectFromCommandLine=loadProjectFromExternalCommandLine();
       }
-      final UpdateSettings settings=UpdateSettings.getInstance();
-      if (settings != null) {
-        final ApplicationInfo appInfo=ApplicationInfo.getInstance();
-        if (StringUtil.compareVersionNumbers(settings.LAST_BUILD_CHECKED,appInfo.getBuild().asString()) < 0 || (UpdateChecker.isMyVeryFirstOpening() && UpdateChecker.checkNeeded())) {
-          UpdateChecker.setMyVeryFirstOpening(false);
-          UpdateChecker.updateAndShowResult();
-        }
-      }
+      final MessageBus bus=ApplicationManager.getApplication().getMessageBus();
+      bus.syncPublisher(AppLifecycleListener.TOPIC).appStarting(projectFromCommandLine);
       SwingUtilities.invokeLater(new Runnable(){
         @Override public void run(){
           PluginManager.reportPluginError();
         }
       }
 );
+      UsageTrigger.trigger(app.getName() + "app.started");
     }
   }
 ,ModalityState.NON_MODAL);
