@@ -1,0 +1,67 @@
+{
+  DaemonCodeAnalyzerStatus status=new DaemonCodeAnalyzerStatus();
+  if (myFile == null) {
+    status.reasonWhyDisabled="No file";
+    status.errorAnalyzingFinished=true;
+    return status;
+  }
+  if (myProject != null && myProject.isDisposed()) {
+    status.reasonWhyDisabled="Project is disposed";
+    status.errorAnalyzingFinished=true;
+    return status;
+  }
+  if (!myDaemonCodeAnalyzer.isHighlightingAvailable(myFile)) {
+    if (!myFile.isPhysical()) {
+      status.reasonWhyDisabled="File is generated";
+      status.errorAnalyzingFinished=true;
+      return status;
+    }
+ else     if (myFile instanceof PsiCompiledElement) {
+      status.reasonWhyDisabled="File is decompiled";
+      status.errorAnalyzingFinished=true;
+      return status;
+    }
+    final FileType fileType=myFile.getFileType();
+    if (fileType.isBinary()) {
+      status.reasonWhyDisabled="File is binary";
+      status.errorAnalyzingFinished=true;
+      return status;
+    }
+    status.reasonWhyDisabled="Highlighting is disabled for this file";
+    status.errorAnalyzingFinished=true;
+    return status;
+  }
+  FileViewProvider provider=myFile.getViewProvider();
+  Set<Language> languages=provider.getLanguages();
+  HighlightingSettingsPerFile levelSettings=HighlightingSettingsPerFile.getInstance(myProject);
+  boolean shouldHighlight=languages.isEmpty();
+  for (  Language language : languages) {
+    PsiFile root=provider.getPsi(language);
+    FileHighlightingSetting level=levelSettings.getHighlightingSettingForRoot(root);
+    shouldHighlight|=level != FileHighlightingSetting.SKIP_HIGHLIGHTING;
+  }
+  if (!shouldHighlight) {
+    status.reasonWhyDisabled="Highlighting level is None";
+    status.errorAnalyzingFinished=true;
+    return status;
+  }
+  if (HeavyProcessLatch.INSTANCE.isRunning()) {
+    status.reasonWhySuspended=StringUtil.defaultIfEmpty(HeavyProcessLatch.INSTANCE.getRunningOperationName(),"Heavy operation is running");
+    status.errorAnalyzingFinished=true;
+    return status;
+  }
+  status.errorCount=errorCount.clone();
+  fillDaemonCodeAnalyzerErrorsStatus(status,severityRegistrar);
+  List<TextEditorHighlightingPass> passes=myDaemonCodeAnalyzer.getPassesToShowProgressFor(myDocument);
+  status.passStati=passes.isEmpty() ? Collections.<ProgressableTextEditorHighlightingPass>emptyList() : new ArrayList<ProgressableTextEditorHighlightingPass>(passes.size());
+  for (int i=0; i < passes.size(); i++) {
+    TextEditorHighlightingPass tepass=passes.get(i);
+    if (!(tepass instanceof ProgressableTextEditorHighlightingPass))     continue;
+    ProgressableTextEditorHighlightingPass pass=(ProgressableTextEditorHighlightingPass)tepass;
+    if (pass.getProgress() < 0)     continue;
+    status.passStati.add(pass);
+  }
+  status.errorAnalyzingFinished=myDaemonCodeAnalyzer.isAllAnalysisFinished(myFile);
+  status.reasonWhySuspended=myDaemonCodeAnalyzer.isUpdateByTimerEnabled() ? null : "Highlighting is paused temporarily";
+  return status;
+}
