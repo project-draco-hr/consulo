@@ -1,37 +1,66 @@
 {
-  FileContent result;
-synchronized (this) {
-    result=myPushbackBuffer.poll();
-    if (result != null) {
-      return result;
-    }
-  }
-  try {
-    while (result == null) {
-      result=myQueue.poll(300L,TimeUnit.MILLISECONDS);
-      if (result == null && myContentLoadingThreadTerminated) {
-        return null;
+  FileContent result=null;
+  while (result == null) {
+    if (ourAllowParallelFileReading) {
+      result=myLoadedContentsQueue.poll();
+      if (result == null) {
+        VirtualFile virtualFileToLoad=myFilesToLoadQueue.poll();
+        if (virtualFileToLoad != null) {
+          FileContent content=new FileContent(virtualFileToLoad);
+          if (isValidFile(virtualFileToLoad)) {
+            try {
+              content.getBytes();
+              return content;
+            }
+ catch (            IOException e) {
+              LOG.info(virtualFileToLoad + ": " + e);
+            }
+catch (            InvalidVirtualFileAccessException e) {
+              LOG.info(virtualFileToLoad + ": " + e);
+            }
+catch (            Throwable t) {
+              LOG.error(virtualFileToLoad + ": " + t);
+            }
+          }
+          content.setEmptyContent();
+          return content;
+        }
+        do {
+          try {
+            result=myLoadedContentsQueue.poll(10,TimeUnit.MILLISECONDS);
+            if (result != null)             break;
+          }
+ catch (          InterruptedException ex) {
+            throw new RuntimeException(ex);
+          }
+        }
+ while (!myContentLoadingThreadTerminated);
       }
     }
+ else {
+      try {
+        result=myLoadedContentsQueue.poll(300,TimeUnit.MILLISECONDS);
+      }
+ catch (      InterruptedException ex) {
+        throw new RuntimeException(ex);
+      }
+    }
+    if (result == null && myContentLoadingThreadTerminated) {
+      return null;
+    }
   }
- catch (  InterruptedException e) {
-    throw new RuntimeException(e);
-  }
-  final VirtualFile file=result.getVirtualFile();
-  if (file == null) {
+  if (result == TOMBSTONE) {
     try {
-      myQueue.put(result);
+      myLoadedContentsQueue.put(result);
     }
  catch (    InterruptedException ignore) {
     }
     return null;
   }
-synchronized (this) {
-    try {
-      myTotalSize-=result.getLength();
-    }
-  finally {
-      notifyAll();
+synchronized (myProceedWithLoadingLock) {
+    myLoadedBytesInQueue-=result.getLength();
+    if (myLoadedBytesInQueue < MAX_SIZE_OF_BYTES_IN_QUEUE) {
+      myProceedWithLoadingLock.notifyAll();
     }
   }
   return result;

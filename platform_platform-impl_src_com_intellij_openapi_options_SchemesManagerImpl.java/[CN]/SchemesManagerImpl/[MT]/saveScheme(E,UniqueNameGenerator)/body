@@ -1,0 +1,62 @@
+{
+  ExternalInfo externalInfo=scheme.getExternalInfo();
+  String currentFileNameWithoutExtension=externalInfo.getCurrentFileName();
+  Parent parent=myProcessor.writeScheme(scheme);
+  Element element=parent == null || parent instanceof Element ? (Element)parent : ((Document)parent).detachRootElement();
+  if (JDOMUtil.isEmpty(element)) {
+    ContainerUtilRt.addIfNotNull(myFilesToDelete,currentFileNameWithoutExtension);
+    return;
+  }
+  String fileNameWithoutExtension=currentFileNameWithoutExtension;
+  if (fileNameWithoutExtension == null || isRenamed(scheme)) {
+    fileNameWithoutExtension=nameGenerator.generateUniqueName(FileUtil.sanitizeName(scheme.getName()));
+  }
+  String fileName=fileNameWithoutExtension + mySchemeExtension;
+  int newHash=JDOMUtil.getTreeHash(element);
+  if (currentFileNameWithoutExtension == fileNameWithoutExtension && newHash == externalInfo.getHash()) {
+    return;
+  }
+  myFilesToDelete.remove(fileNameWithoutExtension);
+  BufferExposingByteArrayOutputStream byteOut=StorageUtil.writeToBytes(element,"\n");
+  boolean renamed=currentFileNameWithoutExtension != null && fileNameWithoutExtension != currentFileNameWithoutExtension && nameGenerator.value(currentFileNameWithoutExtension);
+  if (!externalInfo.isRemote()) {
+    VirtualFile file=null;
+    if (renamed) {
+      file=myDir.findChild(currentFileNameWithoutExtension + mySchemeExtension);
+      if (file != null) {
+        AccessToken token=ApplicationManager.getApplication().acquireWriteActionLock(DocumentRunnable.IgnoreDocumentRunnable.class);
+        try {
+          file.rename(this,fileName);
+        }
+  finally {
+          token.finish();
+        }
+      }
+    }
+    if (file == null) {
+      if (myDir == null || !myDir.isValid()) {
+        myDir=DirectoryBasedStorage.createDir(myIoDir,this);
+      }
+      file=DirectoryBasedStorage.getFile(fileName,myDir,this);
+    }
+    OutputStream out=file.getOutputStream(this);
+    try {
+      byteOut.writeTo(out);
+    }
+  finally {
+      out.close();
+    }
+  }
+ else   if (renamed) {
+    myFilesToDelete.add(currentFileNameWithoutExtension);
+  }
+  externalInfo.setHash(newHash);
+  externalInfo.setPreviouslySavedName(scheme.getName());
+  externalInfo.setCurrentFileName(createFileName(fileName));
+  if (myProvider != null && myProvider.isEnabled()) {
+    String fileSpec=getFileFullPath(fileName);
+    if (myProvider.isApplicable(fileSpec,myRoamingType)) {
+      myProvider.saveContent(fileSpec,byteOut.getInternalBuffer(),byteOut.size(),myRoamingType,true);
+    }
+  }
+}

@@ -1,12 +1,53 @@
 {
-  if (myRefreshAlarm != null) {
-    myRefreshAlarm.cancelAllRequests();
-    myRefreshAlarm=null;
+  boolean hasSchemes=false;
+  UniqueNameGenerator nameGenerator=new UniqueNameGenerator();
+  for (  T scheme : mySchemes) {
+    if (scheme instanceof ExternalizableScheme && myProcessor.shouldBeSaved((E)scheme)) {
+      hasSchemes=true;
+      ExternalizableScheme eScheme=(ExternalizableScheme)scheme;
+      String fileName=eScheme.getExternalInfo().getCurrentFileName();
+      if (fileName != null && !isRenamed(eScheme)) {
+        nameGenerator.addExistingName(fileName);
+      }
+    }
   }
-  if (myVFSBaseDir == null) {
-    ensureVFSBaseDir();
+  VirtualFile dir=getVirtualDir();
+  if (!hasSchemes) {
+    myFilesToDelete.clear();
+    if (dir != null && dir.exists()) {
+      try {
+        StorageUtil.deleteFile(this,dir);
+      }
+ catch (      IOException e) {
+        throw new StateStorageException(e);
+      }
+    }
+    return;
   }
-  if (myVFSBaseDir != null) {
-    doSave();
+  for (  final T scheme : mySchemes) {
+    if (!isExternalizable(scheme)) {
+      continue;
+    }
+    @SuppressWarnings("unchecked") E eScheme=(E)scheme;
+    if (myProcessor.shouldBeSaved(eScheme)) {
+      try {
+        saveScheme(eScheme,nameGenerator);
+      }
+ catch (      final Exception e) {
+        Application app=ApplicationManager.getApplication();
+        if (app.isUnitTestMode() || app.isCommandLine()) {
+          LOG.error("Cannot write scheme " + scheme.getName() + " in '"+ myFileSpec+ "': "+ e.getLocalizedMessage(),e);
+        }
+ else {
+          app.invokeLater(new Runnable(){
+            @Override public void run(){
+              Messages.showErrorDialog("Cannot save scheme '" + scheme.getName() + ": "+ e.getMessage(),"Save Settings");
+            }
+          }
+);
+        }
+      }
+    }
   }
+  deleteFiles(dir);
 }

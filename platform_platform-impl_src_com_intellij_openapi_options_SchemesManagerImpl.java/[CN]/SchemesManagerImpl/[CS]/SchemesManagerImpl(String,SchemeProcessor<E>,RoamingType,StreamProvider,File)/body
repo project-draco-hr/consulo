@@ -3,13 +3,71 @@
   myProcessor=processor;
   myRoamingType=roamingType;
   myProvider=provider;
-  myBaseDir=baseDir;
+  myIoDir=baseDir;
   if (processor instanceof SchemeExtensionProvider) {
     mySchemeExtension=((SchemeExtensionProvider)processor).getSchemeExtension();
     myUpgradeExtension=((SchemeExtensionProvider)processor).isUpgradeNeeded();
   }
-  myBaseDir.mkdirs();
-  if (ApplicationManager.getApplication().isUnitTestMode() || !ApplicationManager.getApplication().isCommandLine()) {
-    addVFSListener();
+  VirtualFileTracker virtualFileTracker=ServiceManager.getService(VirtualFileTracker.class);
+  if (virtualFileTracker != null) {
+    final String baseDirPath=myIoDir.getAbsolutePath().replace(File.separatorChar,'/');
+    virtualFileTracker.addTracker(LocalFileSystem.PROTOCOL_PREFIX + baseDirPath,new VirtualFileAdapter(){
+      @Override public void contentsChanged(      @NotNull VirtualFileEvent event){
+        if (event.getRequestor() != null || !isMy(event)) {
+          return;
+        }
+        E scheme=findSchemeFor(event.getFile().getName());
+        T oldCurrentScheme=null;
+        if (scheme != null) {
+          oldCurrentScheme=getCurrentScheme();
+          removeScheme((T)scheme);
+          myProcessor.onSchemeDeleted(scheme);
+        }
+        E readScheme=readSchemeFromFile(event.getFile(),true,Collections.<String,E>emptyMap());
+        if (readScheme != null) {
+          myProcessor.initScheme(readScheme);
+          myProcessor.onSchemeAdded(readScheme);
+          T newCurrentScheme=getCurrentScheme();
+          if (oldCurrentScheme != null && newCurrentScheme == null) {
+            setCurrentSchemeName(readScheme.getName());
+            newCurrentScheme=getCurrentScheme();
+          }
+          if (oldCurrentScheme != newCurrentScheme) {
+            myProcessor.onCurrentSchemeChanged((E)oldCurrentScheme);
+          }
+        }
+      }
+      @Override public void fileCreated(      @NotNull VirtualFileEvent event){
+        if (event.getRequestor() == null && isMy(event)) {
+          E readScheme=readSchemeFromFile(event.getFile(),true,Collections.<String,E>emptyMap());
+          if (readScheme != null) {
+            myProcessor.initScheme(readScheme);
+            myProcessor.onSchemeAdded(readScheme);
+          }
+        }
+      }
+      @Override public void fileDeleted(      @NotNull VirtualFileEvent event){
+        if (event.getRequestor() == null && isMy(event)) {
+          E scheme=findSchemeFor(event.getFile().getName());
+          T oldCurrentScheme=null;
+          if (scheme != null) {
+            oldCurrentScheme=getCurrentScheme();
+            removeScheme((T)scheme);
+            myProcessor.onSchemeDeleted(scheme);
+          }
+          T newCurrentScheme=getCurrentScheme();
+          if (oldCurrentScheme != null && newCurrentScheme == null) {
+            if (!mySchemes.isEmpty()) {
+              setCurrentSchemeName(mySchemes.get(0).getName());
+              newCurrentScheme=getCurrentScheme();
+            }
+          }
+          if (oldCurrentScheme != newCurrentScheme) {
+            myProcessor.onCurrentSchemeChanged((E)oldCurrentScheme);
+          }
+        }
+      }
+    }
+,false,ApplicationManager.getApplication());
   }
 }

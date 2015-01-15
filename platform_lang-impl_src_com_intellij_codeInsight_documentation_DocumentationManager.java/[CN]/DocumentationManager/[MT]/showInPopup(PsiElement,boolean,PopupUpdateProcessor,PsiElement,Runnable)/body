@@ -1,0 +1,75 @@
+{
+  final DocumentationComponent component=new DocumentationComponent(this);
+  component.setNavigateCallback(new Consumer<PsiElement>(){
+    @Override public void consume(    PsiElement psiElement){
+      final AbstractPopup jbPopup=(AbstractPopup)getDocInfoHint();
+      if (jbPopup != null) {
+        final String title=getTitle(psiElement,false);
+        jbPopup.setCaption(title);
+      }
+    }
+  }
+);
+  Processor<JBPopup> pinCallback=new Processor<JBPopup>(){
+    @Override public boolean process(    JBPopup popup){
+      createToolWindow(element,originalElement);
+      myToolWindow.setAutoHide(false);
+      popup.cancel();
+      return false;
+    }
+  }
+;
+  ActionListener actionListener=new ActionListener(){
+    @Override public void actionPerformed(    ActionEvent e){
+      createToolWindow(element,originalElement);
+      final JBPopup hint=getDocInfoHint();
+      if (hint != null && hint.isVisible())       hint.cancel();
+    }
+  }
+;
+  List<Pair<ActionListener,KeyStroke>> actions=ContainerUtil.newSmartList();
+  AnAction quickDocAction=ActionManagerEx.getInstanceEx().getAction(IdeActions.ACTION_QUICK_JAVADOC);
+  for (  Shortcut shortcut : quickDocAction.getShortcutSet().getShortcuts()) {
+    if (!(shortcut instanceof KeyboardShortcut))     continue;
+    actions.add(Pair.create(actionListener,((KeyboardShortcut)shortcut).getFirstKeyStroke()));
+  }
+  boolean hasLookup=LookupManager.getActiveLookup(myEditor) != null;
+  final JBPopup hint=JBPopupFactory.getInstance().createComponentPopupBuilder(component,component).setProject(element.getProject()).addListener(updateProcessor).addUserData(updateProcessor).setKeyboardActions(actions).setDimensionServiceKey(myProject,JAVADOC_LOCATION_AND_SIZE,false).setResizable(true).setMovable(true).setRequestFocus(requestFocus).setCancelOnClickOutside(!hasLookup).setTitle(getTitle(element,false)).setCouldPin(pinCallback).setModalContext(false).setCancelCallback(new Computable<Boolean>(){
+    @Override public Boolean compute(){
+      myCloseOnSneeze=false;
+      if (closeCallback != null) {
+        closeCallback.run();
+      }
+      if (fromQuickSearch()) {
+        ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).unregisterHint();
+      }
+      Disposer.dispose(component);
+      myEditor=null;
+      myPreviouslyFocused=null;
+      return Boolean.TRUE;
+    }
+  }
+).setKeyEventHandler(new BooleanFunction<KeyEvent>(){
+    @Override public boolean fun(    KeyEvent e){
+      if (myCloseOnSneeze) {
+        closeDocHint();
+      }
+      if ((AbstractPopup.isCloseRequest(e) && getDocInfoHint() != null)) {
+        closeDocHint();
+        return true;
+      }
+      return false;
+    }
+  }
+).createPopup();
+  component.setHint(hint);
+  if (myEditor == null) {
+    Lookup lookup=LookupManager.getInstance(myProject).getActiveLookup();
+    myEditor=lookup != null ? lookup.getEditor() : null;
+  }
+  fetchDocInfo(getDefaultCollector(element,originalElement),component);
+  myDocInfoHintRef=new WeakReference<JBPopup>(hint);
+  if (fromQuickSearch() && myPreviouslyFocused != null) {
+    ((ChooseByNameBase.JPanelProvider)myPreviouslyFocused.getParent()).registerHint(hint);
+  }
+}

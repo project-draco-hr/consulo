@@ -1,0 +1,59 @@
+{
+  if (myModel.isMultipleFiles() && myResultsPreviewTable != null) {
+    final ModalityState state=ModalityState.current();
+    if (state == ModalityState.NON_MODAL)     return;
+    if (myResultsPreviewSearchProgress != null && !myResultsPreviewSearchProgress.isCanceled()) {
+      myResultsPreviewSearchProgress.cancel();
+    }
+    final DefaultTableModel model=new DefaultTableModel();
+    model.addColumn("Usages");
+    myResultsPreviewTable.setModel(model);
+    myResultsPreviewTable.getColumnModel().getColumn(0).setCellRenderer(new MyTableCellRenderer());
+    final FindModel modelClone=myModel.clone();
+    applyTo(modelClone,false);
+    ValidationInfo result=getValidationInfo(modelClone);
+    if (result != null)     return;
+    final PsiDirectory psiDirectory=FindInProjectUtil.getPsiDirectory(modelClone,myProject);
+    final ProgressIndicatorBase progressIndicatorWhenSearchStarted=new ProgressIndicatorBase();
+    myResultsPreviewSearchProgress=progressIndicatorWhenSearchStarted;
+    myResultsPreviewTable.getEmptyText().setText("Searching...");
+    final AtomicInteger resultsCount=new AtomicInteger();
+    ProgressIndicatorUtils.scheduleWithWriteActionPriority(myResultsPreviewSearchProgress,new ReadTask(){
+      @Override public void computeInReadAction(      @NotNull ProgressIndicator indicator){
+        final UsageViewPresentation presentation=FindInProjectUtil.setupViewPresentation(FindSettings.getInstance().isShowResultsInSeparateView(),modelClone);
+        final boolean showPanelIfOnlyOneUsage=!FindSettings.getInstance().isSkipResultsWithOneUsage();
+        final FindUsagesProcessPresentation processPresentation=FindInProjectUtil.setupProcessPresentation(myProject,showPanelIfOnlyOneUsage,presentation);
+        FindInProjectUtil.findUsages(modelClone,psiDirectory,myProject,new Processor<UsageInfo>(){
+          @Override public boolean process(          final UsageInfo info){
+            final Usage usage=UsageInfo2UsageAdapter.CONVERTER.fun(info);
+            usage.getPresentation().getIcon();
+            ApplicationManager.getApplication().invokeLater(new Runnable(){
+              @Override public void run(){
+                model.addRow(new Object[]{usage});
+              }
+            }
+,state);
+            return resultsCount.incrementAndGet() < ShowUsagesAction.USAGES_PAGE_SIZE;
+          }
+        }
+,processPresentation);
+        if (resultsCount.get() == 0) {
+          ApplicationManager.getApplication().invokeLater(new Runnable(){
+            @Override public void run(){
+              if (progressIndicatorWhenSearchStarted == myResultsPreviewSearchProgress) {
+                myResultsPreviewTable.getEmptyText().setText(UIBundle.message("message.nothingToShow"));
+              }
+            }
+          }
+,state);
+        }
+      }
+      @Override public void onCanceled(      @NotNull ProgressIndicator indicator){
+        if (progressIndicatorWhenSearchStarted == myResultsPreviewSearchProgress && resultsCount.get() == 0) {
+          myResultsPreviewTable.getEmptyText().setText("Cancelled");
+        }
+      }
+    }
+);
+  }
+}

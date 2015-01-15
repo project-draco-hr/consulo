@@ -58,37 +58,14 @@
     }
     Matcher matcher=model.isRegularExpressions() ? compileRegExp(model,"") : null;
     StringSearcher searcher=matcher != null ? null : new StringSearcher(model.getStringToFind(),model.isCaseSensitive(),true);
-    LayeredLexer.ourDisableLayersFlag.set(Boolean.TRUE);
-    EditorHighlighter editorHighlighter=EditorHighlighterFactory.getInstance().createEditorHighlighter(myProject,file);
-    Lexer lexer;
-    try {
-      if (editorHighlighter instanceof LayeredLexerEditorHighlighter) {
-        lexer=new LexerEditorHighlighterLexer(editorHighlighter,false);
-      }
- else {
-        lexer=highlighter.getHighlightingLexer();
-      }
-    }
-  finally {
-      LayeredLexer.ourDisableLayersFlag.set(null);
-    }
-    data=new CommentsLiteralsSearchData(file,relevantLanguages,highlighter,lexer,tokensOfInterest,searcher,matcher,(FindModel)model.clone());
-    lexer.start(text,0,text.length(),0);
+    SyntaxHighlighterOverEditorHighlighter highlighterAdapter=new SyntaxHighlighterOverEditorHighlighter(highlighter,file,myProject);
+    data=new CommentsLiteralsSearchData(file,relevantLanguages,highlighterAdapter,tokensOfInterest,searcher,matcher,model.clone());
+    data.highlighter.restart(text);
     model.putUserData(ourCommentsLiteralsSearchDataKey,data);
   }
   int initialStartOffset=model.isForward() && data.startOffset < offset ? data.startOffset : 0;
-  final Lexer lexer=data.highlightingLexer;
-  LayeredHighlighterIterator layeredHighlighterIterator=null;
-  if (lexer instanceof LexerEditorHighlighterLexer) {
-    ((LexerEditorHighlighterLexer)lexer).resetPosition(initialStartOffset);
-    HighlighterIterator iterator=((LexerEditorHighlighterLexer)lexer).getHighlighterIterator();
-    if (iterator instanceof LayeredHighlighterIterator) {
-      layeredHighlighterIterator=(LayeredHighlighterIterator)iterator;
-    }
-  }
- else {
-    lexer.start(text,initialStartOffset,text.length(),0);
-  }
+  data.highlighter.resetPosition(initialStartOffset);
+  final Lexer lexer=data.highlighter.getHighlightingLexer();
   IElementType tokenType;
   TokenSet tokens=data.tokensOfInterest;
   int lastGoodOffset=0;
@@ -96,9 +73,8 @@
   FindResultImpl prevFindResult=NOT_FOUND_RESULT;
   while ((tokenType=lexer.getTokenType()) != null) {
     if (lexer.getState() == 0)     lastGoodOffset=lexer.getTokenStart();
-    final SyntaxHighlighter activeSyntaxHighlighter=layeredHighlighterIterator != null ? layeredHighlighterIterator.getActiveSyntaxHighlighter() : data.highlighter;
-    final TextAttributesKey[] keys=activeSyntaxHighlighter.getTokenHighlights(tokenType);
-    if (tokens.contains(tokenType) || (model.isInStringLiteralsOnly() && isHighlightedAsString(keys)) || (model.isInCommentsOnly() && isHighlightedAsDocComment(keys))) {
+    final TextAttributesKey[] keys=data.highlighter.getTokenHighlights(tokenType);
+    if (tokens.contains(tokenType) || (model.isInStringLiteralsOnly() && ChunkExtractor.isHighlightedAsString(keys)) || (model.isInCommentsOnly() && ChunkExtractor.isHighlightedAsComment(keys))) {
       int start=lexer.getTokenStart();
       int end=lexer.getTokenEnd();
       if (model.isInStringLiteralsOnly()) {
