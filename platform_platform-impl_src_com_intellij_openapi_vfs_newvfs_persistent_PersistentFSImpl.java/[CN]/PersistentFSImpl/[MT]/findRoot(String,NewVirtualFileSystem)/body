@@ -12,18 +12,30 @@
   finally {
     myRootsLock.readLock().unlock();
   }
-  VirtualFileSystemEntry newRoot;
+  final VirtualFileSystemEntry newRoot;
   int rootId=FSRecords.findRootRecord(rootUrl);
+  VfsData.Segment segment=VfsData.getSegment(rootId,true);
+  VfsData.DirectoryData directoryData=new VfsData.DirectoryData();
   if (fs instanceof JarFileSystem) {
-    String parentPath=basePath.substring(0,basePath.indexOf(ArchiveFileSystem.ARCHIVE_SEPARATOR));
+    String parentPath=basePath.substring(0,basePath.indexOf(JarFileSystem.JAR_SEPARATOR));
     VirtualFile parentFile=LocalFileSystem.getInstance().findFileByPath(parentPath);
-    if (parentFile == null || !isValidJar(parentPath))     return null;
-    newRoot=new JarRoot(fs,rootId,parentFile);
+    if (parentFile == null)     return null;
+    FileType type=FileTypeRegistry.getInstance().getFileTypeByFileName(parentFile.getName());
+    if (!(type instanceof ArchiveFileType))     return null;
+    newRoot=new JarRoot(fs,rootId,segment,directoryData,parentFile);
   }
  else {
-    newRoot=new FsRoot(fs,rootId,basePath);
+    newRoot=new FsRoot(fs,rootId,segment,directoryData,basePath);
   }
-  FileAttributes attributes=fs.getAttributes(newRoot);
+  FileAttributes attributes=fs.getAttributes(new StubVirtualFile(){
+    @NotNull @Override public String getPath(){
+      return newRoot.getPath();
+    }
+    @Nullable @Override public VirtualFile getParent(){
+      return null;
+    }
+  }
+);
   if (attributes == null || !attributes.isDirectory()) {
     return null;
   }
@@ -32,6 +44,7 @@
   try {
     VirtualFileSystemEntry root=myRoots.get(rootUrl);
     if (root != null)     return root;
+    VfsData.initFile(rootId,segment,-1,directoryData);
     mark=writeAttributesToRecord(rootId,0,newRoot,fs,attributes);
     myRoots.put(rootUrl,newRoot);
     myRootsById.put(rootId,newRoot);

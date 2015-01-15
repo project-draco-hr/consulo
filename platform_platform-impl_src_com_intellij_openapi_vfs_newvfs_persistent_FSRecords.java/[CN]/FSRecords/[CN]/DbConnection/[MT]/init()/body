@@ -1,2 +1,82 @@
 {
+  final File basePath=basePath();
+  basePath.mkdirs();
+  final File namesFile=new File(basePath,"names.dat");
+  final File attributesFile=new File(basePath,"attrib.dat");
+  final File contentsFile=new File(basePath,"content.dat");
+  final File contentsHashesFile=new File(basePath,"contentHashes.dat");
+  final File recordsFile=new File(basePath,"records.dat");
+  if (!namesFile.exists()) {
+    invalidateIndex();
+  }
+  try {
+    if (getCorruptionMarkerFile().exists()) {
+      invalidateIndex();
+      throw new IOException("Corruption marker file found");
+    }
+    PagedFileStorage.StorageLockContext storageLockContext=new PagedFileStorage.StorageLockContext(false);
+    myNames=new PersistentStringEnumerator(namesFile,storageLockContext);
+    myAttributes=new Storage(attributesFile.getCanonicalPath(),REASONABLY_SMALL);
+    myContents=new RefCountingStorage(contentsFile.getCanonicalPath(),CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH);
+    myContentHashesEnumerator=weHaveContentHashes ? new ContentHashesUtil.HashEnumerator(contentsHashesFile,storageLockContext) : null;
+    boolean aligned=PagedFileStorage.BUFFER_SIZE % RECORD_SIZE == 0;
+    assert aligned;
+    myRecords=new ResizeableMappedFile(recordsFile,20 * 1024,storageLockContext,PagedFileStorage.BUFFER_SIZE,aligned,IOUtil.ourByteBuffersUseNativeByteOrder);
+    if (myRecords.length() == 0) {
+      cleanRecord(0);
+      cleanRecord(1);
+      setCurrentVersion();
+    }
+    if (getVersion() != VERSION) {
+      throw new IOException("FS repository version mismatch");
+    }
+    if (myRecords.getInt(HEADER_CONNECTION_STATUS_OFFSET) != SAFELY_CLOSED_MAGIC) {
+      throw new IOException("FS repository wasn't safely shut down");
+    }
+    markDirty();
+    scanFreeRecords();
+  }
+ catch (  Exception e) {
+    LOG.info("Filesystem storage is corrupted or does not exist. [Re]Building. Reason: " + e.getMessage());
+    try {
+      closeFiles();
+      boolean deleted=FileUtil.delete(getCorruptionMarkerFile());
+      deleted&=deleteAllFilesStartingWith(namesFile);
+      deleted&=AbstractStorage.deleteFiles(attributesFile.getCanonicalPath());
+      deleted&=AbstractStorage.deleteFiles(contentsFile.getCanonicalPath());
+      deleted&=deleteAllFilesStartingWith(contentsHashesFile);
+      deleted&=deleteAllFilesStartingWith(recordsFile);
+      if (!deleted) {
+        throw new IOException("Cannot delete filesystem storage files");
+      }
+    }
+ catch (    final IOException e1) {
+      final Runnable warnAndShutdown=new Runnable(){
+        @Override public void run(){
+          if (ApplicationManager.getApplication().isUnitTestMode()) {
+            e1.printStackTrace();
+          }
+ else {
+            final String message="Files in " + basePath.getPath() + " are locked.\n"+ ApplicationNamesInfo.getInstance().getProductName()+ " will not be able to start up.";
+            if (!ApplicationManager.getApplication().isHeadlessEnvironment()) {
+              JOptionPane.showMessageDialog(JOptionPane.getRootFrame(),message,"Fatal Error",JOptionPane.ERROR_MESSAGE);
+            }
+ else {
+              System.err.println(message);
+            }
+          }
+          Runtime.getRuntime().halt(1);
+        }
+      }
+;
+      if (EventQueue.isDispatchThread()) {
+        warnAndShutdown.run();
+      }
+ else {
+        SwingUtilities.invokeLater(warnAndShutdown);
+      }
+      throw new RuntimeException("Can't rebuild filesystem storage ",e1);
+    }
+    init();
+  }
 }

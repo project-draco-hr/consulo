@@ -10,114 +10,14 @@
     root.markClean();
     return;
   }
-  if (rootAttributes != null && rootAttributes.isDirectory()) {
+ else   if (rootAttributes.isDirectory()) {
     fs=PersistentFS.replaceWithNativeFS(fs);
   }
   myRefreshQueue.addLast(Pair.create(root,rootAttributes));
-  PersistentFS persistence=PersistentFS.getInstance();
-  main:   while (!myRefreshQueue.isEmpty() && !myCancelled) {
-    Pair<NewVirtualFile,FileAttributes> pair=myRefreshQueue.pullFirst();
-    NewVirtualFile file=pair.first;
-    boolean fileDirty=file.isDirty();
-    debug(LOG,"file=%s dirty=%b",file,fileDirty);
-    if (!fileDirty)     continue;
-    FileAttributes attributes=pair.second != null ? pair.second : fs.getAttributes(file);
-    if (attributes == null) {
-      scheduleDeletion(file);
-      continue;
-    }
-    boolean checkFurther=true;
-    NewVirtualFile parent=file.getParent();
-    if (parent != null && (checkAndScheduleAttributesChange(parent,file,attributes) || checkAndScheduleSymLinkTargetChange(parent,file,attributes,fs))) {
-      checkFurther=false;
-    }
- else     if (file.isDirectory()) {
-      VirtualDirectoryImpl dir=(VirtualDirectoryImpl)file;
-      boolean fullSync=dir.allChildrenLoaded();
-      if (fullSync) {
-        Set<String> currentNames=newHashSet(persistence.list(file));
-        Set<String> upToDateNames=newHashSet(VfsUtil.filterNames(fs.list(file)));
-        Set<String> newNames=newHashSet(upToDateNames);
-        newNames.removeAll(currentNames);
-        Set<String> deletedNames=newHashSet(currentNames);
-        deletedNames.removeAll(upToDateNames);
-        debug(LOG,"current=%s +%s -%s",currentNames,newNames,deletedNames);
-        for (        String name : deletedNames) {
-          scheduleDeletion(file.findChild(name));
-        }
-        for (        String name : newNames) {
-          if (myCancelled)           break main;
-          FileAttributes childAttributes=fs.getAttributes(new FakeVirtualFile(file,name));
-          if (childAttributes != null) {
-            scheduleCreation(file,name,childAttributes.isDirectory());
-          }
- else {
-            LOG.warn("fs=" + fs + " dir="+ file+ " name="+ name);
-          }
-        }
-        for (        VirtualFile child : file.getChildren()) {
-          if (myCancelled)           break main;
-          if (!deletedNames.contains(child.getName())) {
-            FileAttributes childAttributes=fs.getAttributes(child);
-            if (childAttributes != null) {
-              checkAndScheduleChildRefresh(file,child,childAttributes);
-            }
- else {
-              LOG.warn("fs=" + fs + " dir="+ file+ " name="+ child.getName());
-              scheduleDeletion(child);
-            }
-          }
-        }
-      }
- else {
-        Collection<VirtualFile> cachedChildren=file.getCachedChildren();
-        debug(LOG,"cached=%s",cachedChildren);
-        for (        VirtualFile child : cachedChildren) {
-          if (myCancelled)           break main;
-          FileAttributes childAttributes=fs.getAttributes(child);
-          if (childAttributes != null) {
-            checkAndScheduleChildRefresh(file,child,childAttributes);
-          }
- else {
-            scheduleDeletion(child);
-          }
-        }
-        List<String> names=dir.getSuspiciousNames();
-        debug(LOG,"suspicious=%s",names);
-        for (        String name : names) {
-          if (myCancelled)           break main;
-          if (name.isEmpty())           continue;
-          VirtualFile fake=new FakeVirtualFile(file,name);
-          FileAttributes childAttributes=fs.getAttributes(fake);
-          if (childAttributes != null) {
-            scheduleCreation(file,name,childAttributes.isDirectory());
-          }
-        }
-      }
-    }
- else {
-      long currentTimestamp=persistence.getTimeStamp(file);
-      long upToDateTimestamp=attributes.lastModified;
-      long currentLength=persistence.getLength(file);
-      long upToDateLength=attributes.length;
-      if (currentTimestamp != upToDateTimestamp || currentLength != upToDateLength) {
-        scheduleUpdateContent(file);
-      }
-    }
-    if (checkFurther) {
-      boolean currentWritable=persistence.isWritable(file);
-      boolean upToDateWritable=attributes.isWritable();
-      if (currentWritable != upToDateWritable) {
-        scheduleAttributeChange(file,VirtualFile.PROP_WRITABLE,currentWritable,upToDateWritable);
-      }
-      if (SystemInfo.isWindows) {
-        boolean currentHidden=persistence.isHidden(file);
-        boolean upToDateHidden=attributes.isHidden();
-        if (currentHidden != upToDateHidden) {
-          scheduleAttributeChange(file,VirtualFile.PROP_HIDDEN,currentHidden,upToDateHidden);
-        }
-      }
-    }
-    file.markClean();
+  try {
+    processQueue(fs,PersistentFS.getInstance());
+  }
+ catch (  RefreshCancelledException e) {
+    LOG.debug("refresh cancelled");
   }
 }

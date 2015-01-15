@@ -1,5 +1,5 @@
 {
-  myChangedFilesCollector.ensureAllInvalidateTasksCompleted();
+  myChangedFilesCollector.tryToEnsureAllInvalidateTasksCompleted();
   final VirtualFile file=content.getVirtualFile();
   FileType fileType=file.getFileType();
   FileTypeManagerImpl.cacheFileType(file,fileType);
@@ -11,19 +11,25 @@
       final ID<?,?> indexId=affectedIndexCandidates.get(i);
       if (shouldIndexFile(project,file,indexId)) {
         if (fc == null) {
+          if (project == null) {
+            project=ProjectUtil.guessProjectForFile(file);
+          }
           byte[] currentBytes;
-          byte[] hash;
           try {
             currentBytes=content.getBytes();
-            hash=fileType.isBinary() || !IdIndex.ourSnapshotMappingsEnabled ? null : ContentHashesSupport.calcContentHashWithFileType(currentBytes,fileType);
           }
  catch (          IOException e) {
             currentBytes=ArrayUtil.EMPTY_BYTE_ARRAY;
-            hash=null;
           }
-          fc=new FileContentImpl(file,currentBytes,hash);
-          if (project == null) {
-            project=ProjectUtil.guessProjectForFile(file);
+          fc=new FileContentImpl(file,currentBytes);
+          if (!fileType.isBinary() && IdIndex.ourSnapshotMappingsEnabled) {
+            try {
+              byte[] hash=ContentHashesSupport.calcContentHashWithFileType(currentBytes,fc.getCharset(),SubstitutedFileType.substituteFileType(file,fileType,project));
+              fc.setHash(hash);
+            }
+ catch (            IOException e) {
+              LOG.error(e);
+            }
           }
           psiFile=content.getUserData(IndexingDataKeys.PSI_FILE);
           initFileContent(fc,project,psiFile);
