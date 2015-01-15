@@ -33,11 +33,21 @@
 ,this);
   eventMulticaster.addCaretListener(new CaretAdapter(){
     @Override public void caretPositionChanged(    CaretEvent e){
-      Editor editor=e.getEditor();
+      final Editor editor=e.getEditor();
       if (!editor.getComponent().isShowing() && !application.isUnitTestMode() || !worthBothering(editor.getDocument(),editor.getProject())) {
         return;
       }
-      myDaemonCodeAnalyzer.hideLastIntentionHint();
+      if (!application.isUnitTestMode()) {
+        ApplicationManager.getApplication().invokeLater(new Runnable(){
+          @Override public void run(){
+            if (!editor.getComponent().isShowing() || myProject.isDisposed()) {
+              return;
+            }
+            myDaemonCodeAnalyzer.hideLastIntentionHint();
+          }
+        }
+,ModalityState.current());
+      }
     }
   }
 ,this);
@@ -52,7 +62,7 @@
       }
       myActiveEditors=activeEditors;
       stopDaemon(true,"Active editor change");
-      if (LaterInvocator.isInModalContext()) {
+      if (ApplicationManager.getApplication().isDispatchThread() && LaterInvocator.isInModalContext()) {
         myDaemonCodeAnalyzer.setUpdateByTimerEnabled(true);
       }
       for (      Editor editor : activeEditors) {
@@ -122,6 +132,12 @@
     }
   }
 );
+  colorsManager.addEditorColorsListener(new EditorColorsListener(){
+    @Override public void globalSchemeChange(    EditorColorsScheme scheme){
+      stopDaemonAndRestartAllFiles();
+    }
+  }
+,this);
   commandProcessor.addCommandListener(new MyCommandListener(),this);
   application.addApplicationListener(new MyApplicationListener(),this);
   editorColorsManager.addEditorColorsListener(new MyEditorColorsListener(),this);
@@ -136,7 +152,7 @@
       if (VirtualFile.PROP_NAME.equals(propertyName)) {
         stopDaemonAndRestartAllFiles();
         VirtualFile virtualFile=event.getFile();
-        PsiFile psiFile=((PsiManagerEx)psiManager).getFileManager().getCachedPsiFile(virtualFile);
+        PsiFile psiFile=!virtualFile.isValid() ? null : ((PsiManagerEx)psiManager).getFileManager().getCachedPsiFile(virtualFile);
         if (psiFile != null && !myDaemonCodeAnalyzer.isHighlightingAvailable(psiFile)) {
           Document document=fileDocumentManager.getCachedDocument(virtualFile);
           if (document != null) {
@@ -161,4 +177,28 @@
   }
 ;
   LaterInvocator.addModalityStateListener(modalityStateListener,this);
+  messageBus.connect().subscribe(SeverityRegistrar.SEVERITIES_CHANGED_TOPIC,new Runnable(){
+    @Override public void run(){
+      UIUtil.invokeLaterIfNeeded(new Runnable(){
+        @Override public void run(){
+          if (!project.isDisposed()) {
+            for (            Editor editor : editorTracker.getActiveEditors()) {
+              repaintErrorStripeRenderer(editor,project);
+            }
+          }
+        }
+      }
+);
+    }
+  }
+);
+  if (RefResolveService.ENABLED) {
+    RefResolveService resolveService=RefResolveService.getInstance(project);
+    resolveService.addListener(this,new RefResolveService.Listener(){
+      @Override public void allFilesResolved(){
+        stopDaemon(true,"RefResolveService is up to date");
+      }
+    }
+);
+  }
 }
