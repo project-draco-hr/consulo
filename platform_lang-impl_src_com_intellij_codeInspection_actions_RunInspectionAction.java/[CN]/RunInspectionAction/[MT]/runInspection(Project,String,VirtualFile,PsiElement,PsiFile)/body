@@ -1,0 +1,49 @@
+{
+  final InspectionManagerEx managerEx=(InspectionManagerEx)InspectionManager.getInstance(project);
+  final Module module=virtualFile != null ? ModuleUtilCore.findModuleForFile(virtualFile,project) : null;
+  AnalysisScope analysisScope=null;
+  if (psiFile != null) {
+    analysisScope=new AnalysisScope(psiFile);
+  }
+ else {
+    if (virtualFile != null && virtualFile.isDirectory()) {
+      final PsiDirectory psiDirectory=PsiManager.getInstance(project).findDirectory(virtualFile);
+      if (psiDirectory != null) {
+        analysisScope=new AnalysisScope(psiDirectory);
+      }
+    }
+    if (analysisScope == null && virtualFile != null) {
+      analysisScope=new AnalysisScope(project,Arrays.asList(virtualFile));
+    }
+    if (analysisScope == null) {
+      analysisScope=new AnalysisScope(project);
+    }
+  }
+  final FileFilterPanel fileFilterPanel=new FileFilterPanel();
+  fileFilterPanel.init();
+  final BaseAnalysisActionDialog dialog=new BaseAnalysisActionDialog(AnalysisScopeBundle.message("specify.analysis.scope",InspectionsBundle.message("inspection.action.title")),AnalysisScopeBundle.message("analysis.scope.title",InspectionsBundle.message("inspection.action.noun")),project,analysisScope,module != null ? module.getName() : null,true,AnalysisUIOptions.getInstance(project),psiElement){
+    @Override protected JComponent getAdditionalActionSettings(    Project project){
+      return fileFilterPanel.getPanel();
+    }
+    @NotNull @Override public AnalysisScope getScope(    @NotNull AnalysisUIOptions uiOptions,    @NotNull AnalysisScope defaultScope,    @NotNull Project project,    Module module){
+      final AnalysisScope scope=super.getScope(uiOptions,defaultScope,project,module);
+      final SearchScope filterScope=fileFilterPanel.getSearchScope();
+      if (filterScope == null) {
+        return scope;
+      }
+      final SearchScope filteredScope=filterScope.intersectWith(scope.toSearchScope());
+      return new AnalysisScope(filteredScope,project);
+    }
+  }
+;
+  if (!dialog.showAndGet()) {
+    return;
+  }
+  final AnalysisUIOptions uiOptions=AnalysisUIOptions.getInstance(project);
+  AnalysisScope scope=dialog.getScope(uiOptions,analysisScope,project,module);
+  PsiElement element=psiFile == null ? psiElement : psiFile;
+  final InspectionProfile currentProfile=InspectionProjectProfileManager.getInstance(project).getInspectionProfile();
+  final InspectionToolWrapper toolWrapper=currentProfile.getInspectionTool(shortName,project);
+  LOGGER.assertTrue(toolWrapper != null,"Missed inspection: " + shortName);
+  RunInspectionIntention.rerunInspection(toolWrapper,managerEx,scope,element);
+}

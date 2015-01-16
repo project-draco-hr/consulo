@@ -1,8 +1,9 @@
 {
   cancelListUpdater();
   final UsageViewPresentation presentation=new UsageViewPresentation();
-  final String prefixPattern=myFindUsagesTitle + " \'" + myTextField.getText().trim()+ "\'";
-  final String nonPrefixPattern=myFindUsagesTitle + " \'*" + myTextField.getText().trim()+ "*\'";
+  final String text=myTextField.getText();
+  final String prefixPattern=myFindUsagesTitle + " \'" + text.trim()+ "\'";
+  final String nonPrefixPattern=myFindUsagesTitle + " \'*" + text.trim()+ "*\'";
   presentation.setCodeUsagesString(prefixPattern);
   presentation.setUsagesInGeneratedCodeString(prefixPattern + " in generated code");
   presentation.setDynamicUsagesString(nonPrefixPattern);
@@ -15,38 +16,34 @@
   fillUsages(Arrays.asList(elements[0]),usages,targets,false);
   fillUsages(Arrays.asList(elements[1]),usages,targets,true);
   if (myListModel.contains(EXTRA_ELEM)) {
-    final String text=myTextField.getText();
     final boolean everywhere=myCheckBox.isSelected();
-    final LinkedHashSet<Object> prefixMatchElementsArray=new LinkedHashSet<Object>();
-    final LinkedHashSet<Object> nonPrefixMatchElementsArray=new LinkedHashSet<Object>();
+    final Set<Object> prefixMatchElementsArray=new LinkedHashSet<Object>();
+    final Set<Object> nonPrefixMatchElementsArray=new LinkedHashSet<Object>();
     hideHint();
     ProgressManager.getInstance().run(new Task.Modal(myProject,prefixPattern,true){
       private ChooseByNameBase.CalcElementsThread myCalcUsagesThread;
       @Override public void run(      @NotNull final ProgressIndicator indicator){
         ensureNamesLoaded(everywhere);
         indicator.setIndeterminate(true);
+        final TooManyUsagesStatus tooManyUsagesStatus=TooManyUsagesStatus.createFor(indicator);
+        myCalcUsagesThread=new CalcElementsThread(text,everywhere,null,ModalityState.NON_MODAL,false){
+          @Override protected boolean isOverflow(          @NotNull Set<Object> elementsArray){
+            tooManyUsagesStatus.pauseProcessingIfTooManyUsages();
+            if (elementsArray.size() > UsageLimitUtil.USAGES_LIMIT - myMaximumListSizeLimit && tooManyUsagesStatus.switchTooManyUsagesStatus()) {
+              int usageCount=elementsArray.size() + myMaximumListSizeLimit;
+              UsageViewManagerImpl.showTooManyUsagesWarning(getProject(),tooManyUsagesStatus,indicator,presentation,usageCount,null);
+            }
+            return false;
+          }
+        }
+;
         ApplicationManager.getApplication().runReadAction(new Runnable(){
           @Override public void run(){
-            final boolean[] overFlow={false};
-            myCalcUsagesThread=new CalcElementsThread(text,everywhere,null,ModalityState.NON_MODAL,false){
-              private final AtomicBoolean userAskedToAbort=new AtomicBoolean();
-              @Override protected boolean isOverflow(              @NotNull Set<Object> elementsArray){
-                if (elementsArray.size() > UsageLimitUtil.USAGES_LIMIT - myMaximumListSizeLimit && !userAskedToAbort.getAndSet(true)) {
-                  final UsageLimitUtil.Result ret=UsageLimitUtil.showTooManyUsagesWarning(myProject,UsageViewBundle.message("find.excessive.usage.count.prompt",elementsArray.size() + myMaximumListSizeLimit,StringUtil.pluralize(presentation.getUsagesWord())),presentation);
-                  if (ret == UsageLimitUtil.Result.ABORT) {
-                    overFlow[0]=true;
-                    return true;
-                  }
-                }
-                return false;
-              }
-            }
-;
             boolean anyPlace=isSearchInAnyPlace();
             setSearchInAnyPlace(false);
             myCalcUsagesThread.addElementsByPattern(text,prefixMatchElementsArray,indicator,everywhere);
             setSearchInAnyPlace(anyPlace);
-            if (anyPlace && !overFlow[0]) {
+            if (anyPlace && !indicator.isCanceled()) {
               myCalcUsagesThread.addElementsByPattern(text,nonPrefixMatchElementsArray,indicator,everywhere);
               nonPrefixMatchElementsArray.removeAll(prefixMatchElementsArray);
             }

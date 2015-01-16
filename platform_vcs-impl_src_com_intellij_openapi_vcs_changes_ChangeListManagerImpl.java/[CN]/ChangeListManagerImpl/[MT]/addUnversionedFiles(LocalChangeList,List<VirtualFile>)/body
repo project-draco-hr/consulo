@@ -1,73 +1,8 @@
 {
-  final List<VcsException> exceptions=new ArrayList<VcsException>();
-  final Set<VirtualFile> allProcessedFiles=new HashSet<VirtualFile>();
-  ChangesUtil.processVirtualFilesByVcs(myProject,files,new ChangesUtil.PerVcsProcessor<VirtualFile>(){
-    @Override public void process(    final AbstractVcs vcs,    final List<VirtualFile> items){
-      final CheckinEnvironment environment=vcs.getCheckinEnvironment();
-      if (environment != null) {
-        final Set<VirtualFile> descendant=new HashSet<VirtualFile>();
-        for (        VirtualFile item : items) {
-          final Processor<VirtualFile> addProcessor=new Processor<VirtualFile>(){
-            @Override public boolean process(            VirtualFile file){
-              if (getStatus(file) == FileStatus.UNKNOWN) {
-                descendant.add(file);
-              }
-              return true;
-            }
-          }
-;
-          VcsRootIterator.iterateVfUnderVcsRoot(myProject,item,addProcessor);
-        }
-        final List<VcsException> result=environment.scheduleUnversionedFilesForAddition(new ArrayList<VirtualFile>(descendant));
-        allProcessedFiles.addAll(descendant);
-        if (result != null) {
-          exceptions.addAll(result);
-        }
-      }
+  addUnversionedFiles(list,files,new Condition<FileStatus>(){
+    @Override public boolean value(    FileStatus status){
+      return status == FileStatus.UNKNOWN;
     }
   }
 );
-  if (exceptions.size() > 0) {
-    StringBuilder message=new StringBuilder(VcsBundle.message("error.adding.files.prompt"));
-    for (    VcsException ex : exceptions) {
-      message.append("\n").append(ex.getMessage());
-    }
-    Messages.showErrorDialog(myProject,message.toString(),VcsBundle.message("error.adding.files.title"));
-  }
-  for (  VirtualFile file : allProcessedFiles) {
-    myFileStatusManager.fileStatusChanged(file);
-  }
-  VcsDirtyScopeManager.getInstance(myProject).filesDirty(allProcessedFiles,null);
-  if (!list.isDefault()) {
-    invokeAfterUpdate(new Runnable(){
-      @Override public void run(){
-        ApplicationManager.getApplication().runReadAction(new Runnable(){
-          @Override public void run(){
-synchronized (myDataLock) {
-              List<Change> changesToMove=new ArrayList<Change>();
-              final LocalChangeList defaultList=getDefaultChangeList();
-              for (              Change change : defaultList.getChanges()) {
-                final ContentRevision afterRevision=change.getAfterRevision();
-                if (afterRevision != null) {
-                  VirtualFile vFile=afterRevision.getFile().getVirtualFile();
-                  if (allProcessedFiles.contains(vFile)) {
-                    changesToMove.add(change);
-                  }
-                }
-              }
-              if (changesToMove.size() > 0) {
-                moveChangesTo(list,changesToMove.toArray(new Change[changesToMove.size()]));
-              }
-            }
-          }
-        }
-);
-        myChangesViewManager.scheduleRefresh();
-      }
-    }
-,InvokeAfterUpdateMode.BACKGROUND_NOT_CANCELLABLE_NOT_AWT,VcsBundle.message("change.lists.manager.add.unversioned"),null);
-  }
- else {
-    myChangesViewManager.scheduleRefresh();
-  }
 }
