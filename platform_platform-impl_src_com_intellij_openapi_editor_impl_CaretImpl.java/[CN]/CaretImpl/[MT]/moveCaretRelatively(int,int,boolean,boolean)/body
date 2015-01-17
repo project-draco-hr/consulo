@@ -1,3 +1,147 @@
 {
-  moveCaretRelatively(columnShift,lineShift,withSelection,false,scrollToCaret);
+  assertIsDispatchThread();
+  if (mySkipChangeRequests) {
+    return;
+  }
+  if (myReportCaretMoves) {
+    LogMessageEx.error(LOG,"Unexpected caret move request");
+  }
+  if (!myEditor.isStickySelection() && !myEditor.getCaretModel().isDocumentChanged) {
+    CopyPasteManager.getInstance().stopKillRings();
+  }
+  myEditor.getCaretModel().doWithCaretMerging(new Runnable(){
+    @Override public void run(){
+      int oldOffset=myOffset;
+      final int leadSelectionOffset=getLeadSelectionOffset();
+      final VisualPosition leadSelectionPosition=getLeadSelectionPosition();
+      EditorSettings editorSettings=myEditor.getSettings();
+      VisualPosition visualCaret=getVisualPosition();
+      int lastColumnNumber=myLastColumnNumber;
+      int desiredX=myDesiredX;
+      if (columnShift == 0) {
+        if (myDesiredX < 0) {
+          desiredX=getCurrentX();
+        }
+      }
+ else {
+        myDesiredX=desiredX=-1;
+      }
+      int newLineNumber=visualCaret.line + lineShift;
+      int newColumnNumber=visualCaret.column + columnShift;
+      if (desiredX >= 0) {
+        newColumnNumber=myEditor.xyToVisualPosition(new Point(desiredX,Math.max(0,newLineNumber) * myEditor.getLineHeight())).column;
+      }
+      Document document=myEditor.getDocument();
+      if (!editorSettings.isVirtualSpace() && lineShift == 0 && columnShift == 1) {
+        int lastLine=document.getLineCount() - 1;
+        if (lastLine < 0)         lastLine=0;
+        if (newColumnNumber > EditorUtil.getLastVisualLineColumnNumber(myEditor,newLineNumber) && newLineNumber < myEditor.logicalToVisualPosition(new LogicalPosition(lastLine,0)).line) {
+          newColumnNumber=0;
+          newLineNumber++;
+        }
+      }
+ else       if (!editorSettings.isVirtualSpace() && lineShift == 0 && columnShift == -1) {
+        if (newColumnNumber < 0 && newLineNumber > 0) {
+          newLineNumber--;
+          newColumnNumber=EditorUtil.getLastVisualLineColumnNumber(myEditor,newLineNumber);
+        }
+      }
+      if (newColumnNumber < 0)       newColumnNumber=0;
+      boolean selectToDocumentStart=false;
+      if (newLineNumber < 0) {
+        selectToDocumentStart=true;
+        newLineNumber=0;
+        newColumnNumber=0;
+        desiredX=-1;
+        lastColumnNumber=-1;
+      }
+      VisualPosition pos=new VisualPosition(newLineNumber,newColumnNumber);
+      if (!myEditor.getSoftWrapModel().isInsideSoftWrap(pos)) {
+        LogicalPosition log=myEditor.visualToLogicalPosition(new VisualPosition(newLineNumber,newColumnNumber));
+        int offset=myEditor.logicalPositionToOffset(log);
+        if (offset >= document.getTextLength()) {
+          int lastOffsetColumn=myEditor.offsetToVisualPosition(document.getTextLength()).column;
+          if (lastOffsetColumn > newColumnNumber) {
+            newColumnNumber=lastOffsetColumn;
+            desiredX=-1;
+            lastColumnNumber=-1;
+          }
+        }
+        if (!editorSettings.isCaretInsideTabs()) {
+          CharSequence text=document.getCharsSequence();
+          if (offset >= 0 && offset < document.getTextLength()) {
+            if (text.charAt(offset) == '\t' && (columnShift <= 0 || offset == myOffset)) {
+              if (columnShift <= 0) {
+                newColumnNumber=myEditor.offsetToVisualPosition(offset).column;
+              }
+ else {
+                SoftWrap softWrap=myEditor.getSoftWrapModel().getSoftWrap(offset + 1);
+                if (softWrap == null) {
+                  newColumnNumber=myEditor.offsetToVisualPosition(offset + 1).column;
+                }
+ else {
+                  newColumnNumber=EditorUtil.getLastVisualLineColumnNumber(myEditor,newLineNumber);
+                }
+              }
+            }
+          }
+        }
+      }
+      pos=new VisualPosition(newLineNumber,newColumnNumber);
+      if (columnShift != 0 && lineShift == 0 && myEditor.getSoftWrapModel().isInsideSoftWrap(pos)) {
+        LogicalPosition logical=myEditor.visualToLogicalPosition(pos);
+        int softWrapOffset=myEditor.logicalPositionToOffset(logical);
+        if (columnShift >= 0) {
+          moveToOffset(softWrapOffset);
+        }
+ else {
+          int line=myEditor.offsetToVisualLine(softWrapOffset - 1);
+          moveToVisualPosition(new VisualPosition(line,EditorUtil.getLastVisualLineColumnNumber(myEditor,line)));
+        }
+      }
+ else {
+        moveToVisualPosition(pos);
+        if (!editorSettings.isVirtualSpace() && columnShift == 0 && lastColumnNumber >= 0) {
+          setLastColumnNumber(lastColumnNumber);
+        }
+      }
+      if (withSelection) {
+        if (selectToDocumentStart) {
+          setSelection(leadSelectionPosition,leadSelectionOffset,myEditor.offsetToVisualPosition(0),0);
+        }
+ else         if (pos.line >= myEditor.getVisibleLineCount()) {
+          int endOffset=document.getTextLength();
+          if (leadSelectionOffset < endOffset) {
+            setSelection(leadSelectionPosition,leadSelectionOffset,myEditor.offsetToVisualPosition(endOffset),endOffset);
+          }
+        }
+ else {
+          int selectionStartToUse=leadSelectionOffset;
+          VisualPosition selectionStartPositionToUse=leadSelectionPosition;
+          if (isUnknownDirection() || oldOffset > getSelectionStart() && oldOffset < getSelectionEnd()) {
+            if (getOffset() > leadSelectionOffset ^ getSelectionStart() < getSelectionEnd()) {
+              selectionStartToUse=getSelectionEnd();
+              selectionStartPositionToUse=getSelectionEndPosition();
+            }
+ else {
+              selectionStartToUse=getSelectionStart();
+              selectionStartPositionToUse=getSelectionStartPosition();
+            }
+          }
+          setSelection(selectionStartPositionToUse,selectionStartToUse,getVisualPosition(),getOffset());
+        }
+      }
+ else {
+        removeSelection();
+      }
+      if (scrollToCaret) {
+        myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+      }
+      if (desiredX >= 0) {
+        myDesiredX=desiredX;
+      }
+      EditorActionUtil.selectNonexpandableFold(myEditor);
+    }
+  }
+);
 }
