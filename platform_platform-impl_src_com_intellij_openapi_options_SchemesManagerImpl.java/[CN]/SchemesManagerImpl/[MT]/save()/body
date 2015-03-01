@@ -1,10 +1,24 @@
 {
   boolean hasSchemes=false;
   UniqueNameGenerator nameGenerator=new UniqueNameGenerator();
+  List<E> schemesToSave=new SmartList<E>();
   for (  T scheme : mySchemes) {
-    if (scheme instanceof ExternalizableScheme && myProcessor.shouldBeSaved((E)scheme)) {
+    if (scheme instanceof ExternalizableScheme) {
+      E eScheme=(E)scheme;
+      BaseSchemeProcessor.State state;
+      if (myProcessor instanceof BaseSchemeProcessor) {
+        state=((BaseSchemeProcessor<E>)myProcessor).getState(eScheme);
+      }
+ else {
+        state=myProcessor.shouldBeSaved(eScheme) ? BaseSchemeProcessor.State.POSSIBLY_CHANGED : BaseSchemeProcessor.State.NON_PERSISTENT;
+      }
+      if (state == BaseSchemeProcessor.State.NON_PERSISTENT) {
+        continue;
+      }
       hasSchemes=true;
-      ExternalizableScheme eScheme=(ExternalizableScheme)scheme;
+      if (state != BaseSchemeProcessor.State.UNCHANGED) {
+        schemesToSave.add(eScheme);
+      }
       String fileName=eScheme.getExternalInfo().getCurrentFileName();
       if (fileName != null && !isRenamed(eScheme)) {
         nameGenerator.addExistingName(fileName);
@@ -24,28 +38,22 @@
     }
     return;
   }
-  for (  final T scheme : mySchemes) {
-    if (!isExternalizable(scheme)) {
-      continue;
+  for (  final E scheme : schemesToSave) {
+    try {
+      saveScheme(scheme,nameGenerator);
     }
-    @SuppressWarnings("unchecked") E eScheme=(E)scheme;
-    if (myProcessor.shouldBeSaved(eScheme)) {
-      try {
-        saveScheme(eScheme,nameGenerator);
+ catch (    final Exception e) {
+      Application app=ApplicationManager.getApplication();
+      if (app.isUnitTestMode() || app.isCommandLine()) {
+        LOG.error("Cannot write scheme " + scheme.getName() + " in '"+ myFileSpec+ "': "+ e.getLocalizedMessage(),e);
       }
- catch (      final Exception e) {
-        Application app=ApplicationManager.getApplication();
-        if (app.isUnitTestMode() || app.isCommandLine()) {
-          LOG.error("Cannot write scheme " + scheme.getName() + " in '"+ myFileSpec+ "': "+ e.getLocalizedMessage(),e);
-        }
  else {
-          app.invokeLater(new Runnable(){
-            @Override public void run(){
-              Messages.showErrorDialog("Cannot save scheme '" + scheme.getName() + ": "+ e.getMessage(),"Save Settings");
-            }
+        app.invokeLater(new Runnable(){
+          @Override public void run(){
+            Messages.showErrorDialog("Cannot save scheme '" + scheme.getName() + ": "+ e.getMessage(),"Save Settings");
           }
-);
         }
+);
       }
     }
   }
