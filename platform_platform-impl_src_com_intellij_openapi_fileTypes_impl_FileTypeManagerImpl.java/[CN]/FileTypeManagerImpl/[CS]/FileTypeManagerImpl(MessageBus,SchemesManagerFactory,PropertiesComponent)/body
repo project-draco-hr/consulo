@@ -1,0 +1,73 @@
+{
+  int fileTypeChangedCounter=StringUtilRt.parseInt(propertiesComponent.getValue("fileTypeChangedCounter"),0);
+  fileTypeChangedCount=new AtomicInteger(fileTypeChangedCounter);
+  autoDetectedAttribute=new FileAttribute("AUTO_DETECTION_CACHE_ATTRIBUTE",fileTypeChangedCounter,true);
+  myMessageBus=bus;
+  mySchemesManager=schemesManagerFactory.createSchemesManager(FILE_SPEC,new BaseSchemeProcessor<AbstractFileType>(){
+    @NotNull @Override public AbstractFileType readScheme(    @NotNull Element element,    boolean duringLoad){
+      if (!duringLoad) {
+        fireBeforeFileTypesChanged();
+      }
+      AbstractFileType type=(AbstractFileType)loadFileType(element,false);
+      if (!duringLoad) {
+        fireFileTypesChanged();
+      }
+      return type;
+    }
+    @NotNull @Override public State getState(    @NotNull AbstractFileType fileType){
+      if (!shouldSave(fileType)) {
+        return State.NON_PERSISTENT;
+      }
+      if (!myDefaultTypes.contains(fileType)) {
+        return State.POSSIBLY_CHANGED;
+      }
+      return fileType.isModified() ? State.POSSIBLY_CHANGED : State.NON_PERSISTENT;
+    }
+    @Override public Element writeScheme(    @NotNull AbstractFileType fileType){
+      Element root=new Element(ELEMENT_FILETYPE);
+      root.setAttribute("binary",String.valueOf(fileType.isBinary()));
+      if (!StringUtil.isEmpty(fileType.getDefaultExtension())) {
+        root.setAttribute("default_extension",fileType.getDefaultExtension());
+      }
+      root.setAttribute(ATTRIBUTE_DESCRIPTION,fileType.getDescription());
+      root.setAttribute(ATTRIBUTE_NAME,fileType.getName());
+      fileType.writeExternal(root);
+      Element map=new Element(AbstractFileType.ELEMENT_EXTENSION_MAP);
+      writeExtensionsMap(map,fileType,false);
+      if (!map.getChildren().isEmpty()) {
+        root.addContent(map);
+      }
+      return root;
+    }
+    @Override public void onSchemeDeleted(    @NotNull AbstractFileType scheme){
+      fireBeforeFileTypesChanged();
+      myPatternsTable.removeAllAssociations(scheme);
+      fireFileTypesChanged();
+    }
+  }
+,RoamingType.PER_USER);
+  bus.connect().subscribe(VirtualFileManager.VFS_CHANGES,new BulkFileListener.Adapter(){
+    @Override public void after(    @NotNull List<? extends VFileEvent> events){
+      Collection<VirtualFile> files=ContainerUtil.map2Set(events,new Function<VFileEvent,VirtualFile>(){
+        @Override public VirtualFile fun(        VFileEvent event){
+          VirtualFile file=event instanceof VFileCreateEvent ? null : event.getFile();
+          return file != null && wasAutoDetectedBefore(file) && isDetectable(file) ? file : null;
+        }
+      }
+);
+      files.remove(null);
+      if (toLog()) {
+        log("F: VFS events: " + events);
+      }
+      if (!files.isEmpty() && RE_DETECT_ASYNC) {
+        if (toLog()) {
+          log("F: queued to redetect: " + files);
+        }
+        reDetectQueue.offerIfAbsent(files);
+      }
+    }
+  }
+);
+  myIgnoredPatterns.setIgnoreMasks(DEFAULT_IGNORED);
+  initStandardFileTypes();
+}
