@@ -5,16 +5,10 @@
   myRemoteRevisionsStateCache=new RemoteRevisionsStateCache(myProject);
   myChangeDecorator=new RemoteStatusChangeNodeDecorator(this);
   myVcsManager=ProjectLevelVcsManager.getInstance(project);
-  myConnection=myProject.getMessageBus().connect();
-  myConnection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED,this);
-  myConnection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED_IN_PLUGIN,this);
+  MessageBusConnection connection=myProject.getMessageBus().connect();
+  connection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED,this);
+  connection.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED_IN_PLUGIN,this);
   myKinds=new HashMap<String,RemoteDifferenceStrategy>();
-  Disposer.register(project,new Disposable(){
-    public void dispose(){
-      myConnection.disconnect();
-    }
-  }
-);
   final VcsConfiguration vcsConfiguration=VcsConfiguration.getInstance(myProject);
   myControlledCycle=new ControlledCycle(project,new Getter<Boolean>(){
     @Override public Boolean get(){
@@ -23,7 +17,14 @@
         boolean somethingChanged=myRemoteRevisionsNumbersCache.updateStep();
         somethingChanged|=myRemoteRevisionsStateCache.updateStep();
         if (somethingChanged) {
-          myProject.getMessageBus().syncPublisher(REMOTE_VERSION_CHANGED).run();
+          ApplicationManager.getApplication().runReadAction(new Runnable(){
+            @Override public void run(){
+              if (!myProject.isDisposed()) {
+                myProject.getMessageBus().syncPublisher(REMOTE_VERSION_CHANGED).run();
+              }
+            }
+          }
+);
         }
       }
       return shouldBeDone;
@@ -33,7 +34,7 @@
   updateRoots();
   if ((!myProject.isDefault()) && vcsConfiguration.isChangedOnServerEnabled()) {
     ((ProjectLevelVcsManagerImpl)myVcsManager).addInitializationRequest(VcsInitObject.REMOTE_REVISIONS_CACHE,new Runnable(){
-      public void run(){
+      @Override public void run(){
         if (!myVcsManager.hasActiveVcss() || !vcsConfiguration.isChangedOnServerEnabled())         return;
         myControlledCycle.startIfNotStarted(-1);
       }
