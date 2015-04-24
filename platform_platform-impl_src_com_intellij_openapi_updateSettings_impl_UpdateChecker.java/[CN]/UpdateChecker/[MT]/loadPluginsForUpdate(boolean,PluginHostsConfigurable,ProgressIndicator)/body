@@ -1,0 +1,68 @@
+{
+  final List<Couple<IdeaPluginDescriptor>> targets=new ArrayList<Couple<IdeaPluginDescriptor>>();
+  final Set<String> failed=new HashSet<String>();
+  List<IdeaPluginDescriptor> remotePluginDescriptors=new ArrayList<IdeaPluginDescriptor>();
+  for (  String host : getPluginHosts(hostsConfigurable)) {
+    try {
+      remotePluginDescriptors.addAll(loadPluginDescriptionsFromHost(host,indicator));
+    }
+ catch (    ProcessCanceledException e) {
+      return null;
+    }
+catch (    Exception e) {
+      LOGGER.info(e);
+      failed.add(host);
+    }
+  }
+  try {
+    remotePluginDescriptors.addAll(RepositoryHelper.loadPluginsFromRepository(indicator));
+  }
+ catch (  ProcessCanceledException e) {
+    return null;
+  }
+catch (  Exception e) {
+    LOGGER.info(e);
+  }
+  final Map<PluginId,IdeaPluginDescriptor> ourPlugins=new HashMap<PluginId,IdeaPluginDescriptor>();
+  final IdeaPluginDescriptor[] installedPlugins=PluginManagerCore.getPlugins();
+  final List<String> disabledPlugins=PluginManagerCore.getDisabledPlugins();
+  for (  IdeaPluginDescriptor installedPlugin : installedPlugins) {
+    if (!installedPlugin.isBundled() && !disabledPlugins.contains(installedPlugin.getPluginId().getIdString())) {
+      ourPlugins.put(installedPlugin.getPluginId(),installedPlugin);
+    }
+  }
+  final PluginManagerUISettings updateSettings=PluginManagerUISettings.getInstance();
+  updateSettings.myOutdatedPlugins.clear();
+  if (!ourPlugins.isEmpty()) {
+    try {
+      for (      final Map.Entry<PluginId,IdeaPluginDescriptor> entry : ourPlugins.entrySet()) {
+        final PluginId pluginId=entry.getKey();
+        List<IdeaPluginDescriptor> filter=ContainerUtil.filter(remotePluginDescriptors,new Condition<IdeaPluginDescriptor>(){
+          @Override public boolean value(          IdeaPluginDescriptor ideaPluginDescriptor){
+            return pluginId.equals(ideaPluginDescriptor.getPluginId());
+          }
+        }
+);
+        if (filter.isEmpty()) {
+          continue;
+        }
+        for (        IdeaPluginDescriptor filtered : filter) {
+          if (StringUtil.compareVersionNumbers(filtered.getVersion(),entry.getValue().getVersion()) > 0) {
+            updateSettings.myOutdatedPlugins.add(pluginId.toString());
+            targets.add(Couple.of(entry.getValue(),filtered));
+          }
+        }
+      }
+    }
+ catch (    ProcessCanceledException ignore) {
+      return null;
+    }
+catch (    Exception e) {
+      showErrorMessage(showErrorDialog,e.getMessage());
+    }
+  }
+  if (!failed.isEmpty()) {
+    showErrorMessage(showErrorDialog,IdeBundle.message("connection.failed.message",StringUtil.join(failed,",")));
+  }
+  return targets;
+}
