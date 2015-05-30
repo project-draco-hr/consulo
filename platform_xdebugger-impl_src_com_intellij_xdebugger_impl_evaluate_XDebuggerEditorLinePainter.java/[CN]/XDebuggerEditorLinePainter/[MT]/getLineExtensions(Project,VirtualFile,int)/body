@@ -2,10 +2,10 @@
   if (!EarlyAccessProgramManager.is(XDebuggerInlineEapDescriptor.class)) {
     return null;
   }
-  final Map<Pair<VirtualFile,Integer>,Set<XValueNodeImpl>> map=project.getUserData(XVariablesView.DEBUG_VARIABLES);
+  XVariablesView.InlineVariablesInfo data=project.getUserData(XVariablesView.DEBUG_VARIABLES);
   final ObjectLongHashMap<VirtualFile> timestamps=project.getUserData(XVariablesView.DEBUG_VARIABLES_TIMESTAMPS);
   final Document doc=FileDocumentManager.getInstance().getDocument(file);
-  if (map == null || timestamps == null || doc == null) {
+  if (data == null || timestamps == null || doc == null) {
     return null;
   }
   Map<Variable,VariableValue> oldValues=project.getUserData(CACHE);
@@ -17,9 +17,12 @@
   if (timestamp == -1 || timestamp < doc.getModificationStamp()) {
     return null;
   }
-  Set<XValueNodeImpl> values=map.get(Pair.create(file,lineNumber));
+  List<XValueNodeImpl> values=data.get(file,lineNumber);
   if (values != null && !values.isEmpty()) {
-    final int bpLine=getCurrentBreakPointLineInFile(values,file);
+    XDebugSession session=XDebugView.getSession(values.iterator().next().getTree());
+    final int bpLine=getCurrentBreakPointLineInFile(session,file);
+    boolean isTopFrame=session instanceof XDebugSessionImpl && ((XDebugSessionImpl)session).isTopFrameSelected();
+    final TextAttributes attributes=bpLine == lineNumber && isTopFrame ? getTopFrameSelectedAttributes() : getNormalAttributes();
     ArrayList<VariableText> result=new ArrayList<VariableText>();
     for (    XValueNodeImpl value : values) {
       SimpleColoredText text=new SimpleColoredText();
@@ -43,9 +46,6 @@
  catch (      Exception ignored) {
         continue;
       }
-      XDebugSession session=XDebugView.getSession(values.iterator().next().getTree());
-      boolean isTopFrame=session instanceof XDebugSessionImpl && ((XDebugSessionImpl)session).isTopFrameSelected();
-      final TextAttributes attributes=bpLine == lineNumber && isTopFrame ? getTopFrameSelectedAttributes() : getNormalAttributes();
       final String name=value.getName();
       if (StringUtil.isEmpty(text.toString())) {
         continue;
@@ -73,12 +73,6 @@
         variableValue.produceChangedParts(res.infos);
       }
     }
-    Collections.sort(result,new Comparator<VariableText>(){
-      @Override public int compare(      VariableText o1,      VariableText o2){
-        return o1.length - o2.length;
-      }
-    }
-);
     final List<LineExtensionInfo> infos=new ArrayList<LineExtensionInfo>();
     for (    VariableText text : result) {
       infos.addAll(text.infos);
