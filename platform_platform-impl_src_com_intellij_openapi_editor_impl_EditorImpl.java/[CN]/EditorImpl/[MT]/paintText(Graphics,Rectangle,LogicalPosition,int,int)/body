@@ -1,20 +1,13 @@
 {
   myCurrentFontType=null;
   myLastCache=null;
-  final int plainSpaceWidth=EditorUtil.getSpaceWidth(Font.PLAIN,this);
-  final int boldSpaceWidth=EditorUtil.getSpaceWidth(Font.BOLD,this);
-  final int italicSpaceWidth=EditorUtil.getSpaceWidth(Font.ITALIC,this);
-  final int boldItalicSpaceWidth=EditorUtil.getSpaceWidth(Font.BOLD | Font.ITALIC,this);
-  boolean spacesHaveSameWidth=plainSpaceWidth == boldSpaceWidth && plainSpaceWidth == italicSpaceWidth && plainSpaceWidth == boldItalicSpaceWidth;
-  myCommonSpaceWidth=spacesHaveSameWidth ? boldSpaceWidth : -1;
   int lineHeight=getLineHeight();
   int visibleLine=clip.y / lineHeight;
-  Ref<LogicalPosition> logicalPosition=new Ref<LogicalPosition>(clipStartPosition);
   int startLine=clipStartPosition.line;
   int start=clipStartOffset;
   Point position=new Point(0,visibleLine * lineHeight);
   if (startLine == 0 && myPrefixText != null) {
-    position.x=drawStringWithSoftWraps(g,new CharArrayCharSequence(myPrefixText),0,myPrefixText.length,position,clip,myPrefixAttributes.getEffectColor(),myPrefixAttributes.getEffectType(),myPrefixAttributes.getFontType(),myPrefixAttributes.getForegroundColor(),logicalPosition);
+    position.x=drawStringWithSoftWraps(g,new CharArrayCharSequence(myPrefixText),0,myPrefixText.length,position,clip,myPrefixAttributes.getEffectColor(),myPrefixAttributes.getEffectType(),myPrefixAttributes.getFontType(),myPrefixAttributes.getForegroundColor(),-1,PAINT_NO_WHITESPACE);
   }
   if (startLine >= myDocument.getLineCount() || startLine < 0) {
     if (position.x > 0)     flushCachedChars(g);
@@ -36,23 +29,32 @@
   int fontType=attributes.getFontType();
   g.setColor(currentColor);
   CharSequence chars=myDocument.getImmutableCharSequence();
+  LineWhitespacePaintingStrategy context=new LineWhitespacePaintingStrategy();
+  context.update(chars,lIterator);
   while (!iterationState.atEnd() && !lIterator.atEnd()) {
     int hEnd=iterationState.getEndOffset();
     int lEnd=lIterator.getEnd();
     if (hEnd >= lEnd) {
       FoldRegion collapsedFolderAt=myFoldingModel.getCollapsedRegionAtOffset(start);
       if (collapsedFolderAt == null) {
-        int i=drawStringWithSoftWraps(g,chars,start,lEnd - lIterator.getSeparatorLength(),position,clip,effectColor,effectType,fontType,currentColor,logicalPosition);
+        drawStringWithSoftWraps(g,chars,start,lEnd - lIterator.getSeparatorLength(),position,clip,effectColor,effectType,fontType,currentColor,clipStartOffset,context);
         final VirtualFile file=getVirtualFile();
         if (myProject != null && file != null && !isOneLineMode()) {
+          int offset=position.x;
           for (          EditorLinePainter painter : EditorLinePainter.EP_NAME.getExtensions()) {
             Collection<LineExtensionInfo> extensions=painter.getLineExtensions(myProject,file,lIterator.getLineNumber());
             if (extensions != null && !extensions.isEmpty()) {
               for (              LineExtensionInfo info : extensions) {
-                drawStringWithSoftWraps(g,info.getText(),0,info.getText().length(),position,clip,info.getEffectColor() == null ? effectColor : info.getEffectColor(),info.getEffectType() == null ? effectType : info.getEffectType(),info.getFontType(),info.getColor() == null ? currentColor : info.getColor(),logicalPosition);
+                final String text=info.getText();
+                for (int i=0; i < text.length(); i++) {
+                  char ch=text.charAt(i);
+                  offset+=EditorUtil.charWidth(ch,Font.ITALIC,this);
+                }
+                position.x=drawString(g,text,0,text.length(),position,clip,info.getEffectColor() == null ? effectColor : info.getEffectColor(),info.getEffectType() == null ? effectType : info.getEffectType(),info.getFontType(),info.getColor() == null ? currentColor : info.getColor(),context);
               }
             }
           }
+          myLinePaintersWidth=Math.max(myLinePaintersWidth,offset);
         }
         position.x=0;
         if (position.y > clip.y + clip.height) {
@@ -62,20 +64,23 @@
         start=lEnd;
       }
       lIterator.advance();
+      if (!lIterator.atEnd()) {
+        context.update(chars,lIterator);
+      }
     }
  else {
       FoldRegion collapsedFolderAt=iterationState.getCurrentFold();
       if (collapsedFolderAt != null) {
         SoftWrap softWrap=mySoftWrapModel.getSoftWrap(collapsedFolderAt.getStartOffset());
         if (softWrap != null) {
-          position.x=drawStringWithSoftWraps(g,chars,collapsedFolderAt.getStartOffset(),collapsedFolderAt.getStartOffset(),position,clip,effectColor,effectType,fontType,currentColor,logicalPosition);
+          position.x=drawStringWithSoftWraps(g,chars,collapsedFolderAt.getStartOffset(),collapsedFolderAt.getStartOffset(),position,clip,effectColor,effectType,fontType,currentColor,clipStartOffset,context);
         }
         int foldingXStart=position.x;
-        position.x=drawString(g,collapsedFolderAt.getPlaceholderText(),position,clip,effectColor,effectType,fontType,currentColor);
+        position.x=drawString(g,collapsedFolderAt.getPlaceholderText(),position,clip,effectColor,effectType,fontType,currentColor,PAINT_NO_WHITESPACE);
         BorderEffect.paintFoldedEffect(g,foldingXStart,position.y,position.x,getLineHeight(),effectColor,effectType);
       }
  else {
-        position.x=drawStringWithSoftWraps(g,chars,start,Math.min(hEnd,lEnd - lIterator.getSeparatorLength()),position,clip,effectColor,effectType,fontType,currentColor,logicalPosition);
+        position.x=drawStringWithSoftWraps(g,chars,start,Math.min(hEnd,lEnd - lIterator.getSeparatorLength()),position,clip,effectColor,effectType,fontType,currentColor,clipStartOffset,context);
       }
       iterationState.advance();
       attributes=iterationState.getMergedAttributes();
@@ -92,7 +97,7 @@
   FoldRegion collapsedFolderAt=iterationState.getCurrentFold();
   if (collapsedFolderAt != null) {
     int foldingXStart=position.x;
-    int foldingXEnd=drawStringWithSoftWraps(g,collapsedFolderAt.getPlaceholderText(),position,clip,effectColor,effectType,fontType,currentColor,logicalPosition);
+    int foldingXEnd=drawStringWithSoftWraps(g,collapsedFolderAt.getPlaceholderText(),position,clip,effectColor,effectType,fontType,currentColor,clipStartOffset,PAINT_NO_WHITESPACE);
     BorderEffect.paintFoldedEffect(g,foldingXStart,position.y,foldingXEnd,getLineHeight(),effectColor,effectType);
   }
   final SoftWrap softWrap=mySoftWrapModel.getSoftWrap(clipEndOffset);

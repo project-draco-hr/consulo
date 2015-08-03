@@ -1,0 +1,80 @@
+{
+  if (ChangesUtil.isTextConflictingChange(change)) {
+    FilePath path=ChangesUtil.getFilePath(change);
+    VirtualFile file=path.getVirtualFile();
+    if (file == null) {
+      file=LocalFileSystem.getInstance().refreshAndFindFileByPath(path.getPath());
+    }
+    if (file == null)     throw new DiffRequestProducerException("Can't show merge conflict - file not found");
+    if (project == null) {
+      throw new DiffRequestProducerException("Can't show merge conflict - project is unknown");
+    }
+    final AbstractVcs vcs=ChangesUtil.getVcsForChange(change,project);
+    if (vcs == null || vcs.getMergeProvider() == null) {
+      throw new DiffRequestProducerException("Can't show merge conflict - operation nos supported");
+    }
+    try {
+      final Ref<Throwable> exceptionRef=new Ref<Throwable>();
+      final Ref<MergeData> mergeDataRef=new Ref<MergeData>();
+      final VirtualFile finalFile=file;
+      UIUtil.invokeAndWaitIfNeeded(new Runnable(){
+        @Override public void run(){
+          try {
+            mergeDataRef.set(vcs.getMergeProvider().loadRevisions(finalFile));
+          }
+ catch (          VcsException e) {
+            exceptionRef.set(e);
+          }
+        }
+      }
+);
+      if (!exceptionRef.isNull()) {
+        Throwable e=exceptionRef.get();
+        if (e instanceof VcsException)         throw (VcsException)e;
+        if (e instanceof Error)         throw (Error)e;
+        if (e instanceof RuntimeException)         throw (RuntimeException)e;
+        throw new RuntimeException(e);
+      }
+      MergeData mergeData=mergeDataRef.get();
+      ContentRevision bRev=change.getBeforeRevision();
+      ContentRevision aRev=change.getAfterRevision();
+      String beforeRevisionTitle=getRevisionTitle(bRev,"Your version");
+      String afterRevisionTitle=getRevisionTitle(aRev,"Server version");
+      String title=DiffRequestFactory.getInstance().getTitle(file);
+      List<String> titles=ContainerUtil.list(beforeRevisionTitle,"Base Version",afterRevisionTitle);
+      DiffContentFactory contentFactory=DiffContentFactory.getInstance();
+      List<DiffContent> contents=ContainerUtil.list(contentFactory.createFromBytes(project,file,mergeData.CURRENT),contentFactory.createFromBytes(project,file,mergeData.ORIGINAL),contentFactory.createFromBytes(project,file,mergeData.LAST));
+      return new SimpleDiffRequest(title,contents,titles);
+    }
+ catch (    VcsException e) {
+      LOG.info(e);
+      throw new DiffRequestProducerException(e);
+    }
+catch (    IOException e) {
+      LOG.info(e);
+      throw new DiffRequestProducerException(e);
+    }
+  }
+ else {
+    ContentRevision bRev=change.getBeforeRevision();
+    ContentRevision aRev=change.getAfterRevision();
+    if (bRev == null && aRev == null) {
+      LOG.warn("Both revision contents are empty");
+      throw new DiffRequestProducerException("Bad revisions contents");
+    }
+    if (bRev != null)     checkContentRevision(project,bRev,context,indicator);
+    if (aRev != null)     checkContentRevision(project,aRev,context,indicator);
+    String title=getRequestTitle(change);
+    indicator.setIndeterminate(true);
+    DiffContent content1=createContent(project,bRev,context,indicator);
+    DiffContent content2=createContent(project,aRev,context,indicator);
+    String beforeRevisionTitle=getRevisionTitle(bRev,"Base version");
+    String afterRevisionTitle=getRevisionTitle(aRev,"Your version");
+    SimpleDiffRequest request=new SimpleDiffRequest(title,content1,content2,beforeRevisionTitle,afterRevisionTitle);
+    boolean bRevCurrent=bRev instanceof CurrentContentRevision;
+    boolean aRevCurrent=aRev instanceof CurrentContentRevision;
+    if (bRevCurrent && !aRevCurrent)     request.putUserData(DiffUserDataKeys.MASTER_SIDE,Side.LEFT);
+    if (!bRevCurrent && aRevCurrent)     request.putUserData(DiffUserDataKeys.MASTER_SIDE,Side.RIGHT);
+    return request;
+  }
+}

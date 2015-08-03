@@ -1,29 +1,20 @@
 {
+  myEventBeingProcessed=event;
+  notifyListenersOnCacheUpdateStart(event);
   myContext.reset();
   myOffset2fontType.clear();
   myOffset2widthInPixels.clear();
-  int start=event.getNewStartOffset();
-  final LogicalPosition logical;
-  final Point point;
-  if (start == 0 && myEditor.getPrefixTextWidthInPixels() <= 0) {
-    logical=new LogicalPosition(0,0,0,0,0,0,0);
-    point=new Point(0,0);
-  }
- else {
-    logical=myDataMapper.offsetToLogicalPosition(start);
-    VisualPosition visual=new VisualPosition(myDataMapper.logicalToVisualPosition(logical,myEditor.logicalToVisualPosition(logical,false)).line,0);
-    point=myEditor.visualPositionToXY(visual);
-    start=myEditor.logicalPositionToOffset(logical);
-  }
+  final int start=event.getStartOffset();
+  final LogicalPosition logical=event.getStartLogicalPosition();
   Document document=myEditor.getDocument();
   myContext.text=document.getCharsSequence();
   myContext.tokenStartOffset=start;
   IterationState iterationState=new IterationState(myEditor,start,document.getTextLength(),false);
   TextAttributes attributes=iterationState.getMergedAttributes();
   myContext.fontType=attributes.getFontType();
-  myContext.rangeEndOffset=event.getNewEndOffset();
+  myContext.rangeEndOffset=event.getMandatoryEndOffset();
   EditorPosition position=new EditorPosition(logical,start,myEditor);
-  position.x=point.x;
+  position.x=start == 0 ? myEditor.getPrefixTextWidthInPixels() : 0;
   int spaceWidth=EditorUtil.getSpaceWidth(myContext.fontType,myEditor);
   int plainSpaceWidth=EditorUtil.getSpaceWidth(Font.PLAIN,myEditor);
   myContext.logicalLineData.update(logical.line,spaceWidth,plainSpaceWidth);
@@ -31,18 +22,26 @@
   myContext.lineStartPosition=position.clone();
   myContext.fontType2spaceWidth.put(myContext.fontType,spaceWidth);
   myContext.softWrapStartOffset=position.offset;
-  myContext.contentComponent=myEditor.getContentComponent();
   myContext.reservedWidthInPixels=myPainter.getMinDrawingWidth(SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED);
-  while (!iterationState.atEnd() && myContext.currentPosition.offset <= event.getNewEndOffset()) {
+  SoftWrap softWrapAtStartPosition=myStorage.getSoftWrap(start);
+  if (softWrapAtStartPosition != null) {
+    myContext.currentPosition.x=softWrapAtStartPosition.getIndentInPixels();
+    myContext.lineStartPosition.visualColumn=0;
+    myContext.lineStartPosition.softWrapColumnDiff-=softWrapAtStartPosition.getIndentInColumns();
+    myContext.softWrapStartOffset++;
+    notifyListenersOnVisualLineStart(myContext.lineStartPosition);
+  }
+  while (!iterationState.atEnd()) {
     FoldRegion currentFold=iterationState.getCurrentFold();
     if (currentFold == null) {
       myContext.tokenEndOffset=iterationState.getEndOffset();
-      processNonFoldToken();
+      if (processNonFoldToken()) {
+        break;
+      }
     }
  else {
-      boolean continueProcessing=processCollapsedFoldRegion(currentFold);
-      if (!continueProcessing) {
-        return false;
+      if (processCollapsedFoldRegion(currentFold)) {
+        break;
       }
       myOffset2widthInPixels.clear();
     }
@@ -52,6 +51,12 @@
     myContext.tokenStartOffset=iterationState.getStartOffset();
     myOffset2fontType.fill(myContext.tokenStartOffset,iterationState.getEndOffset(),myContext.fontType);
   }
+  if (myContext.delayedSoftWrap != null) {
+    myStorage.remove(myContext.delayedSoftWrap);
+  }
   notifyListenersOnVisualLineEnd();
-  return true;
+  event.setActualEndOffset(myContext.currentPosition.offset);
+  validateFinalPosition(event);
+  notifyListenersOnCacheUpdateEnd(event);
+  myEventBeingProcessed=null;
 }

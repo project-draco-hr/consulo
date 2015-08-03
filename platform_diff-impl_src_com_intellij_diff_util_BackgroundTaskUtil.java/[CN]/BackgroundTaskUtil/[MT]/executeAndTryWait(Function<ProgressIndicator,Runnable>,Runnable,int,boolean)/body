@@ -1,0 +1,60 @@
+{
+  final ModalityState modality=ModalityState.current();
+  final ProgressIndicator indicator=new EmptyProgressIndicator(){
+    @NotNull @Override public ModalityState getModalityState(){
+      return modality;
+    }
+  }
+;
+  final Semaphore semaphore=new Semaphore(0);
+  final AtomicReference<Runnable> resultRef=new AtomicReference<Runnable>();
+  if (forceEDT) {
+    try {
+      Runnable callback=backgroundTask.fun(indicator);
+      finish(callback,indicator);
+    }
+ catch (    ProcessCanceledException ignore) {
+    }
+catch (    Throwable t) {
+      LOG.error(t);
+    }
+  }
+ else {
+    ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+      @Override public void run(){
+        ProgressManager.getInstance().executeProcessUnderProgress(new Runnable(){
+          @Override public void run(){
+            final Runnable callback=backgroundTask.fun(indicator);
+            if (indicator.isCanceled()) {
+              semaphore.release();
+              return;
+            }
+            if (!resultRef.compareAndSet(null,callback)) {
+              ApplicationManager.getApplication().invokeLater(new Runnable(){
+                @Override public void run(){
+                  finish(callback,indicator);
+                }
+              }
+,modality);
+            }
+            semaphore.release();
+          }
+        }
+,indicator);
+      }
+    }
+);
+    try {
+      semaphore.tryAcquire(waitMillis,TimeUnit.MILLISECONDS);
+    }
+ catch (    InterruptedException ignore) {
+    }
+    if (!resultRef.compareAndSet(null,TOO_SLOW_OPERATION)) {
+      finish(resultRef.get(),indicator);
+    }
+ else {
+      if (onSlowAction != null)       onSlowAction.run();
+    }
+  }
+  return indicator;
+}

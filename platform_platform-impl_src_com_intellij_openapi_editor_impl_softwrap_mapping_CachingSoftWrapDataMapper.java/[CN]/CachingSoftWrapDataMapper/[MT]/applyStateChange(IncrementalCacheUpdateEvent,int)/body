@@ -1,0 +1,84 @@
+{
+  CacheEntry lastEntry=myCache.isEmpty() ? null : myCache.get(myCache.size() - 1);
+  int lengthDiff=event.getLengthDiff();
+  int recalcEndOffsetTranslated=event.getActualEndOffset() - lengthDiff;
+  int startIndex=MappingUtil.getCacheEntryIndexForOffset(event.getStartOffset(),myEditor.getDocument(),myCache);
+  if (startIndex < 0) {
+    startIndex=-startIndex - 1;
+  }
+  int foldedLinesDiff=0;
+  for (int i=startIndex; i < myCache.size(); i++) {
+    CacheEntry entry=myCache.get(i);
+    foldedLinesDiff+=entry.endFoldedLines - entry.startFoldedLines;
+  }
+  int logicalLinesDiff=event.getLogicalLinesDiff();
+  int firstIndex=-1;
+  int borderLogicalLine=lastEntry == null ? -1 : lastEntry.endLogicalLine;
+  int borderColumnDiff=0;
+  int borderFoldedColumnDiff=0;
+  int borderSoftWrapColumnDiff=0;
+  int borderSoftWrapLinesBeforeDiff=0;
+  int borderSoftWrapLinesCurrentDiff=0;
+  int affectedEntriesCount=myAffectedByUpdateCacheEntries.size();
+  for (int i=0; i < affectedEntriesCount; i++) {
+    CacheEntry entry=myAffectedByUpdateCacheEntries.get(i);
+    if (firstIndex < 0) {
+      if (entry.startOffset < recalcEndOffsetTranslated) {
+        foldedLinesDiff-=entry.endFoldedLines - entry.startFoldedLines;
+        continue;
+      }
+      firstIndex=i;
+      if (lastEntry != null && entry.startLogicalLine + logicalLinesDiff == borderLogicalLine) {
+        borderColumnDiff=lastEntry.endLogicalColumn - entry.startLogicalColumn;
+        borderSoftWrapLinesBeforeDiff=lastEntry.endSoftWrapLinesBefore - entry.startSoftWrapLinesBefore;
+        borderSoftWrapLinesCurrentDiff=lastEntry.endSoftWrapLinesCurrent - entry.startSoftWrapLinesCurrent + 1;
+        borderFoldedColumnDiff=lastEntry.endFoldingColumnDiff - entry.startFoldingColumnDiff;
+        borderSoftWrapColumnDiff=-borderColumnDiff - borderFoldedColumnDiff;
+      }
+      if (lengthDiff == 0 && logicalLinesDiff == 0 && foldedLinesDiff == 0 && softWrappedLinesDiff == 0 && borderColumnDiff == 0 && borderSoftWrapColumnDiff == 0 && borderFoldedColumnDiff == 0 && borderSoftWrapLinesBeforeDiff == 0 && borderSoftWrapLinesCurrentDiff == 0) {
+        break;
+      }
+    }
+    if (firstIndex >= 0 && i >= firstIndex) {
+      entry.visualLine+=(logicalLinesDiff + softWrappedLinesDiff - foldedLinesDiff);
+      entry.startLogicalLine+=logicalLinesDiff;
+      entry.endLogicalLine+=logicalLinesDiff;
+      entry.advance(lengthDiff);
+      entry.startFoldedLines+=foldedLinesDiff;
+      entry.endFoldedLines+=foldedLinesDiff;
+      if (entry.startLogicalLine == borderLogicalLine) {
+        entry.startLogicalColumn+=borderColumnDiff;
+        entry.startSoftWrapLinesBefore+=borderSoftWrapLinesBeforeDiff;
+        entry.startSoftWrapLinesCurrent+=borderSoftWrapLinesCurrentDiff;
+        entry.startSoftWrapColumnDiff+=borderSoftWrapColumnDiff;
+        entry.startFoldingColumnDiff+=borderFoldedColumnDiff;
+      }
+ else {
+        entry.startSoftWrapLinesBefore+=softWrappedLinesDiff;
+      }
+      if (entry.endLogicalLine == borderLogicalLine) {
+        entry.endLogicalColumn+=borderColumnDiff;
+        entry.endSoftWrapLinesBefore+=borderSoftWrapLinesBeforeDiff;
+        entry.endSoftWrapLinesCurrent+=borderSoftWrapLinesCurrentDiff;
+        entry.endSoftWrapColumnDiff+=borderSoftWrapColumnDiff;
+        entry.endFoldingColumnDiff+=borderFoldedColumnDiff;
+      }
+ else {
+        entry.endSoftWrapLinesBefore+=softWrappedLinesDiff;
+      }
+    }
+  }
+  if (firstIndex >= 0) {
+    if (lastEntry != null) {
+      CacheEntry nextEntry=myAffectedByUpdateCacheEntries.get(firstIndex);
+      if (lastEntry.visualLine >= nextEntry.visualLine) {
+        LOG.error("Invalid soft wrap cache update",new Attachment("state.txt",myEditor.getSoftWrapModel().toString()));
+      }
+    }
+    if (myAffectedByUpdateCacheEntries.get(affectedEntriesCount - 1).endOffset > myEditor.getDocument().getTextLength()) {
+      LOG.error("Invalid soft wrap cache entries emerged",new Attachment("state.txt",myEditor.getSoftWrapModel().toString()));
+    }
+    myCache.addAll(myAffectedByUpdateCacheEntries.subList(firstIndex,myAffectedByUpdateCacheEntries.size()));
+  }
+  myAffectedByUpdateCacheEntries.clear();
+}

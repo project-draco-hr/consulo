@@ -1,72 +1,31 @@
 {
-  final DefaultActionGroup group=new DefaultActionGroup();
-  final ShowPrevChangeMarkerAction localShowPrevAction=new ShowPrevChangeMarkerAction(tracker.getPrevRange(range),tracker,editor);
-  final ShowNextChangeMarkerAction localShowNextAction=new ShowNextChangeMarkerAction(tracker.getNextRange(range),tracker,editor);
-  final RollbackLineStatusRangeAction rollback=new RollbackLineStatusRangeAction(tracker,range,editor);
-  final ShowLineStatusRangeDiffAction showDiff=new ShowLineStatusRangeDiffAction(tracker,range,editor);
-  final CopyLineStatusRangeAction copyRange=new CopyLineStatusRangeAction(tracker,range);
-  group.add(localShowPrevAction);
-  group.add(localShowNextAction);
-  group.add(rollback);
-  group.add(showDiff);
-  group.add(copyRange);
-  final JComponent editorComponent=editor.getComponent();
-  EmptyAction.setupAction(localShowPrevAction,"VcsShowPrevChangeMarker",editorComponent);
-  EmptyAction.setupAction(localShowNextAction,"VcsShowNextChangeMarker",editorComponent);
-  EmptyAction.setupAction(rollback,IdeActions.SELECTED_CHANGES_ROLLBACK,editorComponent);
-  EmptyAction.setupAction(showDiff,"ChangesView.Diff",editorComponent);
-  EmptyAction.setupAction(copyRange,IdeActions.ACTION_COPY,editorComponent);
-  final JComponent toolbar=ActionManager.getInstance().createActionToolbar(ActionPlaces.FILEHISTORY_VIEW_TOOLBAR,group,true).getComponent();
-  final Color background=((EditorEx)editor).getBackgroundColor();
-  final Color foreground=editor.getColorsScheme().getColor(EditorColors.CARET_COLOR);
-  toolbar.setBackground(background);
-  toolbar.setBorder(new ColoredSideBorder(foreground,foreground,range.getType() != Range.INSERTED ? null : foreground,foreground,1));
-  final JPanel component=new JPanel(new BorderLayout());
-  component.setOpaque(false);
-  final JPanel toolbarPanel=new JPanel(new BorderLayout());
-  toolbarPanel.setOpaque(false);
-  toolbarPanel.add(toolbar,BorderLayout.WEST);
-  JPanel emptyPanel=new JPanel();
-  emptyPanel.setOpaque(false);
-  toolbarPanel.add(emptyPanel,BorderLayout.CENTER);
-  MouseAdapter listener=new MouseAdapter(){
-    @Override public void mousePressed(    MouseEvent e){
-      editor.getContentComponent().dispatchEvent(SwingUtilities.convertMouseEvent(e.getComponent(),e,editor.getContentComponent()));
-    }
-    @Override public void mouseClicked(    MouseEvent e){
-      editor.getContentComponent().dispatchEvent(SwingUtilities.convertMouseEvent(e.getComponent(),e,editor.getContentComponent()));
-    }
-    public void mouseReleased(    final MouseEvent e){
-      editor.getContentComponent().dispatchEvent(SwingUtilities.convertMouseEvent(e.getComponent(),e,editor.getContentComponent()));
-    }
-  }
-;
-  emptyPanel.addMouseListener(listener);
-  component.add(toolbarPanel,BorderLayout.NORTH);
-  if (range.getType() != Range.INSERTED) {
-    final DocumentEx doc=(DocumentEx)tracker.getVcsDocument();
-    final EditorEx uEditor=(EditorEx)EditorFactory.getInstance().createViewer(doc,tracker.getProject());
-    final EditorHighlighter highlighter=EditorHighlighterFactory.getInstance().createEditorHighlighter(tracker.getProject(),getFileName(tracker.getDocument()));
-    uEditor.setHighlighter(highlighter);
-    final EditorFragmentComponent editorFragmentComponent=EditorFragmentComponent.createEditorFragmentComponent(uEditor,range.getVcsLine1(),range.getVcsLine2(),false,false);
-    component.add(editorFragmentComponent,BorderLayout.CENTER);
-    EditorFactory.getInstance().releaseEditor(uEditor);
-  }
-  final List<AnAction> actionList=ActionUtil.getActions(editorComponent);
-  final LightweightHint lightweightHint=new LightweightHint(component);
+  final Disposable disposable=Disposer.newDisposable();
+  List<DiffFragment> wordDiff=computeWordDiff(range,tracker);
+  installEditorHighlighters(range,editor,tracker,wordDiff,disposable);
+  Pair<JComponent,Integer> editorComponent=createEditorComponent(range,editor,tracker,wordDiff);
+  ActionToolbar toolbar=buildToolbar(range,editor,tracker,disposable);
+  toolbar.updateActionsImmediately();
+  PopupPanel popupPanel=new PopupPanel(editor,toolbar,editorComponent.first,editorComponent.second);
+  LightweightHint hint=new LightweightHint(popupPanel);
   HintListener closeListener=new HintListener(){
-    public void hintHidden(    final EventObject event){
-      actionList.remove(rollback);
-      actionList.remove(showDiff);
-      actionList.remove(copyRange);
-      actionList.remove(localShowPrevAction);
-      actionList.remove(localShowNextAction);
+    @Override public void hintHidden(    final EventObject event){
+      Disposer.dispose(disposable);
     }
   }
 ;
-  lightweightHint.addHintListener(closeListener);
-  HintManagerImpl.getInstanceImpl().showEditorHint(lightweightHint,editor,point,HintManagerImpl.HIDE_BY_ANY_KEY | HintManagerImpl.HIDE_BY_TEXT_CHANGE | HintManagerImpl.HIDE_BY_SCROLLING,-1,false,new HintHint(editor,point));
-  if (!lightweightHint.isVisible()) {
+  hint.addHintListener(closeListener);
+  int line=editor.getCaretModel().getLogicalPosition().line;
+  Point point=HintManagerImpl.getHintPosition(hint,editor,new LogicalPosition(line,0),HintManager.UNDER);
+  if (mousePosition != null) {
+    int lineHeight=editor.getLineHeight();
+    int delta=(point.y - mousePosition.y) % lineHeight;
+    if (delta < 0)     delta+=lineHeight;
+    point.y=mousePosition.y + delta;
+  }
+  point.x-=popupPanel.getEditorTextOffset();
+  int flags=HintManager.HIDE_BY_ANY_KEY | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_SCROLLING;
+  HintManagerImpl.getInstanceImpl().showEditorHint(hint,editor,point,flags,-1,false,new HintHint(editor,point));
+  if (!hint.isVisible()) {
     closeListener.hintHidden(null);
   }
 }

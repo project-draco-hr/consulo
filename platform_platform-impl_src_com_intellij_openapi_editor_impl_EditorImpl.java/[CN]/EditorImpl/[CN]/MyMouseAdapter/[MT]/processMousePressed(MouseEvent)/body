@@ -9,7 +9,6 @@
   if (y < 0)   y=0;
   final EditorMouseEventArea eventArea=getMouseEventArea(e);
   myMousePressArea=eventArea;
-  boolean isNavigation=false;
   if (eventArea == EditorMouseEventArea.FOLDING_OUTLINE_AREA) {
     final FoldRegion range=myGutterComponent.findFoldingAnchorAt(x,y);
     if (range != null) {
@@ -19,6 +18,13 @@
         @Override public void run(){
           myFoldingModel.flushCaretShift();
           range.setExpanded(expansion);
+          if (e.isAltDown()) {
+            for (            FoldRegion region : myFoldingModel.getAllFoldRegions()) {
+              if (region.getStartOffset() >= range.getStartOffset() && region.getEndOffset() <= range.getEndOffset()) {
+                region.setExpanded(expansion);
+              }
+            }
+          }
         }
       }
 ;
@@ -27,7 +33,8 @@
       getScrollingModel().scrollVertically(y - scrollShift);
       myGutterComponent.updateSize();
       validateMousePointer(e);
-      return isNavigation;
+      e.consume();
+      return false;
     }
   }
   if (e.getSource() == myGutterComponent) {
@@ -38,53 +45,64 @@
  else {
         myGutterComponent.mousePressed(e);
       }
-      if (e.isConsumed())       return isNavigation;
+      if (e.isConsumed())       return false;
     }
     x=0;
   }
   int oldSelectionStart=mySelectionModel.getLeadSelectionOffset();
   final int oldStart=mySelectionModel.getSelectionStart();
   final int oldEnd=mySelectionModel.getSelectionEnd();
-  if (e.getSource() != myGutterComponent || (eventArea != EditorMouseEventArea.LINE_MARKERS_AREA && eventArea != EditorMouseEventArea.ANNOTATIONS_AREA)) {
-    boolean toggleCaret=myCaretModel.supportsMultipleCarets() && e.getSource() != myGutterComponent && isToggleCaretEvent(e);
-    LogicalPosition pos=getLogicalPositionForScreenPos(x,y,true);
+  boolean toggleCaret=e.getSource() != myGutterComponent && isToggleCaretEvent(e);
+  boolean lastPressCreatedCaret=myLastPressCreatedCaret;
+  if (e.getClickCount() == 1) {
+    myLastPressCreatedCaret=false;
+  }
+  if (e.getSource() != myGutterComponent || eventArea != EditorMouseEventArea.LINE_MARKERS_AREA && eventArea != EditorMouseEventArea.ANNOTATIONS_AREA) {
+    VisualPosition visualPosition=myUseNewRendering ? getTargetPosition(x,y,true) : null;
+    LogicalPosition pos=myUseNewRendering ? visualToLogicalPosition(visualPosition) : getLogicalPositionForScreenPos(x,y,true);
     if (toggleCaret) {
-      VisualPosition visualPosition=logicalToVisualPosition(pos);
+      if (!myUseNewRendering) {
+        visualPosition=logicalToVisualPosition(pos);
+      }
       Caret caret=getCaretModel().getCaretAt(visualPosition);
-      if (caret == null) {
-        getCaretModel().addCaret(visualPosition);
-      }
+      if (e.getClickCount() == 1) {
+        if (caret == null) {
+          myLastPressCreatedCaret=getCaretModel().addCaret(visualPosition) != null;
+        }
  else {
-        getCaretModel().removeCaret(caret);
+          getCaretModel().removeCaret(caret);
+        }
       }
+ else       if (e.getClickCount() == 3 && lastPressCreatedCaret) {
+        if (myUseNewRendering) {
+          getCaretModel().moveToVisualPosition(visualPosition);
+        }
+ else {
+          getCaretModel().moveToLogicalPosition(pos);
+        }
+      }
+    }
+ else     if (myCaretModel.supportsMultipleCarets() && e.getSource() != myGutterComponent && isCreateRectangularSelectionEvent(e)) {
+      mySelectionModel.setBlockSelection(myCaretModel.getLogicalPosition(),pos);
     }
  else {
       getCaretModel().removeSecondaryCarets();
-      getCaretModel().moveToLogicalPosition(pos);
+      if (myUseNewRendering) {
+        getCaretModel().moveToVisualPosition(visualPosition);
+      }
+ else {
+        getCaretModel().moveToLogicalPosition(pos);
+      }
     }
   }
-  if (e.isPopupTrigger())   return isNavigation;
+  if (e.isPopupTrigger())   return false;
   requestFocus();
   int caretOffset=getCaretModel().getOffset();
   int newStart=mySelectionModel.getSelectionStart();
   int newEnd=mySelectionModel.getSelectionEnd();
-  if (oldStart != newStart && oldEnd != newEnd) {
-    if (oldStart == oldEnd && newStart == newEnd) {
-      isNavigation=true;
-    }
-  }
+  boolean isNavigation=oldStart == oldEnd && newStart == newEnd && oldStart != newStart;
   myMouseSelectedRegion=myFoldingModel.getFoldingPlaceholderAt(new Point(x,y));
   myMousePressedInsideSelection=mySelectionModel.hasSelection() && caretOffset >= mySelectionModel.getSelectionStart() && caretOffset <= mySelectionModel.getSelectionEnd();
-  if (!myMousePressedInsideSelection && mySelectionModel.hasBlockSelection()) {
-    int[] starts=mySelectionModel.getBlockSelectionStarts();
-    int[] ends=mySelectionModel.getBlockSelectionEnds();
-    for (int i=0; i < starts.length; i++) {
-      if (caretOffset >= starts[i] && caretOffset < ends[i]) {
-        myMousePressedInsideSelection=true;
-        break;
-      }
-    }
-  }
   if (getMouseEventArea(e) == EditorMouseEventArea.LINE_NUMBERS_AREA && e.getClickCount() == 1) {
     mySelectionModel.selectLineAtCaret();
     setMouseSelectionState(MOUSE_SELECTION_STATE_LINE_SELECTED);
@@ -110,12 +128,12 @@
     }
   }
  else {
-    if (!myMousePressedInsideSelection && (getSelectionModel().hasSelection() || getSelectionModel().hasBlockSelection())) {
+    if (!myMousePressedInsideSelection && getSelectionModel().hasSelection()) {
       setMouseSelectionState(MOUSE_SELECTION_STATE_NONE);
       mySelectionModel.setSelection(caretOffset,caretOffset);
     }
  else {
-      if (!e.isPopupTrigger() && (eventArea == EditorMouseEventArea.EDITING_AREA || eventArea == EditorMouseEventArea.LINE_NUMBERS_AREA)) {
+      if (!e.isPopupTrigger() && (eventArea == EditorMouseEventArea.EDITING_AREA || eventArea == EditorMouseEventArea.LINE_NUMBERS_AREA) && (!toggleCaret || lastPressCreatedCaret)) {
 switch (e.getClickCount()) {
 case 2:
           selectWordAtCaret(mySettings.isMouseClickSelectionHonorsCamelWords() && mySettings.isCamelWords());

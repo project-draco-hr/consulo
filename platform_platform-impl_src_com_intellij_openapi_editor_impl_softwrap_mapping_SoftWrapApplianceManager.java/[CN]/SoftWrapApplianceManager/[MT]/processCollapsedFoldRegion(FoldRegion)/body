@@ -1,31 +1,33 @@
 {
-  if (processOutOfDateFoldRegion(foldRegion)) {
-    return false;
-  }
-  String placeholder=foldRegion.getPlaceholderText();
-  if (placeholder.isEmpty()) {
+  Document document=myEditor.getDocument();
+  if (!foldRegion.isValid() || foldRegion.getStartOffset() != myContext.tokenStartOffset || foldRegion.getEndOffset() > document.getTextLength()) {
+    LOG.error("Inconsistent fold region state: fold region: " + foldRegion + ", soft wrap model state: "+ myEditor.getSoftWrapModel()+ ", folding model state: "+ myEditor.getFoldingModel());
     return true;
   }
+  String placeholder=foldRegion.getPlaceholderText();
   int placeholderWidthInPixels=0;
   for (int i=0; i < placeholder.length(); i++) {
     placeholderWidthInPixels+=SoftWrapModelImpl.getEditorTextRepresentationHelper(myEditor).charWidth(placeholder.charAt(i),myContext.fontType);
   }
-  int newX=myContext.currentPosition.x + placeholderWidthInPixels;
-  notifyListenersOnVisualLineStart(myContext.lineStartPosition);
-  if (!myContext.exceedsVisualEdge(newX) || myContext.currentPosition.offset == myContext.lineStartPosition.offset) {
-    myContext.advance(foldRegion,placeholderWidthInPixels);
-    return true;
+  if (myContext.delayedSoftWrap == null) {
+    int newX=myContext.currentPosition.x + placeholderWidthInPixels;
+    notifyListenersOnVisualLineStart(myContext.lineStartPosition);
+    if (!myContext.exceedsVisualEdge(newX) || myContext.currentPosition.offset == myContext.lineStartPosition.offset) {
+      myContext.advance(foldRegion,placeholderWidthInPixels);
+      return false;
+    }
   }
   myContext.logicalLineData.update(foldRegion.getStartOffset());
-  SoftWrap softWrap;
-  if (myContext.exceedsVisualEdge(myContext.currentPosition.x + myContext.reservedWidthInPixels)) {
+  SoftWrap softWrap=null;
+  if (myContext.delayedSoftWrap == null && myContext.exceedsVisualEdge(myContext.currentPosition.x + myContext.reservedWidthInPixels)) {
     softWrap=registerSoftWrap(myContext.softWrapStartOffset,myContext.tokenStartOffset,myContext.tokenStartOffset,myContext.getSpaceWidth(),myContext.logicalLineData);
   }
- else {
-    softWrap=registerSoftWrap(foldRegion.getStartOffset(),myContext.getSpaceWidth(),myContext.logicalLineData);
+  if (myContext.delayedSoftWrap != null) {
+    myStorage.remove(myContext.delayedSoftWrap);
+    myContext.delayedSoftWrap=null;
   }
   if (softWrap == null) {
-    softWrap=registerSoftWrap(myContext.tokenStartOffset,myContext.getSpaceWidth(),myContext.logicalLineData);
+    softWrap=registerSoftWrap(foldRegion.getStartOffset(),myContext.getSpaceWidth(),myContext.logicalLineData);
   }
   myContext.softWrapStartOffset=softWrap.getStart();
   if (softWrap.getStart() < myContext.tokenStartOffset) {
@@ -47,12 +49,17 @@
   myContext.currentPosition.x=softWrap.getIndentInPixels();
   myContext.currentPosition.visualColumn=softWrap.getIndentInColumns();
   myContext.currentPosition.softWrapColumnDiff+=softWrap.getIndentInColumns();
+  myContext.clearLastFoldInfo();
+  myContext.skipToLineEnd=false;
+  if (checkIsDoneAfterSoftWrap()) {
+    return true;
+  }
   for (int j=softWrap.getStart(); j < myContext.tokenStartOffset; j++) {
     char c=myContext.text.charAt(j);
-    newX=calculateNewX(c);
+    int newX=calculateNewX(c);
     myContext.onNonLineFeedSymbol(c,newX);
   }
   myOffset2fontType.clear();
   myContext.advance(foldRegion,placeholderWidthInPixels);
-  return true;
+  return false;
 }

@@ -3,8 +3,8 @@
   myContext.logicalLineData.update(offset);
   int softWrapStartOffset=myContext.softWrapStartOffset;
   int preferredOffset=Math.max(softWrapStartOffset,offset - 1);
-  SoftWrap softWrap=registerSoftWrap(softWrapStartOffset,preferredOffset,calculateSoftWrapEndOffset(softWrapStartOffset,myContext.logicalLineData.endLineOffset),myContext.getSpaceWidth(),myContext.logicalLineData);
-  boolean revertedToFoldRegion=false;
+  SoftWrapImpl softWrap=registerSoftWrap(softWrapStartOffset,preferredOffset,myContext.logicalLineData.endLineOffset,myContext.getSpaceWidth(),myContext.logicalLineData);
+  FoldRegion revertedToFoldRegion=null;
   if (softWrap == null) {
     EditorPosition wrapPosition=null;
     if (myContext.lastFoldEndPosition != null && myStorage.getSoftWrap(myContext.lastFoldEndPosition.offset) == null) {
@@ -18,12 +18,10 @@
       myContext.currentPosition=wrapPosition;
       softWrap=registerSoftWrap(wrapPosition.offset,myContext.getSpaceWidth(),myContext.logicalLineData);
       myContext.tokenStartOffset=wrapPosition.offset;
-      revertedToFoldRegion=true;
+      revertedToFoldRegion=myContext.lastFold;
     }
  else {
-      myContext.tryToShiftToNextLine();
-      myHasLinesWithFailedWrap=true;
-      return;
+      return myContext.tryToShiftToNextLine();
     }
   }
   myContext.skipToLineEnd=false;
@@ -32,10 +30,10 @@
   if (actualSoftWrapOffset > myContext.tokenEndOffset) {
     myContext.delayedSoftWrap=softWrap;
     myContext.onNonLineFeedSymbol(myContext.text.charAt(offset));
-    return;
+    return false;
   }
  else   if (actualSoftWrapOffset < offset) {
-    if (!revertedToFoldRegion) {
+    if (revertedToFoldRegion == null) {
       revertListeners(actualSoftWrapOffset,myContext.currentPosition.visualLine);
       for (int j=offset - 1; j >= actualSoftWrapOffset; j--) {
         int pixelsDiff=myOffset2widthInPixels.data[j - myOffset2widthInPixels.anchor];
@@ -57,7 +55,11 @@
   myContext.currentPosition.offset=actualSoftWrapOffset;
   myOffset2fontType.clear();
   myOffset2widthInPixels.clear();
-  if (revertedToFoldRegion && myContext.currentPosition.offset == myContext.lastFold.getStartOffset()) {
-    processCollapsedFoldRegion(myContext.lastFold);
+  if (checkIsDoneAfterSoftWrap()) {
+    return true;
   }
+  if (revertedToFoldRegion != null && myContext.currentPosition.offset == revertedToFoldRegion.getStartOffset()) {
+    return processCollapsedFoldRegion(revertedToFoldRegion);
+  }
+  return false;
 }

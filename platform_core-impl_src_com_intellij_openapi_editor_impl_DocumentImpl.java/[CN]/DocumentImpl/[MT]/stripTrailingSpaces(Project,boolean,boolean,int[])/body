@@ -1,0 +1,78 @@
+{
+  if (!isStripTrailingSpacesEnabled) {
+    return true;
+  }
+  boolean markAsNeedsStrippingLater=false;
+  CharSequence text=myText;
+  TIntObjectHashMap<List<RangeMarker>> caretMarkers=new TIntObjectHashMap<List<RangeMarker>>(caretOffsets.length);
+  try {
+    if (!virtualSpaceEnabled) {
+      for (      int caretOffset : caretOffsets) {
+        if (caretOffset < 0 || caretOffset > getTextLength()) {
+          continue;
+        }
+        int line=getLineNumber(caretOffset);
+        List<RangeMarker> markers=caretMarkers.get(line);
+        if (markers == null) {
+          markers=new ArrayList<RangeMarker>();
+          caretMarkers.put(line,markers);
+        }
+        RangeMarker marker=createRangeMarker(caretOffset,caretOffset);
+        markers.add(marker);
+      }
+    }
+    lineLoop:     for (int line=0; line < getLineCount(); line++) {
+      LineSet lineSet=getLineSet();
+      if (inChangedLinesOnly && !lineSet.isModified(line))       continue;
+      int whiteSpaceStart=-1;
+      final int lineEnd=lineSet.getLineEnd(line) - lineSet.getSeparatorLength(line);
+      int lineStart=lineSet.getLineStart(line);
+      for (int offset=lineEnd - 1; offset >= lineStart; offset--) {
+        char c=text.charAt(offset);
+        if (c != ' ' && c != '\t') {
+          break;
+        }
+        whiteSpaceStart=offset;
+      }
+      if (whiteSpaceStart == -1)       continue;
+      if (!virtualSpaceEnabled) {
+        List<RangeMarker> markers=caretMarkers.get(line);
+        if (markers != null) {
+          for (          RangeMarker marker : markers) {
+            if (marker.getStartOffset() >= 0 && whiteSpaceStart < marker.getStartOffset()) {
+              markAsNeedsStrippingLater=true;
+              continue lineLoop;
+            }
+          }
+        }
+      }
+      final int finalStart=whiteSpaceStart;
+      DocumentUtil.writeInRunUndoTransparentAction(new DocumentRunnable(DocumentImpl.this,project){
+        @Override public void run(){
+          deleteString(finalStart,lineEnd);
+        }
+      }
+);
+      text=myText;
+    }
+  }
+  finally {
+    caretMarkers.forEachValue(new TObjectProcedure<List<RangeMarker>>(){
+      @Override public boolean execute(      List<RangeMarker> markerList){
+        if (markerList != null) {
+          for (          RangeMarker marker : markerList) {
+            try {
+              marker.dispose();
+            }
+ catch (            Exception e) {
+              LOG.error(e);
+            }
+          }
+        }
+        return true;
+      }
+    }
+);
+  }
+  return markAsNeedsStrippingLater;
+}

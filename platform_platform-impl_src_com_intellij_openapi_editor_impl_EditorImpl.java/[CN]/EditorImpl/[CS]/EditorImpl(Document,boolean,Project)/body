@@ -1,16 +1,24 @@
 {
+  assertIsDispatchThread();
   myProject=project;
   myDocument=(DocumentEx)document;
+  if (myDocument instanceof DocumentImpl) {
+    ((DocumentImpl)myDocument).requestTabTracking();
+  }
   myScheme=createBoundColorSchemeDelegate(null);
   initTabPainter();
   myIsViewer=viewer;
-  mySettings=new SettingsImpl(this);
+  mySettings=new SettingsImpl(this,project);
+  if (shouldSoftWrapsBeForced()) {
+    mySettings.setUseSoftWrapsQuiet();
+    putUserData(FORCED_SOFT_WRAPS,Boolean.TRUE);
+  }
   mySelectionModel=new SelectionModelImpl(this);
   myMarkupModel=new EditorMarkupModelImpl(this);
   myFoldingModel=new FoldingModelImpl(this);
   myCaretModel=new CaretModelImpl(this);
   mySoftWrapModel=new SoftWrapModelImpl(this);
-  mySizeContainer.reset();
+  if (!myUseNewRendering)   mySizeContainer.reset();
   myCommandProcessor=CommandProcessor.getInstance();
   if (project != null) {
     myConnection=project.getMessageBus().connect();
@@ -28,16 +36,29 @@
     }
     @Override public void attributesChanged(    @NotNull RangeHighlighterEx highlighter,    boolean renderersChanged){
       if (myDocument.isInBulkUpdate())       return;
+      if (myUseNewRendering && renderersChanged) {
+        updateGutterSize();
+      }
+      boolean errorStripeNeedsRepaint=renderersChanged || highlighter.getErrorStripeMarkColor() != null;
+      if (myUseNewRendering && myDocumentChangeInProgress) {
+        myErrorStripeNeedsRepaint|=errorStripeNeedsRepaint;
+        return;
+      }
       int textLength=myDocument.getTextLength();
+      clearTextWidthCache();
       int start=Math.min(Math.max(highlighter.getAffectedAreaStartOffset(),0),textLength);
       int end=Math.min(Math.max(highlighter.getAffectedAreaEndOffset(),0),textLength);
       int startLine=start == -1 ? 0 : myDocument.getLineNumber(start);
       int endLine=end == -1 ? myDocument.getLineCount() : myDocument.getLineNumber(end);
+      TextAttributes attributes=highlighter.getTextAttributes();
+      if (myUseNewRendering && start != end && attributes != null && attributes.getFontType() != Font.PLAIN) {
+        myView.invalidateRange(start,end);
+      }
       repaintLines(Math.max(0,startLine - 1),Math.min(endLine + 1,getDocument().getLineCount()));
-      if (renderersChanged || highlighter.getErrorStripeMarkColor() != null) {
+      if (errorStripeNeedsRepaint) {
         ((EditorMarkupModelImpl)getMarkupModel()).repaint(start,end);
       }
-      if (renderersChanged) {
+      if (!myUseNewRendering && renderersChanged) {
         updateGutterSize();
       }
       updateCaretCursor();
@@ -45,7 +66,7 @@
   }
 ;
   ((MarkupModelEx)DocumentMarkupModel.forDocument(myDocument,myProject,true)).addMarkupModelListener(myCaretModel,markupModelListener);
-  ((MarkupModelEx)getMarkupModel()).addMarkupModelListener(myCaretModel,markupModelListener);
+  getMarkupModel().addMarkupModelListener(myCaretModel,markupModelListener);
   myDocument.addDocumentListener(myFoldingModel,myCaretModel);
   myDocument.addDocumentListener(myCaretModel,myCaretModel);
   myDocument.addDocumentListener(mySelectionModel,myCaretModel);
@@ -54,8 +75,8 @@
   myFoldingModel.addListener(mySoftWrapModel,myCaretModel);
   myIndentsModel=new IndentsModelImpl(this);
   myCaretModel.addCaretListener(new CaretListener(){
-    @Nullable private LightweightHint myCurrentHint=null;
-    @Nullable private IndentGuideDescriptor myCurrentCaretGuide=null;
+    @Nullable private LightweightHint myCurrentHint;
+    @Nullable private IndentGuideDescriptor myCurrentCaretGuide;
     @Override public void caretPositionChanged(    CaretEvent e){
       if (myStickySelection) {
         int selectionStart=Math.min(myStickySelectionStart,getDocument().getTextLength() - 1);
@@ -84,11 +105,11 @@
       if (myPrimaryCaret != null) {
         myPrimaryCaret.updateVisualPosition();
       }
-      ((CaretImpl)e.getCaret()).updateVisualPosition();
+      repaintCaretRegion(e);
       myPrimaryCaret=myCaretModel.getPrimaryCaret();
     }
     @Override public void caretRemoved(    CaretEvent e){
-      ((CaretImpl)e.getCaret()).updateVisualPosition();
+      repaintCaretRegion(e);
       myPrimaryCaret=myCaretModel.getPrimaryCaret();
       myPrimaryCaret.updateVisualPosition();
     }
@@ -103,50 +124,67 @@
         myCaretModel.updateVisualPosition();
       }
     }
-    @Override public void softWrapAdded(    @NotNull SoftWrap softWrap){
-      mySoftWrapsChanged=true;
-    }
-    @Override public void softWrapsRemoved(){
+    @Override public void softWrapsChanged(){
       mySoftWrapsChanged=true;
     }
   }
 );
-  mySoftWrapModel.addVisualSizeChangeListener(new VisualSizeChangeListener(){
-    @Override public void onLineWidthsChange(    int startLine,    int oldEndLine,    int newEndLine,    @NotNull TIntIntHashMap lineWidths){
-      mySizeContainer.update(startLine,newEndLine,oldEndLine);
-      for (int i=startLine; i <= newEndLine; i++) {
-        if (lineWidths.contains(i)) {
-          int width=lineWidths.get(i);
-          if (width >= 0) {
-            mySizeContainer.updateLineWidthIfNecessary(i,width);
+  if (!myUseNewRendering) {
+    mySoftWrapModel.addVisualSizeChangeListener(new VisualSizeChangeListener(){
+      @Override public void onLineWidthsChange(      int startLine,      int oldEndLine,      int newEndLine,      @NotNull TIntIntHashMap lineWidths){
+        mySizeContainer.update(startLine,newEndLine,oldEndLine);
+        for (int i=startLine; i <= newEndLine; i++) {
+          if (lineWidths.contains(i)) {
+            int width=lineWidths.get(i);
+            if (width >= 0) {
+              mySizeContainer.updateLineWidthIfNecessary(i,width);
+            }
           }
         }
       }
     }
-  }
 );
+  }
   EditorHighlighter highlighter=new EmptyEditorHighlighter(myScheme.getAttributes(HighlighterColors.TEXT));
   setHighlighter(highlighter);
   myEditorComponent=new EditorComponentImpl(this);
   myScrollPane=new MyScrollPane();
+  if (SystemInfo.isMac && SystemInfo.isJavaVersionAtLeast("1.7") && Registry.is("editor.mac.smooth.scrolling")) {
+    PreciseMouseWheelScroller.install(myScrollPane);
+  }
+  myVerticalScrollBar=(MyScrollBar)myScrollPane.getVerticalScrollBar();
+  myVerticalScrollBar.setOpaque(false);
   myPanel=new JPanel();
-  myPanel.putClientProperty(OrphanGuardian.CLIENT_PROPERTY_KEY,new OrphanGuardian(){
-    @Override public void iterateOrphans(    Consumer<JComponent> consumer){
+  UIUtil.putClientProperty(myPanel,JBSwingUtilities.NOT_IN_HIERARCHY_COMPONENTS,new Iterable<JComponent>(){
+    @NotNull @Override public Iterator<JComponent> iterator(){
       JComponent component=getPermanentHeaderComponent();
       if (component != null && !component.isValid()) {
-        consumer.consume(component);
+        return Collections.<JComponent>singleton(component).iterator();
       }
+      return ContainerUtil.emptyIterator();
     }
   }
 );
   myHeaderPanel=new MyHeaderPanel();
-  myVerticalScrollBar=new MyScrollBar(Adjustable.VERTICAL);
   myGutterComponent=new EditorGutterComponentImpl(this);
   initComponent();
   myScrollingModel=new ScrollingModelImpl(this);
+  if (myUseNewRendering) {
+    myView=new EditorView(this);
+    myView.reinitSettings();
+  }
+ else {
+    myView=null;
+  }
   if (UISettings.getInstance().PRESENTATION_MODE) {
     setFontSize(UISettings.getInstance().PRESENTATION_MODE_FONT_SIZE);
   }
+  myGutterComponent.setLineNumberAreaWidthFunction(new TIntFunction(){
+    @Override public int execute(    int lineNumber){
+      return getFontMetrics(Font.PLAIN).stringWidth(Integer.toString(lineNumber + 1));
+    }
+  }
+);
   myGutterComponent.updateSize();
   Dimension preferredSize=getPreferredSize();
   myEditorComponent.setSize(preferredSize);
@@ -163,5 +201,4 @@
     }
 );
   }
-  updateHasTabsFlag(document.getImmutableCharSequence());
 }
