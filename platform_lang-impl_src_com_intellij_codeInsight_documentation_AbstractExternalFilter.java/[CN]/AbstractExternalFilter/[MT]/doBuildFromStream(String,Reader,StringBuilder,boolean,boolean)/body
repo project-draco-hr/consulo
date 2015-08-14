@@ -1,0 +1,86 @@
+{
+  ParseSettings settings=getParseSettings(url);
+  @NonNls Pattern startSection=settings.startPattern;
+  @NonNls Pattern endSection=settings.endPattern;
+  boolean useDt=settings.useDt;
+  @NonNls String greatestEndSection="<!-- ========= END OF CLASS DATA ========= -->";
+  data.append(HTML);
+  URL baseUrl=VfsUtilCore.convertToURL(url);
+  if (baseUrl != null) {
+    data.append("<base href=\"").append(baseUrl).append("\">");
+  }
+  data.append("<style type=\"text/css\">" + "  ul.inheritance {\n" + "      margin:0;\n"+ "      padding:0;\n"+ "  }\n"+ "  ul.inheritance li {\n"+ "       display:inline;\n"+ "       list-style:none;\n"+ "  }\n"+ "  ul.inheritance li ul.inheritance {\n"+ "    margin-left:15px;\n"+ "    padding-left:15px;\n"+ "    padding-top:1px;\n"+ "  }\n"+ "</style>");
+  String read;
+  String contentEncoding=null;
+  @SuppressWarnings("IOResourceOpenedButNotSafelyClosed") BufferedReader buf=new BufferedReader(input);
+  do {
+    read=buf.readLine();
+    if (read != null && searchForEncoding && read.contains("charset")) {
+      String foundEncoding=parseContentEncoding(read);
+      if (foundEncoding != null) {
+        contentEncoding=foundEncoding;
+      }
+    }
+  }
+ while (read != null && matchStart && !startSection.matcher(StringUtil.toUpperCase(read)).find());
+  if (input instanceof MyReader && contentEncoding != null && !contentEncoding.equalsIgnoreCase(CharsetToolkit.UTF8) && !contentEncoding.equals(((MyReader)input).getEncoding())) {
+    try {
+      data.setLength(0);
+      doBuildFromStream(url,new MyReader(((MyReader)input).myInputStream,contentEncoding),data,false,true);
+    }
+ catch (    ProcessCanceledException e) {
+      return;
+    }
+    return;
+  }
+  if (read == null) {
+    data.setLength(0);
+    if (matchStart && !settings.forcePatternSearch && input instanceof MyReader) {
+      try {
+        final MyReader reader=contentEncoding != null ? new MyReader(((MyReader)input).myInputStream,contentEncoding) : new MyReader(((MyReader)input).myInputStream,((MyReader)input).getEncoding());
+        doBuildFromStream(url,reader,data,false,false);
+      }
+ catch (      ProcessCanceledException ignored) {
+      }
+    }
+    return;
+  }
+  if (useDt) {
+    boolean skip=false;
+    do {
+      if (StringUtil.toUpperCase(read).contains(H2) && !read.toUpperCase(Locale.ENGLISH).contains("H2")) {
+        data.append(H2);
+        skip=true;
+      }
+ else       if (endSection.matcher(read).find() || StringUtil.indexOfIgnoreCase(read,greatestEndSection,0) != -1) {
+        data.append(HTML_CLOSE);
+        return;
+      }
+ else       if (!skip) {
+        appendLine(data,read);
+      }
+    }
+ while (((read=buf.readLine()) != null) && !StringUtil.toUpperCase(read).trim().equals(DL) && !StringUtil.containsIgnoreCase(read,"<div class=\"description\""));
+    data.append(DL);
+    StringBuilder classDetails=new StringBuilder();
+    while (((read=buf.readLine()) != null) && !StringUtil.toUpperCase(read).equals(HR) && !StringUtil.toUpperCase(read).equals(P)) {
+      if (reachTheEnd(data,read,classDetails))       return;
+      appendLine(classDetails,read);
+    }
+    while (((read=buf.readLine()) != null) && !StringUtil.toUpperCase(read).equals(P) && !StringUtil.toUpperCase(read).equals(HR)) {
+      if (reachTheEnd(data,read,classDetails))       return;
+      appendLine(data,read.replaceAll(DT,DT + BR));
+    }
+    data.append(classDetails);
+    data.append(P);
+  }
+ else {
+    appendLine(data,read);
+  }
+  while (((read=buf.readLine()) != null) && !endSection.matcher(read).find() && StringUtil.indexOfIgnoreCase(read,greatestEndSection,0) == -1) {
+    if (!StringUtil.toUpperCase(read).contains(HR) && !StringUtil.containsIgnoreCase(read,"<ul class=\"blockList\">") && !StringUtil.containsIgnoreCase(read,"<li class=\"blockList\">")) {
+      appendLine(data,read);
+    }
+  }
+  data.append(HTML_CLOSE);
+}
