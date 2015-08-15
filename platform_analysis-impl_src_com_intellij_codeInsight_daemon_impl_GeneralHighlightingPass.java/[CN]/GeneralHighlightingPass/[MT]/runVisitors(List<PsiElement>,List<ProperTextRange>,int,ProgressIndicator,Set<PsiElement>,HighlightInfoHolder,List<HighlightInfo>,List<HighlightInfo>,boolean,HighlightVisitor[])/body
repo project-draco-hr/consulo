@@ -1,0 +1,82 @@
+{
+  Stack<TextRange> nestedRange=new Stack<TextRange>();
+  Stack<List<HighlightInfo>> nestedInfos=new Stack<List<HighlightInfo>>();
+  boolean failed=false;
+  int nextLimit=chunkSize;
+  for (int i=0; i < elements.size(); i++) {
+    PsiElement element=elements.get(i);
+    progress.checkCanceled();
+    PsiElement parent=element.getParent();
+    if (element != getFile() && !skipParentsSet.isEmpty() && element.getFirstChild() != null && skipParentsSet.contains(element)) {
+      skipParentsSet.add(parent);
+      continue;
+    }
+    boolean isErrorElement=element instanceof PsiErrorElement;
+    if (isErrorElement) {
+      myHasErrorElement=true;
+    }
+    for (    HighlightVisitor visitor : visitors) {
+      try {
+        visitor.visit(element);
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      IndexNotReadyException e) {
+        throw e;
+      }
+catch (      Exception e) {
+        if (!failed) {
+          LOG.error(e);
+        }
+        failed=true;
+      }
+    }
+    if (i == nextLimit) {
+      advanceProgress(chunkSize);
+      nextLimit=i + chunkSize;
+    }
+    TextRange elementRange=ranges.get(i);
+    List<HighlightInfo> infosForThisRange=holder.size() == 0 ? null : new ArrayList<HighlightInfo>(holder.size());
+    for (int j=0; j < holder.size(); j++) {
+      final HighlightInfo info=holder.get(j);
+      if (!myRestrictRange.containsRange(info.getStartOffset(),info.getEndOffset()))       continue;
+      List<HighlightInfo> result=myPriorityRange.containsRange(info.getStartOffset(),info.getEndOffset()) && !(element instanceof PsiFile) ? insideResult : outsideResult;
+      if (!result.add(info))       continue;
+      boolean isError=info.getSeverity() == HighlightSeverity.ERROR;
+      if (isError) {
+        if (!forceHighlightParents) {
+          skipParentsSet.add(parent);
+        }
+        myErrorFound=true;
+      }
+      info.setBijective(elementRange.equalsToRange(info.startOffset,info.endOffset) || isErrorElement);
+      myHighlightInfoProcessor.infoIsAvailable(myHighlightingSession,info,myPriorityRange,myRestrictRange,Pass.UPDATE_ALL);
+      infosForThisRange.add(info);
+    }
+    holder.clear();
+    while (true) {
+      if (!nestedRange.isEmpty() && elementRange.contains(nestedRange.peek())) {
+        TextRange oldRange=nestedRange.pop();
+        List<HighlightInfo> oldInfos=nestedInfos.pop();
+        if (elementRange.equals(oldRange)) {
+          if (infosForThisRange == null) {
+            infosForThisRange=oldInfos;
+          }
+ else           if (oldInfos != null) {
+            infosForThisRange.addAll(oldInfos);
+          }
+        }
+      }
+ else {
+        break;
+      }
+    }
+    nestedRange.push(elementRange);
+    nestedInfos.push(infosForThisRange);
+    if (parent == null || i != ranges.size() - 1 && !elementRange.equals(ranges.get(i + 1)) || !Comparing.equal(elementRange,parent.getTextRange())) {
+      myHighlightInfoProcessor.allHighlightsForRangeAreProduced(myHighlightingSession,elementRange,infosForThisRange);
+    }
+  }
+  advanceProgress(elements.size() - (nextLimit - chunkSize));
+}

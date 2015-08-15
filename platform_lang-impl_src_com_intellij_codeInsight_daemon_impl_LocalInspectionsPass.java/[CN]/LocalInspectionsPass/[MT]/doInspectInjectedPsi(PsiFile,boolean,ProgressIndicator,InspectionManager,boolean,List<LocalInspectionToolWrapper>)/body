@@ -1,0 +1,34 @@
+{
+  final PsiElement host=InjectedLanguageManager.getInstance(injectedPsi.getProject()).getInjectionHost(injectedPsi);
+  final List<PsiElement> elements=getElementsFrom(injectedPsi);
+  if (elements.isEmpty()) {
+    return;
+  }
+  Set<String> elementDialectIds=InspectionEngine.calcElementDialectIds(elements);
+  Map<LocalInspectionToolWrapper,Set<String>> toolToSpecifiedLanguageIds=InspectionEngine.getToolsToSpecifiedLanguages(wrappers);
+  for (  final Map.Entry<LocalInspectionToolWrapper,Set<String>> pair : toolToSpecifiedLanguageIds.entrySet()) {
+    indicator.checkCanceled();
+    final LocalInspectionToolWrapper wrapper=pair.getKey();
+    final LocalInspectionTool tool=wrapper.getTool();
+    if (host != null && myIgnoreSuppressed && SuppressionUtil.inspectionResultSuppressed(host,tool)) {
+      continue;
+    }
+    ProblemsHolder holder=new ProblemsHolder(iManager,injectedPsi,isOnTheFly){
+      @Override public void registerProblem(      @NotNull ProblemDescriptor descriptor){
+        super.registerProblem(descriptor);
+        if (isOnTheFly && inVisibleRange) {
+          addDescriptorIncrementally(descriptor,wrapper,indicator);
+        }
+      }
+    }
+;
+    LocalInspectionToolSession injSession=new LocalInspectionToolSession(injectedPsi,0,injectedPsi.getTextLength());
+    Set<String> dialectIdsSpecifiedForTool=pair.getValue();
+    InspectionEngine.createVisitorAndAcceptElements(tool,holder,isOnTheFly,injSession,elements,elementDialectIds,dialectIdsSpecifiedForTool);
+    tool.inspectionFinished(injSession,holder);
+    List<ProblemDescriptor> problems=holder.getResults();
+    if (!problems.isEmpty()) {
+      appendDescriptors(injectedPsi,problems,wrapper);
+    }
+  }
+}

@@ -1,19 +1,22 @@
 {
+  ApplicationManager.getApplication().assertReadAccessAllowed();
   final Set<PsiFile> outInjected=new THashSet<PsiFile>();
   List<DocumentWindow> injected=InjectedLanguageUtil.getCachedInjectedDocuments(myFile);
-  Collection<PsiElement> hosts=new THashSet<PsiElement>(elements1.size() + elements2.size() + injected.size());
+  final Collection<PsiElement> hosts=new THashSet<PsiElement>(elements1.size() + elements2.size() + injected.size());
   for (  DocumentWindow documentRange : injected) {
     progress.checkCanceled();
     if (!documentRange.isValid())     continue;
     PsiFile file=PsiDocumentManager.getInstance(myProject).getPsiFile(documentRange);
     if (file == null)     continue;
     PsiElement context=InjectedLanguageManager.getInstance(file.getProject()).getInjectionHost(file);
-    if (context != null && context.isValid() && !file.getProject().isDisposed() && (myUpdateAll || new ProperTextRange(myStartOffset,myEndOffset).intersects(context.getTextRange()))) {
+    if (context != null && context.isValid() && !file.getProject().isDisposed() && (myUpdateAll || myRestrictRange.intersects(context.getTextRange()))) {
       hosts.add(context);
     }
   }
-  hosts.addAll(elements1);
-  hosts.addAll(elements2);
+  InjectedLanguageManagerImpl injectedLanguageManager=InjectedLanguageManagerImpl.getInstanceImpl(myProject);
+  Processor<PsiElement> collectInjectableProcessor=new CommonProcessors.CollectProcessor<PsiElement>(hosts);
+  injectedLanguageManager.processInjectableElements(elements1,collectInjectableProcessor);
+  injectedLanguageManager.processInjectableElements(elements2,collectInjectableProcessor);
   final PsiLanguageInjectionHost.InjectedPsiVisitor visitor=new PsiLanguageInjectionHost.InjectedPsiVisitor(){
     @Override public void visit(    @NotNull PsiFile injectedPsi,    @NotNull List<PsiLanguageInjectionHost.Shred> places){
 synchronized (outInjected) {
@@ -24,6 +27,7 @@ synchronized (outInjected) {
 ;
   if (!JobLauncher.getInstance().invokeConcurrentlyUnderProgress(new ArrayList<PsiElement>(hosts),progress,true,new Processor<PsiElement>(){
     @Override public boolean process(    PsiElement element){
+      ApplicationManager.getApplication().assertReadAccessAllowed();
       progress.checkCanceled();
       InjectedLanguageUtil.enumerate(element,myFile,false,visitor);
       return true;

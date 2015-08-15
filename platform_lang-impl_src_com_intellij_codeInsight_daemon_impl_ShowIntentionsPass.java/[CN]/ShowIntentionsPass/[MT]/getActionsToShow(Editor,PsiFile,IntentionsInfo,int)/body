@@ -2,16 +2,24 @@
   final PsiElement psiElement=hostFile.findElementAt(hostEditor.getCaretModel().getOffset());
   LOG.assertTrue(psiElement == null || psiElement.isValid(),psiElement);
   int offset=hostEditor.getCaretModel().getOffset();
-  Project project=hostFile.getProject();
+  final Project project=hostFile.getProject();
   List<HighlightInfo.IntentionActionDescriptor> fixes=getAvailableActions(hostEditor,hostFile,passIdToShowIntentionsFor);
   final DaemonCodeAnalyzer codeAnalyzer=DaemonCodeAnalyzer.getInstance(project);
   final Document hostDocument=hostEditor.getDocument();
   HighlightInfo infoAtCursor=((DaemonCodeAnalyzerImpl)codeAnalyzer).findHighlightByOffset(hostDocument,offset,true);
-  if (infoAtCursor == null || infoAtCursor.getSeverity() == HighlightSeverity.ERROR) {
+  if (infoAtCursor == null) {
     intentions.errorFixesToShow.addAll(fixes);
   }
  else {
-    intentions.inspectionFixesToShow.addAll(fixes);
+    final boolean isError=infoAtCursor.getSeverity() == HighlightSeverity.ERROR;
+    for (    HighlightInfo.IntentionActionDescriptor fix : fixes) {
+      if (fix.isError() && isError) {
+        intentions.errorFixesToShow.add(fix);
+      }
+ else {
+        intentions.inspectionFixesToShow.add(fix);
+      }
+    }
   }
   for (  final IntentionAction action : IntentionManager.getInstance().getAvailableIntentionActions()) {
     Pair<PsiFile,Editor> place=ShowIntentionActionsHandler.chooseBetweenHostAndInjected(hostFile,hostEditor,new PairProcessor<PsiFile,Editor>(){
@@ -31,31 +39,10 @@
     }
   }
   final int line=hostDocument.getLineNumber(offset);
-  DaemonCodeAnalyzerEx.processHighlights(hostDocument,project,null,hostDocument.getLineStartOffset(line),hostDocument.getLineEndOffset(line),new Processor<HighlightInfo>(){
-    @Override public boolean process(    HighlightInfo info){
-      final GutterIconRenderer renderer=(GutterIconRenderer)info.getGutterIconRenderer();
-      if (renderer == null) {
-        return true;
-      }
-      final AnAction action=renderer.getClickAction();
-      if (action == null) {
-        return true;
-      }
-      final String text=renderer.getTooltipText();
-      if (text == null) {
-        return true;
-      }
-      final IntentionAction actionAdapter=new AbstractIntentionAction(){
-        @Override public void invoke(        @NotNull Project project,        Editor editor,        PsiFile file) throws IncorrectOperationException {
-          final RelativePoint relativePoint=JBPopupFactory.getInstance().guessBestPopupLocation(editor);
-          action.actionPerformed(new AnActionEvent(relativePoint.toMouseEvent(),DataManager.getInstance().getDataContext(),text,new Presentation(),ActionManager.getInstance(),0));
-        }
-        @Override @NotNull public String getText(){
-          return text;
-        }
-      }
-;
-      intentions.guttersToShow.add(new HighlightInfo.IntentionActionDescriptor(actionAdapter,Collections.<IntentionAction>emptyList(),text,renderer.getIcon()));
+  MarkupModelEx model=(MarkupModelEx)DocumentMarkupModel.forDocument(hostDocument,project,true);
+  model.processRangeHighlightersOverlappingWith(hostDocument.getLineStartOffset(line),hostDocument.getLineEndOffset(line),new Processor<RangeHighlighterEx>(){
+    @Override public boolean process(    RangeHighlighterEx highlighter){
+      GutterIntentionAction.addActions(project,hostEditor,hostFile,highlighter,intentions.guttersToShow);
       return true;
     }
   }

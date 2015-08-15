@@ -1,27 +1,28 @@
 {
   if (progress != null)   progress.checkCanceled();
   PsiFile file=scope.getContainingFile();
-  final CharSequence buffer=file.getViewProvider().getContents();
+  FileViewProvider viewProvider=file.getViewProvider();
+  final CharSequence buffer=viewProvider.getContents();
   TextRange range=scope.getTextRange();
   if (range == null) {
-    throw new AssertionError("Element " + scope + " of class "+ scope.getClass()+ " has null range");
+    LOG.error("Element " + scope + " of class "+ scope.getClass()+ " has null range");
+    return true;
   }
-  int scopeStart=range.getStartOffset();
-  int startOffset=scopeStart;
+  final int scopeStart=range.getStartOffset();
+  final int startOffset=scopeStart;
   int endOffset=range.getEndOffset();
   if (endOffset > buffer.length()) {
-    LOG.error("Range for element: '" + scope + "' = "+ range+ " is out of file '"+ file+ "' range: "+ file.getTextLength());
+    diagnoseInvalidRange(scope,file,viewProvider,buffer,range);
+    return true;
   }
-  final char[] bufferArray=CharArrayUtil.fromSequenceWithoutCopying(buffer);
-  do {
-    if (progress != null)     progress.checkCanceled();
-    startOffset=searchWord(buffer,bufferArray,startOffset,endOffset,searcher,progress);
-    if (startOffset < 0) {
-      return true;
+  final Project project=file.getProject();
+  final TreeElement[] lastElement={null};
+  return processTextOccurrences(buffer,startOffset,endOffset,searcher,progress,new TIntProcedure(){
+    @Override public boolean execute(    int offset){
+      if (progress != null)       progress.checkCanceled();
+      lastElement[0]=processTreeUp(project,processor,scope,searcher,offset - scopeStart,processInjectedPsi,progress,lastElement[0]);
+      return lastElement[0] != null;
     }
-    if (!processTreeUp(processor,scope,searcher,startOffset - scopeStart,processInjectedPsi,progress))     return false;
-    startOffset++;
   }
- while (startOffset < endOffset);
-  return true;
+);
 }

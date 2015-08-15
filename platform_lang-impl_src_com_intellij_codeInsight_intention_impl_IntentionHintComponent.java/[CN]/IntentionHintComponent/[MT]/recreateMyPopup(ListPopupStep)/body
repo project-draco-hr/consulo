@@ -1,0 +1,70 @@
+{
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  if (myPopup != null) {
+    Disposer.dispose(myPopup);
+  }
+  myPopup=JBPopupFactory.getInstance().createListPopup(step);
+  boolean committed=PsiDocumentManager.getInstance(myFile.getProject()).isCommitted(myEditor.getDocument());
+  final PsiFile injectedFile=committed ? InjectedLanguageUtil.findInjectedPsiNoCommit(myFile,myEditor.getCaretModel().getOffset()) : null;
+  final Editor injectedEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(myEditor,injectedFile);
+  final ScopeHighlighter highlighter=new ScopeHighlighter(myEditor);
+  final ScopeHighlighter injectionHighlighter=new ScopeHighlighter(injectedEditor);
+  myPopup.addListener(new JBPopupListener.Adapter(){
+    @Override public void onClosed(    LightweightWindowEvent event){
+      highlighter.dropHighlight();
+      injectionHighlighter.dropHighlight();
+      myPopupShown=false;
+    }
+  }
+);
+  myPopup.addListSelectionListener(new ListSelectionListener(){
+    @Override public void valueChanged(    @NotNull ListSelectionEvent e){
+      final Object source=e.getSource();
+      highlighter.dropHighlight();
+      injectionHighlighter.dropHighlight();
+      if (source instanceof DataProvider) {
+        final Object selectedItem=PlatformDataKeys.SELECTED_ITEM.getData((DataProvider)source);
+        if (selectedItem instanceof IntentionActionWithTextCaching) {
+          final IntentionAction action=((IntentionActionWithTextCaching)selectedItem).getAction();
+          if (action instanceof SuppressIntentionActionFromFix) {
+            if (injectedFile != null && ((SuppressIntentionActionFromFix)action).isShouldBeAppliedToInjectionHost() == ThreeState.NO) {
+              final PsiElement at=injectedFile.findElementAt(injectedEditor.getCaretModel().getOffset());
+              final PsiElement container=((SuppressIntentionActionFromFix)action).getContainer(at);
+              if (container != null) {
+                injectionHighlighter.highlight(container,Collections.singletonList(container));
+              }
+            }
+ else {
+              final PsiElement at=myFile.findElementAt(myEditor.getCaretModel().getOffset());
+              final PsiElement container=((SuppressIntentionActionFromFix)action).getContainer(at);
+              if (container != null) {
+                highlighter.highlight(container,Collections.singletonList(container));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+);
+  if (myEditor.isOneLineMode()) {
+    final Container ancestor=SwingUtilities.getAncestorOfClass(JComboBox.class,myEditor.getContentComponent());
+    if (ancestor != null) {
+      final JComboBox comboBox=(JComboBox)ancestor;
+      myOuterComboboxPopupListener=new PopupMenuListenerAdapter(){
+        @Override public void popupMenuWillBecomeVisible(        PopupMenuEvent e){
+          hide();
+        }
+      }
+;
+      comboBox.addPopupMenuListener(myOuterComboboxPopupListener);
+    }
+  }
+  Disposer.register(this,myPopup);
+  Disposer.register(myPopup,new Disposable(){
+    @Override public void dispose(){
+      ApplicationManager.getApplication().assertIsDispatchThread();
+    }
+  }
+);
+}

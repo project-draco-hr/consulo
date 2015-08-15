@@ -1,3 +1,30 @@
 {
-  return AsyncUtil.get(processRequestsAsync(request,processor));
+  final Map<SearchRequestCollector,Processor<PsiReference>> collectors=ContainerUtil.newHashMap();
+  collectors.put(collector,processor);
+  ProgressIndicator progress=getOrCreateIndicator();
+  appendCollectorsFromQueryRequests(collectors);
+  boolean result;
+  do {
+    MultiMap<Set<IdIndexEntry>,RequestWithProcessor> globals=new MultiMap<Set<IdIndexEntry>,RequestWithProcessor>();
+    final List<Computable<Boolean>> customs=ContainerUtil.newArrayList();
+    final Set<RequestWithProcessor> locals=ContainerUtil.newLinkedHashSet();
+    Map<RequestWithProcessor,Processor<PsiElement>> localProcessors=new THashMap<RequestWithProcessor,Processor<PsiElement>>();
+    distributePrimitives(collectors,locals,globals,customs,localProcessors,progress);
+    result=processGlobalRequestsOptimized(globals,progress,localProcessors);
+    if (result) {
+      for (      RequestWithProcessor local : locals) {
+        result=processSingleRequest(local.request,local.refProcessor);
+        if (!result)         break;
+      }
+      if (result) {
+        for (        Computable<Boolean> custom : customs) {
+          result=custom.compute();
+          if (!result)           break;
+        }
+      }
+      if (!result)       break;
+    }
+  }
+ while (appendCollectorsFromQueryRequests(collectors));
+  return result;
 }
