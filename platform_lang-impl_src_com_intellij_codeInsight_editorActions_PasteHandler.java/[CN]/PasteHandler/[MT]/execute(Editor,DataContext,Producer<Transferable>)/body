@@ -1,20 +1,24 @@
 {
+  final Transferable transferable=EditorModificationUtil.getContentsToPasteToEditor(producer);
+  if (transferable == null)   return;
   if (!CodeInsightUtilBase.prepareEditorForWrite(editor))   return;
   final Document document=editor.getDocument();
   if (!FileDocumentManager.getInstance().requestWriting(document,CommonDataKeys.PROJECT.getData(dataContext))) {
     return;
   }
-  DataContext context=dataContext;
-  if (producer != null) {
-    context=new DataContext(){
-      @Override public Object getData(      @NonNls String dataId){
-        return PasteAction.TRANSFERABLE_PROVIDER.is(dataId) ? producer : dataContext.getData(dataId);
+  DataContext context=new DataContext(){
+    @Override public Object getData(    @NonNls String dataId){
+      return PasteAction.TRANSFERABLE_PROVIDER.is(dataId) ? new Producer<Transferable>(){
+        @Nullable @Override public Transferable produce(){
+          return transferable;
+        }
       }
+ : dataContext.getData(dataId);
     }
-;
   }
+;
   final Project project=editor.getProject();
-  if (project == null || editor.isColumnMode() || editor.getSelectionModel().hasBlockSelection() || editor.getCaretModel().getCaretCount() > 1) {
+  if (project == null || editor.isColumnMode() || editor.getCaretModel().getCaretCount() > 1) {
     if (myOriginalHandler != null) {
       myOriginalHandler.execute(editor,null,context);
     }
@@ -27,6 +31,7 @@
     }
     return;
   }
+  DumbService.getInstance(project).setAlternativeResolveEnabled(true);
   document.startGuardedBlockChecking();
   try {
     for (    PasteProvider provider : Extensions.getExtensions(EP_NAME)) {
@@ -35,12 +40,13 @@
         return;
       }
     }
-    doPaste(editor,project,file,document,producer);
+    doPaste(editor,project,file,document,transferable);
   }
  catch (  ReadOnlyFragmentModificationException e) {
     EditorActionManager.getInstance().getReadonlyFragmentModificationHandler(document).handle(e);
   }
  finally {
     document.stopGuardedBlockChecking();
+    DumbService.getInstance(project).setAlternativeResolveEnabled(false);
   }
 }

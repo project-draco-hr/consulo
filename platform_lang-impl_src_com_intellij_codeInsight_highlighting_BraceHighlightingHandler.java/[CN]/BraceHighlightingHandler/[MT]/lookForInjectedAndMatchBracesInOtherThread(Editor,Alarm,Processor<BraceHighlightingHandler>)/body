@@ -1,19 +1,25 @@
 {
   ApplicationManagerEx.getApplicationEx().assertIsDispatchThread();
-  final Project project=editor.getProject();
-  if (project == null || project.isDisposed())   return;
+  if (!isValidEditor(editor))   return;
   if (!PROCESSED_EDITORS.add(editor)) {
     return;
   }
   final int offset=editor.getCaretModel().getOffset();
+  final Project project=editor.getProject();
   final PsiFile psiFile=PsiUtilBase.getPsiFileInEditor(editor,project);
-  JobLauncher.getInstance().submitToJobThread(Job.DEFAULT_PRIORITY,new Runnable(){
+  if (!isValidFile(psiFile))   return;
+  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
     @Override public void run(){
       if (!ApplicationManagerEx.getApplicationEx().tryRunReadAction(new Runnable(){
         @Override public void run(){
           final PsiFile injected;
           try {
-            injected=psiFile == null || psiFile instanceof PsiCompiledElement || isReallyDisposed(editor,project) ? null : getInjectedFileIfAny(editor,project,offset,psiFile,alarm);
+            if (psiFile instanceof PsiCompiledFile) {
+              injected=((PsiCompiledFile)psiFile).getDecompiledPsiFile();
+            }
+ else {
+              injected=psiFile instanceof PsiCompiledElement || psiFile instanceof PsiBinaryFile || !isValidEditor(editor)|| !isValidFile(psiFile) ? null : getInjectedFileIfAny(editor,project,offset,psiFile,alarm);
+            }
           }
  catch (          RuntimeException e) {
             ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
@@ -27,7 +33,7 @@
           ApplicationManager.getApplication().invokeLater(new DumbAwareRunnable(){
             @Override public void run(){
               try {
-                if (!isReallyDisposed(editor,project)) {
+                if (isValidEditor(editor) && isValidFile(injected)) {
                   Editor newEditor=InjectedLanguageUtil.getInjectedEditorForInjectedFile(editor,injected);
                   BraceHighlightingHandler handler=new BraceHighlightingHandler(project,newEditor,alarm,injected);
                   processor.process(handler);

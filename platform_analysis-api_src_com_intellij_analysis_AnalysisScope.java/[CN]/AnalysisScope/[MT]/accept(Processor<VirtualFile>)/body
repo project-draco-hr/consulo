@@ -1,0 +1,84 @@
+{
+  if (myType == VIRTUAL_FILES) {
+    if (myFilesSet == null)     initFilesSet();
+    final FileIndex index=ProjectRootManager.getInstance(myProject).getFileIndex();
+    for (    final VirtualFile file : myFilesSet) {
+      if (!myIncludeTestSource && index.isInTestSourceContent(file))       continue;
+      if (!processor.process(file))       return false;
+    }
+    return true;
+  }
+  if (myScope instanceof GlobalSearchScope) {
+    final FileIndex projectFileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+    final ContentIterator contentIterator=new ContentIterator(){
+      @Override public boolean processFile(      @NotNull final VirtualFile fileOrDir){
+        final boolean isInScope=ApplicationManager.getApplication().runReadAction(new Computable<Boolean>(){
+          @Override public Boolean compute(){
+            if (!myIncludeTestSource && projectFileIndex.isInTestSourceContent(fileOrDir))             return false;
+            if (isInGeneratedSources(fileOrDir,myProject))             return false;
+            return ((GlobalSearchScope)myScope).contains(fileOrDir);
+          }
+        }
+).booleanValue();
+        return !isInScope || processor.process(fileOrDir);
+      }
+    }
+;
+    if (!projectFileIndex.iterateContent(contentIterator))     return false;
+    if (mySearchInLibraries) {
+      final VirtualFile[] libraryRoots=LibraryUtil.getLibraryRoots(myProject,false,false);
+      for (      VirtualFile libraryRoot : libraryRoots) {
+        if (!VfsUtilCore.iterateChildrenRecursively(libraryRoot,VirtualFileFilter.ALL,contentIterator))         return false;
+      }
+    }
+    return true;
+  }
+  if (myScope instanceof LocalSearchScope) {
+    final PsiElement[] psiElements=((LocalSearchScope)myScope).getScope();
+    final Set<VirtualFile> files=new THashSet<VirtualFile>();
+    for (    final PsiElement element : psiElements) {
+      VirtualFile file=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile>(){
+        @Override public VirtualFile compute(){
+          return PsiUtilCore.getVirtualFile(element);
+        }
+      }
+);
+      if (file != null && files.add(file)) {
+        if (!processor.process(file))         return false;
+      }
+    }
+    return true;
+  }
+  List<Module> modules=myModule != null ? Collections.<Module>singletonList(myModule) : myModules;
+  if (modules != null) {
+    for (    final Module module : modules) {
+      final FileIndex moduleFileIndex=ModuleRootManager.getInstance(module).getFileIndex();
+      if (!moduleFileIndex.iterateContent(new ContentIterator(){
+        @Override public boolean processFile(        @NotNull VirtualFile fileOrDir){
+          return processor.process(fileOrDir);
+        }
+      }
+))       return false;
+    }
+    return true;
+  }
+  if (myElement instanceof PsiDirectory) {
+    return accept((PsiDirectory)myElement,processor);
+  }
+  if (myElement != null) {
+    VirtualFile file=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile>(){
+      @Override public VirtualFile compute(){
+        return PsiUtilCore.getVirtualFile(myElement);
+      }
+    }
+);
+    return file == null || processor.process(file);
+  }
+  final FileIndex projectFileIndex=ProjectRootManager.getInstance(myProject).getFileIndex();
+  return projectFileIndex.iterateContent(new ContentIterator(){
+    @Override public boolean processFile(    @NotNull final VirtualFile fileOrDir){
+      return processor.process(fileOrDir);
+    }
+  }
+);
+}

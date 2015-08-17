@@ -1,0 +1,55 @@
+{
+  LOG.assertTrue(!ApplicationManager.getApplication().isReadAccessAllowed() || isOfflineInspections,"Must not run under read action, too unresponsive");
+  final List<InspectionToolWrapper> needRepeatSearchRequest=new ArrayList<InspectionToolWrapper>();
+  final boolean canBeExternalUsages=scope.getScopeType() != AnalysisScope.PROJECT;
+  for (  Tools tools : globalTools) {
+    for (    ScopeToolState state : tools.getTools()) {
+      final InspectionToolWrapper toolWrapper=state.getTool();
+      final GlobalInspectionTool tool=(GlobalInspectionTool)toolWrapper.getTool();
+      final InspectionToolPresentation toolPresentation=getPresentation(toolWrapper);
+      try {
+        if (tool.isGraphNeeded()) {
+          try {
+            ((RefManagerImpl)getRefManager()).findAllDeclarations();
+          }
+ catch (          Throwable e) {
+            getStdJobDescriptors().BUILD_GRAPH.setDoneAmount(0);
+            throw e;
+          }
+        }
+        ApplicationManager.getApplication().runReadAction(new Runnable(){
+          @Override public void run(){
+            tool.runInspection(scope,inspectionManager,GlobalInspectionContextImpl.this,toolPresentation);
+            if (canBeExternalUsages && tool.queryExternalUsagesRequests(inspectionManager,GlobalInspectionContextImpl.this,toolPresentation)) {
+              needRepeatSearchRequest.add(toolWrapper);
+            }
+          }
+        }
+);
+      }
+ catch (      ProcessCanceledException e) {
+        throw e;
+      }
+catch (      IndexNotReadyException e) {
+        throw e;
+      }
+catch (      Throwable e) {
+        LOG.error(e);
+      }
+    }
+  }
+  for (  GlobalInspectionContextExtension extension : myExtensions.values()) {
+    try {
+      extension.performPostRunActivities(needRepeatSearchRequest,this);
+    }
+ catch (    ProcessCanceledException e) {
+      throw e;
+    }
+catch (    IndexNotReadyException e) {
+      throw e;
+    }
+catch (    Throwable e) {
+      LOG.error(e);
+    }
+  }
+}

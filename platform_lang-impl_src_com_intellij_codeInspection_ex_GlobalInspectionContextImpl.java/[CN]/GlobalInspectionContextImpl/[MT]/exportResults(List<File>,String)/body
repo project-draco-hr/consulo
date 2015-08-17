@@ -1,0 +1,79 @@
+{
+  @NonNls final String ext=".xml";
+  final Map<Element,Tools> globalTools=new HashMap<Element,Tools>();
+  for (  Map.Entry<String,Tools> entry : myTools.entrySet()) {
+    final Tools sameTools=entry.getValue();
+    boolean hasProblems=false;
+    String toolName=entry.getKey();
+    if (sameTools != null) {
+      for (      ScopeToolState toolDescr : sameTools.getTools()) {
+        InspectionToolWrapper toolWrapper=toolDescr.getTool();
+        if (toolWrapper instanceof LocalInspectionToolWrapper) {
+          hasProblems=new File(outputPath,toolName + ext).exists();
+        }
+ else {
+          InspectionToolPresentation presentation=getPresentation(toolWrapper);
+          presentation.updateContent();
+          if (presentation.hasReportedProblems()) {
+            final Element root=new Element(InspectionsBundle.message("inspection.problems"));
+            globalTools.put(root,sameTools);
+            LOG.assertTrue(!hasProblems,toolName);
+            break;
+          }
+        }
+      }
+    }
+    if (hasProblems) {
+      try {
+        new File(outputPath).mkdirs();
+        final File file=new File(outputPath,toolName + ext);
+        inspectionsResults.add(file);
+        FileUtil.writeToFile(file,("</" + InspectionsBundle.message("inspection.problems") + ">").getBytes(CharsetToolkit.UTF8_CHARSET),true);
+      }
+ catch (      IOException e) {
+        LOG.error(e);
+      }
+    }
+  }
+  getRefManager().iterate(new RefVisitor(){
+    @Override public void visitElement(    @NotNull final RefEntity refEntity){
+      for (      Map.Entry<Element,Tools> entry : globalTools.entrySet()) {
+        Tools tools=entry.getValue();
+        Element element=entry.getKey();
+        for (        ScopeToolState state : tools.getTools()) {
+          try {
+            InspectionToolWrapper toolWrapper=state.getTool();
+            InspectionToolPresentation presentation=getPresentation(toolWrapper);
+            presentation.exportResults(element,refEntity);
+          }
+ catch (          Throwable e) {
+            LOG.error("Problem when exporting: " + refEntity.getExternalName(),e);
+          }
+        }
+      }
+    }
+  }
+);
+  for (  Map.Entry<Element,Tools> entry : globalTools.entrySet()) {
+    final String toolName=entry.getValue().getShortName();
+    Element element=entry.getKey();
+    element.setAttribute(LOCAL_TOOL_ATTRIBUTE,Boolean.toString(false));
+    final org.jdom.Document doc=new org.jdom.Document(element);
+    PathMacroManager.getInstance(getProject()).collapsePaths(doc.getRootElement());
+    try {
+      new File(outputPath).mkdirs();
+      final File file=new File(outputPath,toolName + ext);
+      inspectionsResults.add(file);
+      OutputStreamWriter writer=new OutputStreamWriter(new FileOutputStream(file),CharsetToolkit.UTF8_CHARSET);
+      try {
+        JDOMUtil.writeDocument(doc,writer,"\n");
+      }
+  finally {
+        writer.close();
+      }
+    }
+ catch (    IOException e) {
+      LOG.error(e);
+    }
+  }
+}

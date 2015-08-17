@@ -1,0 +1,42 @@
+{
+  Document document=PsiDocumentManager.getInstance(getProject()).getDocument(file);
+  if (document == null)   return true;
+  VirtualFile virtualFile=file.getVirtualFile();
+  String url=ProjectUtilCore.displayUrlRelativeToProject(virtualFile,virtualFile.getPresentableUrl(),getProject(),true,false);
+  incrementJobDoneAmount(getStdJobDescriptors().LOCAL_ANALYSIS,url);
+  final LocalInspectionsPass pass=new LocalInspectionsPass(file,document,0,file.getTextLength(),LocalInspectionsPass.EMPTY_PRIORITY_RANGE,true,HighlightInfoProcessor.getEmpty());
+  try {
+    final List<LocalInspectionToolWrapper> lTools=getWrappersFromTools(localTools,file);
+    pass.doInspectInBatch(this,inspectionManager,lTools);
+    final List<GlobalInspectionToolWrapper> tools=getWrappersFromTools(globalSimpleTools,file);
+    JobLauncher.getInstance().invokeConcurrentlyUnderProgress(tools,myProgressIndicator,false,new Processor<GlobalInspectionToolWrapper>(){
+      @Override public boolean process(      GlobalInspectionToolWrapper toolWrapper){
+        GlobalSimpleInspectionTool tool=(GlobalSimpleInspectionTool)toolWrapper.getTool();
+        ProblemsHolder holder=new ProblemsHolder(inspectionManager,file,false);
+        ProblemDescriptionsProcessor problemDescriptionProcessor=getProblemDescriptionProcessor(toolWrapper,wrappersMap);
+        tool.checkFile(file,inspectionManager,holder,GlobalInspectionContextImpl.this,problemDescriptionProcessor);
+        InspectionToolPresentation toolPresentation=getPresentation(toolWrapper);
+        LocalDescriptorsUtil.addProblemDescriptors(holder.getResults(),false,GlobalInspectionContextImpl.this,null,CONVERT,toolPresentation);
+        return true;
+      }
+    }
+);
+  }
+ catch (  ProcessCanceledException e) {
+    final Throwable cause=e.getCause();
+    if (cause == null) {
+      throw e;
+    }
+    LOG.error("In file: " + file,cause);
+  }
+catch (  IndexNotReadyException e) {
+    throw e;
+  }
+catch (  Throwable e) {
+    LOG.error("In file: " + file.getName(),e);
+  }
+ finally {
+    InjectedLanguageManager.getInstance(getProject()).dropFileCaches(file);
+  }
+  return true;
+}

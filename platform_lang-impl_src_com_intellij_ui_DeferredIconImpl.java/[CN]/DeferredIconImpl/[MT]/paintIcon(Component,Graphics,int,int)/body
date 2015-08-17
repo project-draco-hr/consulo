@@ -9,42 +9,44 @@
   final Component target=getTarget(c);
   final Component paintingParent=SwingUtilities.getAncestorOfClass(PaintingParent.class,c);
   final Rectangle paintingParentRec=paintingParent == null ? null : ((PaintingParent)paintingParent).getChildRec(c);
-  JobLauncher.getInstance().submitToJobThread(Job.DEFAULT_PRIORITY,new Runnable(){
+  ourIconsCalculatingExecutor.submit(new Runnable(){
     @Override public void run(){
       int oldWidth=myDelegateIcon.getIconWidth();
       final Icon[] evaluated=new Icon[1];
-      final Runnable evalRunnable=new Runnable(){
-        @Override public void run(){
-          try {
-            evaluated[0]=nonNull(myEvaluator.fun(myParam));
-          }
- catch (          ProcessCanceledException e) {
-            evaluated[0]=EMPTY_ICON;
-          }
-catch (          IndexNotReadyException e) {
-            evaluated[0]=EMPTY_ICON;
-          }
-        }
-      }
-;
       final long startTime=System.currentTimeMillis();
       if (myNeedReadAction) {
-        if (!ApplicationManagerEx.getApplicationEx().tryRunReadAction(new Runnable(){
+        boolean result=ProgressIndicatorUtils.runInReadActionWithWriteActionPriority(new Runnable(){
           @Override public void run(){
-            IconDeferrerImpl.evaluateDeferred(evalRunnable);
+            IconDeferrerImpl.evaluateDeferred(new Runnable(){
+              @Override public void run(){
+                try {
+                  evaluated[0]=nonNull(myEvaluator.fun(myParam));
+                }
+ catch (                IndexNotReadyException e) {
+                  evaluated[0]=EMPTY_ICON;
+                }
+              }
+            }
+);
             if (myAutoUpdatable) {
               myLastCalcTime=System.currentTimeMillis();
               myLastTimeSpent=myLastCalcTime - startTime;
             }
           }
         }
-)) {
+);
+        if (!result) {
           myIsScheduled=false;
           return;
         }
       }
  else {
-        IconDeferrerImpl.evaluateDeferred(evalRunnable);
+        IconDeferrerImpl.evaluateDeferred(new Runnable(){
+          @Override public void run(){
+            evaluated[0]=nonNull(myEvaluator.fun(myParam));
+          }
+        }
+);
         if (myAutoUpdatable) {
           myLastCalcTime=System.currentTimeMillis();
           myLastTimeSpent=myLastCalcTime - startTime;
