@@ -18,77 +18,12 @@
       continue;
     }
     if (file.isDirectory()) {
-      VirtualDirectoryImpl dir=(VirtualDirectoryImpl)file;
-      boolean fullSync=dir.allChildrenLoaded();
+      boolean fullSync=((VirtualDirectoryImpl)file).allChildrenLoaded();
       if (fullSync) {
-        String[] currentNames=persistence.list(file);
-        String[] upToDateNames=VfsUtil.filterNames(fs.list(file));
-        Set<String> newNames=newTroveSet(strategy,upToDateNames);
-        ContainerUtil.removeAll(newNames,currentNames);
-        Set<String> deletedNames=newTroveSet(strategy,currentNames);
-        ContainerUtil.removeAll(deletedNames,upToDateNames);
-        OpenTHashSet<String> actualNames=null;
-        if (!fs.isCaseSensitive()) {
-          actualNames=new OpenTHashSet<String>(strategy,upToDateNames);
-        }
-        debug(LOG,"current=%s +%s -%s",currentNames,newNames,deletedNames);
-        for (        String name : deletedNames) {
-          scheduleDeletion(file.findChild(name));
-        }
-        for (        String name : newNames) {
-          checkCancelled(file);
-          FileAttributes childAttributes=fs.getAttributes(new FakeVirtualFile(file,name));
-          if (childAttributes != null) {
-            scheduleCreation(file,name,childAttributes.isDirectory(),false);
-          }
- else {
-            LOG.warn("[+] fs=" + fs + " dir="+ file+ " name="+ name);
-          }
-        }
-        for (        VirtualFile child : file.getChildren()) {
-          checkCancelled(file);
-          if (!deletedNames.contains(child.getName())) {
-            FileAttributes childAttributes=fs.getAttributes(child);
-            if (childAttributes != null) {
-              checkAndScheduleChildRefresh(file,child,childAttributes);
-              checkAndScheduleFileNameChange(actualNames,child);
-            }
- else {
-              LOG.warn("[x] fs=" + fs + " dir="+ file+ " name="+ child.getName());
-              scheduleDeletion(child);
-            }
-          }
-        }
+        fullDirRefresh(fs,persistence,strategy,(VirtualDirectoryImpl)file);
       }
  else {
-        Collection<VirtualFile> cachedChildren=file.getCachedChildren();
-        OpenTHashSet<String> actualNames=null;
-        if (!fs.isCaseSensitive()) {
-          actualNames=new OpenTHashSet<String>(strategy,VfsUtil.filterNames(fs.list(file)));
-        }
-        debug(LOG,"cached=%s actual=%s",cachedChildren,actualNames);
-        for (        VirtualFile child : cachedChildren) {
-          checkCancelled(file);
-          FileAttributes childAttributes=fs.getAttributes(child);
-          if (childAttributes != null) {
-            checkAndScheduleChildRefresh(file,child,childAttributes);
-            checkAndScheduleFileNameChange(actualNames,child);
-          }
- else {
-            scheduleDeletion(child);
-          }
-        }
-        List<String> names=dir.getSuspiciousNames();
-        debug(LOG,"suspicious=%s",names);
-        for (        String name : names) {
-          checkCancelled(file);
-          if (name.isEmpty())           continue;
-          VirtualFile fake=new FakeVirtualFile(file,name);
-          FileAttributes childAttributes=fs.getAttributes(fake);
-          if (childAttributes != null) {
-            scheduleCreation(file,name,childAttributes.isDirectory(),false);
-          }
-        }
+        partialDirRefresh(fs,strategy,(VirtualDirectoryImpl)file);
       }
     }
  else {
@@ -102,6 +37,9 @@
     }
     boolean currentWritable=persistence.isWritable(file);
     boolean upToDateWritable=attributes.isWritable();
+    if (LOG_ATTRIBUTES.isDebugEnabled()) {
+      LOG_ATTRIBUTES.debug("file=%s writable vfs=% persistence=%b real=%b",file,file.isWritable(),currentWritable,upToDateWritable);
+    }
     if (currentWritable != upToDateWritable) {
       scheduleAttributeChange(file,VirtualFile.PROP_WRITABLE,currentWritable,upToDateWritable);
     }

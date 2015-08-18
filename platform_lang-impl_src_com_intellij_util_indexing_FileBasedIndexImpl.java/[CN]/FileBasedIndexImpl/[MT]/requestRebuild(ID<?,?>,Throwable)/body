@@ -1,5 +1,47 @@
 {
   cleanupProcessedFlag();
-  boolean requiresRebuildWasSet=ourRebuildStatus.get(indexId).compareAndSet(OK,REQUIRES_REBUILD);
-  if (requiresRebuildWasSet)   LOG.info("Rebuild requested for index " + indexId,throwable);
+  final AtomicInteger status=ourRebuildStatus.get(indexId);
+  boolean requiresRebuildWasSet=status.compareAndSet(OK,REQUIRES_REBUILD);
+  if (requiresRebuildWasSet) {
+    String message="Rebuild requested for index " + indexId;
+    Application app=ApplicationManager.getApplication();
+    if (app.isUnitTestMode() && app.isReadAccessAllowed() && !app.isDispatchThread()) {
+      LOG.error(message,throwable);
+    }
+ else {
+      LOG.info(message,throwable);
+    }
+    cleanupProcessedFlag();
+    advanceIndexVersion(indexId);
+    final Runnable rebuildRunnable=new Runnable(){
+      @Override public void run(){
+        final Ref<Boolean> success=Ref.create(true);
+        new Task.Modal(null,"Updating index",false){
+          @Override public void run(          @NotNull final ProgressIndicator indicator){
+            indicator.setIndeterminate(true);
+            try {
+              doClearIndex(indexId);
+            }
+ catch (            StorageException e) {
+              success.set(false);
+              requestRebuild(indexId);
+              LOG.info(e);
+            }
+          }
+        }
+.queue();
+        if (success.get()) {
+          scheduleIndexRebuild("checkRebuild");
+          status.compareAndSet(REQUIRES_REBUILD,OK);
+        }
+      }
+    }
+;
+    if (myIsUnitTestMode) {
+      rebuildRunnable.run();
+    }
+ else {
+      ApplicationManager.getApplication().invokeLater(rebuildRunnable,ModalityState.NON_MODAL);
+    }
+  }
 }

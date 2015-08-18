@@ -1,0 +1,60 @@
+{
+  while (true) {
+    List<VirtualFile> cached;
+    List<String> wanted;
+    AccessToken token=ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      cached=dir.getCachedChildren();
+      wanted=dir.getSuspiciousNames();
+    }
+  finally {
+      token.finish();
+    }
+    OpenTHashSet<String> actualNames=null;
+    if (!fs.isCaseSensitive()) {
+      actualNames=new OpenTHashSet<String>(strategy,VfsUtil.filterNames(fs.list(dir)));
+    }
+    debug(LOG,"cached=%s actual=%s",cached,actualNames);
+    debug(LOG,"suspicious=%s",wanted);
+    List<Pair<VirtualFile,FileAttributes>> existingMap=ContainerUtil.newArrayListWithCapacity(cached.size());
+    for (    VirtualFile child : cached) {
+      checkCancelled(dir);
+      existingMap.add(pair(child,fs.getAttributes(child)));
+    }
+    List<Pair<String,FileAttributes>> wantedMap=ContainerUtil.newArrayListWithCapacity(wanted.size());
+    for (    String name : wanted) {
+      if (name.isEmpty())       continue;
+      checkCancelled(dir);
+      wantedMap.add(pair(name,fs.getAttributes(new FakeVirtualFile(dir,name))));
+    }
+    token=ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      if (!cached.equals(dir.getCachedChildren()) || !wanted.equals(dir.getSuspiciousNames())) {
+        LOG.debug("retry");
+        continue;
+      }
+      for (      Pair<VirtualFile,FileAttributes> pair : existingMap) {
+        VirtualFile child=pair.first;
+        FileAttributes childAttributes=pair.second;
+        if (childAttributes != null) {
+          checkAndScheduleChildRefresh(dir,child,childAttributes);
+          checkAndScheduleFileNameChange(actualNames,child);
+        }
+ else {
+          scheduleDeletion(child);
+        }
+      }
+      for (      Pair<String,FileAttributes> pair : wantedMap) {
+        String name=pair.first;
+        FileAttributes childAttributes=pair.second;
+        if (childAttributes != null) {
+          scheduleCreation(dir,name,childAttributes.isDirectory(),false);
+        }
+      }
+      break;
+    }
+  finally {
+      token.finish();
+    }
+  }
+}

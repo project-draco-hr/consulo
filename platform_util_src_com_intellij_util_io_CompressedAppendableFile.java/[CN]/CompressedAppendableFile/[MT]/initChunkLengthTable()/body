@@ -1,0 +1,71 @@
+{
+  if (myChunkLengthTable != null)   return;
+  File chunkLengthFile=getChunkLengthFile();
+  if (chunkLengthFile.exists()) {
+    final DataInputStream chunkLengthStream=new DataInputStream(new BufferedInputStream(new LimitedInputStream(new FileInputStream(chunkLengthFile),(int)chunkLengthFile.length()){
+      @Override public int available() throws IOException {
+        return remainingLimit();
+      }
+    }
+,32768));
+    try {
+      short[] chunkLengthTable=new short[(int)(chunkLengthFile.length() / 2)];
+      int chunkLengthTableLength=0;
+      long o=0;
+      while (chunkLengthStream.available() != 0) {
+        int chunkLength=DataInputOutputUtil.readINT(chunkLengthStream);
+        o+=chunkLength;
+        if (chunkLengthTableLength == chunkLengthTable.length) {
+          chunkLengthTable=reallocShortTable(chunkLengthTable);
+        }
+        chunkLengthTable[chunkLengthTableLength++]=(short)chunkLength;
+        if (doDebug)         myCompressedChunksFileOffsets.add(o);
+      }
+      myChunkLengthTable=chunkLengthTable;
+      myChunkTableLength=chunkLengthTableLength;
+      if (myChunkTableLength >= FACTOR) {
+        long[] chunkOffsetTable=new long[myChunkTableLength / FACTOR];
+        long offset=0;
+        for (int i=0; i < chunkOffsetTable.length; ++i) {
+          int start=i * FACTOR;
+          for (int j=0; j < FACTOR; ++j) {
+            offset+=(chunkLengthTable[start + j] & MAX_PAGE_LENGTH);
+          }
+          chunkOffsetTable[i]=offset;
+        }
+        myChunkOffsetTable=chunkOffsetTable;
+        if (doDebug) {
+          for (int i=0; i < chunkLengthTableLength; ++i) {
+            calcOffsetOfPage(i);
+          }
+        }
+      }
+ else {
+        myChunkOffsetTable=ArrayUtil.EMPTY_LONG_ARRAY;
+      }
+      myFileLength=calcOffsetOfPage(myChunkTableLength - 1);
+    }
+  finally {
+      try {
+        chunkLengthStream.close();
+      }
+ catch (      IOException ignore) {
+      }
+    }
+  }
+ else {
+    myChunkLengthTable=ArrayUtil.EMPTY_SHORT_ARRAY;
+    myChunkTableLength=0;
+    myChunkOffsetTable=ArrayUtil.EMPTY_LONG_ARRAY;
+    myFileLength=0;
+  }
+  if (myUncompressedFileLength == -1) {
+    long tempFileLength=getIncompleteChunkFile().length();
+    myUncompressedFileLength=((long)myChunkTableLength * myAppendBufferLength) + tempFileLength;
+    if (myUncompressedFileLength != myFileLength + tempFileLength) {
+      if (CompressionUtil.DUMP_COMPRESSION_STATS) {
+        System.out.println(myUncompressedFileLength + "->" + (myFileLength + tempFileLength)+ " for "+ myBaseFile);
+      }
+    }
+  }
+}

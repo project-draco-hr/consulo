@@ -8,13 +8,14 @@
 );
   records.addAll(infos);
   final int fileBufferLength=256 * 1024;
-  final int maxRecordHeader=Math.max(BYTE_LENGTH_INT_ADDRESS,INT_LENGTH_LONG_ADDRESS);
+  final int maxRecordHeader=5 + 10;
   final byte[] buffer=new byte[fileBufferLength + maxRecordHeader];
   byte[] recordBuffer={};
   long lastReadOffset=mySize;
   long lastConsumedOffset=lastReadOffset;
   long allRecordsStart=0;
   int fragments=0;
+  int newFragments=0;
   int allRecordsLength=0;
   byte[] stuffFromPreviousRecord=null;
   int bytesRead=(int)(mySize - (mySize / fileBufferLength) * fileBufferLength);
@@ -25,14 +26,14 @@
   while (lastReadOffset != 0) {
     final long readStartOffset=lastReadOffset - bytesRead;
     myCompactionModeReader.get(readStartOffset,buffer,0,bytesRead);
-    while (records.size() > 0) {
+    while (!records.isEmpty()) {
       final PersistentHashMap.CompactionRecordInfo info=records.peek();
       if (info.valueAddress >= readStartOffset) {
         if (info.valueAddress >= lastReadOffset) {
-          throw new IOException("Value storage is corrupted: value file size:" + mySize + ", readStartOffset:"+ readStartOffset+ ", record address:"+ info.valueAddress);
+          throw new IOException("Value storage is corrupted: value file size:" + mySize + ", readStartOffset:"+ readStartOffset+ ", record address:"+ info.valueAddress+ "; file: "+ myPath);
         }
         final int recordStartInBuffer=(int)(info.valueAddress - readStartOffset);
-        final int sizePart=buffer[recordStartInBuffer];
+        myBufferStreamWrapper.init(buffer,recordStartInBuffer,buffer.length);
         final long prevChunkAddress;
         int chunkSize;
         final int dataOffset;
@@ -47,16 +48,10 @@
             }
           }
         }
-        if (sizePart < 0) {
-          chunkSize=-sizePart - POSITIVE_VALUE_SHIFT;
-          prevChunkAddress=Bits.getInt(buffer,recordStartInBuffer + 1);
-          dataOffset=BYTE_LENGTH_INT_ADDRESS;
-        }
- else {
-          chunkSize=Bits.getInt(buffer,recordStartInBuffer);
-          prevChunkAddress=Bits.getLong(buffer,recordStartInBuffer + 4);
-          dataOffset=INT_LENGTH_LONG_ADDRESS;
-        }
+        int available=myBufferStreamWrapper.available();
+        chunkSize=DataInputOutputUtil.readINT(myBufferDataStreamWrapper);
+        prevChunkAddress=readPrevChunkAddress(info.valueAddress);
+        dataOffset=available - myBufferStreamWrapper.available();
         byte[] b;
         if (info.value != null) {
           int defragmentedChunkSize=info.value.length + chunkSize;
@@ -104,9 +99,11 @@
         }
         if (prevChunkAddress == 0) {
           info.newValueAddress=storage.appendBytes(b,0,chunkSize,info.newValueAddress);
+          ++newFragments;
         }
  else {
           if (retained > softMaxRetainedLimit && b.length > blockSizeToWriteWhenSoftMaxRetainedLimitIsHit || retained > maxRetainedLimit) {
+            ++newFragments;
             info.newValueAddress=storage.appendBytes(b,0,chunkSize,info.newValueAddress);
             info.value=null;
             retained-=b.length;
@@ -133,5 +130,5 @@
     lastReadOffset-=bytesRead;
     bytesRead=fileBufferLength;
   }
-  return fragments;
+  return fragments | ((long)newFragments << 32);
 }

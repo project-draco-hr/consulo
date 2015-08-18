@@ -20,6 +20,7 @@
 );
       myConnection.subscribe(VirtualFileManager.VFS_CHANGES,new BulkFileListener.Adapter(){
         @Override public void after(        @NotNull List<? extends VFileEvent> events){
+          boolean pushedSomething=false;
           List<Runnable> delayedTasks=ContainerUtil.newArrayList();
           for (          VFileEvent event : events) {
             final VirtualFile file=event.getFile();
@@ -29,8 +30,9 @@
             if (event instanceof VFileCreateEvent) {
               if (!event.isFromRefresh() || !file.isDirectory()) {
                 doPushRecursively(file,pushers,ProjectRootManager.getInstance(myProject).getFileIndex());
+                pushedSomething=true;
               }
- else {
+ else               if (!ProjectCoreUtil.isProjectOrWorkspaceFile(file)) {
                 ContainerUtil.addIfNotNull(delayedTasks,createRecursivePushTask(file,pushers));
               }
             }
@@ -39,10 +41,26 @@
                 file.putUserData(pusher.getFileDataKey(),null);
               }
               doPushRecursively(file,pushers,ProjectRootManager.getInstance(myProject).getFileIndex());
+              pushedSomething=true;
             }
           }
           if (!delayedTasks.isEmpty()) {
             queueTasks(delayedTasks);
+          }
+          if (pushedSomething) {
+            Application application=ApplicationManager.getApplication();
+            Runnable runnable=new Runnable(){
+              @Override public void run(){
+                scheduleDumbModeReindexingIfNeeded();
+              }
+            }
+;
+            if (application.isUnitTestMode()) {
+              runnable.run();
+            }
+ else {
+              application.invokeLater(runnable);
+            }
           }
         }
       }

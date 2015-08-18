@@ -1,0 +1,55 @@
+{
+  if (project.isDisposed()) {
+    return Collections.emptyList();
+  }
+  List<Runnable> tasks=new ArrayList<Runnable>();
+  final ProjectFileIndex projectFileIndex=ProjectRootManager.getInstance(project).getFileIndex();
+  tasks.add(new Runnable(){
+    @Override public void run(){
+      projectFileIndex.iterateContent(processor);
+    }
+  }
+);
+  final Set<VirtualFile> visitedRoots=ContainerUtil.newConcurrentSet();
+  for (  IndexableSetContributor provider : IndexableSetContributor.EP_NAME.getExtensions()) {
+    if (project.isDisposed()) {
+      return tasks;
+    }
+    for (    final VirtualFile root : provider.getAdditionalProjectRootsToIndex(project)) {
+      if (visitedRoots.add(root)) {
+        tasks.add(new Runnable(){
+          @Override public void run(){
+            if (project.isDisposed() || !root.isValid())             return;
+            iterateRecursively(root,processor,indicator,visitedRoots,null);
+          }
+        }
+);
+      }
+    }
+  }
+  for (  final Module module : ModuleManager.getInstance(project).getModules()) {
+    OrderEntry[] orderEntries=ModuleRootManager.getInstance(module).getOrderEntries();
+    for (    OrderEntry orderEntry : orderEntries) {
+      if (orderEntry instanceof OrderEntryWithTracking) {
+        if (orderEntry.isValid()) {
+          final VirtualFile[] libSources=orderEntry.getFiles(SourcesOrderRootType.getInstance());
+          final VirtualFile[] libClasses=orderEntry.getFiles(BinariesOrderRootType.getInstance());
+          for (          VirtualFile[] roots : new VirtualFile[][]{libSources,libClasses}) {
+            for (            final VirtualFile root : roots) {
+              if (visitedRoots.add(root)) {
+                tasks.add(new Runnable(){
+                  @Override public void run(){
+                    if (project.isDisposed() || module.isDisposed() || !root.isValid())                     return;
+                    iterateRecursively(root,processor,indicator,null,projectFileIndex);
+                  }
+                }
+);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return tasks;
+}

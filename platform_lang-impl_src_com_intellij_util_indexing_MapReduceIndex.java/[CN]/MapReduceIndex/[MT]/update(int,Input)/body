@@ -51,6 +51,7 @@
     }
   }
   ProgressManager.checkCanceled();
+  UpdateData<Key,Value> optimizedUpdateData=null;
   final NotNullComputable<Collection<Key>> oldKeysGetter;
   final int savedInputId;
   if (myHasSnapshotMapping) {
@@ -83,6 +84,30 @@
           savedInputId=NULL_MAPPING;
         }
         oldKeysGetter=keysForGivenInputId;
+        if (MapDiffUpdateData.ourDiffUpdateEnabled) {
+          final Map<Key,Value> newValue=data;
+          optimizedUpdateData=new MapDiffUpdateData<Key,Value>(myIndexId){
+            @Override protected Map<Key,Value> getNewValue(){
+              return newValue;
+            }
+            @Override protected Map<Key,Value> getCurrentValue() throws IOException {
+              Integer currentHashId=myInputsSnapshotMapping.get(inputId);
+              Map<Key,Value> currentValue;
+              if (currentHashId != null) {
+                ByteSequence byteSequence=myContents.get(currentHashId);
+                currentValue=byteSequence != null ? deserializeSavedPersistentData(byteSequence) : Collections.<Key,Value>emptyMap();
+              }
+ else {
+                currentValue=Collections.emptyMap();
+              }
+              return currentValue;
+            }
+            @Override public void save(            int inputId) throws IOException {
+              myInputsSnapshotMapping.put(inputId,savedInputId);
+            }
+          }
+;
+        }
       }
  else {
         oldKeysGetter=new NotNullComputable<Collection<Key>>(){
@@ -122,14 +147,14 @@
 ;
     savedInputId=inputId;
   }
-  final Map<Key,Value> finalData=data;
+  final UpdateData<Key,Value> updateData=optimizedUpdateData != null ? optimizedUpdateData : new SimpleUpdateData(myIndexId,savedInputId,data,oldKeysGetter);
   return new Computable<Boolean>(){
     @Override public Boolean compute(){
       final Ref<StorageException> exRef=new Ref<StorageException>(null);
       ProgressManager.getInstance().executeNonCancelableSection(new Runnable(){
         @Override public void run(){
           try {
-            updateWithMap(inputId,savedInputId,finalData,oldKeysGetter);
+            updateWithMap(inputId,updateData);
           }
  catch (          StorageException ex) {
             exRef.set(ex);
@@ -137,9 +162,10 @@
         }
       }
 );
-      if (exRef.get() != null) {
-        LOG.info(exRef.get());
-        FileBasedIndex.getInstance().requestRebuild(myIndexId);
+      StorageException nestedException=exRef.get();
+      if (nestedException != null) {
+        LOG.info("Exception during updateWithMap:" + nestedException);
+        FileBasedIndex.getInstance().requestRebuild(myIndexId,nestedException);
         return Boolean.FALSE;
       }
       return Boolean.TRUE;

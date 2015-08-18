@@ -1,0 +1,39 @@
+{
+  checkFileIsValid(fileId);
+  int recordId=getAttributeRecordId(fileId);
+  if (recordId == 0)   return null;
+  int encodedAttrId=DbConnection.getAttributeId(attribute.getId());
+  Storage storage=getAttributesStorage();
+  DataInputStream attrRefs=storage.readStream(recordId);
+  int page=0;
+  try {
+    if (bulkAttrReadSupport)     skipRecordHeader(attrRefs,DbConnection.RESERVED_ATTR_ID,fileId);
+    while (attrRefs.available() > 0) {
+      final int attIdOnPage=DataInputOutputUtil.readINT(attrRefs);
+      final int attrAddressOrSize=DataInputOutputUtil.readINT(attrRefs);
+      if (attIdOnPage != encodedAttrId) {
+        if (inlineAttributes && attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
+          attrRefs.skipBytes(attrAddressOrSize);
+        }
+      }
+ else {
+        if (inlineAttributes && attrAddressOrSize < MAX_SMALL_ATTR_SIZE) {
+          byte[] b=new byte[attrAddressOrSize];
+          attrRefs.readFully(b);
+          return new DataInputStream(new ByteArrayInputStream(b));
+        }
+        page=inlineAttributes ? attrAddressOrSize - MAX_SMALL_ATTR_SIZE : attrAddressOrSize;
+        break;
+      }
+    }
+  }
+  finally {
+    attrRefs.close();
+  }
+  if (page == 0) {
+    return null;
+  }
+  DataInputStream stream=getAttributesStorage().readStream(page);
+  if (bulkAttrReadSupport)   skipRecordHeader(stream,encodedAttrId,fileId);
+  return stream;
+}

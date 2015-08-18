@@ -4,14 +4,8 @@
     return null;
   }
   String rootUrl=normalizeRootUrl(basePath,fs);
-  myRootsLock.readLock().lock();
-  try {
-    VirtualFileSystemEntry root=myRoots.get(rootUrl);
-    if (root != null)     return root;
-  }
-  finally {
-    myRootsLock.readLock().unlock();
-  }
+  VirtualFileSystemEntry root=myRoots.get(rootUrl);
+  if (root != null)   return root;
   final VirtualFileSystemEntry newRoot;
   int rootId=FSRecords.findRootRecord(rootUrl);
   VfsData.Segment segment=VfsData.getSegment(rootId,true);
@@ -22,10 +16,10 @@
     if (parentFile == null)     return null;
     FileType type=FileTypeRegistry.getInstance().getFileTypeByFileName(parentFile.getName());
     if (!(type instanceof ArchiveFileType))     return null;
-    newRoot=new ArchiveRoot(fs,rootId,segment,directoryData,parentFile);
+    newRoot=new FsRoot(rootId,segment,directoryData,fs,parentFile.getName(),parentFile.getPath() + "!");
   }
  else {
-    newRoot=new FsRoot(fs,rootId,segment,directoryData,basePath);
+    newRoot=new FsRoot(rootId,segment,directoryData,fs,basePath,StringUtil.trimEnd(basePath,"/"));
   }
   FileAttributes attributes=fs.getAttributes(new StubVirtualFile(){
     @NotNull @Override public String getPath(){
@@ -39,18 +33,27 @@
   if (attributes == null || !attributes.isDirectory()) {
     return null;
   }
-  boolean mark=false;
-  myRootsLock.writeLock().lock();
-  try {
-    VirtualFileSystemEntry root=myRoots.get(rootUrl);
+  boolean mark;
+synchronized (myRoots) {
+    root=myRoots.get(rootUrl);
     if (root != null)     return root;
-    VfsData.initFile(rootId,segment,-1,directoryData);
+    try {
+      VfsData.initFile(rootId,segment,-1,directoryData);
+    }
+ catch (    AssertionError e) {
+      for (      Map.Entry<String,VirtualFileSystemEntry> entry : myRoots.entrySet()) {
+        final VirtualFileSystemEntry existingRoot=entry.getValue();
+        if (Math.abs(existingRoot.getId()) == rootId) {
+          throw new RuntimeException("Duplicate FS roots: " + rootUrl + " and "+ entry.getKey()+ ", id="+ rootId+ ", valid="+ existingRoot.isValid(),e);
+        }
+      }
+      throw new RuntimeException("No root duplication",e);
+    }
+    incStructuralModificationCount();
     mark=writeAttributesToRecord(rootId,0,newRoot,fs,attributes);
     myRoots.put(rootUrl,newRoot);
     myRootsById.put(rootId,newRoot);
-  }
-  finally {
-    myRootsLock.writeLock().unlock();
+    myIdToDirCache.put(rootId,newRoot);
   }
   if (!mark && attributes.lastModified != FSRecords.getTimestamp(rootId)) {
     newRoot.markDirtyRecursively();

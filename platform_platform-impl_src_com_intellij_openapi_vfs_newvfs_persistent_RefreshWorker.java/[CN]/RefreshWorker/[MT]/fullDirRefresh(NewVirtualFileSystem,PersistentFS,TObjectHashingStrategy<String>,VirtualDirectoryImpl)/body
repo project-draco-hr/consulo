@@ -1,0 +1,71 @@
+{
+  while (true) {
+    String[] currentNames;
+    VirtualFile[] children;
+    AccessToken token=ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      currentNames=persistence.list(dir);
+      children=dir.getChildren();
+    }
+  finally {
+      token.finish();
+    }
+    String[] upToDateNames=VfsUtil.filterNames(fs.list(dir));
+    Set<String> newNames=newTroveSet(strategy,upToDateNames);
+    ContainerUtil.removeAll(newNames,currentNames);
+    Set<String> deletedNames=newTroveSet(strategy,currentNames);
+    ContainerUtil.removeAll(deletedNames,upToDateNames);
+    OpenTHashSet<String> actualNames=null;
+    if (!fs.isCaseSensitive()) {
+      actualNames=new OpenTHashSet<String>(strategy,upToDateNames);
+    }
+    debug(LOG,"current=%s +%s -%s",Arrays.toString(currentNames),newNames,deletedNames);
+    List<Pair<String,FileAttributes>> addedMap=ContainerUtil.newArrayListWithCapacity(newNames.size());
+    for (    String name : newNames) {
+      checkCancelled(dir);
+      addedMap.add(pair(name,fs.getAttributes(new FakeVirtualFile(dir,name))));
+    }
+    List<Pair<VirtualFile,FileAttributes>> updatedMap=ContainerUtil.newArrayListWithCapacity(children.length - deletedNames.size());
+    for (    VirtualFile child : children) {
+      if (deletedNames.contains(child.getName()))       continue;
+      checkCancelled(dir);
+      updatedMap.add(pair(child,fs.getAttributes(child)));
+    }
+    token=ApplicationManager.getApplication().acquireReadActionLock();
+    try {
+      if (!Arrays.equals(currentNames,persistence.list(dir)) || !Arrays.equals(children,dir.getChildren())) {
+        LOG.debug("retry");
+        continue;
+      }
+      for (      String name : deletedNames) {
+        scheduleDeletion(dir.findChild(name));
+      }
+      for (      Pair<String,FileAttributes> pair : addedMap) {
+        String name=pair.first;
+        FileAttributes childAttributes=pair.second;
+        if (childAttributes != null) {
+          scheduleCreation(dir,name,childAttributes.isDirectory(),false);
+        }
+ else {
+          LOG.warn("[+] fs=" + fs + " dir="+ dir+ " name="+ name);
+        }
+      }
+      for (      Pair<VirtualFile,FileAttributes> pair : updatedMap) {
+        VirtualFile child=pair.first;
+        FileAttributes childAttributes=pair.second;
+        if (childAttributes != null) {
+          checkAndScheduleChildRefresh(dir,child,childAttributes);
+          checkAndScheduleFileNameChange(actualNames,child);
+        }
+ else {
+          LOG.warn("[x] fs=" + fs + " dir="+ dir+ " name="+ child.getName());
+          scheduleDeletion(child);
+        }
+      }
+      break;
+    }
+  finally {
+      token.finish();
+    }
+  }
+}

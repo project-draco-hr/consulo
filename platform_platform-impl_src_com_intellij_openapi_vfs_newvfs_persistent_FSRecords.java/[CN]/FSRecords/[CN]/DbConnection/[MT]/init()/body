@@ -1,23 +1,29 @@
 {
   final File basePath=basePath();
   basePath.mkdirs();
-  final File namesFile=new File(basePath,"names.dat");
-  final File attributesFile=new File(basePath,"attrib.dat");
-  final File contentsFile=new File(basePath,"content.dat");
-  final File contentsHashesFile=new File(basePath,"contentHashes.dat");
-  final File recordsFile=new File(basePath,"records.dat");
+  final File namesFile=new File(basePath,"names" + VFS_FILES_EXTENSION);
+  final File attributesFile=new File(basePath,"attrib" + VFS_FILES_EXTENSION);
+  final File contentsFile=new File(basePath,"content" + VFS_FILES_EXTENSION);
+  final File contentsHashesFile=new File(basePath,"contentHashes" + VFS_FILES_EXTENSION);
+  final File recordsFile=new File(basePath,"records" + VFS_FILES_EXTENSION);
+  final File vfsDependentEnumBaseFile=VfsDependentEnum.getBaseFile();
   if (!namesFile.exists()) {
-    invalidateIndex();
+    invalidateIndex("'" + namesFile.getAbsolutePath() + "' does not exist");
   }
   try {
     if (getCorruptionMarkerFile().exists()) {
-      invalidateIndex();
+      invalidateIndex("corruption marker found");
       throw new IOException("Corruption marker file found");
     }
     PagedFileStorage.StorageLockContext storageLockContext=new PagedFileStorage.StorageLockContext(false);
     myNames=new PersistentStringEnumerator(namesFile,storageLockContext);
-    myAttributes=new Storage(attributesFile.getCanonicalPath(),REASONABLY_SMALL);
-    myContents=new RefCountingStorage(contentsFile.getCanonicalPath(),CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH);
+    myAttributes=new Storage(attributesFile.getCanonicalPath(),REASONABLY_SMALL){
+      @Override protected AbstractRecordsTable createRecordsTable(      PagePool pool,      File recordsFile) throws IOException {
+        return inlineAttributes && useSmallAttrTable ? new CompactRecordsTable(recordsFile,pool,false) : super.createRecordsTable(pool,recordsFile);
+      }
+    }
+;
+    myContents=new RefCountingStorage(contentsFile.getCanonicalPath(),CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH,useSnappyForCompression);
     myContentHashesEnumerator=weHaveContentHashes ? new ContentHashesUtil.HashEnumerator(contentsHashesFile,storageLockContext) : null;
     boolean aligned=PagedFileStorage.BUFFER_SIZE % RECORD_SIZE == 0;
     assert aligned;
@@ -46,6 +52,7 @@
       deleted&=AbstractStorage.deleteFiles(contentsFile.getCanonicalPath());
       deleted&=deleteAllFilesStartingWith(contentsHashesFile);
       deleted&=deleteAllFilesStartingWith(recordsFile);
+      deleted&=deleteAllFilesStartingWith(vfsDependentEnumBaseFile);
       if (!deleted) {
         throw new IOException("Cannot delete filesystem storage files");
       }

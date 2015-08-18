@@ -1,14 +1,26 @@
 {
   try {
-    final FileBasedIndexExtension[] extensions=Extensions.getExtensions(FileBasedIndexExtension.EXTENSION_POINT_NAME);
-    for (    FileBasedIndexExtension<?,?> extension : extensions) {
-      ourRebuildStatus.put(extension.getName(),new AtomicInteger(OK));
-    }
-    final File corruptionMarker=new File(PathManager.getIndexRoot(),CORRUPTION_MARKER_NAME);
+    File indexRoot=PathManager.getIndexRoot();
+    final File corruptionMarker=new File(indexRoot,CORRUPTION_MARKER_NAME);
     final boolean currentVersionCorrupted=corruptionMarker.exists();
+    if (currentVersionCorrupted) {
+      FileUtil.deleteWithRenaming(indexRoot);
+      indexRoot.mkdirs();
+      mySerializationManagerEx.reinitializeNameStorage();
+    }
+    FileBasedIndexExtension[] extensions=Extensions.getExtensions(FileBasedIndexExtension.EXTENSION_POINT_NAME);
     boolean versionChanged=false;
     for (    FileBasedIndexExtension<?,?> extension : extensions) {
-      versionChanged|=registerIndexer(extension,currentVersionCorrupted);
+      try {
+        ourRebuildStatus.put(extension.getName(),new AtomicInteger(OK));
+        versionChanged|=registerIndexer(extension);
+      }
+ catch (      IOException e) {
+        throw e;
+      }
+catch (      Throwable t) {
+        PluginManager.handleComponentError(t,extension.getClass().getName(),null);
+      }
     }
     for (    List<ID<?,?>> value : myFileType2IndicesWithFileTypeInfoMap.values()) {
       value.addAll(myIndicesWithoutFileTypeInfo);
@@ -22,7 +34,7 @@
       rebuildNotification="Index file format has changed for some indices. These indices will be rebuilt.";
     }
     if (rebuildNotification != null && !ApplicationManager.getApplication().isHeadlessEnvironment() && Registry.is("ide.showIndexRebuildMessage")) {
-      new NotificationGroup("Indexing",NotificationDisplayType.BALLOON,false).createNotification("Index Rebuild",rebuildNotification,NotificationType.INFORMATION,null).notify(null);
+      NOTIFICATIONS.createNotification("Index Rebuild",rebuildNotification,NotificationType.INFORMATION,null).notify(null);
     }
     dropUnregisteredIndices();
     for (    ID<?,?> indexId : myIndices.keySet()) {
@@ -53,6 +65,7 @@
     myFlushingFuture=FlushingDaemon.everyFiveSeconds(new Runnable(){
       private int lastModCount=0;
       @Override public void run(){
+        mySerializationManagerEx.flushNameStorage();
         if (lastModCount == myLocalModCount) {
           flushAllIndices(lastModCount);
         }
