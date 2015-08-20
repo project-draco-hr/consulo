@@ -1,38 +1,46 @@
 {
-  if (!PathUtil.isValidFileName(copyName)) {
-    throw new IOException("Invalid file name: " + copyName);
+  if (!VirtualFile.isValidName(copyName)) {
+    throw new IOException(VfsBundle.message("file.invalid.name.error",copyName));
   }
-  FileAttributes attributes=getAttributes(vFile);
-  if (attributes == null || attributes.isSpecial()) {
-    throw new FileNotFoundException("Not a file: " + vFile);
+  if (!file.exists()) {
+    throw new IOException(VfsBundle.message("vfs.file.not.exist.error",file.getPath()));
   }
-  File physicalFile=convertToIOFile(vFile);
-  File physicalCopy=auxCopy(vFile,newParent,copyName);
-  try {
-    if (physicalCopy == null) {
-      File newPhysicalParent=convertToIOFile(newParent);
-      physicalCopy=new File(newPhysicalParent,copyName);
-      try {
-        if (attributes.isDirectory()) {
-          FileUtil.copyDir(physicalFile,physicalCopy);
-        }
- else {
-          FileUtil.copy(physicalFile,physicalCopy);
-        }
-      }
- catch (      IOException e) {
-        FileUtil.delete(physicalCopy);
-        throw e;
-      }
+  if (!newParent.exists() || !newParent.isDirectory()) {
+    throw new IOException(VfsBundle.message("vfs.target.not.directory.error",newParent.getPath()));
+  }
+  if (newParent.findChild(copyName) != null) {
+    throw new IOException(VfsBundle.message("vfs.target.already.exists.error",newParent.getPath() + "/" + copyName));
+  }
+  FileAttributes attributes=getAttributes(file);
+  if (attributes == null) {
+    throw new FileNotFoundException(VfsBundle.message("file.not.exist.error",file.getPath()));
+  }
+  if (attributes.isSpecial()) {
+    throw new FileNotFoundException("Not a file: " + file);
+  }
+  File ioParent=convertToIOFile(newParent);
+  if (!ioParent.isDirectory()) {
+    throw new IOException(VfsBundle.message("target.not.directory.error",ioParent.getPath()));
+  }
+  File ioTarget=new File(ioParent,copyName);
+  if (ioTarget.exists()) {
+    throw new IOException(VfsBundle.message("target.already.exists.error",ioTarget.getPath()));
+  }
+  if (!auxCopy(file,newParent,copyName)) {
+    try {
+      File ioFile=convertToIOFile(file);
+      FileUtil.copyFileOrDir(ioFile,ioTarget,attributes.isDirectory());
+    }
+ catch (    IOException e) {
+      FileUtil.delete(ioTarget);
+      throw e;
     }
   }
-  finally {
-    auxNotifyCompleted(new ThrowableConsumer<LocalFileOperationsHandler,IOException>(){
-      @Override public void consume(      LocalFileOperationsHandler handler) throws IOException {
-        handler.copy(vFile,newParent,copyName);
-      }
+  auxNotifyCompleted(new ThrowableConsumer<LocalFileOperationsHandler,IOException>(){
+    @Override public void consume(    LocalFileOperationsHandler handler) throws IOException {
+      handler.copy(file,newParent,copyName);
     }
+  }
 );
-  }
   return new FakeVirtualFile(newParent,copyName);
 }

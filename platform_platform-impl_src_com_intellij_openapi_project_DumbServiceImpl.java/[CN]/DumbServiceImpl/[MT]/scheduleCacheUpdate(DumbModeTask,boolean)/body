@@ -1,5 +1,6 @@
 {
-  if (LOG.isDebugEnabled())   LOG.debug("Scheduling task " + task,new Throwable());
+  final Throwable trace=new Throwable();
+  if (LOG.isDebugEnabled())   LOG.debug("Scheduling task " + task,trace);
   final Application application=ApplicationManager.getApplication();
   if (application.isUnitTestMode() || application.isHeadlessEnvironment() || !forceDumbMode && !myDumb && application.isReadAccessAllowed()) {
     final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
@@ -24,12 +25,9 @@
       if (myProject.isDisposed()) {
         return;
       }
-      final ProgressIndicatorBase indicator=new ProgressIndicatorBase(){
-        @Override protected void delegateRunningChange(        @NotNull AbstractProgressIndicatorExBase.IndicatorAction action){
-        }
-      }
-;
-      myProgresses.put(task,indicator);
+      ModalityState modality=ModalityState.current();
+      final DumbModePermission permission=getDumbModePermission(modality);
+      myProgresses.put(task,new ProgressIndicatorBase());
       Disposer.register(task,new Disposable(){
         @Override public void dispose(){
           application.assertIsDispatchThread();
@@ -39,29 +37,35 @@
 );
       myUpdatesQueue.addLast(task);
       if (!myDumb) {
-        boolean startSuccess=application.runWriteAction(new Computable<Boolean>(){
-          @Override public Boolean compute(){
+        if (permission == null) {
+          LOG.error("Dumb mode not permitted in modal environment; see DumbService.allowStartingDumbModeInside documentation." + "\n Current modality: " + modality + "\n all permissions: "+ ourPermissionService.getPermissions(),ourForcedTrace != null ? ourForcedTrace : trace);
+        }
+        application.runWriteAction(new Runnable(){
+          @Override public void run(){
             myDumb=true;
+            myModificationCount++;
             try {
               myPublisher.enteredDumbMode();
             }
  catch (            Throwable e) {
               LOG.error(e);
             }
-            try {
-              startBackgroundProcess();
-            }
- catch (            Throwable e) {
-              LOG.error("Failed to start background index update task",e);
-              return false;
-            }
-            return true;
           }
         }
 );
-        if (!startSuccess) {
-          updateFinished();
+        application.invokeLater(new Runnable(){
+          @Override public void run(){
+            boolean modal=permission != DumbModePermission.MAY_START_BACKGROUND;
+            try {
+              startBackgroundProcess(modal);
+            }
+ catch (            Throwable e) {
+              updateFinished();
+              LOG.error("Failed to start background index update task",e);
+            }
+          }
         }
+,modality,myProject.getDisposed());
       }
     }
   }
