@@ -1,89 +1,86 @@
 {
-  Project project=CommonDataKeys.PROJECT.getData(dataContext);
-  PsiFile file;
-  if (project == null || editor.isColumnMode() || (file=PsiUtilBase.getPsiFileInEditor(editor,project)) == null) {
-    if (myOriginalHandler != null) {
-      myOriginalHandler.execute(editor,charTyped,dataContext);
-    }
-    return;
-  }
-  if (!CodeInsightUtilBase.prepareEditorForWrite(editor))   return;
-  if (!FileDocumentManager.getInstance().requestWriting(editor.getDocument(),project)) {
-    return;
-  }
-  Editor originalEditor=editor;
-  Editor injectedEditor=injectedEditorIfCharTypedIsSignificant(charTyped,editor,file);
-  if (injectedEditor != editor) {
-    file=PsiDocumentManager.getInstance(project).getPsiFile(injectedEditor.getDocument());
-    editor=injectedEditor;
-  }
-  final TypedHandlerDelegate[] delegates=Extensions.getExtensions(TypedHandlerDelegate.EP_NAME);
-  boolean handled=false;
-  for (  TypedHandlerDelegate delegate : delegates) {
-    final TypedHandlerDelegate.Result result=delegate.checkAutoPopup(charTyped,project,editor,file);
-    handled=result == TypedHandlerDelegate.Result.STOP;
-    if (result != TypedHandlerDelegate.Result.CONTINUE) {
-      break;
-    }
-  }
-  if (!handled) {
-    autoPopupCompletion(editor,charTyped,project,file);
-    autoPopupParameterInfo(editor,charTyped,project,file);
-  }
-  if (!editor.isInsertMode()) {
+  final Project project=CommonDataKeys.PROJECT.getData(dataContext);
+  final PsiFile originalFile;
+  if (project == null || (originalFile=PsiUtilBase.getPsiFileInEditor(originalEditor,project)) == null) {
     if (myOriginalHandler != null) {
       myOriginalHandler.execute(originalEditor,charTyped,dataContext);
     }
     return;
   }
-  EditorModificationUtil.deleteSelectedTextForAllCarets(editor);
-  FileType fileType=getFileType(file,editor);
-  for (  TypedHandlerDelegate delegate : delegates) {
-    final TypedHandlerDelegate.Result result=delegate.beforeCharTyped(charTyped,project,editor,file,fileType);
-    if (result == TypedHandlerDelegate.Result.STOP) {
-      return;
-    }
-    if (result == TypedHandlerDelegate.Result.DEFAULT) {
-      break;
-    }
-  }
-  if (!editor.getSelectionModel().hasBlockSelection() && editor.getCaretModel().getCaretCount() == 1) {
-    if (')' == charTyped || ']' == charTyped || '}' == charTyped) {
-      if (fileType != PlainTextFileType.INSTANCE) {
-        if (handleRParen(editor,fileType,charTyped))         return;
+  if (!CodeInsightUtilBase.prepareEditorForWrite(originalEditor))   return;
+  final PsiDocumentManager psiDocumentManager=PsiDocumentManager.getInstance(project);
+  final Document originalDocument=originalEditor.getDocument();
+  originalEditor.getCaretModel().runForEachCaret(new CaretAction(){
+    @Override public void perform(    Caret caret){
+      if (psiDocumentManager.isDocumentBlockedByPsi(originalDocument)) {
+        psiDocumentManager.doPostponedOperationsAndUnblockDocument(originalDocument);
+      }
+      Editor editor=injectedEditorIfCharTypedIsSignificant(charTyped,originalEditor,originalFile);
+      PsiFile file=editor == originalEditor ? originalFile : psiDocumentManager.getPsiFile(editor.getDocument());
+      final TypedHandlerDelegate[] delegates=Extensions.getExtensions(TypedHandlerDelegate.EP_NAME);
+      boolean handled=false;
+      for (      TypedHandlerDelegate delegate : delegates) {
+        final TypedHandlerDelegate.Result result=delegate.checkAutoPopup(charTyped,project,editor,file);
+        handled=result == TypedHandlerDelegate.Result.STOP;
+        if (result != TypedHandlerDelegate.Result.CONTINUE) {
+          break;
+        }
+      }
+      if (!handled) {
+        autoPopupCompletion(editor,charTyped,project,file);
+        autoPopupParameterInfo(editor,charTyped,project,file);
+      }
+      if (!editor.isInsertMode()) {
+        type(originalEditor,charTyped);
+        return;
+      }
+      EditorModificationUtil.deleteSelectedText(editor);
+      FileType fileType=getFileType(file,editor);
+      for (      TypedHandlerDelegate delegate : delegates) {
+        final TypedHandlerDelegate.Result result=delegate.beforeCharTyped(charTyped,project,editor,file,fileType);
+        if (result == TypedHandlerDelegate.Result.STOP) {
+          return;
+        }
+        if (result == TypedHandlerDelegate.Result.DEFAULT) {
+          break;
+        }
+      }
+      if (')' == charTyped || ']' == charTyped || '}' == charTyped) {
+        if (PlainTextFileType.INSTANCE != fileType) {
+          if (handleRParen(editor,fileType,charTyped))           return;
+        }
+      }
+ else       if ('"' == charTyped || '\'' == charTyped || '`' == charTyped) {
+        if (handleQuote(editor,charTyped,file))         return;
+      }
+      long modificationStampBeforeTyping=editor.getDocument().getModificationStamp();
+      type(originalEditor,charTyped);
+      AutoHardWrapHandler.getInstance().wrapLineIfNecessary(editor,dataContext,modificationStampBeforeTyping);
+      if (('(' == charTyped || '[' == charTyped || '{' == charTyped) && CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && fileType != PlainTextFileType.INSTANCE) {
+        handleAfterLParen(editor,fileType,charTyped);
+      }
+ else       if ('}' == charTyped) {
+        indentClosingBrace(project,editor);
+      }
+ else       if (')' == charTyped) {
+        indentClosingParenth(project,editor);
+      }
+      for (      TypedHandlerDelegate delegate : delegates) {
+        final TypedHandlerDelegate.Result result=delegate.charTyped(charTyped,project,editor,file);
+        if (result == TypedHandlerDelegate.Result.STOP) {
+          return;
+        }
+        if (result == TypedHandlerDelegate.Result.DEFAULT) {
+          break;
+        }
+      }
+      if ('{' == charTyped) {
+        indentOpenedBrace(project,editor);
+      }
+ else       if ('(' == charTyped) {
+        indentOpenedParenth(project,editor);
       }
     }
- else     if ('"' == charTyped || '\'' == charTyped || '`' == charTyped) {
-      if (handleQuote(editor,charTyped,dataContext,file))       return;
-    }
   }
-  long modificationStampBeforeTyping=editor.getDocument().getModificationStamp();
-  if (myOriginalHandler != null) {
-    myOriginalHandler.execute(originalEditor,charTyped,dataContext);
-  }
-  AutoHardWrapHandler.getInstance().wrapLineIfNecessary(editor,dataContext,modificationStampBeforeTyping);
-  if (('(' == charTyped || '[' == charTyped || '{' == charTyped) && CodeInsightSettings.getInstance().AUTOINSERT_PAIR_BRACKET && !editor.getSelectionModel().hasBlockSelection()&& editor.getCaretModel().getCaretCount() == 1 && fileType != PlainTextFileType.INSTANCE) {
-    handleAfterLParen(editor,fileType,charTyped);
-  }
- else   if ('}' == charTyped) {
-    indentClosingBrace(project,editor);
-  }
- else   if (')' == charTyped) {
-    indentClosingParenth(project,editor);
-  }
-  for (  TypedHandlerDelegate delegate : delegates) {
-    final TypedHandlerDelegate.Result result=delegate.charTyped(charTyped,project,editor,file);
-    if (result == TypedHandlerDelegate.Result.STOP) {
-      return;
-    }
-    if (result == TypedHandlerDelegate.Result.DEFAULT) {
-      break;
-    }
-  }
-  if ('{' == charTyped) {
-    indentOpenedBrace(project,editor);
-  }
- else   if ('(' == charTyped) {
-    indentOpenedParenth(project,editor);
-  }
+);
 }
