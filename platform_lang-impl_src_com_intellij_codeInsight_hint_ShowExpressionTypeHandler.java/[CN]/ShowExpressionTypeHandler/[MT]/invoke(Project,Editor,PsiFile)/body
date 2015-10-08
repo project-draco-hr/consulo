@@ -1,0 +1,55 @@
+{
+  ApplicationManager.getApplication().assertIsDispatchThread();
+  PsiDocumentManager.getInstance(project).commitAllDocuments();
+  PsiElement elementAt=file.findElementAt(TargetElementUtil.adjustOffset(file,editor.getDocument(),editor.getCaretModel().getOffset()));
+  if (elementAt == null)   return;
+  Language language=elementAt.getLanguage();
+  final Set<ExpressionTypeProvider> handlers=getHandlers(project,language,file.getViewProvider().getBaseLanguage());
+  if (handlers.isEmpty())   return;
+  boolean exactRange=false;
+  TextRange range=EditorUtil.getSelectionInAnyMode(editor);
+  final Map<PsiElement,ExpressionTypeProvider> map=ContainerUtil.newLinkedHashMap();
+  for (  ExpressionTypeProvider handler : handlers) {
+    for (    PsiElement element : ((ExpressionTypeProvider<? extends PsiElement>)handler).getExpressionsAt(elementAt)) {
+      TextRange r=element.getTextRange();
+      if (exactRange && !r.equals(range) || !r.contains(range))       continue;
+      if (!exactRange)       exactRange=r.equals(range);
+      map.put(element,handler);
+    }
+  }
+  Pass<PsiElement> callback=new Pass<PsiElement>(){
+    @Override public void pass(    @NotNull PsiElement expression){
+      ExpressionTypeProvider<PsiElement> provider=ObjectUtil.assertNotNull(map.get(expression));
+      final String informationHint=provider.getInformationHint(expression);
+      TextRange range=expression.getTextRange();
+      editor.getSelectionModel().setSelection(range.getStartOffset(),range.getEndOffset());
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
+        @Override public void run(){
+          HintManager.getInstance().showInformationHint(editor,informationHint);
+        }
+      }
+);
+    }
+  }
+;
+  if (map.isEmpty()) {
+    ApplicationManager.getApplication().invokeLater(new Runnable(){
+      @Override public void run(){
+        String errorHint=ObjectUtil.assertNotNull(ContainerUtil.getFirstItem(handlers)).getErrorHint();
+        HintManager.getInstance().showErrorHint(editor,errorHint);
+      }
+    }
+);
+  }
+ else   if (map.size() == 1) {
+    callback.pass(ObjectUtil.assertNotNull(ContainerUtil.getFirstItem(map.keySet())));
+  }
+ else {
+    IntroduceTargetChooser.showChooser(editor,ContainerUtil.newArrayList(map.keySet()),callback,new Function<PsiElement,String>(){
+      @Override public String fun(      @NotNull PsiElement expression){
+        return expression.getText();
+      }
+    }
+);
+  }
+}
