@@ -1,6 +1,6 @@
 {
   PsiDocumentManager.getInstance(project).commitAllDocuments();
-  SelectionModel selectionModel=editor.getSelectionModel();
+  final SelectionModel selectionModel=editor.getSelectionModel();
   if (file == null && !selectionModel.hasSelection()) {
     selectionModel.selectWordAtCaret(false);
   }
@@ -10,50 +10,25 @@
   }
   final HighlightUsagesHandlerBase handler=createCustomHandler(editor,file);
   if (handler != null) {
+    final String featureId=handler.getFeatureId();
+    if (featureId != null) {
+      FeatureUsageTracker.getInstance().triggerFeatureUsed(featureId);
+    }
     handler.highlightUsages();
     return;
   }
-  UsageTarget[] usageTargets=UsageTargetUtil.findUsageTargets(editor,file);
-  if (usageTargets == null) {
-    PsiElement targetElement=getTargetElement(editor,file);
-    if (targetElement != null) {
-      if (!(targetElement instanceof NavigationItem)) {
-        targetElement=targetElement.getNavigationElement();
-      }
-      if (targetElement instanceof NavigationItem) {
-        usageTargets=new UsageTarget[]{new PsiElement2UsageTargetAdapter(targetElement)};
-      }
-    }
-  }
-  if (usageTargets == null) {
-    PsiReference ref=TargetElementUtil.findReference(editor);
-    if (ref instanceof PsiPolyVariantReference) {
-      ResolveResult[] results=((PsiPolyVariantReference)ref).multiResolve(false);
-      if (results.length > 0) {
-        usageTargets=new UsageTarget[results.length];
-        for (int i=0; i < results.length; ++i) {
-          usageTargets[i]=new PsiElement2UsageTargetAdapter(results[i].getElement());
-        }
-      }
-    }
-  }
-  if (usageTargets == null) {
-    if (file.findElementAt(editor.getCaretModel().getOffset()) instanceof PsiWhiteSpace)     return;
-    selectionModel.selectWordAtCaret(false);
-    String selection=selectionModel.getSelectedText();
-    LOG.assertTrue(selection != null);
-    for (int i=0; i < selection.length(); i++) {
-      if (!Character.isJavaIdentifierPart(selection.charAt(i))) {
-        selectionModel.removeSelection();
+  DumbService.getInstance(project).withAlternativeResolveEnabled(new Runnable(){
+    @Override public void run(){
+      UsageTarget[] usageTargets=getUsageTargets(editor,file);
+      if (usageTargets == null) {
+        handleNoUsageTargets(file,editor,selectionModel,project);
         return;
       }
+      boolean clearHighlights=isClearHighlights(editor);
+      for (      UsageTarget target : usageTargets) {
+        target.highlightUsages(file,editor,clearHighlights);
+      }
     }
-    doRangeHighlighting(editor,project);
-    selectionModel.removeSelection();
-    return;
   }
-  boolean clearHighlights=isClearHighlights(editor);
-  for (  UsageTarget target : usageTargets) {
-    target.highlightUsages(file,editor,clearHighlights);
-  }
+);
 }
