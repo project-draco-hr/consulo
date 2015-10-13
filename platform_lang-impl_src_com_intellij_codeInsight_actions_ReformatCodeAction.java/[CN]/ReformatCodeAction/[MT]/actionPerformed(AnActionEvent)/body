@@ -7,11 +7,8 @@
   PsiDocumentManager.getInstance(project).commitAllDocuments();
   final Editor editor=CommonDataKeys.EDITOR.getData(dataContext);
   final VirtualFile[] files=CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
-  if (files == null) {
-    return;
-  }
   PsiFile file=null;
-  final PsiDirectory dir;
+  PsiDirectory dir=null;
   boolean hasSelection=false;
   if (editor != null) {
     file=PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
@@ -19,34 +16,33 @@
     dir=file.getContainingDirectory();
     hasSelection=editor.getSelectionModel().hasSelection();
   }
- else   if (areFiles(files)) {
+ else   if (containsAtLeastOneFile(files)) {
     final ReadonlyStatusHandler.OperationStatus operationStatus=ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(files);
     if (!operationStatus.hasReadonlyFiles()) {
       ReformatFilesOptions selectedFlags=getReformatFilesOptions(project,files);
       if (selectedFlags == null)       return;
-      final boolean processOnlyChangedText=selectedFlags.isProcessOnlyChangedText();
+      final boolean processOnlyChangedText=selectedFlags.getTextRangeType() == TextRangeType.VCS_CHANGED_TEXT;
       final boolean shouldOptimizeImports=selectedFlags.isOptimizeImports() && !DumbService.getInstance(project).isDumb();
       AbstractLayoutCodeProcessor processor=new ReformatCodeProcessor(project,convertToPsiFiles(files,project),null,processOnlyChangedText);
       if (shouldOptimizeImports) {
         processor=new OptimizeImportsProcessor(processor);
       }
-      if (selectedFlags.isRearrangeEntries()) {
-        processor=new RearrangeCodeProcessor(processor,null);
+      if (selectedFlags.isRearrangeCode()) {
+        processor=new RearrangeCodeProcessor(processor);
       }
       processor.run();
     }
     return;
   }
- else {
-    Project projectContext=PlatformDataKeys.PROJECT_CONTEXT.getData(dataContext);
+ else   if (PlatformDataKeys.PROJECT_CONTEXT.getData(dataContext) != null || LangDataKeys.MODULE_CONTEXT.getData(dataContext) != null) {
     Module moduleContext=LangDataKeys.MODULE_CONTEXT.getData(dataContext);
-    if (projectContext != null || moduleContext != null) {
-      ReformatFilesOptions selectedFlags=getLayoutProjectOptions(project,moduleContext);
-      if (selectedFlags != null) {
-        reformatModule(project,moduleContext,selectedFlags);
-      }
-      return;
+    ReformatFilesOptions selectedFlags=getLayoutProjectOptions(project,moduleContext);
+    if (selectedFlags != null) {
+      reformatModule(project,moduleContext,selectedFlags);
     }
+    return;
+  }
+ else {
     PsiElement element=CommonDataKeys.PSI_ELEMENT.getData(dataContext);
     if (element == null)     return;
     if (element instanceof PsiDirectoryContainer) {
@@ -61,63 +57,28 @@
       dir=file.getContainingDirectory();
     }
   }
-  boolean optimizeImports=ReformatFilesDialog.isOptmizeImportsOptionOn();
-  boolean processWholeFile=false;
-  boolean processChangedTextOnly=PropertiesComponent.getInstance().getBoolean(LayoutCodeConstants.PROCESS_CHANGED_TEXT_KEY,false);
-  boolean rearrangeEntries=getLastSavedRearrangeCbState(project,file);
-  final boolean showDialog=EditorSettingsExternalizable.getInstance().getOptions().SHOW_REFORMAT_DIALOG;
-  if (showDialog || (file == null && dir != null)) {
-    LayoutCodeOptions selectedFlags=getLayoutCodeOptions(project,file,dir,hasSelection);
-    if (selectedFlags == null)     return;
-    optimizeImports=selectedFlags.isOptimizeImports();
-    rearrangeEntries=selectedFlags.isRearrangeEntries();
-    processWholeFile=selectedFlags.isProcessWholeFile();
-    processChangedTextOnly=selectedFlags.isProcessOnlyChangedText();
-    if (selectedFlags.isProcessDirectory()) {
-      AbstractLayoutCodeProcessor processor=new ReformatCodeProcessor(project,dir,selectedFlags.isIncludeSubdirectories(),processChangedTextOnly);
-      if (optimizeImports) {
-        processor=new OptimizeImportsProcessor(processor);
-      }
-      if (selectedFlags.isRearrangeEntries()) {
-        processor=new RearrangeCodeProcessor(processor,null);
-      }
-      processor.run();
-      return;
+  if (file == null && dir != null) {
+    DirectoryFormattingOptions options=getDirectoryFormattingOptions(project,dir);
+    if (options != null) {
+      reformatDirectory(project,dir,options);
     }
+    return;
   }
-  final TextRange range;
-  if (!processWholeFile && editor != null && editor.getSelectionModel().hasSelection()) {
-    range=TextRange.create(editor.getSelectionModel().getSelectionStart(),editor.getSelectionModel().getSelectionEnd());
+  if (file == null || editor == null)   return;
+  LastRunReformatCodeOptionsProvider provider=new LastRunReformatCodeOptionsProvider(PropertiesComponent.getInstance());
+  ReformatCodeRunOptions currentRunOptions=provider.getLastRunOptions(file);
+  TextRangeType processingScope=currentRunOptions.getTextRangeType();
+  if (hasSelection) {
+    processingScope=TextRangeType.SELECTED_TEXT;
   }
- else {
-    range=null;
-  }
-  if (optimizeImports && range == null) {
-    if (file != null || dir == null) {
-      new OptimizeImportsProcessor(new ReformatCodeProcessor(project,file,null,processChangedTextOnly)).run();
-    }
- else {
-      new OptimizeImportsProcessor(new ReformatCodeProcessor(project,dir,true,processChangedTextOnly)).run();
+ else   if (processingScope == TextRangeType.VCS_CHANGED_TEXT) {
+    if (FormatChangedTextUtil.getInstance().isChangeNotTrackedForFile(project,file)) {
+      processingScope=TextRangeType.WHOLE_FILE;
     }
   }
  else {
-    new ReformatCodeProcessor(project,file,range,processChangedTextOnly).run();
+    processingScope=TextRangeType.WHOLE_FILE;
   }
-  if (rearrangeEntries && file != null && editor != null) {
-    final ArrangementEngine engine=ServiceManager.getService(project,ArrangementEngine.class);
-    try {
-      final PsiFile finalFile=file;
-      SelectionModel selectionModel=editor.getSelectionModel();
-      final TextRange rangeToUse=selectionModel.hasSelection() ? TextRange.create(selectionModel.getSelectionStart(),selectionModel.getSelectionEnd()) : TextRange.create(0,editor.getDocument().getTextLength());
-      CommandProcessor.getInstance().executeCommand(project,new Runnable(){
-        @Override public void run(){
-          engine.arrange(finalFile,Collections.singleton(rangeToUse));
-        }
-      }
-,getTemplatePresentation().getText(),null);
-    }
-  finally {
-      PsiDocumentManager.getInstance(project).commitDocument(editor.getDocument());
-    }
-  }
+  currentRunOptions.setProcessingScope(processingScope);
+  new FileInEditorProcessor(file,editor,currentRunOptions).processCode();
 }

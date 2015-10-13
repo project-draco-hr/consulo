@@ -2,6 +2,7 @@
   if (wrappers.isEmpty()) {
     return;
   }
+  Map<E,ArrangementSectionRule> entryToSection=ContainerUtilRt.newHashMap();
   Map<E,ArrangementEntryWrapper<E>> map=ContainerUtilRt.newHashMap();
   List<E> arranged=ContainerUtilRt.newArrayList();
   List<E> toArrange=ContainerUtilRt.newArrayList();
@@ -10,7 +11,7 @@
     map.put(wrapper.getEntry(),wrapper);
     if (!entry.canBeMatched()) {
       if (toArrange.isEmpty()) {
-        arranged.addAll(arrange(toArrange,context.rules));
+        arranged.addAll(arrange(toArrange,context.sectionRules,context.rulesByPriority,entryToSection));
       }
       arranged.add(entry);
       toArrange.clear();
@@ -20,12 +21,28 @@
     }
   }
   if (!toArrange.isEmpty()) {
-    arranged.addAll(arrange(toArrange,context.rules));
+    arranged.addAll(arrange(toArrange,context.sectionRules,context.rulesByPriority,entryToSection));
   }
+  final NewSectionInfo<E> newSectionsInfo=NewSectionInfo.create(arranged,entryToSection);
   context.changer.prepare(wrappers,context);
   for (int i=arranged.size() - 1; i >= 0; i--) {
     ArrangementEntryWrapper<E> arrangedWrapper=map.get(arranged.get(i));
     ArrangementEntryWrapper<E> initialWrapper=wrappers.get(i);
-    context.changer.replace(arrangedWrapper,initialWrapper,i > 0 ? map.get(arranged.get(i - 1)) : null,context);
+    ArrangementEntryWrapper<E> previous=i > 0 ? map.get(arranged.get(i - 1)) : null;
+    ArrangementEntryWrapper<E> previousInitial=i > 0 ? wrappers.get(i - 1) : null;
+    final ArrangementEntryWrapper<E> parentWrapper=initialWrapper.getParent();
+    if (arrangedWrapper.equals(initialWrapper)) {
+      if (previous != null && previous.equals(previousInitial) || previous == null && previousInitial == null) {
+        final int beforeOffset=arrangedWrapper.getStartOffset();
+        final int afterOffset=arrangedWrapper.getEndOffset();
+        boolean isInserted=context.changer.insertSection(context,arranged.get(i),newSectionsInfo,parentWrapper,beforeOffset,afterOffset);
+        myCodeChanged=isInserted || myCodeChanged;
+        continue;
+      }
+    }
+    ArrangementEntryWrapper<E> next=i < arranged.size() - 1 ? map.get(arranged.get(i + 1)) : null;
+    context.changer.replace(arrangedWrapper,initialWrapper,previous,next,context);
+    context.changer.insertSection(context,arranged.get(i),newSectionsInfo,arrangedWrapper,initialWrapper,parentWrapper);
+    myCodeChanged=true;
   }
 }

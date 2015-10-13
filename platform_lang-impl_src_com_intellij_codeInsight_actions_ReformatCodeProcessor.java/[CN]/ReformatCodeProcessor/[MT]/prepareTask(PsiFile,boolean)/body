@@ -3,16 +3,31 @@
     @Override public Boolean call() throws Exception {
       FormattingProgressTask.FORMATTING_CANCELLED_FLAG.set(false);
       try {
-        if (myRanges.isEmpty() && processChangedTextOnly) {
-          myRanges.addAll(FormatChangedTextUtil.getChanges(file));
+        Collection<TextRange> ranges=getRangesToFormat(processChangedTextOnly,file);
+        CharSequence before=null;
+        Document document=PsiDocumentManager.getInstance(myProject).getDocument(file);
+        if (getInfoCollector() != null) {
+          LOG.assertTrue(document != null);
+          before=document.getImmutableCharSequence();
         }
-        if (myRanges.isEmpty()) {
-          myRanges.add(file.getTextRange());
+        CaretVisualPositionKeeper caretPositionKeeper=new CaretVisualPositionKeeper(document);
+        if (processChangedTextOnly) {
+          CodeStyleManager.getInstance(myProject).reformatTextWithContext(file,ranges);
         }
-        CodeStyleManager.getInstance(myProject).reformatText(file,myRanges);
+ else {
+          CodeStyleManager.getInstance(myProject).reformatText(file,ranges);
+        }
+        caretPositionKeeper.restoreOriginalLocation();
+        if (before != null) {
+          prepareUserNotificationMessage(document,before);
+        }
         return !FormattingProgressTask.FORMATTING_CANCELLED_FLAG.get();
       }
- catch (      IncorrectOperationException e) {
+ catch (      FilesTooBigForDiffException e) {
+        handleFileTooBigException(LOG,e,file);
+        return false;
+      }
+catch (      IncorrectOperationException e) {
         LOG.error(e);
         return false;
       }

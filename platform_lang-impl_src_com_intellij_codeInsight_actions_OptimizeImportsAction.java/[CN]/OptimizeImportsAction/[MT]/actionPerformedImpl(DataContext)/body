@@ -13,7 +13,7 @@
     if (file == null)     return;
     dir=file.getContainingDirectory();
   }
- else   if (files != null && ReformatCodeAction.areFiles(files)) {
+ else   if (files != null && ReformatCodeAction.containsAtLeastOneFile(files)) {
     final ReadonlyStatusHandler.OperationStatus operationStatus=ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(files);
     if (!operationStatus.hasReadonlyFiles()) {
       new OptimizeImportsProcessor(project,ReformatCodeAction.convertToPsiFiles(files,project),null).run();
@@ -25,17 +25,23 @@
     Module moduleContext=LangDataKeys.MODULE_CONTEXT.getData(dataContext);
     if (projectContext != null || moduleContext != null) {
       final String text;
+      final boolean hasChanges;
       if (moduleContext != null) {
         text=CodeInsightBundle.message("process.scope.module",moduleContext.getName());
+        hasChanges=FormatChangedTextUtil.hasChanges(moduleContext);
       }
  else {
         text=CodeInsightBundle.message("process.scope.project",projectContext.getPresentableUrl());
+        hasChanges=FormatChangedTextUtil.hasChanges(projectContext);
       }
-      LayoutProjectCodeDialog dialog=new LayoutProjectCodeDialog(project,null,CodeInsightBundle.message("process.optimize.imports"),text,false);
-      dialog.show();
-      if (!dialog.isOK())       return;
+      Boolean isProcessVcsChangedText=isProcessVcsChangedText(project,text,hasChanges);
+      if (isProcessVcsChangedText == null) {
+        return;
+      }
       if (moduleContext != null) {
-        new OptimizeImportsProcessor(project,moduleContext).run();
+        OptimizeImportsProcessor processor=new OptimizeImportsProcessor(project,moduleContext);
+        processor.setProcessChangedTextOnly(isProcessVcsChangedText);
+        processor.run();
       }
  else {
         new OptimizeImportsProcessor(projectContext).run();
@@ -56,27 +62,39 @@
       dir=file.getContainingDirectory();
     }
   }
-  boolean processDirectory;
-  boolean includeSubdirectories;
-  if (ApplicationManager.getApplication().isUnitTestMode()) {
-    includeSubdirectories=processDirectory=false;
-  }
- else   if (!EditorSettingsExternalizable.getInstance().getOptions().SHOW_OPIMIZE_IMPORTS_DIALOG && file != null) {
-    includeSubdirectories=processDirectory=false;
-  }
- else {
-    final LayoutCodeDialog dialog=new LayoutCodeDialog(project,CodeInsightBundle.message("process.optimize.imports"),file,dir,null,HELP_ID);
+  boolean processDirectory=false;
+  boolean processOnlyVcsChangedFiles=false;
+  if (!ApplicationManager.getApplication().isUnitTestMode() && file == null && dir != null) {
+    String message=CodeInsightBundle.message("process.scope.directory",dir.getName());
+    OptimizeImportsDialog dialog=new OptimizeImportsDialog(project,message,FormatChangedTextUtil.hasChanges(dir));
     dialog.show();
-    if (!dialog.isOK())     return;
-    EditorSettingsExternalizable.getInstance().getOptions().SHOW_OPIMIZE_IMPORTS_DIALOG=!dialog.isDoNotAskMe();
-    ReformatCodeAction.updateShowDialogSetting(dialog,"\"Optimize Imports\" dialog disabled");
-    processDirectory=dialog.isProcessDirectory();
-    includeSubdirectories=dialog.isIncludeSubdirectories();
+    if (!dialog.isOK()) {
+      return;
+    }
+    processDirectory=true;
+    processOnlyVcsChangedFiles=dialog.isProcessOnlyVcsChangedFiles();
   }
   if (processDirectory) {
-    new OptimizeImportsProcessor(project,dir,includeSubdirectories).run();
+    new OptimizeImportsProcessor(project,dir,true,processOnlyVcsChangedFiles).run();
   }
  else {
-    new OptimizeImportsProcessor(project,file).run();
+    final OptimizeImportsProcessor optimizer=new OptimizeImportsProcessor(project,file);
+    if (editor != null && EditorSettingsExternalizable.getInstance().getOptions().SHOW_NOTIFICATION_AFTER_OPTIMIZE_IMPORTS_ACTION) {
+      optimizer.setCollectInfo(true);
+      optimizer.setPostRunnable(new Runnable(){
+        @Override public void run(){
+          LayoutCodeInfoCollector collector=optimizer.getInfoCollector();
+          if (collector != null) {
+            String info=collector.getOptimizeImportsNotification();
+            if (!editor.isDisposed() && editor.getComponent().isShowing()) {
+              String message=info != null ? info : NO_IMPORTS_OPTIMIZED;
+              FileInEditorProcessor.showHint(editor,StringUtil.capitalize(message),null);
+            }
+          }
+        }
+      }
+);
+    }
+    optimizer.run();
   }
 }

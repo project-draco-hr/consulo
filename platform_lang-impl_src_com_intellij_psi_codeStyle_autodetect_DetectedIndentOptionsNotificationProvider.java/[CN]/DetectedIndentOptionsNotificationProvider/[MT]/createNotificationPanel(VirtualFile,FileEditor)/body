@@ -1,0 +1,47 @@
+{
+  Boolean notifiedFlag=fileEditor.getUserData(NOTIFIED_FLAG);
+  if (fileEditor instanceof TextEditor && notifiedFlag != null) {
+    final Editor editor=((TextEditor)fileEditor).getEditor();
+    final Project project=editor.getProject();
+    if (project != null) {
+      Document document=editor.getDocument();
+      PsiDocumentManager documentManager=PsiDocumentManager.getInstance(project);
+      PsiFile psiFile=documentManager.getPsiFile(document);
+      final Ref<FileIndentOptionsProvider> indentOptionsProviderRef=new Ref<FileIndentOptionsProvider>();
+      if (psiFile != null) {
+        CodeStyleSettings settings=CodeStyleSettingsManager.getSettings(project);
+        CommonCodeStyleSettings.IndentOptions userOptions=settings.getIndentOptions(psiFile.getFileType());
+        CommonCodeStyleSettings.IndentOptions detectedOptions=CodeStyleSettingsManager.getSettings(project).getIndentOptionsByFile(psiFile,null,false,new Processor<FileIndentOptionsProvider>(){
+          @Override public boolean process(          FileIndentOptionsProvider provider){
+            indentOptionsProviderRef.set(provider);
+            return false;
+          }
+        }
+);
+        final FileIndentOptionsProvider provider=indentOptionsProviderRef.get();
+        EditorNotificationInfo info=provider != null && !provider.isAcceptedWithoutWarning(project,file) && !userOptions.equals(detectedOptions) ? provider.getNotificationInfo(project,file,fileEditor,userOptions,detectedOptions) : null;
+        if (info != null) {
+          EditorNotificationPanel panel=new EditorNotificationPanel().text(info.getTitle());
+          if (info.getIcon() != null) {
+            panel.icon(info.getIcon());
+          }
+          for (          final ActionLabelData actionLabelData : info.getLabelAndActions()) {
+            Runnable onClickAction=new Runnable(){
+              @Override public void run(){
+                actionLabelData.action.run();
+                EditorNotifications.getInstance(project).updateAllNotifications();
+              }
+            }
+;
+            panel.createActionLabel(actionLabelData.label,onClickAction);
+          }
+          if (ApplicationManager.getApplication().isUnitTestMode()) {
+            file.putUserData(DETECT_INDENT_NOTIFICATION_SHOWN_KEY,Boolean.TRUE);
+          }
+          return panel;
+        }
+      }
+    }
+  }
+  return null;
+}
