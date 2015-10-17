@@ -1,0 +1,39 @@
+{
+  final Application application=ApplicationManager.getApplication();
+  if (!(application instanceof ApplicationImpl))   return false;
+  final Window eventWindow=windowEvent.getWindow();
+  if (windowEvent.getID() == WindowEvent.WINDOW_ACTIVATED || windowEvent.getID() == WindowEvent.WINDOW_GAINED_FOCUS) {
+    if (state.isInactive()) {
+      Window window=windowEvent.getWindow();
+      return setActive(application,window);
+    }
+  }
+ else   if (windowEvent.getID() == WindowEvent.WINDOW_DEACTIVATED && windowEvent.getOppositeWindow() == null) {
+    requestToDeactivateTime.getAndSet(System.currentTimeMillis());
+    if (state.isActive()) {
+      IdeFrame ideFrame=getIdeFrameFromWindow(windowEvent.getWindow());
+      if (ideFrame != null) {
+        application.getMessageBus().syncPublisher(ApplicationActivationListener.TOPIC).applicationDeactivated(ideFrame);
+      }
+    }
+    state=State.DEACTIVATING;
+    LOG.debug("The app is in the deactivating state");
+    Timer timer=new Timer(1500,new ActionListener(){
+      @Override public void actionPerformed(      ActionEvent evt){
+        if (state.equals(State.DEACTIVATING)) {
+          state=State.DEACTIVATED;
+          LOG.debug("The app is in the deactivated state");
+          IdeFrame ideFrame=getIdeFrameFromWindow(windowEvent.getWindow());
+          if (ideFrame != null) {
+            application.getMessageBus().syncPublisher(ApplicationActivationListener.TOPIC).delayedApplicationDeactivated(ideFrame);
+          }
+        }
+      }
+    }
+);
+    timer.setRepeats(false);
+    timer.start();
+    return true;
+  }
+  return false;
+}
