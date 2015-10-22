@@ -1,0 +1,60 @@
+{
+  final ApplyFilePatch.Result result=tryApplyPatch(project,patch,context,file,commitContext);
+  final ApplyPatchStatus status=result.getStatus();
+  if (ApplyPatchStatus.ALREADY_APPLIED.equals(status) || ApplyPatchStatus.SUCCESS.equals(status)) {
+    return status;
+  }
+  final ApplyPatchForBaseRevisionTexts mergeData=result.getMergeData();
+  if (mergeData == null)   return status;
+  final Document document=FileDocumentManager.getInstance().getDocument(file);
+  if (document == null)   return ApplyPatchStatus.FAILURE;
+  String baseContent=toString(mergeData.getBase());
+  String localContent=toString(mergeData.getLocal());
+  String patchedContent=mergeData.getPatched();
+  if (localContent == null)   return ApplyPatchStatus.FAILURE;
+  final Ref<ApplyPatchStatus> applyPatchStatusReference=new Ref<ApplyPatchStatus>();
+  Consumer<MergeResult> callback=new Consumer<MergeResult>(){
+    @Override public void consume(    MergeResult result){
+      FileDocumentManager.getInstance().saveDocument(document);
+      applyPatchStatusReference.setIfNull(result != MergeResult.CANCEL ? ApplyPatchStatus.SUCCESS : ApplyPatchStatus.FAILURE);
+    }
+  }
+;
+  try {
+    MergeRequest request;
+    if (baseContent != null) {
+      if (reverse) {
+        if (leftPanelTitle == null)         leftPanelTitle=VcsBundle.message("patch.apply.conflict.patched.version");
+        if (rightPanelTitle == null)         rightPanelTitle=VcsBundle.message("patch.apply.conflict.local.version");
+        List<String> contents=ContainerUtil.list(patchedContent,baseContent,localContent);
+        List<String> titles=ContainerUtil.list(leftPanelTitle,null,rightPanelTitle);
+        request=PatchDiffRequestFactory.createMergeRequest(project,document,file,contents,null,titles,callback);
+      }
+ else {
+        request=PatchDiffRequestFactory.createMergeRequest(project,document,file,baseContent,localContent,patchedContent,callback);
+      }
+    }
+ else {
+      request=PatchDiffRequestFactory.createBadMergeRequest(project,document,file,localContent,patchedContent,callback);
+    }
+    request.putUserData(DiffUserDataKeysEx.MERGE_CANCEL_HANDLER,new Condition<MergeTool.MergeViewer>(){
+      @Override public boolean value(      MergeTool.MergeViewer viewer){
+        int result=Messages.showYesNoCancelDialog(viewer.getComponent().getRootPane(),"Would you like to abort applying patch action?","Close Merge","Abort","Skip File","Cancel",Messages.getQuestionIcon());
+        if (result == Messages.YES) {
+          applyPatchStatusReference.set(ApplyPatchStatus.ABORT);
+        }
+ else         if (result == Messages.NO) {
+          applyPatchStatusReference.set(ApplyPatchStatus.SKIP);
+        }
+        return result != Messages.CANCEL;
+      }
+    }
+);
+    DiffManager.getInstance().showMerge(project,request);
+    return applyPatchStatusReference.get();
+  }
+ catch (  InvalidDiffRequestException e) {
+    LOG.warn(e);
+    return ApplyPatchStatus.FAILURE;
+  }
+}

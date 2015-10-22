@@ -1,0 +1,33 @@
+{
+  if (isDisposed())   return;
+  List<? extends DiffRequestProducer> requests=myRequestChain.getRequests();
+  int index=myRequestChain.getIndex();
+  if (index < 0 || index >= requests.size()) {
+    applyRequest(NoDiffRequest.INSTANCE,force,scrollToChangePolicy);
+    return;
+  }
+  final DiffRequestProducer producer=requests.get(index);
+  DiffRequest request=loadRequestFast(producer,useCache);
+  if (request != null) {
+    applyRequest(request,force,scrollToChangePolicy);
+    return;
+  }
+  myQueue.executeAndTryWait(new Function<ProgressIndicator,Runnable>(){
+    @Override public Runnable fun(    ProgressIndicator indicator){
+      final DiffRequest request=loadRequest(producer,indicator);
+      return new Runnable(){
+        @RequiredDispatchThread @Override public void run(){
+          myRequestCache.put(producer,request);
+          applyRequest(request,force,scrollToChangePolicy);
+        }
+      }
+;
+    }
+  }
+,new Runnable(){
+    @Override public void run(){
+      applyRequest(new LoadingDiffRequest(producer.getName()),force,scrollToChangePolicy);
+    }
+  }
+,ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS);
+}

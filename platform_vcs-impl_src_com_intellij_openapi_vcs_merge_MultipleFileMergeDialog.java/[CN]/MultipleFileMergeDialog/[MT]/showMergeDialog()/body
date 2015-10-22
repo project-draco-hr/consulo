@@ -1,5 +1,9 @@
 {
-  final Collection<VirtualFile> files=myTable.getSelection();
+  DiffRequestFactory requestFactory=DiffRequestFactory.getInstance();
+  Collection<VirtualFile> files=myTable.getSelection();
+  if (!beforeResolve(files)) {
+    return;
+  }
   for (  final VirtualFile file : files) {
     final MergeData mergeData;
     try {
@@ -13,22 +17,43 @@
       Messages.showErrorDialog(myRootPanel,"Error loading revisions to merge");
       break;
     }
-    String leftText=decodeContent(file,mergeData.CURRENT);
-    String rightText=decodeContent(file,mergeData.LAST);
-    String originalText=decodeContent(file,mergeData.ORIGINAL);
-    DiffRequestFactory diffRequestFactory=DiffRequestFactory.getInstance();
-    MergeRequest request=diffRequestFactory.createMergeRequest(leftText,rightText,originalText,file,myProject,ActionButtonPresentation.APPLY,ActionButtonPresentation.CANCEL_WITH_PROMPT);
-    final VcsRevisionNumber lastRevisionNumber=mergeData.LAST_REVISION_NUMBER;
-    request.setVersionTitles(new String[]{myMergeDialogCustomizer.getLeftPanelTitle(file),myMergeDialogCustomizer.getCenterPanelTitle(file),myMergeDialogCustomizer.getRightPanelTitle(file,lastRevisionNumber)});
-    request.setWindowTitle(myMergeDialogCustomizer.getMergeWindowTitle(file));
-    DiffManager.getInstance().getDiffTool().show(request);
-    if (request.getResult() == DialogWrapper.OK_EXIT_CODE) {
-      markFileProcessed(file,MergeSession.Resolution.Merged);
-      checkMarkModifiedProject(file);
+    String leftTitle=myMergeDialogCustomizer.getLeftPanelTitle(file);
+    String baseTitle=myMergeDialogCustomizer.getCenterPanelTitle(file);
+    String rightTitle=myMergeDialogCustomizer.getRightPanelTitle(file,mergeData.LAST_REVISION_NUMBER);
+    String title=myMergeDialogCustomizer.getMergeWindowTitle(file);
+    final List<byte[]> byteContents=ContainerUtil.list(mergeData.CURRENT,mergeData.ORIGINAL,mergeData.LAST);
+    List<String> contentTitles=ContainerUtil.list(leftTitle,baseTitle,rightTitle);
+    Consumer<MergeResult> callback=new Consumer<MergeResult>(){
+      @Override public void consume(      final MergeResult result){
+        Document document=FileDocumentManager.getInstance().getCachedDocument(file);
+        if (document != null)         FileDocumentManager.getInstance().saveDocument(document);
+        checkMarkModifiedProject(file);
+        if (result != MergeResult.CANCEL) {
+          ApplicationManager.getApplication().runWriteAction(new Runnable(){
+            @Override public void run(){
+              markFileProcessed(file,getSessionResolution(result));
+            }
+          }
+);
+        }
+      }
     }
+;
+    MergeRequest request;
+    try {
+      if (myProvider.isBinary(file)) {
+        request=requestFactory.createBinaryMergeRequest(myProject,file,byteContents,title,contentTitles,callback);
+      }
  else {
-      request.restoreOriginalContent();
+        request=requestFactory.createMergeRequest(myProject,file,byteContents,title,contentTitles,callback);
+      }
     }
+ catch (    InvalidDiffRequestException e) {
+      LOG.error(e);
+      Messages.showErrorDialog(myRootPanel,"Can't show merge dialog");
+      break;
+    }
+    DiffManager.getInstance().showMerge(myProject,request);
   }
   updateModelFromFiles();
 }
