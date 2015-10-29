@@ -12,11 +12,17 @@
     PsiDocumentManager.getInstance(myProject).commitAllDocuments();
     RefactoringListenerManagerImpl listenerManager=(RefactoringListenerManagerImpl)RefactoringListenerManager.getInstance(myProject);
     myTransaction=listenerManager.startTransaction();
-    final Map<RefactoringHelper,Object> preparedData=new HashMap<RefactoringHelper,Object>();
+    final Map<RefactoringHelper,Object> preparedData=new LinkedHashMap<RefactoringHelper,Object>();
     final Runnable prepareHelpersRunnable=new Runnable(){
       @Override public void run(){
-        for (        RefactoringHelper helper : Extensions.getExtensions(RefactoringHelper.EP_NAME)) {
-          preparedData.put(helper,helper.prepareOperation(writableUsageInfos));
+        for (        final RefactoringHelper helper : Extensions.getExtensions(RefactoringHelper.EP_NAME)) {
+          Object operation=ApplicationManager.getApplication().runReadAction(new Computable<Object>(){
+            @Override public Object compute(){
+              return helper.prepareOperation(writableUsageInfos);
+            }
+          }
+);
+          preparedData.put(helper,operation);
         }
       }
     }
@@ -24,7 +30,26 @@
     ProgressManager.getInstance().runProcessWithProgressSynchronously(prepareHelpersRunnable,"Prepare ...",false,myProject);
     ApplicationManager.getApplication().runWriteAction(new Runnable(){
       @Override public void run(){
-        performRefactoring(writableUsageInfos);
+        final String refactoringId=getRefactoringId();
+        if (refactoringId != null) {
+          RefactoringEventData data=getBeforeData();
+          if (data != null) {
+            data.addUsages(usageInfoSet);
+          }
+          myProject.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringStarted(refactoringId,data);
+        }
+        try {
+          if (refactoringId != null) {
+            UndoableAction action=new UndoRefactoringAction(myProject,refactoringId);
+            UndoManager.getInstance(myProject).undoableActionPerformed(action);
+          }
+          performRefactoring(writableUsageInfos);
+        }
+  finally {
+          if (refactoringId != null) {
+            myProject.getMessageBus().syncPublisher(RefactoringEventListener.REFACTORING_EVENT_TOPIC).refactoringDone(refactoringId,getAfterData(writableUsageInfos));
+          }
+        }
       }
     }
 );
