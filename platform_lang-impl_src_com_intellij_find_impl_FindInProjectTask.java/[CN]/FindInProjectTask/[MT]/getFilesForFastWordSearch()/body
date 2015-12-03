@@ -1,14 +1,15 @@
 {
-  String stringToFind=myFindModel.getStringToFind();
+  String stringToFind=myStringToFindInIndices;
   if (stringToFind.isEmpty() || DumbService.getInstance(myProject).isDumb()) {
     return Collections.emptySet();
   }
-  SearchScope customScope=myFindModel.getCustomScope();
-  GlobalSearchScope scope=myPsiDirectory != null ? GlobalSearchScopesCore.directoryScope(myPsiDirectory,myFindModel.isWithSubdirectories()) : myModule != null ? myModule.getModuleContentScope() : customScope instanceof GlobalSearchScope ? (GlobalSearchScope)customScope : toGlobal(customScope);
-  if (scope == null) {
-    scope=ProjectScope.getContentScope(myProject);
+  final Set<VirtualFile> resultFiles=new LinkedHashSet<VirtualFile>();
+  for (  VirtualFile file : myFilesToScanInitially) {
+    if (myFileMask.value(file)) {
+      resultFiles.add(file);
+    }
   }
-  final Set<PsiFile> resultFiles=new LinkedHashSet<PsiFile>();
+  final GlobalSearchScope scope=toGlobal(FindInProjectUtil.getScopeFromModel(myProject,myFindModel));
   if (TrigramIndex.ENABLED) {
     final Set<Integer> keys=ContainerUtil.newTroveSet();
     TrigramBuilder.processTrigrams(stringToFind,new TrigramBuilder.TrigramProcessor(){
@@ -20,19 +21,15 @@
 );
     if (!keys.isEmpty()) {
       final List<VirtualFile> hits=new ArrayList<VirtualFile>();
-      final GlobalSearchScope finalScope=scope;
       ApplicationManager.getApplication().runReadAction(new Runnable(){
         @Override public void run(){
-          FileBasedIndex.getInstance().getFilesWithKey(TrigramIndex.INDEX_ID,keys,new CommonProcessors.CollectProcessor<VirtualFile>(hits),finalScope);
+          FileBasedIndex.getInstance().getFilesWithKey(TrigramIndex.INDEX_ID,keys,new CommonProcessors.CollectProcessor<VirtualFile>(hits),scope);
         }
       }
 );
       for (      VirtualFile hit : hits) {
         if (myFileMask.value(hit)) {
-          PsiFile file=findFile(hit);
-          if (file != null) {
-            resultFiles.add(file);
-          }
+          resultFiles.add(hit);
         }
       }
       return resultFiles;
@@ -42,16 +39,16 @@
   helper.processFilesWithText(scope,UsageSearchContext.ANY,myFindModel.isCaseSensitive(),stringToFind,new Processor<VirtualFile>(){
     @Override public boolean process(    VirtualFile file){
       if (myFileMask.value(file)) {
-        ContainerUtil.addIfNotNull(resultFiles,findFile(file));
+        ContainerUtil.addIfNotNull(resultFiles,file);
       }
       return true;
     }
   }
 );
   CacheManager cacheManager=CacheManager.getInstance(myProject);
-  PsiFile[] filesWithWord=cacheManager.getFilesWithWord(stringToFind,UsageSearchContext.ANY,scope,myFindModel.isCaseSensitive());
-  for (  PsiFile file : filesWithWord) {
-    if (myFileMask.value(file.getVirtualFile())) {
+  VirtualFile[] filesWithWord=cacheManager.getVirtualFilesWithWord(stringToFind,UsageSearchContext.ANY,scope,myFindModel.isCaseSensitive());
+  for (  VirtualFile file : filesWithWord) {
+    if (myFileMask.value(file)) {
       resultFiles.add(file);
     }
   }

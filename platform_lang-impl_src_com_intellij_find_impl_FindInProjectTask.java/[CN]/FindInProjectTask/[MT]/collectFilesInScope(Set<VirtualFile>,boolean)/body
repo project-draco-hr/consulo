@@ -1,0 +1,77 @@
+{
+  SearchScope customScope=myFindModel.isCustomScope() ? myFindModel.getCustomScope() : null;
+  final GlobalSearchScope globalCustomScope=customScope == null ? null : toGlobal(customScope);
+  final ProjectFileIndex fileIndex=ProjectFileIndex.SERVICE.getInstance(myProject);
+  final boolean hasTrigrams=hasTrigrams(myStringToFindInIndices);
+class EnumContentIterator implements ContentIterator {
+    private final Set<VirtualFile> myFiles=new LinkedHashSet<VirtualFile>();
+    @Override public boolean processFile(    @NotNull final VirtualFile virtualFile){
+      ApplicationManager.getApplication().runReadAction(new Runnable(){
+        @Override public void run(){
+          ProgressManager.checkCanceled();
+          if (virtualFile.isDirectory() || !virtualFile.isValid() || !myFileMask.value(virtualFile)|| globalCustomScope != null && !globalCustomScope.contains(virtualFile)) {
+            return;
+          }
+          if (skipIndexed && isCoveredByIndex(virtualFile) && (fileIndex.isInContent(virtualFile) || fileIndex.isInLibraryClasses(virtualFile) || fileIndex.isInLibrarySource(virtualFile))) {
+            return;
+          }
+          PsiFile psiFile=findFile(virtualFile);
+          VirtualFile sourceVirtualFile=PsiUtilCore.getVirtualFile(psiFile);
+          if (sourceVirtualFile != null && !alreadySearched.contains(sourceVirtualFile)) {
+            myFiles.add(sourceVirtualFile);
+          }
+        }
+        private final FileBasedIndexImpl fileBasedIndex=(FileBasedIndexImpl)FileBasedIndex.getInstance();
+        private boolean isCoveredByIndex(        VirtualFile file){
+          FileType fileType=file.getFileType();
+          if (hasTrigrams) {
+            return TrigramIndex.isIndexable(fileType) && fileBasedIndex.isIndexingCandidate(file,TrigramIndex.INDEX_ID);
+          }
+          return IdIndex.isIndexable(fileType) && fileBasedIndex.isIndexingCandidate(file,IdIndex.NAME);
+        }
+      }
+);
+      return true;
+    }
+    @NotNull private Collection<VirtualFile> getFiles(){
+      return myFiles;
+    }
+  }
+  final EnumContentIterator iterator=new EnumContentIterator();
+  if (customScope instanceof LocalSearchScope) {
+    for (    VirtualFile file : getLocalScopeFiles((LocalSearchScope)customScope)) {
+      iterator.processFile(file);
+    }
+  }
+ else   if (customScope instanceof Iterable) {
+    for (    VirtualFile file : (Iterable<VirtualFile>)customScope) {
+      iterator.processFile(file);
+    }
+  }
+ else   if (myDirectory != null) {
+    final boolean checkExcluded=!ProjectFileIndex.SERVICE.getInstance(myProject).isExcluded(myDirectory);
+    VirtualFileVisitor.Option limit=VirtualFileVisitor.limit(myFindModel.isWithSubdirectories() ? -1 : 1);
+    VfsUtilCore.visitChildrenRecursively(myDirectory,new VirtualFileVisitor(limit){
+      @Override public boolean visitFile(      @NotNull VirtualFile file){
+        if (checkExcluded && myProjectFileIndex.isExcluded(file))         return false;
+        iterator.processFile(file);
+        return true;
+      }
+    }
+);
+  }
+ else {
+    boolean success=myFileIndex.iterateContent(iterator);
+    if (success && globalCustomScope != null && globalCustomScope.isSearchInLibraries()) {
+      final VirtualFile[] librarySources=ApplicationManager.getApplication().runReadAction(new Computable<VirtualFile[]>(){
+        @Override public VirtualFile[] compute(){
+          OrderEnumerator enumerator=myModule == null ? OrderEnumerator.orderEntries(myProject) : OrderEnumerator.orderEntries(myModule);
+          return enumerator.withoutModuleSourceEntries().withoutDepModules().getSourceRoots();
+        }
+      }
+);
+      iterateAll(librarySources,globalCustomScope,iterator);
+    }
+  }
+  return iterator.getFiles();
+}

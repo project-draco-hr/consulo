@@ -22,25 +22,37 @@
     resultsOptionPanel=createResultsOptionPanel(optionsPanel,gbConstraints);
     resultsOptionPanel.add(myCbToSkipResultsWhenOneUsage);
     myCbToSkipResultsWhenOneUsage.setVisible(!myModel.isReplaceState());
-    if (ApplicationManager.getApplication().isInternal() && myModel.isMultipleFiles()) {
-      gbConstraints.weightx=1;
-      gbConstraints.weighty=2;
-      gbConstraints.fill=GridBagConstraints.BOTH;
-      JBScrollPane scrollPane=new JBScrollPane(myResultsPreviewTable=new JBTable(),JBScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,JBScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-      optionsPanel.add(myResultsPreviewPanel=new HideableTitledPanel("Results preview",scrollPane,myPreviousPreviewResultsState),gbConstraints);
-      myResultsPreviewTable.setShowColumns(false);
-      new DoubleClickListener(){
-        @Override protected boolean onDoubleClick(        MouseEvent event){
-          int row=myResultsPreviewTable.getSelectedRow();
-          Object valueAt=myResultsPreviewTable.getModel().getValueAt(row,0);
-          if (valueAt instanceof Usage) {
-            doCancelAction();
-            ((Usage)valueAt).navigate(true);
-          }
-          return true;
+    if (haveResultsPreview()) {
+      final JBTable table=new JBTable(){
+        @Override public Dimension getPreferredSize(){
+          return new Dimension(myInputComboBox.getWidth(),super.getPreferredSize().height);
         }
       }
-.installOn(myResultsPreviewTable);
+;
+      table.setShowColumns(false);
+      table.setShowGrid(false);
+      new NavigateToSourceListener().installOn(table);
+      Splitter previewSplitter=new Splitter(true,0.5f,0.1f,0.9f);
+      myUsagePreviewPanel=new UsagePreviewPanel(myProject,new UsageViewPresentation());
+      myResultsPreviewTable=table;
+      myResultsPreviewTable.getSelectionModel().addListSelectionListener(new ListSelectionListener(){
+        @Override public void valueChanged(        ListSelectionEvent e){
+          if (e.getValueIsAdjusting())           return;
+          int index=myResultsPreviewTable.getSelectionModel().getLeadSelectionIndex();
+          if (index != -1) {
+            UsageInfo usageInfo=((UsageInfo2UsageAdapter)myResultsPreviewTable.getModel().getValueAt(index,0)).getUsageInfo();
+            myUsagePreviewPanel.updateLayout(Collections.singletonList(usageInfo));
+          }
+ else {
+            myUsagePreviewPanel.updateLayout(null);
+          }
+        }
+      }
+);
+      mySearchRescheduleOnCancellationsAlarm=new Alarm();
+      previewSplitter.setFirstComponent(new JBScrollPane(myResultsPreviewTable));
+      previewSplitter.setSecondComponent(myUsagePreviewPanel.createComponent());
+      myPreviewSplitter=previewSplitter;
     }
   }
  else {
@@ -58,6 +70,23 @@
     myCbToOpenInNewTab.setEnabled(myModel.isOpenInNewTabEnabled());
     if (resultsOptionPanel == null)     resultsOptionPanel=createResultsOptionPanel(optionsPanel,gbConstraints);
     resultsOptionPanel.add(myCbToOpenInNewTab);
+  }
+  if (myPreviewSplitter != null) {
+    TabbedPane pane=new JBTabsPaneImpl(myProject,SwingConstants.TOP,myDisposable);
+    pane.insertTab("Options",null,optionsPanel,null,0);
+    pane.insertTab(PREVIEW_TITLE,null,myPreviewSplitter,null,RESULTS_PREVIEW_TAB_INDEX);
+    myContent=pane;
+    final AnAction anAction=new DumbAwareAction(){
+      @RequiredDispatchThread @Override public void actionPerformed(      AnActionEvent e){
+        int selectedIndex=myContent.getSelectedIndex();
+        myContent.setSelectedIndex(1 - selectedIndex);
+      }
+    }
+;
+    final ShortcutSet shortcutSet=ActionManager.getInstance().getAction(IdeActions.ACTION_SWITCHER).getShortcutSet();
+    anAction.registerCustomShortcutSet(shortcutSet,getRootPane(),myDisposable);
+    if (myPreviewResultsTabWasSelected)     myContent.setSelectedIndex(RESULTS_PREVIEW_TAB_INDEX);
+    return pane.getComponent();
   }
   return optionsPanel;
 }

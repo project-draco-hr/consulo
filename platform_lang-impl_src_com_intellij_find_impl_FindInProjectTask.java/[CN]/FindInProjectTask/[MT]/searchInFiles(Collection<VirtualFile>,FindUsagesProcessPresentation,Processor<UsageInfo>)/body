@@ -1,0 +1,55 @@
+{
+  int i=0;
+  long totalFilesSize=0;
+  int count=0;
+  for (  final VirtualFile virtualFile : virtualFiles) {
+    final int index=i++;
+    if (!virtualFile.isValid())     continue;
+    long fileLength=UsageViewManagerImpl.getFileLength(virtualFile);
+    if (fileLength == -1)     continue;
+    final boolean skipProjectFile=ProjectCoreUtil.isProjectOrWorkspaceFile(virtualFile) && !myFindModel.isSearchInProjectFiles();
+    if (skipProjectFile && !Registry.is("find.search.in.project.files"))     continue;
+    if (fileLength > SINGLE_FILE_SIZE_LIMIT) {
+      myLargeFiles.add(virtualFile);
+      continue;
+    }
+    myProgress.checkCanceled();
+    myProgress.setFraction((double)index / virtualFiles.size());
+    String text=FindBundle.message("find.searching.for.string.in.file.progress",myFindModel.getStringToFind(),virtualFile.getPresentableUrl());
+    myProgress.setText(text);
+    myProgress.setText2(FindBundle.message("find.searching.for.string.in.file.occurrences.progress",count));
+    PsiFile psiFile=ApplicationManager.getApplication().runReadAction(new Computable<PsiFile>(){
+      @Override public PsiFile compute(){
+        return findFile(virtualFile);
+      }
+    }
+);
+    if (psiFile == null)     continue;
+    int countInFile=FindInProjectUtil.processUsagesInFile(psiFile,myFindModel,new Processor<UsageInfo>(){
+      @Override public boolean process(      UsageInfo info){
+        return skipProjectFile || consumer.process(info);
+      }
+    }
+);
+    if (countInFile > 0 && skipProjectFile) {
+      processPresentation.projectFileUsagesFound(new Runnable(){
+        @Override public void run(){
+          FindModel model=myFindModel.clone();
+          model.setSearchInProjectFiles(true);
+          FindInProjectManager.getInstance(myProject).startFindInProject(model);
+        }
+      }
+);
+      continue;
+    }
+    count+=countInFile;
+    if (countInFile > 0) {
+      totalFilesSize+=fileLength;
+      if (totalFilesSize > FILES_SIZE_LIMIT && !myWarningShown) {
+        myWarningShown=true;
+        String message=FindBundle.message("find.excessive.total.size.prompt",UsageViewManagerImpl.presentableSize(totalFilesSize),ApplicationNamesInfo.getInstance().getProductName());
+        UsageLimitUtil.showAndCancelIfAborted(myProject,message,processPresentation.getUsageViewPresentation());
+      }
+    }
+  }
+}
