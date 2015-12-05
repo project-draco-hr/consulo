@@ -3,7 +3,6 @@
   SwingUtilities.invokeLater(new Runnable(){
     @Override public void run(){
       if (application.isDisposed())       return;
-      application.assertIsDispatchThread();
       final ApplicationAdapter listener=new ApplicationAdapter(){
         @Override public void beforeWriteActionStart(        Object action){
           if (!progressIndicator.isCanceled()) {
@@ -17,11 +16,26 @@
       try {
         executor.execute(new Runnable(){
           @Override public void run(){
+            boolean continued=false;
             try {
-              runUnderProgress(progressIndicator,readTask);
+              final ReadTask.Continuation continuation=runUnderProgress(progressIndicator,readTask);
+              continued=continuation != null;
+              if (continuation != null) {
+                application.invokeLater(new Runnable(){
+                  @Override public void run(){
+                    application.removeApplicationListener(listener);
+                    if (!progressIndicator.isCanceled()) {
+                      continuation.getAction().run();
+                    }
+                  }
+                }
+,continuation.getModalityState());
+              }
             }
   finally {
-              application.removeApplicationListener(listener);
+              if (!continued) {
+                application.removeApplicationListener(listener);
+              }
             }
           }
         }
