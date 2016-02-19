@@ -3,39 +3,25 @@
   if (project == null)   return;
   if (ChangeListManager.getInstance(project).isFreezedWithNotification(null))   return;
   ShelvedChangeList[] changeLists=ShelvedChangesViewManager.SHELVED_CHANGELIST_KEY.getData(dc);
-  if (changeLists == null) {
-    changeLists=ShelvedChangesViewManager.SHELVED_RECYCLED_CHANGELIST_KEY.getData(dc);
-  }
-  if (changeLists == null)   return;
-  final List<ShelvedChange> changesFromFirstList=changeLists[0].getChanges(project);
-  final ArrayList<DiffRequestPresentable> diffRequestPresentables=new ArrayList<DiffRequestPresentable>();
-  final ApplyPatchContext context=new ApplyPatchContext(project.getBaseDir(),0,false,false);
-  final PatchesPreloader preloader=new PatchesPreloader(project);
-  final List<String> missing=new LinkedList<String>();
-  processTextChanges(project,changesFromFirstList,diffRequestPresentables,context,preloader,missing);
-  final List<ShelvedBinaryFile> files=changeLists[0].getBinaryFiles();
-  processBinaryFiles(project,files,diffRequestPresentables);
-  if (!missing.isEmpty()) {
-    VcsBalloonProblemNotifier.showOverChangesView(project,"Show Diff: Cannot find base for: " + StringUtil.join(missing,",\n"),MessageType.WARNING);
-  }
-  Collections.sort(diffRequestPresentables,ChangeDiffRequestComparator.getInstance());
-  final Set<String> selectedPaths=new HashSet<String>();
-  final List<ShelvedChange> shelvedChanges=ShelvedChangesViewManager.SHELVED_CHANGE_KEY.getData(dc);
-  final List<ShelvedBinaryFile> binaryFiles=ShelvedChangesViewManager.SHELVED_BINARY_FILE_KEY.getData(dc);
-  for (  ShelvedChange change : shelvedChanges) {
-    selectedPaths.add(FilePathsHelper.convertPath(ChangesUtil.getFilePath(change.getChange(project)).getPath()));
-  }
-  for (  ShelvedBinaryFile file : binaryFiles) {
-    selectedPaths.add(FilePathsHelper.convertPath(ChangesUtil.getFilePath(file.createChange(project))));
-  }
-  int idx=0;
-  for (  DiffRequestPresentable presentable : diffRequestPresentables) {
-    final String path=FilePathsHelper.convertPath(presentable.getPathPresentation());
-    if (selectedPaths.contains(path)) {
+  if (changeLists == null)   changeLists=ShelvedChangesViewManager.SHELVED_RECYCLED_CHANGELIST_KEY.getData(dc);
+  if (changeLists == null || changeLists.length != 1)   return;
+  final List<ShelvedChange> textChanges=changeLists[0].getChanges(project);
+  final List<ShelvedBinaryFile> binaryChanges=changeLists[0].getBinaryFiles();
+  final List<MyDiffRequestProducer> diffRequestProducers=new ArrayList<MyDiffRequestProducer>();
+  processTextChanges(project,textChanges,diffRequestProducers);
+  processBinaryFiles(project,binaryChanges,diffRequestProducers);
+  Collections.sort(diffRequestProducers,ChangeDiffRequestComparator.getInstance());
+  final Set<Object> selectedChanges=new HashSet<Object>();
+  selectedChanges.addAll(ContainerUtil.notNullize(ShelvedChangesViewManager.SHELVED_CHANGE_KEY.getData(dc)));
+  selectedChanges.addAll(ContainerUtil.notNullize(ShelvedChangesViewManager.SHELVED_BINARY_FILE_KEY.getData(dc)));
+  int index=0;
+  for (int i=0; i < diffRequestProducers.size(); i++) {
+    MyDiffRequestProducer producer=diffRequestProducers.get(i);
+    if (selectedChanges.contains(producer.getBinaryChange()) || selectedChanges.contains(producer.getTextChange())) {
+      index=i;
       break;
     }
-    ++idx;
   }
-  idx=idx >= diffRequestPresentables.size() ? 0 : idx;
-  ShowDiffAction.showDiffImpl(project,diffRequestPresentables,idx,new ShowDiffUIContext(true));
+  MyDiffRequestChain chain=new MyDiffRequestChain(diffRequestProducers,index);
+  DiffManager.getInstance().showDiff(project,chain,DiffDialogHints.FRAME);
 }

@@ -2,7 +2,7 @@
   assertIsDispatchThread();
   myProject=project;
   myDocument=(DocumentEx)document;
-  if (myDocument instanceof DocumentImpl) {
+  if (myDocument instanceof DocumentImpl && !myUseNewRendering) {
     ((DocumentImpl)myDocument).requestTabTracking();
   }
   myScheme=createBoundColorSchemeDelegate(null);
@@ -13,28 +13,31 @@
     mySettings.setUseSoftWrapsQuiet();
     putUserData(FORCED_SOFT_WRAPS,Boolean.TRUE);
   }
+  MarkupModelEx documentMarkup=(MarkupModelEx)DocumentMarkupModel.forDocument(myDocument,myProject,true);
   mySelectionModel=new SelectionModelImpl(this);
   myMarkupModel=new EditorMarkupModelImpl(this);
+  myDocumentMarkupModel=new EditorFilteringMarkupModelEx(this,documentMarkup);
   myFoldingModel=new FoldingModelImpl(this);
   myCaretModel=new CaretModelImpl(this);
   mySoftWrapModel=new SoftWrapModelImpl(this);
   if (!myUseNewRendering)   mySizeContainer.reset();
   myCommandProcessor=CommandProcessor.getInstance();
+  myImmediatePainter=new ImmediatePainter(this);
   if (project != null) {
     myConnection=project.getMessageBus().connect();
     myConnection.subscribe(DocumentBulkUpdateListener.TOPIC,new EditorDocumentBulkUpdateAdapter());
   }
-  MarkupModelListener markupModelListener=new MarkupModelListener(){
+  myMarkupModelListener=new MarkupModelListener(){
     private boolean areRenderersInvolved(    @NotNull RangeHighlighterEx highlighter){
       return highlighter.getCustomRenderer() != null || highlighter.getGutterIconRenderer() != null || highlighter.getLineMarkerRenderer() != null || highlighter.getLineSeparatorRenderer() != null;
     }
     @Override public void afterAdded(    @NotNull RangeHighlighterEx highlighter){
-      attributesChanged(highlighter,areRenderersInvolved(highlighter));
+      attributesChanged(highlighter,areRenderersInvolved(highlighter),false);
     }
     @Override public void beforeRemoved(    @NotNull RangeHighlighterEx highlighter){
-      attributesChanged(highlighter,areRenderersInvolved(highlighter));
+      attributesChanged(highlighter,areRenderersInvolved(highlighter),false);
     }
-    @Override public void attributesChanged(    @NotNull RangeHighlighterEx highlighter,    boolean renderersChanged){
+    @Override public void attributesChanged(    @NotNull RangeHighlighterEx highlighter,    boolean renderersChanged,    boolean fontStyleChanged){
       if (myDocument.isInBulkUpdate())       return;
       if (myUseNewRendering && renderersChanged) {
         updateGutterSize();
@@ -51,7 +54,7 @@
       int startLine=start == -1 ? 0 : myDocument.getLineNumber(start);
       int endLine=end == -1 ? myDocument.getLineCount() : myDocument.getLineNumber(end);
       TextAttributes attributes=highlighter.getTextAttributes();
-      if (myUseNewRendering && start != end && attributes != null && attributes.getFontType() != Font.PLAIN) {
+      if (myUseNewRendering && start != end && (fontStyleChanged || attributes != null && attributes.getFontType() != Font.PLAIN)) {
         myView.invalidateRange(start,end);
       }
       repaintLines(Math.max(0,startLine - 1),Math.min(endLine + 1,getDocument().getLineCount()));
@@ -65,8 +68,8 @@
     }
   }
 ;
-  ((MarkupModelEx)DocumentMarkupModel.forDocument(myDocument,myProject,true)).addMarkupModelListener(myCaretModel,markupModelListener);
-  getMarkupModel().addMarkupModelListener(myCaretModel,markupModelListener);
+  getFilteredDocumentMarkupModel().addMarkupModelListener(myCaretModel,myMarkupModelListener);
+  getMarkupModel().addMarkupModelListener(myCaretModel,myMarkupModelListener);
   myDocument.addDocumentListener(myFoldingModel,myCaretModel);
   myDocument.addDocumentListener(myCaretModel,myCaretModel);
   myDocument.addDocumentListener(mySelectionModel,myCaretModel);
@@ -159,7 +162,7 @@
     @NotNull @Override public Iterator<JComponent> iterator(){
       JComponent component=getPermanentHeaderComponent();
       if (component != null && !component.isValid()) {
-        return Collections.singleton(component).iterator();
+        return Collections.<JComponent>singleton(component).iterator();
       }
       return ContainerUtil.emptyIterator();
     }
@@ -189,16 +192,4 @@
   Dimension preferredSize=getPreferredSize();
   myEditorComponent.setSize(preferredSize);
   updateCaretCursor();
-  if (!ourIsUnitTestMode) {
-    UiNotifyConnector.doWhenFirstShown(myEditorComponent,new Runnable(){
-      @Override public void run(){
-        if (!isDisposed() && !myScrollingModel.isScrollingNow()) {
-          myScrollingModel.disableAnimation();
-          myScrollingModel.scrollHorizontally(0);
-          myScrollingModel.enableAnimation();
-        }
-      }
-    }
-);
-  }
 }

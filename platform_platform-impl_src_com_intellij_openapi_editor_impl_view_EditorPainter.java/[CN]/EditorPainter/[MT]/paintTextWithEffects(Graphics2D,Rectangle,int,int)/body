@@ -1,21 +1,29 @@
 {
   final CharSequence text=myDocument.getImmutableCharSequence();
   final EditorImpl.LineWhitespacePaintingStrategy whitespacePaintingStrategy=myEditor.new LineWhitespacePaintingStrategy();
+  boolean paintAllSoftWraps=myEditor.getSettings().isAllSoftWrapsShown();
   int lineCount=myEditor.getVisibleLineCount();
-  for (int visualLine=startVisualLine; visualLine <= endVisualLine; visualLine++) {
+  final int whiteSpaceStrokeWidth=JBUI.scale(1);
+  final Stroke whiteSpaceStroke=new BasicStroke(whiteSpaceStrokeWidth);
+  LineLayout prefixLayout=myView.getPrefixLayout();
+  if (startVisualLine == 0 && prefixLayout != null) {
+    g.setColor(myView.getPrefixAttributes().getForegroundColor());
+    paintLineLayoutWithEffect(g,prefixLayout,getMinX(),myView.getAscent(),myView.getPrefixAttributes().getEffectColor(),myView.getPrefixAttributes().getEffectType());
+  }
+  VisualLinesIterator visLinesIterator=new VisualLinesIterator(myView,startVisualLine);
+  while (!visLinesIterator.atEnd()) {
+    int visualLine=visLinesIterator.getVisualLine();
+    if (visualLine > endVisualLine || visualLine >= lineCount)     break;
     int y=myView.visualLineToY(visualLine) + myView.getAscent();
-    LineLayout prefixLayout=myView.getPrefixLayout();
-    if (visualLine == 0 && prefixLayout != null) {
-      g.setColor(myView.getPrefixAttributes().getForegroundColor());
-      paintLineLayoutWithEffect(g,prefixLayout,0,y,myView.getPrefixAttributes().getEffectColor(),myView.getPrefixAttributes().getEffectType());
-    }
-    if (visualLine >= lineCount)     break;
+    final boolean paintSoftWraps=paintAllSoftWraps || myEditor.getCaretModel().getLogicalPosition().line == visLinesIterator.getStartLogicalLine();
     final int[] currentLogicalLine=new int[]{-1};
-    paintLineFragments(g,clip,visualLine,y,new LineFragmentPainter(){
+    paintLineFragments(g,clip,visLinesIterator,y,new LineFragmentPainter(){
       @Override public void paintBeforeLineStart(      Graphics2D g,      TextAttributes attributes,      int columnEnd,      float xEnd,      int y){
-        SoftWrapModelImpl softWrapModel=myEditor.getSoftWrapModel();
-        int symbolWidth=softWrapModel.getMinDrawingWidthInPixels(SoftWrapDrawingType.AFTER_SOFT_WRAP);
-        softWrapModel.paint(g,SoftWrapDrawingType.AFTER_SOFT_WRAP,(int)xEnd - symbolWidth,y - myView.getAscent(),myView.getLineHeight());
+        if (paintSoftWraps) {
+          SoftWrapModelImpl softWrapModel=myEditor.getSoftWrapModel();
+          int symbolWidth=softWrapModel.getMinDrawingWidthInPixels(SoftWrapDrawingType.AFTER_SOFT_WRAP);
+          softWrapModel.doPaint(g,SoftWrapDrawingType.AFTER_SOFT_WRAP,(int)xEnd - symbolWidth,y - myView.getAscent(),myView.getLineHeight());
+        }
       }
       @Override public void paint(      Graphics2D g,      VisualLineFragmentsIterator.Fragment fragment,      int start,      int end,      TextAttributes attributes,      float xStart,      float xEnd,      int y){
         if (attributes != null && attributes.getForegroundColor() != null) {
@@ -28,10 +36,11 @@
             whitespacePaintingStrategy.update(text,myDocument.getLineStartOffset(logicalLine),myDocument.getLineEndOffset(logicalLine));
             currentLogicalLine[0]=logicalLine;
           }
-          paintWhitespace(g,text,xStart,y,start,end,whitespacePaintingStrategy,fragment);
+          paintWhitespace(g,text,xStart,y,start,end,whitespacePaintingStrategy,fragment,whiteSpaceStroke,whiteSpaceStrokeWidth);
         }
-        if (attributes != null && hasTextEffect(attributes.getEffectColor(),attributes.getEffectType())) {
-          paintTextEffect(g,xStart,xEnd,y,attributes.getEffectColor(),attributes.getEffectType());
+        boolean allowBorder=fragment.getCurrentFoldRegion() != null;
+        if (attributes != null && hasTextEffect(attributes.getEffectColor(),attributes.getEffectType(),allowBorder)) {
+          paintTextEffect(g,xStart,xEnd,y,attributes.getEffectColor(),attributes.getEffectType(),allowBorder);
         }
       }
       @Override public void paintAfterLineEnd(      Graphics2D g,      Rectangle clip,      IterationState iterationState,      int columnStart,      float x,      int y){
@@ -41,11 +50,12 @@
           int logicalLine=myDocument.getLineNumber(offset);
           paintLineExtensions(g,logicalLine,x,y);
         }
- else {
-          softWrapModel.paint(g,SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED,(int)x,y - myView.getAscent(),myView.getLineHeight());
+ else         if (paintSoftWraps) {
+          softWrapModel.doPaint(g,SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED,(int)x,y - myView.getAscent(),myView.getLineHeight());
         }
       }
     }
 );
+    visLinesIterator.advance();
   }
 }

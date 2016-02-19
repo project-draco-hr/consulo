@@ -16,11 +16,31 @@
       }
     }
 );
-    ComparisonPolicy comparisonPolicy=getIgnorePolicy().getComparisonPolicy();
-    FairDiffIterable fragments1=ByLine.compareTwoStepFair(sequences[1],sequences[0],comparisonPolicy,indicator);
-    FairDiffIterable fragments2=ByLine.compareTwoStepFair(sequences[1],sequences[2],comparisonPolicy,indicator);
-    List<MergeLineFragment> mergeFragments=ComparisonMergeUtil.buildFair(fragments1,fragments2,indicator);
-    return apply(mergeFragments,comparisonPolicy);
+    final ComparisonPolicy comparisonPolicy=getIgnorePolicy().getComparisonPolicy();
+    List<MergeLineFragment> lineFragments=ByLine.compareTwoStep(sequences[0],sequences[1],sequences[2],comparisonPolicy,indicator);
+    if (getHighlightPolicy().isFineFragments()) {
+      List<MergeLineFragment> fineLineFragments=new ArrayList<MergeLineFragment>(lineFragments.size());
+      for (      final MergeLineFragment fragment : lineFragments) {
+        CharSequence[] chunks=ApplicationManager.getApplication().runReadAction(new Computable<CharSequence[]>(){
+          @Override public CharSequence[] compute(){
+            indicator.checkCanceled();
+            CharSequence[] chunks=new CharSequence[3];
+            chunks[0]=getChunkContent(fragment,documents,ThreeSide.LEFT);
+            chunks[1]=getChunkContent(fragment,documents,ThreeSide.BASE);
+            chunks[2]=getChunkContent(fragment,documents,ThreeSide.RIGHT);
+            ConflictType type=ThreesideDiffChangeBase.calcType(fragment,Arrays.asList(documents),comparisonPolicy);
+            if (!type.isChange(Side.LEFT))             chunks[0]=null;
+            if (!type.isChange(Side.RIGHT))             chunks[2]=null;
+            return chunks;
+          }
+        }
+);
+        List<MergeWordFragment> wordFragments=DiffUtil.compareThreesideInner(chunks,comparisonPolicy,indicator);
+        fineLineFragments.add(new MergeLineFragmentImpl(fragment,wordFragments));
+      }
+      lineFragments=fineLineFragments;
+    }
+    return apply(lineFragments,comparisonPolicy);
   }
  catch (  DiffTooBigException e) {
     return applyNotification(DiffNotifications.createDiffTooBig());
