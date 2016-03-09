@@ -1,5 +1,5 @@
 {
-  super(session.getProject(),true);
+  super(WindowManager.getInstance().getFrame(session.getProject()),true);
   mySession=session;
   myEditorsProvider=editorsProvider;
   mySourcePosition=sourcePosition;
@@ -8,40 +8,53 @@
   setCancelButtonText(XDebuggerBundle.message("xdebugger.evaluate.dialog.close"));
   mySession.addSessionListener(new XDebugSessionAdapter(){
     @Override public void sessionStopped(){
-      SwingUtilities.invokeLater(new Runnable(){
+      ApplicationManager.getApplication().invokeLater(new Runnable(){
         @Override public void run(){
           close(CANCEL_EXIT_CODE);
         }
       }
 );
     }
+    @Override public void stackFrameChanged(){
+      updateSourcePosition();
+    }
+    @Override public void sessionPaused(){
+      updateSourcePosition();
+    }
   }
 ,myDisposable);
   myTreePanel=new XDebuggerTreePanel(session.getProject(),editorsProvider,myDisposable,sourcePosition,XDebuggerActions.EVALUATE_DIALOG_TREE_POPUP_GROUP,((XDebugSessionImpl)session).getValueMarkers());
-  myResultPanel=new JPanel(new BorderLayout());
-  myResultPanel.add(new JLabel(XDebuggerBundle.message("xdebugger.evaluate.label.result")),BorderLayout.NORTH);
-  myResultPanel.add(myTreePanel.getMainPanel(),BorderLayout.CENTER);
-  myMainPanel=new JPanel(new BorderLayout());
+  myResultPanel=JBUI.Panels.simplePanel().addToTop(new JLabel(XDebuggerBundle.message("xdebugger.evaluate.label.result"))).addToCenter(myTreePanel.getMainPanel());
+  myMainPanel=new EvaluationMainPanel();
   mySwitchModeAction=new SwitchModeAction();
   new AnAction(){
-    @Override public void actionPerformed(    AnActionEvent e){
+    @RequiredDispatchThread @Override public void actionPerformed(    AnActionEvent e){
+      doOKAction();
+      addToWatches();
+    }
+  }
+.registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK)),getRootPane(),myDisposable);
+  new AnAction(){
+    @RequiredDispatchThread @Override public void actionPerformed(    AnActionEvent e){
       IdeFocusManager.getInstance(mySession.getProject()).requestFocus(myTreePanel.getTree(),true);
     }
   }
 .registerCustomShortcutSet(new CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_R,InputEvent.ALT_DOWN_MASK)),getRootPane(),myDisposable);
-  myTreePanel.getTree().expandNodesOnLoad(new Condition<TreeNode>(){
+  Condition<TreeNode> rootFilter=new Condition<TreeNode>(){
     @Override public boolean value(    TreeNode node){
       return node.getParent() instanceof EvaluatingExpressionRootNode;
     }
   }
-);
+;
+  myTreePanel.getTree().expandNodesOnLoad(rootFilter);
+  myTreePanel.getTree().selectNodeOnLoad(rootFilter);
   EvaluationMode mode=XDebuggerSettingsManager.getInstanceImpl().getGeneralSettings().getEvaluationDialogMode();
   myIsCodeFragmentEvaluationSupported=evaluator.isCodeFragmentEvaluationSupported();
   if (mode == EvaluationMode.CODE_FRAGMENT && !myIsCodeFragmentEvaluationSupported) {
     mode=EvaluationMode.EXPRESSION;
   }
-  if (mode == EvaluationMode.EXPRESSION) {
-    text=new XExpressionImpl(StringUtil.replace(text.getExpression(),"\n"," "),text.getLanguage(),text.getCustomInfo());
+  if (mode == EvaluationMode.EXPRESSION && text.getMode() == EvaluationMode.CODE_FRAGMENT && myIsCodeFragmentEvaluationSupported) {
+    mode=EvaluationMode.CODE_FRAGMENT;
   }
   switchToMode(mode,text);
   init();

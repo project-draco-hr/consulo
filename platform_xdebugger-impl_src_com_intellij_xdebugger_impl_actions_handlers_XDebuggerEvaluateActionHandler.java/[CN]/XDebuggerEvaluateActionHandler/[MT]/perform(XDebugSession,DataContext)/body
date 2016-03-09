@@ -1,38 +1,41 @@
 {
-  XDebuggerEditorsProvider editorsProvider=session.getDebugProcess().getEditorsProvider();
-  XStackFrame stackFrame=session.getCurrentStackFrame();
+  final XDebuggerEditorsProvider editorsProvider=session.getDebugProcess().getEditorsProvider();
+  final XStackFrame stackFrame=session.getCurrentStackFrame();
   final XDebuggerEvaluator evaluator=session.getDebugProcess().getEvaluator();
   if (evaluator == null) {
     return;
   }
   Editor editor=CommonDataKeys.EDITOR.getData(dataContext);
+  EvaluationMode mode=EvaluationMode.EXPRESSION;
   String selectedText=editor != null ? editor.getSelectionModel().getSelectedText() : null;
   if (selectedText != null) {
     selectedText=evaluator.formatTextForEvaluation(selectedText);
+    mode=evaluator.getEvaluationMode(selectedText,editor.getSelectionModel().getSelectionStart(),editor.getSelectionModel().getSelectionEnd(),CommonDataKeys.PSI_FILE.getData(dataContext));
   }
   String text=selectedText;
   if (text == null && editor != null) {
     text=getExpressionText(evaluator,CommonDataKeys.PROJECT.getData(dataContext),editor);
   }
+  final VirtualFile file=CommonDataKeys.VIRTUAL_FILE.getData(dataContext);
   if (text == null) {
     XValue value=XDebuggerTreeActionBase.getSelectedValue(dataContext);
     if (value != null) {
-      text=value.getEvaluationExpression();
+      value.calculateEvaluationExpression().done(new Consumer<XExpression>(){
+        @Override public void consume(        final XExpression expression){
+          if (expression != null) {
+            AppUIUtil.invokeOnEdt(new Runnable(){
+              @Override public void run(){
+                showDialog(session,file,editorsProvider,stackFrame,evaluator,expression);
+              }
+            }
+);
+          }
+        }
+      }
+);
+      return;
     }
   }
-  Language language=null;
-  if (stackFrame != null) {
-    XSourcePosition position=stackFrame.getSourcePosition();
-    if (position != null) {
-      language=XDebuggerEditorBase.getFileTypeLanguage(position.getFile().getFileType());
-    }
-  }
-  if (language == null) {
-    VirtualFile file=CommonDataKeys.VIRTUAL_FILE.getData(dataContext);
-    if (file != null) {
-      language=XDebuggerEditorBase.getFileTypeLanguage(file.getFileType());
-    }
-  }
-  XExpression expression=new XExpressionImpl(StringUtil.notNullize(text),language,null);
-  new XDebuggerEvaluationDialog(session,editorsProvider,evaluator,expression,stackFrame == null ? null : stackFrame.getSourcePosition()).show();
+  XExpression expression=XExpressionImpl.fromText(StringUtil.notNullize(text),mode);
+  showDialog(session,file,editorsProvider,stackFrame,evaluator,expression);
 }
