@@ -15,10 +15,10 @@
   final JComponent inplaceEditorComponent=createInplaceEditorComponent();
   myInplaceEditorComponent=inplaceEditorComponent;
   LOG.assertTrue(inplaceEditorComponent != null);
-  inplaceEditorComponent.setBounds(layeredPanePoint.x,layeredPanePoint.y,bounds.width,Math.max(bounds.height,inplaceEditorComponent.getPreferredSize().height));
+  setInplaceEditorBounds(inplaceEditorComponent,layeredPanePoint.x,layeredPanePoint.y,bounds.width,bounds.height);
   layeredPane.add(inplaceEditorComponent,new Integer(250));
   myRemoveActions.add(new Runnable(){
-    public void run(){
+    @Override public void run(){
       layeredPane.remove(inplaceEditorComponent);
     }
   }
@@ -27,80 +27,91 @@
   inplaceEditorComponent.paintImmediately(0,0,inplaceEditorComponent.getWidth(),inplaceEditorComponent.getHeight());
   getPreferredFocusedComponent().requestFocus();
   final ComponentAdapter componentListener=new ComponentAdapter(){
-    public void componentResized(    ComponentEvent e){
+    @Override public void componentResized(    ComponentEvent e){
       final Project project=getProject();
       ApplicationManager.getApplication().invokeLater(new Runnable(){
-        public void run(){
+        @Override public void run(){
           if (!isShown() || project == null || project.isDisposed()) {
             return;
           }
-          JTree tree=getTree();
-          JLayeredPane layeredPane=tree.getRootPane().getLayeredPane();
-          Rectangle bounds=getEditorBounds();
-          if (bounds == null) {
+          JTree tree1=getTree();
+          JLayeredPane layeredPane1=tree1.getRootPane().getLayeredPane();
+          Rectangle bounds1=getEditorBounds();
+          if (bounds1 == null) {
             return;
           }
-          Point layeredPanePoint=SwingUtilities.convertPoint(tree,bounds.x,bounds.y,layeredPane);
-          inplaceEditorComponent.setBounds(layeredPanePoint.x,layeredPanePoint.y,bounds.width,bounds.height);
+          Point layeredPanePoint1=SwingUtilities.convertPoint(tree1,bounds1.x,bounds1.y,layeredPane1);
+          setInplaceEditorBounds(inplaceEditorComponent,layeredPanePoint1.x,layeredPanePoint1.y,bounds1.width,bounds1.height);
           inplaceEditorComponent.revalidate();
         }
       }
 );
     }
-    public void componentHidden(    ComponentEvent e){
+    @Override public void componentHidden(    ComponentEvent e){
       cancelEditing();
     }
   }
 ;
+  final HierarchyListener hierarchyListener=new HierarchyListener(){
+    @Override public void hierarchyChanged(    HierarchyEvent e){
+      if (!tree.isShowing()) {
+        TreeInplaceEditor.this.cancelEditing();
+      }
+    }
+  }
+;
+  tree.addHierarchyListener(hierarchyListener);
+  tree.addComponentListener(componentListener);
   rootPane.addComponentListener(componentListener);
   myRemoveActions.add(new Runnable(){
-    public void run(){
+    @Override public void run(){
+      tree.removeHierarchyListener(hierarchyListener);
+      tree.removeComponentListener(componentListener);
       rootPane.removeComponentListener(componentListener);
     }
   }
 );
-  final RunContentManager contentManager=ExecutionManager.getInstance(getProject()).getContentManager();
-  final RunContentListener runContentListener=new RunContentListener(){
-    public void contentSelected(    RunContentDescriptor descriptor){
+  final Disposable disposable=Disposer.newDisposable();
+  getProject().getMessageBus().connect(disposable).subscribe(RunContentManager.TOPIC,new RunContentWithExecutorListener(){
+    @Override public void contentSelected(    @Nullable RunContentDescriptor descriptor,    @NotNull Executor executor){
       cancelEditing();
     }
-    public void contentRemoved(    RunContentDescriptor descriptor){
+    @Override public void contentRemoved(    @Nullable RunContentDescriptor descriptor,    @NotNull Executor executor){
       cancelEditing();
     }
   }
-;
-  contentManager.addRunContentListener(runContentListener);
+);
   myRemoveActions.add(new Runnable(){
-    public void run(){
-      contentManager.removeRunContentListener(runContentListener);
+    @Override public void run(){
+      Disposer.dispose(disposable);
     }
   }
 );
   final JComponent editorComponent=getEditorComponent();
   editorComponent.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,0),"enterStroke");
   editorComponent.getActionMap().put("enterStroke",new AbstractAction(){
-    public void actionPerformed(    ActionEvent e){
+    @Override public void actionPerformed(    ActionEvent e){
       doOKAction();
     }
   }
 );
   editorComponent.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE,0),"escapeStroke");
   editorComponent.getActionMap().put("escapeStroke",new AbstractAction(){
-    public void actionPerformed(    ActionEvent e){
+    @Override public void actionPerformed(    ActionEvent e){
       cancelEditing();
     }
   }
 );
   final Toolkit defaultToolkit=Toolkit.getDefaultToolkit();
   SwingUtilities.invokeLater(new Runnable(){
-    public void run(){
-      if (!isShown())       return;
+    @Override public void run(){
+      if (!TreeInplaceEditor.this.isShown())       return;
       defaultToolkit.addAWTEventListener(TreeInplaceEditor.this,AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_WHEEL_EVENT_MASK);
     }
   }
 );
   myRemoveActions.add(new Runnable(){
-    public void run(){
+    @Override public void run(){
       defaultToolkit.removeAWTEventListener(TreeInplaceEditor.this);
     }
   }
