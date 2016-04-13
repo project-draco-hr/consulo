@@ -1,0 +1,46 @@
+{
+  if (archive.getPackedFiles().isEmpty() && archive.getPackedArchives().isEmpty()) {
+    myContext.addMessage(CompilerMessageCategory.WARNING,"Archive '" + archive.getPresentableDestination() + "' has no files so it won't be created",null,-1,-1);
+    return;
+  }
+  myContext.getProgressIndicator().setText(CompilerBundle.message("packaging.compiler.message.building.0",archive.getPresentableDestination()));
+  File tempFile=FileUtil.createTempFile("artifactCompiler","tmp");
+  myBuiltArchives.put(archive,tempFile);
+  FileUtil.createParentDirs(tempFile);
+  ArchivePackageWriter<T> packageWriter=(ArchivePackageWriter<T>)archive.getPackageWriter();
+  T archiveFile;
+  if (packageWriter instanceof ArchivePackageWriterEx) {
+    archiveFile=((ArchivePackageWriterEx<T>)packageWriter).createArchiveObject(tempFile,archive);
+  }
+ else {
+    archiveFile=packageWriter.createArchiveObject(tempFile);
+  }
+  try {
+    final THashSet<String> writtenPaths=new THashSet<String>();
+    for (    Pair<String,VirtualFile> pair : archive.getPackedFiles()) {
+      final VirtualFile sourceFile=pair.getSecond();
+      if (sourceFile.isInLocalFileSystem()) {
+        File file=VfsUtil.virtualToIoFile(sourceFile);
+        addFileToArchive(archiveFile,packageWriter,file,pair.getFirst(),writtenPaths);
+      }
+ else {
+        extractFileAndAddToArchive(archiveFile,packageWriter,sourceFile,pair.getFirst(),writtenPaths);
+      }
+    }
+    for (    Pair<String,ArchivePackageInfo> nestedArchive : archive.getPackedArchives()) {
+      File nestedArchiveFile=myBuiltArchives.get(nestedArchive.getSecond());
+      if (nestedArchiveFile != null) {
+        addFileToArchive(archiveFile,packageWriter,nestedArchiveFile,nestedArchive.getFirst(),writtenPaths);
+      }
+ else {
+        LOGGER.debug("nested archive file " + nestedArchive.getFirst() + " for "+ archive.getPresentableDestination()+ " not found");
+      }
+    }
+  }
+ catch (  Exception e) {
+    e.printStackTrace();
+  }
+ finally {
+    packageWriter.close(archiveFile);
+  }
+}
