@@ -1,0 +1,74 @@
+{
+  final VerticalPanel globalPanel=new VerticalPanel();
+  globalPanel.setWidth("100%");
+  globalPanel.setHeight(Window.getClientHeight() + "px");
+  Window.addResizeHandler(new ResizeHandler(){
+    @Override public void onResize(    ResizeEvent event){
+      int height=event.getHeight();
+      globalPanel.setHeight(height + "px");
+    }
+  }
+);
+  final GwtTransportServiceAsync serviceAsync=GWT.create(GwtTransportService.class);
+  final TabPanel tabPanel=new TabPanel();
+  HorizontalSplitPanel splitPanel=new HorizontalSplitPanel();
+  splitPanel.setSplitPosition("20%");
+  final Tree tree=new Tree();
+  serviceAsync.getProjectDirectory(new AsyncCallback<GwtVirtualFile>(){
+    @Override public void onFailure(    Throwable caught){
+      Window.alert(caught.getMessage());
+    }
+    @Override public void onSuccess(    GwtVirtualFile result){
+      addNodes(tree,result);
+    }
+  }
+);
+  splitPanel.add(tree);
+  splitPanel.add(tabPanel);
+  tree.addSelectionHandler(new SelectionHandler<TreeItem>(){
+    @Override public void onSelection(    SelectionEvent<TreeItem> event){
+      TreeItem selectedItem=event.getSelectedItem();
+      final GwtVirtualFile virtualFile=(GwtVirtualFile)selectedItem.getUserObject();
+      if (virtualFile.isDirectory()) {
+        boolean state=selectedItem.getState();
+        selectedItem.setState(!state);
+        return;
+      }
+      Integer indexOfOpened=opened.get(virtualFile.getUrl());
+      if (indexOfOpened != null) {
+        tabPanel.selectTab(indexOfOpened);
+        return;
+      }
+      serviceAsync.getContent(virtualFile.getUrl(),new AsyncCallback<String>(){
+        @Override public void onFailure(        Throwable caught){
+          Window.alert(caught.getMessage());
+        }
+        @Override public void onSuccess(        String result){
+          if (result == null) {
+            return;
+          }
+          String tabText="<img src=\"/icons/" + virtualFile.getIcon() + "\">"+ virtualFile.getName();
+          final Editor editor=new Editor(result);
+          editor.update();
+          tabPanel.add(editor.getComponent(),tabText,true);
+          int index=tabPanel.getWidgetCount() - 1;
+          tabPanel.selectTab(index);
+          opened.put(virtualFile.getUrl(),index);
+          serviceAsync.getLexerHighlight(virtualFile.getUrl(),new AsyncCallback<List<GwtHighlightInfo>>(){
+            @Override public void onFailure(            Throwable caught){
+            }
+            @Override public void onSuccess(            List<GwtHighlightInfo> result){
+              editor.addHighlightInfos(result);
+              runHighlightPasses(serviceAsync,virtualFile,editor);
+            }
+          }
+);
+        }
+      }
+);
+    }
+  }
+);
+  globalPanel.add(splitPanel);
+  RootPanel.get().add(globalPanel);
+}
