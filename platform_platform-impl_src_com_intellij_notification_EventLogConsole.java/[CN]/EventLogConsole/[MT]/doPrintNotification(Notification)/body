@@ -1,26 +1,34 @@
 {
-  Editor editor=myLogEditor.getValue();
+  Editor editor=getConsoleEditor();
   if (editor.isDisposed()) {
     return;
   }
   Document document=editor.getDocument();
   boolean scroll=document.getTextLength() == editor.getCaretModel().getOffset() || !editor.getContentComponent().hasFocus();
-  Long notificationTime=myProjectModel.getNotificationTime(notification);
-  if (notificationTime == null) {
-    return;
+  if (document.getTextLength() > 0) {
+    append(document,"\n");
   }
-  String date=DateFormatUtil.formatTimeWithSeconds(notificationTime) + " ";
+  String lastDate=DateFormatUtil.formatDate(notification.getTimestamp());
+  if (document.getTextLength() == 0 || !lastDate.equals(myLastDate)) {
+    myLastDate=lastDate;
+    append(document,lastDate + "\n");
+  }
+  int startDateOffset=document.getTextLength();
+  String date=DateFormatUtil.formatTime(notification.getTimestamp()) + "\t";
   append(document,date);
+  int tabs=calculateTabs(editor,startDateOffset);
+  int titleStartOffset=document.getTextLength();
   int startLine=document.getLineCount() - 1;
-  EventLog.LogEntry pair=EventLog.formatForLog(notification,StringUtil.repeatSymbol(' ',date.length()));
+  EventLog.LogEntry pair=EventLog.formatForLog(notification,StringUtil.repeatSymbol('\t',tabs));
   final NotificationType type=notification.getType();
   TextAttributesKey key=type == NotificationType.ERROR ? ConsoleViewContentType.LOG_ERROR_OUTPUT_KEY : type == NotificationType.INFORMATION ? ConsoleViewContentType.NORMAL_OUTPUT_KEY : ConsoleViewContentType.LOG_WARNING_OUTPUT_KEY;
   int msgStart=document.getTextLength();
-  String message=pair.message;
-  append(document,message);
+  append(document,pair.message);
   TextAttributes attributes=EditorColorsManager.getInstance().getGlobalScheme().getAttributes(key);
   int layer=HighlighterLayer.CARET_ROW + 1;
-  editor.getMarkupModel().addRangeHighlighter(msgStart,document.getTextLength(),layer,attributes,HighlighterTargetArea.EXACT_RANGE);
+  RangeHighlighter highlighter=editor.getMarkupModel().addRangeHighlighter(msgStart,document.getTextLength(),layer,attributes,HighlighterTargetArea.EXACT_RANGE);
+  GROUP_ID.set(highlighter,notification.getGroupId());
+  NOTIFICATION_ID.set(highlighter,notification.id);
   for (  Pair<TextRange,HyperlinkInfo> link : pair.links) {
     final RangeHighlighter rangeHighlighter=myHyperlinkSupport.getValue().createHyperlink(link.first.getStartOffset() + msgStart,link.first.getEndOffset() + msgStart,null,link.second);
     if (link.second instanceof EventLog.ShowBalloon) {
@@ -33,6 +41,6 @@
     editor.getScrollingModel().scrollToCaret(ScrollType.MAKE_VISIBLE);
   }
   if (notification.isImportant()) {
-    highlightNotification(notification,pair.status,startLine,document.getLineCount() - 1);
+    highlightNotification(notification,pair.status,startLine,document.getLineCount() - 1,titleStartOffset,pair.titleLength);
   }
 }

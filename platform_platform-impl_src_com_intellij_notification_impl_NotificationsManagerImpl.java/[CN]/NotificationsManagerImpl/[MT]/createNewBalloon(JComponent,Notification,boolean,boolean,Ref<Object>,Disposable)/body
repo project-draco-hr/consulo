@@ -1,0 +1,272 @@
+{
+  final BalloonLayoutData layoutData=layoutDataRef.isNull() ? new BalloonLayoutData() : (BalloonLayoutData)layoutDataRef.get();
+  if (layoutData.groupId == null) {
+    if (NotificationsConfigurationImpl.getSettings(notification.getGroupId()).isShouldLog()) {
+      layoutData.groupId=notification.getGroupId();
+      layoutData.id=notification.id;
+    }
+  }
+ else {
+    layoutData.groupId=null;
+  }
+  layoutDataRef.set(layoutData);
+  if (layoutData.fillColor == null) {
+    layoutData.fillColor=FILL_COLOR;
+  }
+  if (layoutData.borderColor == null) {
+    layoutData.borderColor=BORDER_COLOR;
+  }
+  boolean actions=!notification.getActions().isEmpty();
+  boolean showFullContent=layoutData.showFullContent || notification instanceof NotificationActionProvider;
+  Color foregroundR=Gray._0;
+  Color foregroundD=Gray._191;
+  final Color foreground=new JBColor(foregroundR,foregroundD);
+  final JEditorPane text=new JEditorPane(){
+    @Override protected void paintComponent(    Graphics g){
+      super.paintComponent(g);
+      if (layoutData.showMinSize) {
+        Point location=getCollapsedTextEndLocation(this,layoutData);
+        if (location != null) {
+          g.setColor(getForeground());
+          g.drawString("...",location.x,location.y + g.getFontMetrics().getAscent());
+        }
+      }
+    }
+  }
+;
+  text.setEditorKit(new HTMLEditorKit(){
+    final HTMLEditorKit kit=UIUtil.getHTMLEditorKit();
+    final HTMLFactory factory=new HTMLFactory(){
+      @Override public View create(      Element e){
+        View view=super.create(e);
+        if (view instanceof ParagraphView) {
+          return new ParagraphView(e){
+            @Override protected SizeRequirements calculateMinorAxisRequirements(            int axis,            SizeRequirements r){
+              if (r == null) {
+                r=new SizeRequirements();
+              }
+              r.minimum=(int)layoutPool.getMinimumSpan(axis);
+              r.preferred=Math.max(r.minimum,(int)layoutPool.getPreferredSpan(axis));
+              r.maximum=Integer.MAX_VALUE;
+              r.alignment=0.5f;
+              return r;
+            }
+          }
+;
+        }
+        return view;
+      }
+    }
+;
+    @Override public StyleSheet getStyleSheet(){
+      return kit.getStyleSheet();
+    }
+    @Override public ViewFactory getViewFactory(){
+      return factory;
+    }
+  }
+);
+  text.setForeground(foreground);
+  final HyperlinkListener listener=NotificationsUtil.wrapListener(notification);
+  if (listener != null) {
+    text.addHyperlinkListener(listener);
+  }
+  String fontStyle=NotificationsUtil.getFontStyle();
+  int prefSize=new JLabel(NotificationsUtil.buildHtml(notification,null,true,null,fontStyle)).getPreferredSize().width;
+  String style=prefSize > BalloonLayoutConfiguration.MaxWidth ? BalloonLayoutConfiguration.MaxWidthStyle : null;
+  if (layoutData.showFullContent) {
+    style=prefSize > BalloonLayoutConfiguration.MaxFullContentWidth ? BalloonLayoutConfiguration.MaxFullContentWidthStyle : null;
+  }
+  String textR=NotificationsUtil.buildHtml(notification,style,true,foregroundR,fontStyle);
+  String textD=NotificationsUtil.buildHtml(notification,style,true,foregroundD,fontStyle);
+  LafHandler lafHandler=new LafHandler(text,textR,textD);
+  layoutData.lafHandler=lafHandler;
+  text.setEditable(false);
+  text.setOpaque(false);
+  if (UIUtil.isUnderNimbusLookAndFeel()) {
+    text.setBackground(UIUtil.TRANSPARENT_COLOR);
+  }
+  text.setBorder(null);
+  final JPanel content=new NonOpaquePanel(new BorderLayout());
+  if (text.getCaret() != null) {
+    text.setCaretPosition(0);
+  }
+  final JScrollPane pane=createBalloonScrollPane(text,false);
+  pane.getVerticalScrollBar().addAdjustmentListener(new AdjustmentListener(){
+    @Override public void adjustmentValueChanged(    AdjustmentEvent e){
+      JScrollBar scrollBar=pane.getVerticalScrollBar();
+      if (layoutData.showMinSize && scrollBar.getValue() > 0) {
+        scrollBar.removeAdjustmentListener(this);
+        scrollBar.setValue(0);
+        scrollBar.addAdjustmentListener(this);
+      }
+    }
+  }
+);
+  LinkLabel<Void> expandAction=null;
+  int lines=3;
+  if (notification.isTitle()) {
+    lines--;
+  }
+  if (actions) {
+    lines--;
+  }
+  layoutData.fullHeight=text.getPreferredSize().height;
+  layoutData.twoLineHeight=calculateContentHeight(lines);
+  layoutData.maxScrollHeight=Math.min(layoutData.fullHeight,calculateContentHeight(10));
+  layoutData.configuration=BalloonLayoutConfiguration.create(notification,layoutData,actions);
+  if (layoutData.welcomeScreen) {
+    layoutData.maxScrollHeight=layoutData.fullHeight;
+  }
+ else   if (!showFullContent && layoutData.maxScrollHeight != layoutData.fullHeight) {
+    pane.setViewport(new GradientViewport(text,JBUI.insets(10,0),true){
+      @Nullable @Override protected Color getViewColor(){
+        return layoutData.fillColor;
+      }
+      @Override protected void paintGradient(      Graphics g){
+        if (!layoutData.showMinSize) {
+          super.paintGradient(g);
+        }
+      }
+    }
+);
+  }
+  configureBalloonScrollPane(pane,layoutData.fillColor);
+  if (showFullContent) {
+    pane.setPreferredSize(text.getPreferredSize());
+  }
+ else   if (layoutData.twoLineHeight < layoutData.fullHeight) {
+    text.setPreferredSize(null);
+    Dimension size=text.getPreferredSize();
+    size.height=layoutData.twoLineHeight;
+    text.setPreferredSize(size);
+    text.setSize(size);
+    layoutData.showMinSize=true;
+    pane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+    pane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+    pane.setPreferredSize(size);
+    expandAction=new LinkLabel<Void>(null,AllIcons.Ide.Notification.Expand,new LinkListener<Void>(){
+      @Override public void linkSelected(      LinkLabel link,      Void ignored){
+        layoutData.showMinSize=!layoutData.showMinSize;
+        text.setPreferredSize(null);
+        Dimension size=text.getPreferredSize();
+        if (layoutData.showMinSize) {
+          size.height=layoutData.twoLineHeight;
+          pane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+          link.setIcon(AllIcons.Ide.Notification.Expand);
+          link.setHoveringIcon(AllIcons.Ide.Notification.ExpandHover);
+        }
+ else {
+          size.height=layoutData.fullHeight;
+          pane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+          link.setIcon(AllIcons.Ide.Notification.Collapse);
+          link.setHoveringIcon(AllIcons.Ide.Notification.CollapseHover);
+        }
+        text.setPreferredSize(size);
+        text.setSize(size);
+        if (!layoutData.showMinSize) {
+          size=new Dimension(size.width,layoutData.maxScrollHeight);
+        }
+        pane.setPreferredSize(size);
+        content.doLayout();
+        layoutData.doLayout.run();
+      }
+    }
+);
+    expandAction.setHoveringIcon(AllIcons.Ide.Notification.ExpandHover);
+  }
+  final CenteredLayoutWithActions layout=new CenteredLayoutWithActions(text,layoutData);
+  JPanel centerPanel=new NonOpaquePanel(layout){
+    @Override protected void paintChildren(    Graphics g){
+      super.paintChildren(g);
+      Component title=layout.getTitle();
+      if (title != null && layoutData.showActions != null && layoutData.showActions.compute()) {
+        int width=layoutData.configuration.allActionsOffset;
+        int x=getWidth() - width - JBUI.scale(5);
+        int y=layoutData.configuration.topSpaceHeight;
+        int height=title instanceof JEditorPane ? getFirstLineHeight((JEditorPane)title) : title.getHeight();
+        g.setColor(layoutData.fillColor);
+        g.fillRect(x,y,width,height);
+        width=layoutData.configuration.beforeGearSpace;
+        x-=width;
+        ((Graphics2D)g).setPaint(new GradientPaint(x,y,ColorUtil.withAlpha(layoutData.fillColor,0.2),x + width,y,layoutData.fillColor));
+        g.fillRect(x,y,width,height);
+      }
+    }
+  }
+;
+  content.add(centerPanel,BorderLayout.CENTER);
+  if (notification.isTitle()) {
+    String titleStyle=StringUtil.defaultIfEmpty(fontStyle,"") + "white-space:nowrap;";
+    String titleR=NotificationsUtil.buildHtml(notification,titleStyle,false,foregroundR,null);
+    String titleD=NotificationsUtil.buildHtml(notification,titleStyle,false,foregroundD,null);
+    JLabel title=new JLabel();
+    lafHandler.setTitle(title,titleR,titleD);
+    title.setOpaque(false);
+    if (UIUtil.isUnderNimbusLookAndFeel()) {
+      title.setBackground(UIUtil.TRANSPARENT_COLOR);
+    }
+    title.setForeground(foreground);
+    centerPanel.add(title,BorderLayout.NORTH);
+  }
+  if (expandAction != null) {
+    centerPanel.add(expandAction,BorderLayout.EAST);
+  }
+  if (notification.isContent()) {
+    centerPanel.add(layoutData.welcomeScreen ? text : pane,BorderLayout.CENTER);
+  }
+  if (!layoutData.welcomeScreen) {
+    final Icon icon=NotificationsUtil.getIcon(notification);
+    JComponent iconComponent=new JComponent(){
+      @Override protected void paintComponent(      Graphics g){
+        super.paintComponent(g);
+        icon.paintIcon(this,g,layoutData.configuration.iconOffset.width,layoutData.configuration.iconOffset.height);
+      }
+    }
+;
+    iconComponent.setOpaque(false);
+    iconComponent.setPreferredSize(new Dimension(layoutData.configuration.iconPanelWidth,2 * layoutData.configuration.iconOffset.height + icon.getIconHeight()));
+    content.add(iconComponent,BorderLayout.WEST);
+  }
+  JPanel buttons=createButtons(notification,content,listener);
+  if (buttons != null) {
+    layoutData.groupId=null;
+    buttons.setBorder(new EmptyBorder(0,0,JBUI.scale(5),JBUI.scale(7)));
+  }
+  HoverAdapter hoverAdapter=new HoverAdapter();
+  hoverAdapter.addSource(content);
+  hoverAdapter.addSource(centerPanel);
+  if (expandAction != null) {
+    hoverAdapter.addComponent(expandAction,JBUI.insets(5,5,7,7));
+  }
+  if (buttons == null && actions) {
+    createActionPanel(notification,centerPanel,layoutData.configuration.actionGap,hoverAdapter);
+  }
+  hoverAdapter.initListeners();
+  if (layoutData.mergeData != null) {
+    createMergeAction(layoutData,content);
+  }
+  text.setSize(text.getPreferredSize());
+  Dimension paneSize=new Dimension(text.getPreferredSize());
+  int maxWidth=JBUI.scale(600);
+  if (windowComponent != null) {
+    maxWidth=Math.min(maxWidth,windowComponent.getWidth() - 20);
+  }
+  if (paneSize.width > maxWidth) {
+    pane.setPreferredSize(new Dimension(maxWidth,paneSize.height + UIUtil.getScrollBarWidth()));
+  }
+  final BalloonBuilder builder=JBPopupFactory.getInstance().createBalloonBuilder(content);
+  builder.setFillColor(layoutData.fillColor).setCloseButtonEnabled(buttons == null).setShowCallout(showCallout).setShadow(false).setHideOnClickOutside(hideOnClickOutside).setHideOnAction(hideOnClickOutside).setHideOnKeyOutside(hideOnClickOutside).setHideOnFrameResize(false).setBorderColor(layoutData.borderColor).setBorderInsets(JBUI.emptyInsets());
+  if (layoutData.fadeoutTime != 0) {
+    builder.setFadeoutTime(layoutData.fadeoutTime);
+  }
+  final BalloonImpl balloon=(BalloonImpl)builder.createBalloon();
+  balloon.setAnimationEnabled(false);
+  notification.setBalloon(balloon);
+  balloon.setShadowBorderProvider(new NotificationBalloonShadowBorderProvider(layoutData.fillColor,layoutData.borderColor));
+  if (!layoutData.welcomeScreen && buttons == null) {
+    balloon.setActionProvider(new NotificationBalloonActionProvider(balloon,layout.getTitle(),layoutData,notification.getGroupId()));
+  }
+  Disposer.register(parentDisposable,balloon);
+  return balloon;
+}
