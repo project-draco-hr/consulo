@@ -1,44 +1,29 @@
 {
-  myThreadMXBean=ManagementFactory.getThreadMXBean();
-  if (!shouldWatch())   return;
-  final String threshold=System.getProperty("performance.watcher.threshold");
-  if (threshold != null) {
-    try {
-      UNRESPONSIVE_THRESHOLD_SECONDS=Integer.parseInt(threshold);
+  UNRESPONSIVE_THRESHOLD_SECONDS=SystemProperties.getIntProperty("performance.watcher.threshold",5);
+  UNRESPONSIVE_INTERVAL_SECONDS=SystemProperties.getIntProperty("performance.watcher.interval",5);
+  if (shouldWatch()) {
+    final AppScheduledExecutorService service=(AppScheduledExecutorService)AppExecutorUtil.getAppScheduledExecutorService();
+    service.setNewThreadListener(new Consumer<Thread>(){
+      private final int ourReasonableThreadPoolSize=Registry.intValue("core.pooled.threads");
+      @Override public void consume(      Thread thread){
+        if (service.getBackendPoolExecutorSize() > ourReasonableThreadPoolSize && ApplicationInfoImpl.getShadowInstance().isEAP()) {
+          File file=dumpThreads("newPooledThread/",true);
+          LOG.info("Not enough pooled threads" + (file != null ? "; dumped threads into file '" + file.getPath() + "'" : ""));
+        }
+      }
     }
- catch (    NumberFormatException e) {
-    }
-  }
-  final String interval=System.getProperty("performance.watcher.interval");
-  if (interval != null) {
-    try {
-      UNRESPONSIVE_INTERVAL_SECONDS=Integer.parseInt(interval);
-    }
- catch (    NumberFormatException e) {
-    }
-  }
-  if (UNRESPONSIVE_THRESHOLD_SECONDS == 0 || UNRESPONSIVE_INTERVAL_SECONDS == 0) {
-    return;
-  }
-  ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
-    @Override public void run(){
-      deleteOldThreadDumps();
-    }
-  }
 );
-  mySessionLogDir=new File(PathManager.getLogPath() + "/threadDumps-" + myDateFormat.format(new Date())+ "-"+ ApplicationInfo.getInstance().getBuild().asString());
-  myCurHangLogDir=mySessionLogDir;
-  try {
-    myShutdownSemaphore.acquire();
-  }
- catch (  InterruptedException e) {
-  }
-  myThread=new Thread(new Runnable(){
-    @Override public void run(){
-      checkEDTResponsiveness();
+    ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+      @Override public void run(){
+        deleteOldThreadDumps();
+      }
+    }
+);
+    for (    MemoryPoolMXBean bean : ManagementFactory.getMemoryPoolMXBeans()) {
+      if ("Code Cache".equals(bean.getName())) {
+        watchCodeCache(bean);
+        break;
+      }
     }
   }
-,"Performance watcher");
-  myThread.setPriority(Thread.MIN_PRIORITY);
-  myThread.start();
 }
