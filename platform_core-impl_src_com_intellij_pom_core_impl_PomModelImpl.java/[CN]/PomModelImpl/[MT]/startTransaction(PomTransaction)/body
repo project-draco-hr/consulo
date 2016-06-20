@@ -4,11 +4,22 @@
   final PsiDocumentManagerBase manager=(PsiDocumentManagerBase)PsiDocumentManager.getInstance(myProject);
   final PsiToDocumentSynchronizer synchronizer=manager.getSynchronizer();
   final PsiElement changeScope=transaction.getChangeScope();
-  LOG.assertTrue(changeScope != null);
   final PsiFile containingFileByTree=getContainingFileByTree(changeScope);
   boolean physical=changeScope.isPhysical();
-  if (physical && synchronizer.toProcessPsiEvent() && isDocumentUncommitted(containingFileByTree)) {
-    throw new IllegalStateException("Attempt to modify PSI for non-committed Document!");
+  if (physical && synchronizer.toProcessPsiEvent()) {
+    if (isDocumentUncommitted(containingFileByTree)) {
+      throw new IllegalStateException("Attempt to modify PSI for non-committed Document!");
+    }
+    CommandProcessor commandProcessor=CommandProcessor.getInstance();
+    if (!commandProcessor.isUndoTransparentActionInProgress() && commandProcessor.getCurrentCommand() == null) {
+      throw new IncorrectOperationException("Must not change PSI outside command or undo-transparent action. See com.intellij.openapi.command.WriteCommandAction or com.intellij.openapi.command.CommandProcessor");
+    }
+  }
+  if (containingFileByTree != null) {
+    ((SmartPointerManagerImpl)SmartPointerManager.getInstance(myProject)).fastenBelts(containingFileByTree.getViewProvider().getVirtualFile());
+    if (containingFileByTree instanceof PsiFileImpl) {
+      ((PsiFileImpl)containingFileByTree).beforeAstChange();
+    }
   }
   BlockSupportImpl.sendBeforeChildrenChangeEvent((PsiManagerImpl)PsiManager.getInstance(myProject),changeScope,true);
   Document document=containingFileByTree == null ? null : physical ? manager.getDocument(containingFileByTree) : manager.getCachedDocument(containingFileByTree);

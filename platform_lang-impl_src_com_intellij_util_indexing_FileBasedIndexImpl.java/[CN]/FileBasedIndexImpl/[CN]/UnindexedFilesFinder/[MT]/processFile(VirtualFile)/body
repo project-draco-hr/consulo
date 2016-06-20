@@ -8,61 +8,58 @@
   if (!(file instanceof VirtualFileWithId)) {
     return true;
   }
-  try {
-    FileType type=file.getFileType();
-    myFileTypeManager.cacheFileType(file,type);
-    boolean oldStuff=true;
-    if (file.isDirectory() || !isTooLarge(file)) {
-      final List<ID<?,?>> affectedIndexCandidates=getAffectedIndexCandidates(file);
-      for (int i=0, size=affectedIndexCandidates.size(); i < size; ++i) {
-        final ID<?,?> indexId=affectedIndexCandidates.get(i);
-        try {
-          if (needsFileContentLoading(indexId) && shouldIndexFile(null,file,indexId)) {
+  myFileTypeManager.freezeFileTypeTemporarilyIn(file,new Runnable(){
+    @Override public void run(){
+      boolean oldStuff=true;
+      if (file.isDirectory() || !isTooLarge(file)) {
+        final List<ID<?,?>> affectedIndexCandidates=getAffectedIndexCandidates(file);
+        for (int i=0, size=affectedIndexCandidates.size(); i < size; ++i) {
+          final ID<?,?> indexId=affectedIndexCandidates.get(i);
+          try {
+            if (needsFileContentLoading(indexId) && shouldIndexFile(null,file,indexId)) {
 synchronized (myFiles) {
-              myFiles.add(file);
+                myFiles.add(file);
+              }
+              oldStuff=false;
+              break;
             }
-            oldStuff=false;
-            break;
+          }
+ catch (          RuntimeException e) {
+            final Throwable cause=e.getCause();
+            if (cause instanceof IOException || cause instanceof StorageException) {
+              LOG.info(e);
+              requestRebuild(indexId);
+            }
+ else {
+              throw e;
+            }
           }
         }
- catch (        RuntimeException e) {
-          final Throwable cause=e.getCause();
-          if (cause instanceof IOException || cause instanceof StorageException) {
+      }
+      FileContent fileContent=null;
+      int inputId=Math.abs(getIdMaskingNonIdBasedFile(file));
+      for (      ID<?,?> indexId : myNotRequiringContentIndices) {
+        if (shouldIndexFile(null,file,indexId)) {
+          oldStuff=false;
+          try {
+            if (fileContent == null) {
+              fileContent=new FileContentImpl(file);
+            }
+            updateSingleIndex(indexId,file,inputId,fileContent);
+          }
+ catch (          StorageException e) {
             LOG.info(e);
             requestRebuild(indexId);
           }
- else {
-            throw e;
-          }
         }
       }
-    }
-    FileContent fileContent=null;
-    int inputId=-1;
-    for (    ID<?,?> indexId : myNotRequiringContentIndices) {
-      if (shouldIndexFile(null,file,indexId)) {
-        oldStuff=false;
-        try {
-          if (fileContent == null) {
-            fileContent=new FileContentImpl(file);
-            inputId=Math.abs(getFileId(file));
-          }
-          updateSingleIndex(indexId,inputId,fileContent);
-        }
- catch (        StorageException e) {
-          LOG.info(e);
-          requestRebuild(indexId);
-        }
+      IndexingStamp.flushCache(inputId);
+      if (oldStuff && file instanceof VirtualFileSystemEntry) {
+        ((VirtualFileSystemEntry)file).setFileIndexed(true);
       }
     }
-    IndexingStamp.flushCache(file);
-    if (oldStuff && file instanceof VirtualFileSystemEntry) {
-      ((VirtualFileSystemEntry)file).setFileIndexed(true);
-    }
   }
-  finally {
-    myFileTypeManager.cacheFileType(file,null);
-  }
+);
   if (myProgressIndicator != null && file.isDirectory()) {
     myProgressIndicator.checkCanceled();
     myProgressIndicator.setText("Scanning files to index");

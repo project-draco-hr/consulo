@@ -1,0 +1,43 @@
+{
+  Project project=file.getProject();
+  final FileElement fileElement=(FileElement)oldFileNode;
+  final CharTable charTable=fileElement.getCharTable();
+  int lengthShift=newFileText.length() - fileElement.getTextLength();
+  if (fileElement.getElementType() instanceof ITemplateDataElementType || isTooDeep(file)) {
+    return null;
+  }
+  final ASTNode leafAtStart=fileElement.findLeafElementAt(Math.max(0,changedPsiRange.getStartOffset() - 1));
+  final ASTNode leafAtEnd=fileElement.findLeafElementAt(Math.min(changedPsiRange.getEndOffset(),fileElement.getTextLength() - 1));
+  ASTNode node=leafAtStart != null && leafAtEnd != null ? TreeUtil.findCommonParent(leafAtStart,leafAtEnd) : fileElement;
+  Language baseLanguage=file.getViewProvider().getBaseLanguage();
+  while (node != null && !(node instanceof FileElement)) {
+    IElementType elementType=node.getElementType();
+    if (elementType instanceof IReparseableElementType) {
+      final TextRange textRange=node.getTextRange();
+      final IReparseableElementType reparseable=(IReparseableElementType)elementType;
+      if (baseLanguage.isKindOf(reparseable.getLanguage()) && textRange.getLength() + lengthShift > 0) {
+        final int start=textRange.getStartOffset();
+        final int end=start + textRange.getLength() + lengthShift;
+        if (end > newFileText.length()) {
+          reportInconsistentLength(file,newFileText,node,start,end);
+          break;
+        }
+        CharSequence newTextStr=newFileText.subSequence(start,end);
+        if (reparseable.isParsable(file,newTextStr,baseLanguage,project)) {
+          ASTNode chameleon=reparseable.createNode(newTextStr);
+          if (chameleon != null) {
+            DummyHolder holder=DummyHolderFactory.createHolder(file.getManager(),null,node.getPsi(),charTable);
+            holder.getTreeElement().rawAddChildren((TreeElement)chameleon);
+            if (holder.getTextLength() != newTextStr.length()) {
+              String details=ApplicationManager.getApplication().isInternal() ? "text=" + newTextStr + "; treeText="+ holder.getText()+ ";" : "";
+              LOG.error("Inconsistent reparse: " + details + " type="+ elementType);
+            }
+            return Couple.of(node,chameleon);
+          }
+        }
+      }
+    }
+    node=node.getTreeParent();
+  }
+  return null;
+}

@@ -1,33 +1,53 @@
 {
   if (isDisabled())   return;
   if (!myVirtualFile.isValid()) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("BaseRevisionLoader: for file " + myVirtualFile.getPath() + " failed: virtual file not valid");
-    }
+    log("BaseRevisionLoader failed: virtual file not valid",myVirtualFile);
     reportTrackerBaseLoadFailed();
     return;
   }
-  final Pair<VcsRevisionNumber,String> baseRevision=myStatusProvider.getBaseRevision(myVirtualFile);
-  if (baseRevision == null) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("BaseRevisionLoader: for file " + myVirtualFile.getPath() + " failed: null returned for base revision");
-    }
+  VcsBaseContentProvider.BaseContent baseContent=myStatusProvider.getBaseRevision(myVirtualFile);
+  if (baseContent == null) {
+    log("BaseRevisionLoader failed: null returned for base revision",myVirtualFile);
     reportTrackerBaseLoadFailed();
     return;
   }
-  final LineStatusTracker.RevisionPack revisionPack=new LineStatusTracker.RevisionPack(myLoadCounter,baseRevision.first);
+  final VcsRevisionNumber revisionNumber=baseContent.getRevisionNumber();
+  final Charset charset=myVirtualFile.getCharset();
+  final long loadCounter=myLoadCounter;
   myLoadCounter++;
-  final String converted=StringUtil.convertLineSeparators(baseRevision.second);
+synchronized (myLock) {
+    final TrackerData data=myLineStatusTrackers.get(myDocument);
+    if (data == null) {
+      log("BaseRevisionLoader canceled: tracker already released",myVirtualFile);
+      return;
+    }
+    if (!data.shouldBeUpdated(revisionNumber,charset,loadCounter)) {
+      log("BaseRevisionLoader canceled: no need to update",myVirtualFile);
+      return;
+    }
+  }
+  String lastUpToDateContent=baseContent.loadContent();
+  if (lastUpToDateContent == null) {
+    log("BaseRevisionLoader failed: can't load up-to-date content",myVirtualFile);
+    reportTrackerBaseLoadFailed();
+    return;
+  }
+  final String converted=StringUtil.convertLineSeparators(lastUpToDateContent);
   final Runnable runnable=new Runnable(){
     @Override public void run(){
 synchronized (myLock) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("BaseRevisionLoader: initializing tracker for file " + myVirtualFile.getPath());
+        final TrackerData data=myLineStatusTrackers.get(myDocument);
+        if (data == null) {
+          log("BaseRevisionLoader initializing: tracker already released",myVirtualFile);
+          return;
         }
-        final LineStatusTracker tracker=myLineStatusTrackers.get(myDocument);
-        if (tracker != null) {
-          tracker.initialize(converted,revisionPack);
+        if (!data.shouldBeUpdated(revisionNumber,charset,loadCounter)) {
+          log("BaseRevisionLoader initializing: canceled",myVirtualFile);
+          return;
         }
+        log("BaseRevisionLoader initializing: success",myVirtualFile);
+        myLineStatusTrackers.put(myDocument,new TrackerData(data.tracker,revisionNumber,charset,loadCounter));
+        data.tracker.setBaseRevision(converted);
       }
     }
   }

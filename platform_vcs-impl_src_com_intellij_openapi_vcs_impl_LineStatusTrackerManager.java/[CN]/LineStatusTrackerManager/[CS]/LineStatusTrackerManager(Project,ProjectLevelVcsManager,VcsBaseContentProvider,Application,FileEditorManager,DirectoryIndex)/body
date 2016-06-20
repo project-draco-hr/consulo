@@ -5,14 +5,15 @@
   myStatusProvider=statusProvider;
   myApplication=application;
   myFileEditorManager=fileEditorManager;
-  myLineStatusTrackers=new HashMap<Document,LineStatusTracker>();
+  myLineStatusTrackers=new HashMap<Document,TrackerData>();
   myPartner=new QueueProcessorRemovePartner<Document,BaseRevisionLoader>(myProject,new Consumer<BaseRevisionLoader>(){
     @Override public void consume(    BaseRevisionLoader baseRevisionLoader){
       baseRevisionLoader.run();
     }
   }
 );
-  project.getMessageBus().connect().subscribe(DocumentBulkUpdateListener.TOPIC,new DocumentBulkUpdateListener.Adapter(){
+  MessageBusConnection busConnection=project.getMessageBus().connect();
+  busConnection.subscribe(DocumentBulkUpdateListener.TOPIC,new DocumentBulkUpdateListener.Adapter(){
     @Override public void updateStarted(    @NotNull final Document doc){
       final LineStatusTracker tracker=getLineStatusTracker(doc);
       if (tracker != null)       tracker.startBulkUpdate();
@@ -23,11 +24,22 @@
     }
   }
 );
+  busConnection.subscribe(LineStatusTrackerSettingListener.TOPIC,new LineStatusTrackerSettingListener(){
+    @Override public void settingsUpdated(){
+synchronized (myLock) {
+        LineStatusTracker.Mode mode=getMode();
+        for (        TrackerData data : myLineStatusTrackers.values()) {
+          data.tracker.setMode(mode);
+        }
+      }
+    }
+  }
+);
   myDisposable=new Disposable(){
     @Override public void dispose(){
 synchronized (myLock) {
-        for (        final LineStatusTracker tracker : myLineStatusTrackers.values()) {
-          tracker.release();
+        for (        final TrackerData data : myLineStatusTrackers.values()) {
+          data.tracker.release();
         }
         myLineStatusTrackers.clear();
         myPartner.clear();

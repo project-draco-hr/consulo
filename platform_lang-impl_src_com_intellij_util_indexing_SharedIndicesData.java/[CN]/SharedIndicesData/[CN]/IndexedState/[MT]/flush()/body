@@ -1,0 +1,40 @@
+{
+  if (compactNecessary) {
+    UnsyncByteArrayOutputStream compactedOutputStream=new UnsyncByteArrayOutputStream(values.length);
+    final DataOutput compactedOutput=new DataOutputStream(compactedOutputStream);
+    final Ref<IOException> ioExceptionRef=new Ref<IOException>();
+    boolean result=indexId2NewState == null || indexId2NewState.forEachEntry(new TIntObjectProcedure<byte[]>(){
+      @Override public boolean execute(      int indexUniqueId,      byte[] indexValue){
+        try {
+          long indexCreationStamp=IndexingStamp.getIndexCreationStamp(ID.findById(indexUniqueId));
+          writeIndexValue(indexUniqueId,indexCreationStamp,indexValue,0,indexValue.length,compactedOutput);
+          return true;
+        }
+ catch (        IOException ex) {
+          ioExceptionRef.set(ex);
+          return false;
+        }
+      }
+    }
+);
+    if (!result)     throw ioExceptionRef.get();
+    result=indexId2Offset == null || indexId2Offset.forEachEntry(new TIntLongProcedure(){
+      @Override public boolean execute(      int chunkIndexId,      long chunkOffsetAndSize){
+        try {
+          int chunkOffset=(int)(chunkOffsetAndSize >> 32);
+          int chunkSize=(int)chunkOffsetAndSize;
+          writeIndexValue(chunkIndexId,IndexingStamp.getIndexCreationStamp(ID.findById(chunkIndexId)),values,chunkOffset,chunkSize,compactedOutput);
+          return true;
+        }
+ catch (        IOException e) {
+          ioExceptionRef.set(e);
+          return false;
+        }
+      }
+    }
+);
+    if (!result)     throw ioExceptionRef.get();
+    if (compactedOutputStream.size() > 0)     storage.put(fileOrContentId,compactedOutputStream.toByteArray());
+ else     storage.remove(fileOrContentId);
+  }
+}

@@ -1,0 +1,31 @@
+{
+  Document document=task.getDocument();
+  final CharSequence newDocumentText=document.getImmutableCharSequence();
+  final TextRange changedPsiRange=getChangedPsiRange(file,task.myLastCommittedText,newDocumentText);
+  if (changedPsiRange == null) {
+    return null;
+  }
+  final Boolean data=document.getUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY);
+  if (data != null) {
+    document.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,null);
+    file.putUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY,data);
+  }
+  BlockSupport blockSupport=BlockSupport.getInstance(file.getProject());
+  final DiffLog diffLog=blockSupport.reparseRange(file,oldFileNode,changedPsiRange,newDocumentText,task.indicator,task.myLastCommittedText);
+  return new Processor<Document>(){
+    @Override public boolean process(    Document document){
+      FileViewProvider viewProvider=file.getViewProvider();
+      if (!task.isStillValid() || ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(file.getProject())).getCachedViewProvider(document) != viewProvider) {
+        return false;
+      }
+      if (file.isPhysical() && !ApplicationManager.getApplication().isWriteAccessAllowed()) {
+        VirtualFile vFile=viewProvider.getVirtualFile();
+        LOG.error("Write action expected" + "; file=" + file + " of "+ file.getClass()+ "; file.valid="+ file.isValid()+ "; file.eventSystemEnabled="+ viewProvider.isEventSystemEnabled()+ "; language="+ file.getLanguage()+ "; vFile="+ vFile+ " of "+ vFile.getClass()+ "; free-threaded="+ PsiDocumentManagerBase.isFreeThreaded(vFile));
+      }
+      doActualPsiChange(file,diffLog);
+      assertAfterCommit(document,file,(FileElement)oldFileNode);
+      return true;
+    }
+  }
+;
+}

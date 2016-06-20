@@ -1,0 +1,59 @@
+{
+  List<Set<Thread>> threadsUnderThisIndicator=new ArrayList<Set<Thread>>();
+synchronized (threadsUnderIndicator) {
+    for (ProgressIndicator thisIndicator=indicator; thisIndicator != null; thisIndicator=thisIndicator instanceof WrappedProgressIndicator ? ((WrappedProgressIndicator)thisIndicator).getOriginalProgressIndicator() : null) {
+      Set<Thread> underIndicator=threadsUnderIndicator.get(thisIndicator);
+      if (underIndicator == null) {
+        underIndicator=new SmartHashSet<Thread>();
+        threadsUnderIndicator.put(thisIndicator,underIndicator);
+      }
+      boolean alreadyUnder=!underIndicator.add(currentThread);
+      threadsUnderThisIndicator.add(alreadyUnder ? null : underIndicator);
+      boolean isStandard=thisIndicator instanceof StandardProgressIndicator;
+      if (!isStandard) {
+        nonStandardIndicators.add(thisIndicator);
+        if (myCheckCancelledFuture == null) {
+          myCheckCancelledFuture=startBackgroundIndicatorPing();
+        }
+      }
+      if (thisIndicator.isCanceled()) {
+        threadsUnderCanceledIndicator.add(currentThread);
+      }
+ else {
+        threadsUnderCanceledIndicator.remove(currentThread);
+      }
+    }
+    updateShouldCheckCanceled();
+  }
+  try {
+    process.run();
+  }
+  finally {
+synchronized (threadsUnderIndicator) {
+      ProgressIndicator thisIndicator=null;
+      for (int i=0; i < threadsUnderThisIndicator.size(); i++) {
+        thisIndicator=i == 0 ? indicator : ((WrappedProgressIndicator)thisIndicator).getOriginalProgressIndicator();
+        Set<Thread> underIndicator=threadsUnderThisIndicator.get(i);
+        boolean removed=underIndicator != null && underIndicator.remove(currentThread);
+        if (removed && underIndicator.isEmpty()) {
+          threadsUnderIndicator.remove(thisIndicator);
+        }
+        boolean isStandard=thisIndicator instanceof StandardProgressIndicator;
+        if (!isStandard) {
+          nonStandardIndicators.remove(thisIndicator);
+          if (nonStandardIndicators.isEmpty()) {
+            myCheckCancelledFuture.cancel(true);
+            myCheckCancelledFuture=null;
+          }
+        }
+        if (oldIndicator != null && oldIndicator.isCanceled()) {
+          threadsUnderCanceledIndicator.add(currentThread);
+        }
+ else {
+          threadsUnderCanceledIndicator.remove(currentThread);
+        }
+      }
+      updateShouldCheckCanceled();
+    }
+  }
+}
