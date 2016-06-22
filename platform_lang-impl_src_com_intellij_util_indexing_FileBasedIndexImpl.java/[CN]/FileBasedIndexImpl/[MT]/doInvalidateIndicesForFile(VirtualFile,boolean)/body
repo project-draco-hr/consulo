@@ -1,0 +1,38 @@
+{
+  waitUntilIndicesAreInitialized();
+  cleanProcessedFlag(file);
+  final int fileId=Math.abs(getIdMaskingNonIdBasedFile(file));
+  IndexingStamp.flushCache(fileId);
+  List<ID<?,?>> nontrivialFileIndexedStates=IndexingStamp.getNontrivialFileIndexedStates(fileId);
+  if (!contentChanged) {
+    for (    ID<?,?> indexId : nontrivialFileIndexedStates) {
+      if (myNotRequiringContentIndices.contains(indexId)) {
+        try {
+          updateSingleIndex(indexId,null,fileId,null);
+        }
+ catch (        StorageException e) {
+          LOG.info(e);
+          requestRebuild(indexId);
+        }
+      }
+    }
+    myChangedFilesCollector.removeScheduledFileFromUpdate(file);
+  }
+  Collection<ID<?,?>> fileIndexedStatesToUpdate=ContainerUtil.intersection(nontrivialFileIndexedStates,myRequiringContentIndices);
+  if (contentChanged) {
+    if (!fileIndexedStatesToUpdate.isEmpty()) {
+      for (int i=0, size=nontrivialFileIndexedStates.size(); i < size; ++i) {
+        final ID<?,?> indexId=nontrivialFileIndexedStates.get(i);
+        if (needsFileContentLoading(indexId)) {
+          getIndex(indexId).resetIndexedStateForFile(fileId);
+        }
+      }
+      clearUpToDateStateForPsiIndicesOfUnsavedDocuments(file);
+      if (!isTooLarge(file))       myChangedFilesCollector.scheduleForUpdate(file);
+    }
+  }
+ else   if (!fileIndexedStatesToUpdate.isEmpty()) {
+    myChangedFilesCollector.scheduleForUpdate(new DeletedVirtualFileStub((VirtualFileWithId)file));
+  }
+  IndexingStamp.flushCache(fileId);
+}

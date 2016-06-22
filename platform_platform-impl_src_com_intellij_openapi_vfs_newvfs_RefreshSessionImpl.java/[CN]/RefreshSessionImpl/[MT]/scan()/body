@@ -3,37 +3,36 @@
   myWorkQueue=new ArrayList<VirtualFile>();
   boolean haveEventsToFire=myFinishRunnable != null || !myEvents.isEmpty();
   if (!workQueue.isEmpty()) {
-    final LocalFileSystem fileSystem=LocalFileSystem.getInstance();
-    final FileWatcher watcher;
-    if (fileSystem instanceof LocalFileSystemImpl) {
-      LocalFileSystemImpl fs=(LocalFileSystemImpl)fileSystem;
-      fs.markSuspiciousFilesDirty(workQueue);
-      watcher=fs.getFileWatcher();
-    }
- else {
-      watcher=null;
+    LocalFileSystem fs=LocalFileSystem.getInstance();
+    if (fs instanceof LocalFileSystemImpl) {
+      ((LocalFileSystemImpl)fs).markSuspiciousFilesDirty(workQueue);
     }
     long t=0;
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("scanning " + workQueue);
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("scanning " + workQueue);
       t=System.currentTimeMillis();
     }
-    for (    VirtualFile file : workQueue) {
-      if (myCancelled)       break;
-      NewVirtualFile nvf=(NewVirtualFile)file;
-      if (!myIsRecursive && (!myIsAsync || (watcher != null && !watcher.isWatched(nvf)))) {
-        nvf.markDirty();
+    int count=0;
+    refresh:     do {
+      if (LOG.isTraceEnabled())       LOG.trace("try=" + count);
+      for (      VirtualFile file : workQueue) {
+        if (myCancelled)         break refresh;
+        NewVirtualFile nvf=(NewVirtualFile)file;
+        if (!myIsRecursive && !myIsAsync) {
+          nvf.markDirty();
+        }
+        RefreshWorker worker=new RefreshWorker(nvf,myIsRecursive);
+        myWorker=worker;
+        worker.scan();
+        haveEventsToFire|=myEvents.addAll(worker.getEvents());
       }
-      RefreshWorker worker=myWorker=new RefreshWorker(nvf,myIsRecursive);
-      worker.scan();
-      List<VFileEvent> events=worker.getEvents();
-      if (myEvents.addAll(events)) {
-        haveEventsToFire=true;
-      }
+      count++;
+      if (LOG.isTraceEnabled())       LOG.trace("events=" + myEvents.size());
     }
+ while (myIsRecursive && count < 3 && isAnyDirty(workQueue));
     if (t != 0) {
       t=System.currentTimeMillis() - t;
-      LOG.debug((myCancelled ? "cancelled, " : "done, ") + t + " ms, events "+ myEvents);
+      LOG.trace((myCancelled ? "cancelled, " : "done, ") + t + " ms, events "+ myEvents);
     }
   }
   myWorker=null;

@@ -1,36 +1,54 @@
 {
   Application application=new Application();
   application.addApplicationListener(new ApplicationAdapter(){
-    public void handleAbout(    ApplicationEvent applicationEvent){
+    @Override public void handleAbout(    ApplicationEvent applicationEvent){
       AboutAction.showAbout();
       applicationEvent.setHandled(true);
     }
-    public void handlePreferences(    ApplicationEvent applicationEvent){
-      Project project=getProject();
-      if (project == null) {
-        project=ProjectManager.getInstance().getDefaultProject();
-      }
-      if (!((ShowSettingsUtilImpl)ShowSettingsUtil.getInstance()).isAlreadyShown()) {
-        ShowSettingsUtil.getInstance().showSettingsDialog(project);
+    @Override public void handlePreferences(    ApplicationEvent applicationEvent){
+      final Project project=getNotNullProject();
+      final ShowSettingsUtilImpl showSettingsUtil=(ShowSettingsUtilImpl)ShowSettingsUtil.getInstance();
+      if (!showSettingsUtil.isAlreadyShown()) {
+        TransactionGuard.submitTransaction(project,new Runnable(){
+          @Override public void run(){
+            showSettingsUtil.showSettingsDialog(project);
+          }
+        }
+);
       }
       applicationEvent.setHandled(true);
     }
-    public void handleQuit(    ApplicationEvent applicationEvent){
-      ApplicationManagerEx.getApplicationEx().exit();
-    }
-    public void handleOpenFile(    ApplicationEvent applicationEvent){
+    @NotNull private Project getNotNullProject(){
       Project project=getProject();
-      String filename=applicationEvent.getFilename();
+      return project == null ? ProjectManager.getInstance().getDefaultProject() : project;
+    }
+    @Override public void handleQuit(    ApplicationEvent applicationEvent){
+      final ApplicationEx app=ApplicationManagerEx.getApplicationEx();
+      TransactionGuard.submitTransaction(app,new Runnable(){
+        @Override public void run(){
+          app.exit();
+        }
+      }
+);
+    }
+    @Override public void handleOpenFile(    final ApplicationEvent applicationEvent){
+      final Project project=getProject();
+      final String filename=applicationEvent.getFilename();
       if (filename == null)       return;
-      File file=new File(filename);
-      if (ProjectUtil.openOrImport(file.getAbsolutePath(),project,true) != null) {
-        ApplicationStarter.getInstance().setPerformProjectLoad(false);
-        return;
+      TransactionGuard.submitTransaction(ApplicationManager.getApplication(),new Runnable(){
+        @Override public void run(){
+          File file=new File(filename);
+          if (ProjectUtil.openOrImport(file.getAbsolutePath(),project,true) != null) {
+            IdeaApplication.getInstance().setPerformProjectLoad(false);
+            return;
+          }
+          if (project != null && file.exists()) {
+            OpenFileAction.openFile(filename,project);
+            applicationEvent.setHandled(true);
+          }
+        }
       }
-      if (project != null && file.exists()) {
-        OpenFileAction.openFile(filename,project);
-        applicationEvent.setHandled(true);
-      }
+);
     }
   }
 );

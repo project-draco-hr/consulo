@@ -1,0 +1,52 @@
+{
+  try {
+    state.finalizeFileTypeMappingForIndices();
+    String rebuildNotification=null;
+    if (currentVersionCorrupted) {
+      rebuildNotification="Index files on disk are corrupted. Indices will be rebuilt.";
+    }
+ else     if (versionChanged.get()) {
+      rebuildNotification="Index file format has changed for some indices. These indices will be rebuilt.";
+    }
+    if (rebuildNotification != null && !ApplicationManager.getApplication().isHeadlessEnvironment() && Registry.is("ide.showIndexRebuildMessage")) {
+      NOTIFICATIONS.createNotification("Index Rebuild",rebuildNotification,NotificationType.INFORMATION,null).notify(null);
+    }
+    state.freeze();
+    myState=state;
+    for (    ID<?,?> indexId : state.getIndexIDs()) {
+      if (ourRebuildStatus.get(indexId).compareAndSet(REQUIRES_REBUILD,OK)) {
+        try {
+          clearIndex(indexId);
+        }
+ catch (        StorageException e) {
+          requestRebuild(indexId);
+          LOG.error(e);
+        }
+      }
+    }
+    myConnection.subscribe(VirtualFileManager.VFS_CHANGES,myChangedFilesCollector);
+    registerIndexableSet(new AdditionalIndexableFileSet(),null);
+    return state;
+  }
+  finally {
+    ShutDownTracker.getInstance().registerShutdownTask(new Runnable(){
+      @Override public void run(){
+        performShutdown();
+      }
+    }
+);
+    saveRegisteredIndicesAndDropUnregisteredOnes(state.getIndexIDs());
+    myFlushingFuture=FlushingDaemon.everyFiveSeconds(new Runnable(){
+      private int lastModCount;
+      @Override public void run(){
+        mySerializationManagerEx.flushNameStorage();
+        if (lastModCount == myLocalModCount) {
+          flushAllIndices(lastModCount);
+        }
+        lastModCount=myLocalModCount;
+      }
+    }
+);
+    myInitialized=true;
+  }
+}

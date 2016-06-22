@@ -1,0 +1,36 @@
+{
+  if (tasks.size() == 1 || ApplicationManager.getApplication().isWriteAccessAllowed() || !Registry.is("idea.concurrent.scanning.files.to.index")) {
+    for (    Runnable r : tasks)     r.run();
+    return;
+  }
+  final ProgressIndicator progress=ProgressManager.getInstance().getProgressIndicator();
+  final ConcurrentLinkedQueue<Runnable> tasksQueue=new ConcurrentLinkedQueue<Runnable>(tasks);
+  List<Future<?>> results=ContainerUtil.newArrayList();
+  if (tasks.size() > 1) {
+    int numThreads=Math.max(Math.min(CacheUpdateRunner.indexingThreadCount() - 1,tasks.size() - 1),1);
+    for (int i=0; i < numThreads; ++i) {
+      results.add(ApplicationManager.getApplication().executeOnPooledThread(new Runnable(){
+        @Override public void run(){
+          ProgressManager.getInstance().runProcess(new Runnable(){
+            @Override public void run(){
+              Runnable runnable;
+              while ((runnable=tasksQueue.poll()) != null)               runnable.run();
+            }
+          }
+,ProgressWrapper.wrap(progress));
+        }
+      }
+));
+    }
+  }
+  Runnable runnable;
+  while ((runnable=tasksQueue.poll()) != null)   runnable.run();
+  for (  Future<?> result : results) {
+    try {
+      result.get();
+    }
+ catch (    Exception ex) {
+      LOG.error(ex);
+    }
+  }
+}

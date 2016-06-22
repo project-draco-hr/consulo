@@ -1,3 +1,94 @@
 {
-  scheduleCacheUpdate(task,true);
+  final TransactionId contextTransaction=TransactionGuard.getInstance().getContextTransaction();
+  final Throwable trace=ourForcedTrace != null ? ourForcedTrace : new Throwable();
+  final DumbModePermission schedulerPermission=getExplicitPermission();
+  if (LOG.isDebugEnabled())   LOG.debug("Scheduling task " + task,trace);
+  final Application application=ApplicationManager.getApplication();
+  if (application.isUnitTestMode() || application.isHeadlessEnvironment()) {
+    final ProgressIndicator indicator=ProgressManager.getInstance().getProgressIndicator();
+    if (indicator != null) {
+      indicator.pushState();
+    }
+    AccessToken token=HeavyProcessLatch.INSTANCE.processStarted("Performing indexing task");
+    try {
+      task.performInDumbMode(indicator != null ? indicator : new EmptyProgressIndicator());
+    }
+  finally {
+      token.finish();
+      if (indicator != null) {
+        indicator.popState();
+      }
+      Disposer.dispose(task);
+    }
+    return;
+  }
+  final Runnable runnable=new Runnable(){
+    @Override public void run(){
+      if (myProject.isDisposed()) {
+        return;
+      }
+      final DumbModePermission permission=schedulerPermission != null ? schedulerPermission : DumbServiceImpl.this.getEdtPermission();
+      myProgresses.put(task,new ProgressIndicatorBase());
+      Disposer.register(task,new Disposable(){
+        @Override public void dispose(){
+          application.assertIsDispatchThread();
+          myProgresses.remove(task);
+        }
+      }
+);
+      myUpdatesQueue.addLast(task);
+      if (!myDumb) {
+        if (permission == null) {
+          LOG.info("Dumb mode not permitted in modal environment; see DumbService.allowStartingDumbModeInside documentation",trace);
+        }
+ else         if (permission == DumbModePermission.MAY_START_MODAL) {
+          LOG.debug("Starting modal dumb mode, caused by the following trace",trace);
+        }
+        application.runWriteAction(new Runnable(){
+          @Override public void run(){
+synchronized (myRunWhenSmartQueue) {
+              myDumb=true;
+            }
+            myDumbStart=trace;
+            myDumbStartTransaction=contextTransaction;
+            myModificationCount++;
+            if (!myUpdateFinishedQueued) {
+              try {
+                myPublisher.enteredDumbMode();
+              }
+ catch (              Throwable e) {
+                LOG.error(e);
+              }
+            }
+          }
+        }
+);
+        application.invokeLater(new Runnable(){
+          @Override public void run(){
+            boolean modal=permission != DumbModePermission.MAY_START_BACKGROUND;
+            try {
+              DumbServiceImpl.this.startBackgroundProcess(modal);
+            }
+ catch (            Throwable e) {
+              DumbServiceImpl.this.queueUpdateFinished(modal);
+              LOG.error("Failed to start background index update task",e);
+            }
+          }
+        }
+,ModalityState.any(),myProject.getDisposed());
+      }
+    }
+  }
+;
+  if (application.isDispatchThread()) {
+    runnable.run();
+  }
+ else {
+    SwingUtilities.invokeLater(new Runnable(){
+      @Override public void run(){
+        TransactionGuard.submitTransaction(myProject,runnable);
+      }
+    }
+);
+  }
 }

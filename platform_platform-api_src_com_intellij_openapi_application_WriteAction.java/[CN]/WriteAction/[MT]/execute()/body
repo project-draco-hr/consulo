@@ -1,31 +1,32 @@
 {
   final RunResult<T> result=new RunResult<T>(this);
-  if (canWriteNow()) {
-    result.run();
+  final Application application=ApplicationManager.getApplication();
+  boolean dispatchThread=application.isDispatchThread();
+  if (dispatchThread) {
+    AccessToken token=start(getClass());
+    try {
+      result.run();
+    }
+  finally {
+      token.finish();
+    }
     return result;
   }
-  try {
-    GuiUtils.runOrInvokeAndWait(new Runnable(){
-      @Override public void run(){
-        final AccessToken accessToken=start();
-        try {
-          result.run();
-        }
+  if (application.isReadAccessAllowed()) {
+    LOG.error("Must not start write action from within read action in the other thread - deadlock is coming");
+  }
+  TransactionGuard.getInstance().submitTransactionAndWait(new Runnable(){
+    @Override public void run(){
+      AccessToken token=start(WriteAction.this.getClass());
+      try {
+        result.run();
+      }
   finally {
-          accessToken.finish();
-        }
+        token.finish();
       }
     }
+  }
 );
-  }
- catch (  Exception e) {
-    if (isSilentExecution()) {
-      result.setThrowable(e);
-    }
- else {
-      if (e instanceof RuntimeException)       throw (RuntimeException)e;
-      throw new Error(e);
-    }
-  }
+  result.throwException();
   return result;
 }

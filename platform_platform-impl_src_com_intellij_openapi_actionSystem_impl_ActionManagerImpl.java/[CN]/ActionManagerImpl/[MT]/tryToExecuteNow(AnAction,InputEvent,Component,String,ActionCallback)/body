@@ -2,38 +2,43 @@
   final Presentation presentation=action.getTemplatePresentation().clone();
   IdeFocusManager.findInstanceByContext(getContextBy(contextComponent)).doWhenFocusSettlesDown(new Runnable(){
     @Override public void run(){
-      final DataContext context=getContextBy(contextComponent);
-      AnActionEvent event=new AnActionEvent(inputEvent,context,place != null ? place : ActionPlaces.UNKNOWN,presentation,ActionManagerImpl.this,inputEvent.getModifiersEx());
-      ActionUtil.performDumbAwareUpdate(action,event,false);
-      if (!event.getPresentation().isEnabled()) {
-        result.setRejected();
-        return;
-      }
-      ActionUtil.lastUpdateAndCheckDumb(action,event,false);
-      if (!event.getPresentation().isEnabled()) {
-        result.setRejected();
-        return;
-      }
-      Component component=PlatformDataKeys.CONTEXT_COMPONENT.getData(context);
-      if (component != null && !component.isShowing()) {
-        result.setRejected();
-        return;
-      }
-      fireBeforeActionPerformed(action,context,event);
-      UIUtil.addAwtListener(new AWTEventListener(){
-        @Override public void eventDispatched(        AWTEvent event){
-          if (event.getID() == WindowEvent.WINDOW_OPENED || event.getID() == WindowEvent.WINDOW_ACTIVATED) {
-            if (!result.isProcessed()) {
-              final WindowEvent we=(WindowEvent)event;
-              IdeFocusManager.findInstanceByComponent(we.getWindow()).doWhenFocusSettlesDown(result.createSetDoneRunnable());
+      ((TransactionGuardImpl)TransactionGuard.getInstance()).performUserActivity(new Runnable(){
+        @Override public void run(){
+          final DataContext context=getContextBy(contextComponent);
+          AnActionEvent event=new AnActionEvent(inputEvent,context,place != null ? place : ActionPlaces.UNKNOWN,presentation,ActionManagerImpl.this,inputEvent.getModifiersEx());
+          ActionUtil.performDumbAwareUpdate(action,event,false);
+          if (!event.getPresentation().isEnabled()) {
+            result.setRejected();
+            return;
+          }
+          ActionUtil.lastUpdateAndCheckDumb(action,event,false);
+          if (!event.getPresentation().isEnabled()) {
+            result.setRejected();
+            return;
+          }
+          Component component=PlatformDataKeys.CONTEXT_COMPONENT.getData(context);
+          if (component != null && !component.isShowing()) {
+            result.setRejected();
+            return;
+          }
+          ActionManagerImpl.this.fireBeforeActionPerformed(action,context,event);
+          UIUtil.addAwtListener(new AWTEventListener(){
+            @Override public void eventDispatched(            AWTEvent event){
+              if (event.getID() == WindowEvent.WINDOW_OPENED || event.getID() == WindowEvent.WINDOW_ACTIVATED) {
+                if (!result.isProcessed()) {
+                  final WindowEvent we=(WindowEvent)event;
+                  IdeFocusManager.findInstanceByComponent(we.getWindow()).doWhenFocusSettlesDown(result.createSetDoneRunnable());
+                }
+              }
             }
           }
+,AWTEvent.WINDOW_EVENT_MASK,result);
+          ActionUtil.performActionDumbAware(action,event);
+          result.setDone();
+          ActionManagerImpl.this.queueActionPerformedEvent(action,context,event);
         }
       }
-,AWTEvent.WINDOW_EVENT_MASK,result);
-      ActionUtil.performActionDumbAware(action,event);
-      result.setDone();
-      queueActionPerformedEvent(action,context,event);
+);
     }
   }
 );

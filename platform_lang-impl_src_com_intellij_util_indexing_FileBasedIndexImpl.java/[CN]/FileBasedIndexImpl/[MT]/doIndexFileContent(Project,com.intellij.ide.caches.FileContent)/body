@@ -1,60 +1,57 @@
 {
-  myChangedFilesCollector.tryToEnsureAllInvalidateTasksCompleted();
   final VirtualFile file=content.getVirtualFile();
-  FileType fileType=file.getFileType();
-  myFileTypeManager.cacheFileType(file,fileType);
-  try {
-    PsiFile psiFile=null;
-    FileContentImpl fc=null;
-    int inputId=-1;
-    final List<ID<?,?>> affectedIndexCandidates=getAffectedIndexCandidates(file);
-    for (int i=0, size=affectedIndexCandidates.size(); i < size; ++i) {
-      final ID<?,?> indexId=affectedIndexCandidates.get(i);
-      if (shouldIndexFile(project,file,indexId)) {
-        if (fc == null) {
-          if (project == null) {
-            project=ProjectUtil.guessProjectForFile(file);
-          }
-          byte[] currentBytes;
-          try {
-            currentBytes=content.getBytes();
-          }
- catch (          IOException e) {
-            currentBytes=ArrayUtil.EMPTY_BYTE_ARRAY;
-          }
-          fc=new FileContentImpl(file,currentBytes);
-          if (!fileType.isBinary() && IdIndex.ourSnapshotMappingsEnabled) {
+  final FileType fileType=file.getFileType();
+  final Project finalProject=project == null ? ProjectUtil.guessProjectForFile(file) : project;
+  myFileTypeManager.freezeFileTypeTemporarilyIn(file,new Runnable(){
+    @Override public void run(){
+      PsiFile psiFile=null;
+      FileContentImpl fc=null;
+      int inputId=-1;
+      final List<ID<?,?>> affectedIndexCandidates=FileBasedIndexImpl.this.getAffectedIndexCandidates(file);
+      for (int i=0, size=affectedIndexCandidates.size(); i < size; ++i) {
+        final ID<?,?> indexId=affectedIndexCandidates.get(i);
+        if (FileBasedIndexImpl.this.shouldIndexFile(project,file,indexId)) {
+          if (fc == null) {
+            byte[] currentBytes;
             try {
-              byte[] hash=ContentHashesSupport.calcContentHashWithFileType(currentBytes,fc.getCharset(),SubstitutedFileType.substituteFileType(file,fileType,project));
-              fc.setHash(hash);
+              currentBytes=content.getBytes();
             }
  catch (            IOException e) {
-              LOG.error(e);
+              currentBytes=ArrayUtil.EMPTY_BYTE_ARRAY;
             }
+            fc=new FileContentImpl(file,currentBytes);
+            if (IdIndex.ourSnapshotMappingsEnabled) {
+              try {
+                FileType substituteFileType=SubstitutedFileType.substituteFileType(file,fileType,finalProject);
+                byte[] hash=fileType.isBinary() ? ContentHashesSupport.calcContentHash(currentBytes,substituteFileType) : ContentHashesSupport.calcContentHashWithFileType(currentBytes,fc.getCharset(),substituteFileType);
+                fc.setHash(hash);
+              }
+ catch (              IOException e) {
+                LOG.error(e);
+              }
+            }
+            psiFile=content.getUserData(IndexingDataKeys.PSI_FILE);
+            initFileContent(fc,finalProject,psiFile);
+            inputId=Math.abs(getFileId(file));
           }
-          psiFile=content.getUserData(IndexingDataKeys.PSI_FILE);
-          initFileContent(fc,project,psiFile);
-          inputId=Math.abs(getFileId(file));
-        }
-        try {
-          ProgressManager.checkCanceled();
-          updateSingleIndex(indexId,inputId,fc);
-        }
- catch (        ProcessCanceledException e) {
-          cleanFileContent(fc,psiFile);
-          throw e;
-        }
-catch (        StorageException e) {
-          requestRebuild(indexId);
-          LOG.info(e);
+          try {
+            ProgressManager.checkCanceled();
+            FileBasedIndexImpl.this.updateSingleIndex(indexId,file,inputId,fc);
+          }
+ catch (          ProcessCanceledException e) {
+            cleanFileContent(fc,psiFile);
+            throw e;
+          }
+catch (          StorageException e) {
+            FileBasedIndexImpl.this.requestRebuild(indexId);
+            LOG.info(e);
+          }
         }
       }
-    }
-    if (psiFile != null) {
-      psiFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
+      if (psiFile != null) {
+        psiFile.putUserData(PsiFileImpl.BUILDING_STUB,null);
+      }
     }
   }
-  finally {
-    myFileTypeManager.cacheFileType(file,null);
-  }
+);
 }
