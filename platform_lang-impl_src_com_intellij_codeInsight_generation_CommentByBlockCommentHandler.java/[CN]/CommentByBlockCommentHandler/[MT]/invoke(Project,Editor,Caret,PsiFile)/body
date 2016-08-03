@@ -1,0 +1,77 @@
+{
+  if (!CodeInsightUtilBase.prepareEditorForWrite(editor))   return;
+  myProject=project;
+  myEditor=editor;
+  myCaret=caret;
+  myFile=file;
+  myDocument=editor.getDocument();
+  if (!FileDocumentManager.getInstance().requestWriting(myDocument,project)) {
+    return;
+  }
+  FeatureUsageTracker.getInstance().triggerFeatureUsed("codeassists.comment.block");
+  final Commenter commenter=findCommenter(myFile,myEditor,caret);
+  if (commenter == null)   return;
+  final String prefix;
+  final String suffix;
+  if (commenter instanceof SelfManagingCommenter) {
+    final SelfManagingCommenter selfManagingCommenter=(SelfManagingCommenter)commenter;
+    mySelfManagedCommenterData=selfManagingCommenter.createBlockCommentingState(caret.getSelectionStart(),caret.getSelectionEnd(),myDocument,myFile);
+    if (mySelfManagedCommenterData == null) {
+      mySelfManagedCommenterData=SelfManagingCommenter.EMPTY_STATE;
+    }
+    prefix=selfManagingCommenter.getBlockCommentPrefix(caret.getSelectionStart(),myDocument,mySelfManagedCommenterData);
+    suffix=selfManagingCommenter.getBlockCommentSuffix(caret.getSelectionEnd(),myDocument,mySelfManagedCommenterData);
+  }
+ else {
+    prefix=commenter.getBlockCommentPrefix();
+    suffix=commenter.getBlockCommentSuffix();
+  }
+  if (prefix == null || suffix == null)   return;
+  TextRange commentedRange=findCommentedRange(commenter);
+  if (commentedRange != null) {
+    final int commentStart=commentedRange.getStartOffset();
+    final int commentEnd=commentedRange.getEndOffset();
+    int selectionStart=commentStart;
+    int selectionEnd=commentEnd;
+    if (myCaret.hasSelection()) {
+      selectionStart=myCaret.getSelectionStart();
+      selectionEnd=myCaret.getSelectionEnd();
+    }
+    if ((commentStart < selectionStart || commentStart >= selectionEnd) && (commentEnd <= selectionStart || commentEnd > selectionEnd)) {
+      commentRange(selectionStart,selectionEnd,prefix,suffix,commenter);
+    }
+ else {
+      uncommentRange(commentedRange,trim(prefix),trim(suffix),commenter);
+    }
+  }
+ else {
+    if (myCaret.hasSelection()) {
+      int selectionStart=myCaret.getSelectionStart();
+      int selectionEnd=myCaret.getSelectionEnd();
+      if (commenter instanceof IndentedCommenter) {
+        final Boolean value=((IndentedCommenter)commenter).forceIndentedLineComment();
+        if (value != null && value == Boolean.TRUE) {
+          selectionStart=myDocument.getLineStartOffset(myDocument.getLineNumber(selectionStart));
+          selectionEnd=myDocument.getLineEndOffset(myDocument.getLineNumber(selectionEnd));
+        }
+      }
+      commentRange(selectionStart,selectionEnd,prefix,suffix,commenter);
+    }
+ else {
+      EditorUtil.fillVirtualSpaceUntilCaret(editor);
+      int caretOffset=myCaret.getOffset();
+      if (commenter instanceof IndentedCommenter) {
+        final Boolean value=((IndentedCommenter)commenter).forceIndentedLineComment();
+        if (value != null && value == Boolean.TRUE) {
+          final int lineNumber=myDocument.getLineNumber(caretOffset);
+          final int start=myDocument.getLineStartOffset(lineNumber);
+          final int end=myDocument.getLineEndOffset(lineNumber);
+          commentRange(start,end,prefix,suffix,commenter);
+          return;
+        }
+      }
+      myDocument.insertString(caretOffset,prefix + suffix);
+      myCaret.moveToOffset(caretOffset + prefix.length());
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  FeatureUsageTracker.getInstance().triggerFeatureUsed("codeassists.comment.line");
+  myCodeStyleManager=CodeStyleManager.getInstance(myProject);
+  CodeStyleSettings codeStyleSettings=CodeStyleSettingsManager.getSettings(myProject);
+  boolean allLinesCommented=true;
+  for (  Block block : myBlocks) {
+    int startLine=block.startLine;
+    int endLine=block.endLine;
+    Document document=block.editor.getDocument();
+    PsiFile psiFile=block.psiFile;
+    CommonCodeStyleSettings languageSettings=codeStyleSettings.getCommonSettings(psiFile.getLanguage());
+    block.startOffsets=new int[endLine - startLine + 1];
+    block.endOffsets=new int[endLine - startLine + 1];
+    block.commenters=new Commenter[endLine - startLine + 1];
+    block.commenterStateMap=new THashMap<SelfManagingCommenter,CommenterDataHolder>();
+    CharSequence chars=document.getCharsSequence();
+    boolean singleline=startLine == endLine;
+    int offset=document.getLineStartOffset(startLine);
+    offset=CharArrayUtil.shiftForward(chars,offset," \t");
+    int endOffset=CharArrayUtil.shiftBackward(chars,document.getLineEndOffset(endLine)," \t\n");
+    block.blockSuitableCommenter=getBlockSuitableCommenter(psiFile,offset,endOffset);
+    block.commentWithIndent=!languageSettings.LINE_COMMENT_AT_FIRST_COLUMN;
+    block.addSpace=languageSettings.LINE_COMMENT_ADD_SPACE;
+    for (int line=startLine; line <= endLine; line++) {
+      Commenter commenter=block.blockSuitableCommenter != null ? block.blockSuitableCommenter : findCommenter(block.editor,psiFile,line);
+      if (commenter == null || commenter.getLineCommentPrefix() == null && (commenter.getBlockCommentPrefix() == null || commenter.getBlockCommentSuffix() == null)) {
+        block.skip=true;
+        break;
+      }
+      if (commenter instanceof SelfManagingCommenter && block.commenterStateMap.get(commenter) == null) {
+        final SelfManagingCommenter selfManagingCommenter=(SelfManagingCommenter)commenter;
+        CommenterDataHolder state=selfManagingCommenter.createLineCommentingState(startLine,endLine,document,psiFile);
+        if (state == null)         state=SelfManagingCommenter.EMPTY_STATE;
+        block.commenterStateMap.put(selfManagingCommenter,state);
+      }
+      block.commenters[line - startLine]=commenter;
+      if (!isLineCommented(block,line,commenter) && (singleline || !isLineEmpty(document,line))) {
+        allLinesCommented=false;
+        if (commenter instanceof IndentedCommenter) {
+          final Boolean value=((IndentedCommenter)commenter).forceIndentedLineComment();
+          if (value != null) {
+            block.commentWithIndent=value;
+          }
+        }
+        break;
+      }
+    }
+  }
+  boolean moveCarets=true;
+  for (  Block block : myBlocks) {
+    if (block.carets.size() > 1 && block.startLine != block.endLine) {
+      moveCarets=false;
+      break;
+    }
+  }
+  Collections.reverse(myBlocks);
+  for (  Block block : myBlocks) {
+    if (!block.skip) {
+      if (!allLinesCommented) {
+        if (!block.commentWithIndent) {
+          doDefaultCommenting(block);
+        }
+ else {
+          doIndentCommenting(block);
+        }
+      }
+ else {
+        for (int line=block.endLine; line >= block.startLine; line--) {
+          uncommentLine(block,line,block.addSpace);
+        }
+      }
+    }
+    if (!moveCarets || block.caretUpdate == null) {
+      continue;
+    }
+    Document document=block.editor.getDocument();
+    for (    Caret caret : block.carets) {
+switch (block.caretUpdate) {
+case PUT_AT_COMMENT_START:
+        final Commenter commenter=block.commenters[0];
+      if (commenter != null) {
+        String prefix;
+        if (commenter instanceof SelfManagingCommenter) {
+          prefix=((SelfManagingCommenter)commenter).getCommentPrefix(block.startLine,document,block.commenterStateMap.get((SelfManagingCommenter)commenter));
+          if (prefix == null)           prefix="";
+        }
+ else {
+          prefix=commenter.getLineCommentPrefix();
+          if (prefix == null)           prefix=commenter.getBlockCommentPrefix();
+        }
+        int lineStart=document.getLineStartOffset(block.startLine);
+        lineStart=CharArrayUtil.shiftForward(document.getCharsSequence(),lineStart," \t");
+        lineStart+=prefix.length();
+        lineStart=CharArrayUtil.shiftForward(document.getCharsSequence(),lineStart," \t");
+        if (lineStart > document.getTextLength())         lineStart=document.getTextLength();
+        caret.moveToOffset(lineStart);
+      }
+    break;
+case SHIFT_DOWN:
+  LogicalPosition position=caret.getLogicalPosition();
+if (position.line < document.getLineCount() - 1) {
+  int verticalShift=1 + block.editor.getSoftWrapModel().getSoftWrapsForLine(position.line).size() - EditorUtil.getSoftWrapCountAfterLineStart(block.editor,position);
+  caret.moveCaretRelatively(0,verticalShift,false,true);
+}
+break;
+case RESTORE_SELECTION:
+caret.setSelection(document.getLineStartOffset(document.getLineNumber(caret.getSelectionStart())),caret.getSelectionEnd());
+}
+}
+}
+}

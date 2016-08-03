@@ -1,0 +1,62 @@
+{
+  myProject=project;
+  if (!CodeInsightUtilBase.prepareEditorForWrite(editor))   return;
+  file=file.getViewProvider().getPsi(file.getViewProvider().getBaseLanguage());
+  PsiElement context=InjectedLanguageManager.getInstance(file.getProject()).getInjectionHost(file);
+  if (context != null && (context.textContains('\'') || context.textContains('\"') || context.textContains('/'))) {
+    String s=context.getText();
+    if (StringUtil.startsWith(s,"\"") || StringUtil.startsWith(s,"\'") || StringUtil.startsWith(s,"/")) {
+      file=context.getContainingFile();
+      editor=editor instanceof EditorWindow ? ((EditorWindow)editor).getDelegate() : editor;
+      caret=caret instanceof InjectedCaret ? ((InjectedCaret)caret).getDelegate() : caret;
+    }
+  }
+  Document document=editor.getDocument();
+  if (!FileDocumentManager.getInstance().requestWriting(document,project)) {
+    return;
+  }
+  boolean hasSelection=caret.hasSelection();
+  int startOffset=caret.getSelectionStart();
+  int endOffset=caret.getSelectionEnd();
+  FoldRegion fold=editor.getFoldingModel().getCollapsedRegionAtOffset(startOffset);
+  if (fold != null && fold.shouldNeverExpand() && fold.getStartOffset() == startOffset && fold.getEndOffset() == endOffset) {
+    hasSelection=false;
+  }
+  if (document.getTextLength() == 0)   return;
+  while (true) {
+    int lastLineEnd=document.getLineEndOffset(document.getLineNumber(endOffset));
+    FoldRegion collapsedAt=editor.getFoldingModel().getCollapsedRegionAtOffset(lastLineEnd);
+    if (collapsedAt != null) {
+      final int regionEndOffset=collapsedAt.getEndOffset();
+      if (regionEndOffset <= endOffset) {
+        break;
+      }
+      endOffset=regionEndOffset;
+    }
+ else {
+      break;
+    }
+  }
+  int startLine=document.getLineNumber(startOffset);
+  int endLine=document.getLineNumber(endOffset);
+  if (endLine > startLine && document.getLineStartOffset(endLine) == endOffset) {
+    endLine--;
+  }
+  Block lastBlock=myBlocks.isEmpty() ? null : myBlocks.get(myBlocks.size() - 1);
+  Block currentBlock;
+  if (lastBlock == null || lastBlock.editor != editor || lastBlock.psiFile != file || startLine > (lastBlock.endLine + 1)) {
+    currentBlock=new Block();
+    currentBlock.editor=editor;
+    currentBlock.psiFile=file;
+    currentBlock.startLine=startLine;
+    myBlocks.add(currentBlock);
+  }
+ else {
+    currentBlock=lastBlock;
+  }
+  currentBlock.carets.add(caret);
+  currentBlock.endLine=endLine;
+  boolean wholeLinesSelected=!hasSelection || startOffset == document.getLineStartOffset(document.getLineNumber(startOffset)) && endOffset == document.getLineEndOffset(document.getLineNumber(endOffset - 1)) + 1;
+  boolean startingNewLineComment=!hasSelection && isLineEmpty(document,document.getLineNumber(startOffset)) && !Comparing.equal(IdeActions.ACTION_COMMENT_LINE,ActionManagerEx.getInstanceEx().getPrevPreformedActionId());
+  currentBlock.caretUpdate=startingNewLineComment ? CaretUpdate.PUT_AT_COMMENT_START : !hasSelection ? CaretUpdate.SHIFT_DOWN : wholeLinesSelected ? CaretUpdate.RESTORE_SELECTION : null;
+}
