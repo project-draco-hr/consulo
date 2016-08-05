@@ -9,7 +9,7 @@
   initTabPainter();
   myIsViewer=viewer;
   mySettings=new SettingsImpl(this,project);
-  if (shouldSoftWrapsBeForced()) {
+  if (!mySettings.isUseSoftWraps() && shouldSoftWrapsBeForced()) {
     mySettings.setUseSoftWrapsQuiet();
     putUserData(FORCED_SOFT_WRAPS,Boolean.TRUE);
   }
@@ -19,25 +19,26 @@
   myDocumentMarkupModel=new EditorFilteringMarkupModelEx(this,documentMarkup);
   myFoldingModel=new FoldingModelImpl(this);
   myCaretModel=new CaretModelImpl(this);
+  myScrollingModel=new ScrollingModelImpl(this);
   mySoftWrapModel=new SoftWrapModelImpl(this);
   if (!myUseNewRendering)   mySizeContainer.reset();
   myCommandProcessor=CommandProcessor.getInstance();
   myImmediatePainter=new ImmediatePainter(this);
-  if (project != null) {
-    myConnection=project.getMessageBus().connect();
-    myConnection.subscribe(DocumentBulkUpdateListener.TOPIC,new EditorDocumentBulkUpdateAdapter());
+  if (myDocument instanceof DocumentImpl) {
+    myBulkUpdateListener=new EditorDocumentBulkUpdateAdapter();
+    ((DocumentImpl)myDocument).addInternalBulkModeListener(myBulkUpdateListener);
   }
   myMarkupModelListener=new MarkupModelListener(){
     private boolean areRenderersInvolved(    @NotNull RangeHighlighterEx highlighter){
       return highlighter.getCustomRenderer() != null || highlighter.getGutterIconRenderer() != null || highlighter.getLineMarkerRenderer() != null || highlighter.getLineSeparatorRenderer() != null;
     }
     @Override public void afterAdded(    @NotNull RangeHighlighterEx highlighter){
-      attributesChanged(highlighter,areRenderersInvolved(highlighter),false);
+      attributesChanged(highlighter,areRenderersInvolved(highlighter),EditorUtil.attributesImpactFontStyleOrColor(highlighter.getTextAttributes()));
     }
     @Override public void beforeRemoved(    @NotNull RangeHighlighterEx highlighter){
-      attributesChanged(highlighter,areRenderersInvolved(highlighter),false);
+      attributesChanged(highlighter,areRenderersInvolved(highlighter),EditorUtil.attributesImpactFontStyleOrColor(highlighter.getTextAttributes()));
     }
-    @Override public void attributesChanged(    @NotNull RangeHighlighterEx highlighter,    boolean renderersChanged,    boolean fontStyleChanged){
+    @Override public void attributesChanged(    @NotNull RangeHighlighterEx highlighter,    boolean renderersChanged,    boolean fontStyleOrColorChanged){
       if (myDocument.isInBulkUpdate())       return;
       if (myUseNewRendering && renderersChanged) {
         updateGutterSize();
@@ -53,13 +54,19 @@
       int end=Math.min(Math.max(highlighter.getAffectedAreaEndOffset(),0),textLength);
       int startLine=start == -1 ? 0 : myDocument.getLineNumber(start);
       int endLine=end == -1 ? myDocument.getLineCount() : myDocument.getLineNumber(end);
-      TextAttributes attributes=highlighter.getTextAttributes();
-      if (myUseNewRendering && start != end && (fontStyleChanged || attributes != null && attributes.getFontType() != Font.PLAIN)) {
+      if (myUseNewRendering && start != end && fontStyleOrColorChanged) {
         myView.invalidateRange(start,end);
       }
-      repaintLines(Math.max(0,startLine - 1),Math.min(endLine + 1,getDocument().getLineCount()));
+      if (!myFoldingModel.isInBatchFoldingOperation()) {
+        repaintLines(Math.max(0,startLine - 1),Math.min(endLine + 1,getDocument().getLineCount()));
+      }
       if (errorStripeNeedsRepaint) {
-        ((EditorMarkupModelImpl)getMarkupModel()).repaint(start,end);
+        if (myFoldingModel.isInBatchFoldingOperation()) {
+          myErrorStripeNeedsRepaint=true;
+        }
+ else {
+          myMarkupModel.repaint(start,end);
+        }
       }
       if (!myUseNewRendering && renderersChanged) {
         updateGutterSize();
@@ -151,10 +158,6 @@
   EditorHighlighter highlighter=new EmptyEditorHighlighter(myScheme.getAttributes(HighlighterColors.TEXT));
   setHighlighter(highlighter);
   myEditorComponent=new EditorComponentImpl(this);
-  myScrollPane=new MyScrollPane();
-  if (SystemInfo.isMac && SystemInfo.isJavaVersionAtLeast("1.7") && Registry.is("editor.mac.smooth.scrolling")) {
-    PreciseMouseWheelScroller.install(myScrollPane);
-  }
   myVerticalScrollBar=(MyScrollBar)myScrollPane.getVerticalScrollBar();
   myVerticalScrollBar.setOpaque(false);
   myPanel=new JPanel();
@@ -162,7 +165,7 @@
     @NotNull @Override public Iterator<JComponent> iterator(){
       JComponent component=getPermanentHeaderComponent();
       if (component != null && !component.isValid()) {
-        return Collections.<JComponent>singleton(component).iterator();
+        return Collections.singleton(component).iterator();
       }
       return ContainerUtil.emptyIterator();
     }
@@ -171,7 +174,6 @@
   myHeaderPanel=new MyHeaderPanel();
   myGutterComponent=new EditorGutterComponentImpl(this);
   initComponent();
-  myScrollingModel=new ScrollingModelImpl(this);
   if (myUseNewRendering) {
     myView=new EditorView(this);
     myView.reinitSettings();
@@ -182,14 +184,11 @@
   if (UISettings.getInstance().PRESENTATION_MODE) {
     setFontSize(UISettings.getInstance().PRESENTATION_MODE_FONT_SIZE);
   }
-  myGutterComponent.setLineNumberAreaWidthFunction(new TIntFunction(){
-    @Override public int execute(    int lineNumber){
-      return getFontMetrics(Font.PLAIN).stringWidth(Integer.toString(lineNumber + 1));
-    }
-  }
-);
   myGutterComponent.updateSize();
   Dimension preferredSize=getPreferredSize();
   myEditorComponent.setSize(preferredSize);
   updateCaretCursor();
+  if (SystemInfo.isJavaVersionAtLeast("1.8") && SystemInfo.isMacIntel64 && SystemInfo.isJetbrainsJvm&& Registry.is("ide.mac.forceTouch")) {
+    new MacGestureSupportForEditor(getComponent());
+  }
 }
