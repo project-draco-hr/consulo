@@ -1,28 +1,30 @@
 {
   incModificationCount();
-  for (  FilePointerPartNode node : myPointersToUpdateUrl) {
+  for (  FilePointerPartNode node : myNodesToUpdateUrl) {
 synchronized (this) {
-      VirtualFilePointerImpl pointer=node.leaf;
-      String urlBefore=pointer.getUrlNoUpdate();
+      String urlBefore=node.myFileAndUrl.second;
       Pair<VirtualFile,String> after=node.update();
       String urlAfter=after.second;
       if (URL_COMPARATOR.compare(urlBefore,urlAfter) != 0) {
-        FilePointerPartNode root=myPointers.get(pointer.getListener());
+        List<VirtualFilePointerImpl> myPointers=new SmartList<VirtualFilePointerImpl>();
+        node.addAllPointersTo(myPointers);
         int useCount=node.useCount;
-        node.remove();
-        FilePointerPartNode newNode=root.findPointerOrCreate(VfsUtilCore.urlToPath(urlAfter),0,after);
-        VirtualFilePointerImpl existingPointer=newNode.leaf;
+        FilePointerPartNode root=node.remove();
+        FilePointerPartNode newNode=root.findPointerOrCreate(VfsUtilCore.urlToPath(urlAfter),0,after,myPointers.size());
+        VirtualFilePointer existingPointer=newNode.getAnyPointer();
         if (existingPointer != null) {
-          pointer.myNode=newNode;
+          for (FilePointerPartNode n=newNode; n != null; n=n.parent) {
+            n.pointersUnder+=myPointers.size();
+          }
         }
- else {
-          newNode.associate(pointer,after);
-        }
+        newNode.addAllPointersTo(myPointers);
+        VirtualFilePointerImpl[] newMyPointers=myPointers.toArray(new VirtualFilePointerImpl[myPointers.size()]);
+        newNode.associate(newMyPointers,after);
         newNode.incrementUsageCount(useCount);
       }
     }
   }
-  VirtualFilePointer[] pointersToFireArray=toPointers(myPointersToFire);
+  VirtualFilePointer[] pointersToFireArray=toPointers(myNodesToFire);
   for (  VirtualFilePointer pointer : pointersToFireArray) {
     ((VirtualFilePointerImpl)pointer).myNode.update();
   }
@@ -32,9 +34,9 @@ synchronized (this) {
   if (pointersToFireArray.length != 0) {
     myBus.syncPublisher(VirtualFilePointerListener.TOPIC).validityChanged(pointersToFireArray);
   }
-  myPointersToUpdateUrl=Collections.emptyList();
+  myNodesToUpdateUrl=Collections.emptyList();
   myEvents=Collections.emptyList();
-  myPointersToFire=Collections.emptyList();
+  myNodesToFire=Collections.emptyList();
   for (  FilePointerPartNode root : myPointers.values()) {
     root.checkConsistency();
   }

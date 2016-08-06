@@ -1,0 +1,40 @@
+{
+  if (ourSubscribed.getAndSet(true))   return;
+  Application app=ApplicationManager.getApplication();
+  app.getMessageBus().connect(app).subscribe(VirtualFileManager.VFS_CHANGES,new BulkFileListener.Adapter(){
+    @Override public void after(    @NotNull List<? extends VFileEvent> events){
+      InvalidationState state=null;
+synchronized (ourLock) {
+        for (        VFileEvent event : events) {
+          if (!(event.getFileSystem() instanceof LocalFileSystem))           continue;
+          if (event instanceof VFileCreateEvent)           continue;
+          if (event instanceof VFilePropertyChangeEvent && !VirtualFile.PROP_NAME.equals(((VFilePropertyChangeEvent)event).getPropertyName())) {
+            continue;
+          }
+          String path=event.getPath();
+          if (event instanceof VFilePropertyChangeEvent) {
+            path=((VFilePropertyChangeEvent)event).getOldPath();
+          }
+ else           if (event instanceof VFileMoveEvent) {
+            path=((VFileMoveEvent)event).getOldPath();
+          }
+          VirtualFile file=event.getFile();
+          if (file == null || !file.isDirectory()) {
+            state=InvalidationState.invalidate(state,path);
+          }
+ else {
+            Collection<String> affectedPaths=ourDominatorsMap.get(path);
+            if (affectedPaths != null) {
+              affectedPaths=ContainerUtil.newArrayList(affectedPaths);
+              for (              String affectedPath : affectedPaths) {
+                state=InvalidationState.invalidate(state,affectedPath);
+              }
+            }
+          }
+        }
+      }
+      if (state != null)       state.scheduleRefresh();
+    }
+  }
+);
+}
