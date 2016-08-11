@@ -1,0 +1,129 @@
+{
+  if (myBuilder == null) {
+    return;
+  }
+switch (DOM.eventGetType(event)) {
+case Event.ONMOUSEOVER:
+{
+      com.google.gwt.dom.client.Element element=DOM.eventGetToElement(event);
+      myInsideGutter=insideGutter(element);
+      if (myInsideGutter) {
+        return;
+      }
+      Object range=element == null ? null : element.getPropertyObject("range");
+      if (!(range instanceof GwtTextRange)) {
+        return;
+      }
+      final int startOffset=((GwtTextRange)range).getStartOffset();
+      final Widget widget=(Widget)element.getPropertyObject("widget");
+      if (event.getCtrlKey()) {
+        if (myHighlightState == HighlightState.UNKNOWN) {
+          return;
+        }
+        GwtUtil.rpc().getNavigationInfo(myFileUrl,startOffset,new ReportableCallable<GwtNavigateInfo>(){
+          @Override public void onSuccess(          GwtNavigateInfo result){
+            if (result == null) {
+              return;
+            }
+            GwtTextRange resultElementRange=result.getRange();
+            if (myLastCursorPsiElementTextRange != null && myLastCursorPsiElementTextRange.containsRange(resultElementRange)) {
+              return;
+            }
+            getElement().getStyle().setCursor(Style.Cursor.POINTER);
+            if (result.getDocText() != null) {
+              myLastTooltipRange=myLastCursorPsiElementTextRange;
+              showTooltip(widget,result.getDocText());
+            }
+ else {
+              removeTooltip();
+            }
+            myLastCursorPsiElementTextRange=resultElementRange;
+            GwtHighlightInfo highlightInfo=new GwtHighlightInfo(myScheme.getAttributes(GwtEditorColorScheme.CTRL_CLICKABLE),resultElementRange,Integer.MAX_VALUE);
+            myLastNavigationInfo=result;
+            addHighlightInfos(Arrays.asList(highlightInfo),ourSelectFlag);
+          }
+        }
+);
+      }
+ else {
+        if (widget instanceof EditorSegmentBuilder.CharSpan) {
+          myLastTooltipRange=((EditorSegmentBuilder.CharSpan)widget).range;
+          String toolTip=((EditorSegmentBuilder.CharSpan)widget).getToolTip();
+          if (toolTip != null) {
+            showTooltip(widget,toolTip);
+          }
+        }
+ else {
+          myLastTooltipRange=null;
+          removeTooltip();
+        }
+      }
+      event.preventDefault();
+      break;
+    }
+case Event.ONKEYUP:
+  if (event.getKeyCode() == KeyCodes.KEY_CTRL) {
+    removeTooltip();
+  }
+break;
+case Event.ONMOUSEOUT:
+{
+boolean old=myInsideGutter;
+myInsideGutter=insideGutter(DOM.eventGetToElement(event));
+if (old != myInsideGutter) {
+  getElement().getStyle().clearCursor();
+}
+if (myInsideGutter) {
+  event.preventDefault();
+  return;
+}
+com.google.gwt.dom.client.Element element=DOM.eventGetToElement(event);
+GwtTextRange range=element == null ? null : (GwtTextRange)element.getPropertyObject("range");
+if (range == null || myLastTooltipRange != null && !myLastTooltipRange.containsRange(range)) {
+  removeTooltip();
+}
+onMouseOut();
+event.preventDefault();
+break;
+}
+case Event.ONCLICK:
+{
+if (myInsideGutter) {
+event.preventDefault();
+return;
+}
+com.google.gwt.dom.client.Element element=DOM.eventGetTarget(event);
+int offset=0;
+Object spanRange=element.getPropertyObject("range");
+if (spanRange != null) {
+offset=((GwtTextRange)spanRange).getStartOffset();
+}
+ else {
+Object lineRange=element.getPropertyObject("lineRange");
+if (lineRange != null) {
+  offset=((GwtTextRange)lineRange).getStartOffset();
+}
+}
+if (offset == myLastCaretOffset) {
+return;
+}
+myLastCaretOffset=offset;
+if (event.getCtrlKey()) {
+if (myLastNavigationInfo != null) {
+  List<GwtNavigatable> navigates=myLastNavigationInfo.getNavigates();
+  GwtNavigatable navigatable=navigates.get(0);
+  onMouseOut();
+  myEditorTabPanel.openFileInEditor(navigatable.getFile(),navigatable.getOffset());
+}
+}
+ else {
+onOffsetChangeImpl();
+}
+event.preventDefault();
+break;
+}
+default :
+super.onBrowserEvent(event);
+break;
+}
+}
