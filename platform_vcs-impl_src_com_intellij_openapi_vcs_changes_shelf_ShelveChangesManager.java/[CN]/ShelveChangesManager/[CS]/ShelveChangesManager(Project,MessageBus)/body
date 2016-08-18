@@ -1,10 +1,34 @@
 {
   super(project);
+  myPathMacroSubstitutor=PathMacroManager.getInstance(myProject).createTrackingSubstitutor();
   myBus=bus;
-  if (project.isDefault()) {
-    myFileProcessor=new CompoundShelfFileProcessor(null,PathManager.getConfigPath() + File.separator + "shelf");
+  mySchemeManager=SchemesManagerFactory.getInstance().createSchemesManager(SHELVE_MANAGER_DIR_PATH,new BaseSchemeProcessor<ShelvedChangeList>(){
+    @Nullable @Override public ShelvedChangeList readScheme(    @NotNull Element element,    boolean duringLoad) throws InvalidDataException {
+      return readOneShelvedChangeList(element);
+    }
+    @NotNull @Override public Parent writeScheme(    @NotNull ShelvedChangeList scheme) throws WriteExternalException {
+      Element child=new Element(ELEMENT_CHANGELIST);
+      scheme.writeExternal(child);
+      myPathMacroSubstitutor.collapsePaths(child);
+      return child;
+    }
   }
- else {
-    myFileProcessor=new CompoundShelfFileProcessor("shelf");
+,RoamingType.PER_USER);
+  myCleaningFuture=JobScheduler.getScheduler().scheduleWithFixedDelay(new Runnable(){
+    @Override public void run(){
+      cleanSystemUnshelvedOlderOneWeek();
+    }
+  }
+,1,1,TimeUnit.DAYS);
+  Disposer.register(project,new Disposable(){
+    @Override public void dispose(){
+      stopCleanScheduler();
+    }
+  }
+);
+  File shelfDirectory=mySchemeManager.getRootDirectory();
+  myFileProcessor=new CompoundShelfFileProcessor(shelfDirectory);
+  if (shelfDirectory.exists()) {
+    ChangeListManager.getInstance(project).addDirectoryToIgnoreImplicitly(shelfDirectory.getAbsolutePath());
   }
 }

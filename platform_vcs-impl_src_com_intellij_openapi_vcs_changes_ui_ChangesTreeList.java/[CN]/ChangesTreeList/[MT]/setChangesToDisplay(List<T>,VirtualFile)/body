@@ -1,70 +1,38 @@
 {
-  final boolean wasEmpty=myList.isEmpty();
-  final List<T> sortedChanges=new ArrayList<T>(changes);
-  Collections.sort(sortedChanges,new Comparator<T>(){
-    public int compare(    final T o1,    final T o2){
-      return TreeModelBuilder.getPathForObject(o1).getName().compareToIgnoreCase(TreeModelBuilder.getPathForObject(o2).getName());
-    }
-  }
-);
-  final Set<Object> wasSelected=new HashSet<Object>(Arrays.asList(myList.getSelectedValues()));
-  myList.setModel(new AbstractListModel(){
-    @Override public int getSize(){
-      return sortedChanges.size();
-    }
-    @Override public Object getElementAt(    int index){
-      return sortedChanges.get(index);
-    }
-  }
-);
   final DefaultTreeModel model=buildTreeModel(changes,myChangeDecorator);
   TreeState state=null;
-  if (!myAlwaysExpandList && !wasEmpty) {
-    state=TreeState.createOn(myTree,(DefaultMutableTreeNode)myTree.getModel().getRoot());
+  if (!myAlwaysExpandList) {
+    state=TreeState.createOn(this,getRoot());
   }
-  myTree.setModel(model);
-  if (!myAlwaysExpandList && !wasEmpty) {
-    state.applyTo(myTree,(DefaultMutableTreeNode)myTree.getModel().getRoot());
-    final TIntArrayList indices=new TIntArrayList();
-    for (int i=0; i < sortedChanges.size(); i++) {
-      T t=sortedChanges.get(i);
-      if (wasSelected.contains(t)) {
-        indices.add(i);
-      }
-    }
-    myList.setSelectedIndices(indices.toNativeArray());
+  setModel(model);
+  myIsModelFlat=isCurrentModelFlat();
+  setChildIndent(myShowFlatten && myIsModelFlat);
+  if (!myAlwaysExpandList) {
+    state.applyTo(this,getRoot());
     return;
   }
   final Runnable runnable=new Runnable(){
-    public void run(){
+    @Override public void run(){
       if (myProject.isDisposed())       return;
-      TreeUtil.expandAll(myTree);
-      int listSelection=0;
-      int scrollRow=0;
+      TreeUtil.expandAll(ChangesTreeList.this);
+      int selectedTreeRow=-1;
       if (myShowCheckboxes) {
         if (myIncludedChanges.size() > 0) {
-          for (int i=0; i < sortedChanges.size(); i++) {
-            T t=sortedChanges.get(i);
-            if (myIncludedChanges.contains(t)) {
-              listSelection=i;
-              break;
-            }
-          }
           ChangesBrowserNode root=(ChangesBrowserNode)model.getRoot();
           Enumeration enumeration=root.depthFirstEnumeration();
           while (enumeration.hasMoreElements()) {
             ChangesBrowserNode node=(ChangesBrowserNode)enumeration.nextElement();
-            final CheckboxTree.NodeState state=getNodeStatus(node);
+            @SuppressWarnings("unchecked") final CheckboxTree.NodeState state=getNodeStatus(node);
             if (node != root && state == CheckboxTree.NodeState.CLEAR) {
-              myTree.collapsePath(new TreePath(node.getPath()));
+              collapsePath(new TreePath(node.getPath()));
             }
           }
           enumeration=root.depthFirstEnumeration();
           while (enumeration.hasMoreElements()) {
             ChangesBrowserNode node=(ChangesBrowserNode)enumeration.nextElement();
-            final CheckboxTree.NodeState state=getNodeStatus(node);
+            @SuppressWarnings("unchecked") final CheckboxTree.NodeState state=getNodeStatus(node);
             if (state == CheckboxTree.NodeState.FULL && node.isLeaf()) {
-              scrollRow=myTree.getRowForPath(new TreePath(node.getPath()));
+              selectedTreeRow=getRowForPath(new TreePath(node.getPath()));
               break;
             }
           }
@@ -72,34 +40,16 @@
       }
  else {
         if (toSelect != null) {
-          ChangesBrowserNode root=(ChangesBrowserNode)model.getRoot();
-          final int[] rowToSelect=new int[]{-1};
-          TreeUtil.traverse(root,new TreeUtil.Traverse(){
-            @Override public boolean accept(            Object node){
-              if (node instanceof DefaultMutableTreeNode) {
-                Object userObject=((DefaultMutableTreeNode)node).getUserObject();
-                if (userObject instanceof Change) {
-                  Change change=(Change)userObject;
-                  VirtualFile virtualFile=change.getVirtualFile();
-                  if ((virtualFile != null && virtualFile.equals(toSelect)) || seemsToBeMoved(change,toSelect)) {
-                    TreeNode[] path=((DefaultMutableTreeNode)node).getPath();
-                    rowToSelect[0]=myTree.getRowForPath(new TreePath(path));
-                  }
-                }
-              }
-              return rowToSelect[0] == -1;
-            }
+          int rowInTree=findRowContainingFile((TreeNode)model.getRoot(),toSelect);
+          if (rowInTree > -1) {
+            selectedTreeRow=rowInTree;
           }
-);
-          scrollRow=rowToSelect[0] == -1 ? scrollRow : rowToSelect[0];
         }
       }
-      if (changes.size() > 0) {
-        myList.setSelectedIndex(listSelection);
-        myList.ensureIndexIsVisible(listSelection);
-        myTree.setSelectionRow(scrollRow);
-        TreeUtil.showRowCentered(myTree,scrollRow,false);
+      if (selectedTreeRow >= 0) {
+        setSelectionRow(selectedTreeRow);
       }
+      TreeUtil.showRowCentered(ChangesTreeList.this,selectedTreeRow,false);
     }
   }
 ;

@@ -12,7 +12,7 @@
   String localContent=toString(mergeData.getLocal());
   String patchedContent=mergeData.getPatched();
   if (localContent == null)   return ApplyPatchStatus.FAILURE;
-  final Ref<ApplyPatchStatus> applyPatchStatusReference=new Ref<ApplyPatchStatus>();
+  final Ref<ApplyPatchStatus> applyPatchStatusReference=new Ref<>();
   Consumer<MergeResult> callback=new Consumer<MergeResult>(){
     @Override public void consume(    MergeResult result){
       FileDocumentManager.getInstance().saveDocument(document);
@@ -35,11 +35,21 @@
       }
     }
  else {
-      request=PatchDiffRequestFactory.createBadMergeRequest(project,document,file,localContent,patchedContent,callback);
+      TextFilePatch textPatch=(TextFilePatch)patch.getPatch();
+      final GenericPatchApplier applier=new GenericPatchApplier(localContent,textPatch.getHunks());
+      applier.execute();
+      final AppliedTextPatch appliedTextPatch=AppliedTextPatch.create(applier.getAppliedInfo());
+      request=PatchDiffRequestFactory.createBadMergeRequest(project,document,file,localContent,appliedTextPatch,callback);
     }
+    request.putUserData(DiffUserDataKeysEx.MERGE_ACTION_CAPTIONS,new Function<MergeResult,String>(){
+      @Override public String fun(      MergeResult result){
+        return result.equals(MergeResult.CANCEL) ? "Abort..." : null;
+      }
+    }
+);
     request.putUserData(DiffUserDataKeysEx.MERGE_CANCEL_HANDLER,new Condition<MergeTool.MergeViewer>(){
       @Override public boolean value(      MergeTool.MergeViewer viewer){
-        int result=Messages.showYesNoCancelDialog(viewer.getComponent().getRootPane(),"Would you like to abort applying patch action?","Close Merge","Abort","Skip File","Cancel",Messages.getQuestionIcon());
+        int result=Messages.showYesNoCancelDialog(viewer.getComponent().getRootPane(),"Would you like to (A)bort&Rollback applying patch action or (S)kip this file?","Close Merge","_Abort","_Skip","Cancel",Messages.getQuestionIcon());
         if (result == Messages.YES) {
           applyPatchStatusReference.set(ApplyPatchStatus.ABORT);
         }
