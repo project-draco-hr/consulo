@@ -4,23 +4,24 @@
   ApplyPatchStatus result=ApplyPatchStatus.SUCCESS;
   for (  PatchApplier patchApplier : group) {
     result=ApplyPatchStatus.and(result,patchApplier.nonWriteActionPreCheck());
-    if (ApplyPatchStatus.FAILURE.equals(result))     return result;
   }
-  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(project,false);
-  final Ref<ApplyPatchStatus> refStatus=new Ref<ApplyPatchStatus>(null);
+  final Label beforeLabel=LocalHistory.getInstance().putSystemLabel(project,"Before patch");
+  final TriggerAdditionOrDeletion trigger=new TriggerAdditionOrDeletion(project);
+  final Ref<ApplyPatchStatus> refStatus=new Ref<>(result);
   try {
     CommandProcessor.getInstance().executeCommand(project,new Runnable(){
       @Override public void run(){
         for (        PatchApplier applier : group) {
-          if (!applier.createFiles()) {
-            refStatus.set(ApplyPatchStatus.FAILURE);
-            return;
-          }
+          refStatus.set(ApplyPatchStatus.and(refStatus.get(),applier.createFiles()));
           applier.addSkippedItems(trigger);
         }
         trigger.prepare();
+        if (refStatus.get() == ApplyPatchStatus.SUCCESS) {
+          refStatus.set(null);
+        }
         for (        PatchApplier applier : group) {
           refStatus.set(ApplyPatchStatus.and(refStatus.get(),applier.executeWritable()));
+          if (refStatus.get() == ApplyPatchStatus.ABORT)           break;
         }
       }
     }
@@ -28,19 +29,26 @@
   }
   finally {
     VcsFileListenerContextHelper.getInstance(project).clearContext();
+    LocalHistory.getInstance().putSystemLabel(project,"After patch");
   }
   result=refStatus.get();
   result=result == null ? ApplyPatchStatus.FAILURE : result;
   trigger.processIt();
-  final Set<FilePath> directlyAffected=new HashSet<FilePath>();
-  final Set<VirtualFile> indirectlyAffected=new HashSet<VirtualFile>();
+  final Set<FilePath> directlyAffected=new HashSet<>();
+  final Set<VirtualFile> indirectlyAffected=new HashSet<>();
   for (  PatchApplier applier : group) {
     directlyAffected.addAll(applier.getDirectlyAffected());
     indirectlyAffected.addAll(applier.getIndirectlyAffected());
   }
   directlyAffected.addAll(trigger.getAffected());
   final Consumer<Collection<FilePath>> mover=localChangeList == null ? null : createMover(project,localChangeList);
-  PatchApplier.refreshPassedFilesAndMoveToChangelist(project,null,directlyAffected,indirectlyAffected,mover,false);
+  refreshPassedFilesAndMoveToChangelist(project,directlyAffected,indirectlyAffected,mover);
+  if (result == ApplyPatchStatus.FAILURE) {
+    suggestRollback(project,group,beforeLabel);
+  }
+ else   if (result == ApplyPatchStatus.ABORT) {
+    rollbackUnderProgress(project,project.getBaseDir(),beforeLabel);
+  }
   showApplyStatus(project,result);
   return result;
 }

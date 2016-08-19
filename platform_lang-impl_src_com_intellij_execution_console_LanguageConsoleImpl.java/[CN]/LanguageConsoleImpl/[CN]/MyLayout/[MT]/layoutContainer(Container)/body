@@ -4,28 +4,39 @@
     return;
   }
   final EditorEx history=myHistoryViewer;
-  final EditorEx input=componentCount == 2 ? myConsoleEditor : null;
+  final EditorEx input=isConsoleEditorEnabled() ? myConsoleEditor : null;
   if (input == null) {
     parent.getComponent(0).setBounds(parent.getBounds());
     return;
   }
   final Dimension panelSize=parent.getSize();
+  if (myScrollBar.isVisible()) {
+    Dimension size=myScrollBar.getPreferredSize();
+    if (panelSize.height < size.height)     return;
+    panelSize.height-=size.height;
+    myScrollBar.setBounds(0,panelSize.height,panelSize.width,size.height);
+  }
   if (panelSize.getHeight() <= 0) {
     return;
   }
   final Dimension historySize=history.getContentSize();
   final Dimension inputSize=input.getContentSize();
-  int newInputHeight;
-  final int width=Math.max(inputSize.width,historySize.width);
   if (isHistoryViewerForceAdditionalColumnsUsage()) {
     history.getSoftWrapModel().forceAdditionalColumnsUsage();
-    input.getSettings().setAdditionalColumnsCount(2 + (width - inputSize.width) / EditorUtil.getSpaceWidth(Font.PLAIN,input));
-    history.getSettings().setAdditionalColumnsCount(2 + (width - historySize.width) / EditorUtil.getSpaceWidth(Font.PLAIN,history));
+    int minAdditionalColumns=2;
+    int historySpaceWidth=EditorUtil.getPlainSpaceWidth(history);
+    historySize.width+=historySpaceWidth * (minAdditionalColumns - history.getSettings().getAdditionalColumnsCount());
+    int inputSpaceWidth=EditorUtil.getPlainSpaceWidth(input);
+    inputSize.width+=inputSpaceWidth * (minAdditionalColumns - input.getSettings().getAdditionalColumnsCount());
+    int max=Math.max(historySize.width,inputSize.width);
+    history.getSettings().setAdditionalColumnsCount(minAdditionalColumns + (max - historySize.width) / historySpaceWidth);
+    input.getSettings().setAdditionalColumnsCount(minAdditionalColumns + (max - inputSize.width) / inputSpaceWidth);
   }
+  int newInputHeight;
   if (history.getDocument().getLineCount() == 0) {
     historySize.height=0;
   }
-  int minHistoryHeight=historySize.height > 0 ? (getMinHistoryLineCount() * history.getLineHeight() + (myShowSeparatorLine ? SEPARATOR_THICKNESS : 0)) : 0;
+  int minHistoryHeight=historySize.height > 0 ? getMinHistoryLineCount() * history.getLineHeight() : 0;
   int minInputHeight=input.isViewer() ? 0 : input.getLineHeight();
   final int inputPreferredHeight=input.isViewer() ? 0 : Math.max(minInputHeight,inputSize.height);
   final int historyPreferredHeight=Math.max(minHistoryHeight,historySize.height);
@@ -41,8 +52,19 @@
  else {
     newInputHeight=panelSize.height - historyPreferredHeight;
   }
+  int oldHistoryHeight=history.getComponent().getHeight();
   int newHistoryHeight=panelSize.height - newInputHeight;
+  int delta=newHistoryHeight - ((newHistoryHeight / history.getLineHeight()) * history.getLineHeight());
+  newHistoryHeight-=delta;
+  newInputHeight+=delta;
   input.getComponent().setBounds(0,newHistoryHeight,panelSize.width,newInputHeight);
-  myForceScrollToEnd.compareAndSet(false,shouldScrollHistoryToEnd());
   history.getComponent().setBounds(0,0,panelSize.width,newHistoryHeight);
+  input.getComponent().doLayout();
+  history.getComponent().doLayout();
+  if (newHistoryHeight < oldHistoryHeight) {
+    JViewport viewport=history.getScrollPane().getViewport();
+    Point position=viewport.getViewPosition();
+    position.translate(0,oldHistoryHeight - newHistoryHeight);
+    viewport.setViewPosition(position);
+  }
 }
