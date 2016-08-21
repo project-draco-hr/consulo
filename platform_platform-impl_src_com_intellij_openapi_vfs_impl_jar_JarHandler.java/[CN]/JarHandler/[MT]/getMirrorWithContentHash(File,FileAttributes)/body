@@ -1,0 +1,77 @@
+{
+  File mirrorFile=null;
+  String jarDir=getJarsDir();
+  try {
+    String path=originalFile.getPath();
+    CacheLibraryInfo info=CacheLibraryInfo.ourCachedLibraryInfo.get(path);
+    if (info != null && originalAttributes.length == info.myFileLength && Math.abs(originalAttributes.lastModified - info.myModificationTime) <= FS_TIME_RESOLUTION) {
+      mirrorFile=new File(jarDir,info.mySnapshotPath);
+      if (!mirrorDiffers(originalAttributes,FileSystemUtil.getAttributes(mirrorFile),true)) {
+        return mirrorFile;
+      }
+    }
+    MessageDigest sha1=null;
+    File tempJarFile=null;
+    try {
+      tempJarFile=FileUtil.createTempFile(new File(jarDir),originalFile.getName(),"",true,false);
+      DataOutputStream os=new DataOutputStream(new FileOutputStream(tempJarFile));
+      try {
+        FileInputStream is=new FileInputStream(originalFile);
+        try {
+          sha1=MessageDigest.getInstance("SHA1");
+          sha1.update(String.valueOf(originalAttributes.length).getBytes(Charset.defaultCharset()));
+          sha1.update((byte)0);
+          byte[] buffer=new byte[Math.min(1024 * 1024,(int)originalAttributes.length)];
+          long totalBytes=0;
+          while (true) {
+            int read=is.read(buffer);
+            if (read < 0)             break;
+            totalBytes+=read;
+            sha1.update(buffer,0,read);
+            os.write(buffer,0,read);
+            if (totalBytes == originalAttributes.length)             break;
+          }
+        }
+  finally {
+          is.close();
+        }
+      }
+  finally {
+        os.close();
+      }
+    }
+ catch (    IOException ex) {
+      File target=mirrorFile != null ? mirrorFile : tempJarFile != null ? tempJarFile : new File(jarDir);
+      reportIOErrorWithJars(originalFile,target,ex);
+      return originalFile;
+    }
+catch (    NoSuchAlgorithmException ex) {
+      LOG.error(ex);
+      return originalFile;
+    }
+    String mirrorName=getSnapshotName(originalFile.getName(),sha1.digest());
+    mirrorFile=new File(jarDir,mirrorName);
+    FileAttributes mirrorFileAttributes=FileSystemUtil.getAttributes(mirrorFile);
+    if (mirrorFileAttributes == null) {
+      try {
+        FileUtil.rename(tempJarFile,mirrorFile);
+        FileUtil.setLastModified(mirrorFile,originalAttributes.lastModified);
+      }
+ catch (      IOException ex) {
+        reportIOErrorWithJars(originalFile,mirrorFile,ex);
+        return originalFile;
+      }
+    }
+ else {
+      FileUtil.delete(tempJarFile);
+    }
+    info=new CacheLibraryInfo(mirrorFile.getName(),originalAttributes.lastModified,originalAttributes.length);
+    CacheLibraryInfo.ourCachedLibraryInfo.put(path,info);
+    return mirrorFile;
+  }
+ catch (  IOException ex) {
+    CacheLibraryInfo.ourCachedLibraryInfo.markCorrupted();
+    reportIOErrorWithJars(originalFile,mirrorFile != null ? mirrorFile : new File(jarDir,originalFile.getName()),ex);
+    return originalFile;
+  }
+}

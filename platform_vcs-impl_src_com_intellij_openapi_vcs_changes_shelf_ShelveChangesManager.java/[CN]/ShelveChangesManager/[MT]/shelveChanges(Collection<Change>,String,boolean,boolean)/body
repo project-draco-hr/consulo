@@ -1,0 +1,52 @@
+{
+  final ProgressIndicator progressIndicator=ProgressManager.getInstance().getProgressIndicator();
+  if (progressIndicator != null) {
+    progressIndicator.setText(VcsBundle.message("shelve.changes.progress.title"));
+  }
+  File schemePatchDir=generateUniqueSchemePatchDir(commitMessage,true);
+  final List<Change> textChanges=new ArrayList<>();
+  final List<ShelvedBinaryFile> binaryFiles=new ArrayList<>();
+  for (  Change change : changes) {
+    if (ChangesUtil.getFilePath(change).isDirectory()) {
+      continue;
+    }
+    if (change.getBeforeRevision() instanceof BinaryContentRevision || change.getAfterRevision() instanceof BinaryContentRevision) {
+      binaryFiles.add(shelveBinaryFile(schemePatchDir,change));
+    }
+ else {
+      textChanges.add(change);
+    }
+  }
+  final ShelvedChangeList changeList;
+  try {
+    File patchPath=getPatchFileInConfigDir(schemePatchDir);
+    ProgressManager.checkCanceled();
+    final List<FilePatch> patches=IdeaTextPatchBuilder.buildPatch(myProject,textChanges,myProject.getBaseDir().getPresentableUrl(),false);
+    ProgressManager.checkCanceled();
+    CommitContext commitContext=new CommitContext();
+    baseRevisionsOfDvcsIntoContext(textChanges,commitContext);
+    myFileProcessor.savePathFile(new CompoundShelfFileProcessor.ContentProvider(){
+      @Override public void writeContentTo(      @NotNull final Writer writer,      @NotNull CommitContext commitContext) throws IOException {
+        UnifiedDiffWriter.write(myProject,patches,writer,"\n",commitContext);
+      }
+    }
+,patchPath,commitContext);
+    changeList=new ShelvedChangeList(patchPath.toString(),commitMessage.replace('\n',' '),binaryFiles);
+    changeList.markToDelete(markToBeDeleted);
+    changeList.setName(schemePatchDir.getName());
+    ProgressManager.checkCanceled();
+    mySchemeManager.addNewScheme(changeList,false);
+    if (rollback) {
+      final String operationName=UIUtil.removeMnemonic(RollbackChangesDialog.operationNameByChanges(myProject,changes));
+      boolean modalContext=ApplicationManager.getApplication().isDispatchThread() && LaterInvocator.isInModalContext();
+      if (progressIndicator != null) {
+        progressIndicator.startNonCancelableSection();
+      }
+      new RollbackWorker(myProject,operationName,modalContext).doRollback(changes,true,null,VcsBundle.message("shelve.changes.action"));
+    }
+  }
+  finally {
+    notifyStateChanged();
+  }
+  return changeList;
+}

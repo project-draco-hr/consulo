@@ -2,31 +2,51 @@
   if (myPreparedDeletion != null) {
     for (    Map.Entry<VcsRoot,Collection<FilePath>> entry : myPreparedDeletion.entrySet()) {
       final VcsRoot vcsRoot=entry.getKey();
-      final CheckinEnvironment localChangesProvider=vcsRoot.getVcs().getCheckinEnvironment();
+      final AbstractVcs vcs=ObjectUtils.assertNotNull(vcsRoot.getVcs());
+      final CheckinEnvironment localChangesProvider=vcs.getCheckinEnvironment();
       if (localChangesProvider == null)       continue;
       final Collection<FilePath> filePaths=entry.getValue();
-      if (vcsRoot.getVcs().fileListenerIsSynchronous()) {
+      if (vcs.fileListenerIsSynchronous()) {
         myAffected.addAll(filePaths);
         continue;
       }
-      askUserIfNeededDeletion(vcsRoot.getVcs(),(List<FilePath>)filePaths);
+      askUserIfNeeded(vcsRoot.getVcs(),(List<FilePath>)filePaths,VcsConfiguration.StandardConfirmation.REMOVE);
       myAffected.addAll(filePaths);
       localChangesProvider.scheduleMissingFileForDeletion((List<FilePath>)filePaths);
     }
   }
   if (myPreparedAddition != null) {
+    final List<FilePath> incorrectFilePath=new ArrayList<>();
     for (    Map.Entry<VcsRoot,Collection<FilePath>> entry : myPreparedAddition.entrySet()) {
       final VcsRoot vcsRoot=entry.getKey();
-      final CheckinEnvironment localChangesProvider=vcsRoot.getVcs().getCheckinEnvironment();
+      final AbstractVcs vcs=ObjectUtils.assertNotNull(vcsRoot.getVcs());
+      final CheckinEnvironment localChangesProvider=vcs.getCheckinEnvironment();
       if (localChangesProvider == null)       continue;
       final Collection<FilePath> filePaths=entry.getValue();
-      if (vcsRoot.getVcs().fileListenerIsSynchronous()) {
+      if (vcs.fileListenerIsSynchronous()) {
         myAffected.addAll(filePaths);
         continue;
       }
-      askUserIfNeededAddition(vcsRoot.getVcs(),(List<FilePath>)filePaths);
+      askUserIfNeeded(vcsRoot.getVcs(),(List<FilePath>)filePaths,VcsConfiguration.StandardConfirmation.ADD);
       myAffected.addAll(filePaths);
-      localChangesProvider.scheduleUnversionedFilesForAddition(ObjectsConvertor.fp2vf(filePaths));
+      final List<VirtualFile> virtualFiles=new ArrayList<>();
+      ContainerUtil.process(filePaths,new Processor<FilePath>(){
+        @Override public boolean process(        FilePath path){
+          VirtualFile vf=path.getVirtualFile();
+          if (vf == null) {
+            incorrectFilePath.add(path);
+          }
+ else {
+            virtualFiles.add(vf);
+          }
+          return true;
+        }
+      }
+);
+      localChangesProvider.scheduleUnversionedFilesForAddition(virtualFiles);
+    }
+    if (!incorrectFilePath.isEmpty()) {
+      notifyAndLogFiles("Apply new files error",incorrectFilePath);
     }
   }
 }

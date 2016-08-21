@@ -1,0 +1,56 @@
+{
+  if (outputType == ProcessOutputTypes.STDERR) {
+    LOG.warn(line);
+  }
+  if (outputType != ProcessOutputTypes.STDOUT) {
+    return;
+  }
+  if (LOG.isTraceEnabled())   LOG.trace(">> " + line);
+  if (myLastOp == null) {
+    final WatcherOp watcherOp;
+    try {
+      watcherOp=WatcherOp.valueOf(line);
+    }
+ catch (    IllegalArgumentException e) {
+      String message="Illegal watcher command: '" + line + "'";
+      if (line.length() <= 20)       message+=" " + Arrays.toString(line.chars().toArray());
+      LOG.error(message);
+      return;
+    }
+    if (watcherOp == WatcherOp.GIVEUP) {
+      notifyOnFailure(ApplicationBundle.message("watcher.gave.up"),null);
+      myIsShuttingDown=true;
+    }
+ else     if (watcherOp == WatcherOp.RESET) {
+      myNotificationSink.notifyReset(null);
+    }
+ else {
+      myLastOp=watcherOp;
+    }
+  }
+ else   if (myLastOp == WatcherOp.MESSAGE) {
+    notifyOnFailure(line,NotificationListener.URL_OPENING_LISTENER);
+    myLastOp=null;
+  }
+ else   if (myLastOp == WatcherOp.REMAP || myLastOp == WatcherOp.UNWATCHEABLE) {
+    if ("#".equals(line)) {
+      if (myLastOp == WatcherOp.REMAP) {
+        processRemap();
+      }
+ else {
+        mySettingRoots.decrementAndGet();
+        processUnwatchable();
+      }
+      myLines.clear();
+      myLastOp=null;
+    }
+ else {
+      myLines.add(line);
+    }
+  }
+ else {
+    String path=StringUtil.trimEnd(line.replace('\0','\n'),File.separator);
+    processChange(path,myLastOp);
+    myLastOp=null;
+  }
+}

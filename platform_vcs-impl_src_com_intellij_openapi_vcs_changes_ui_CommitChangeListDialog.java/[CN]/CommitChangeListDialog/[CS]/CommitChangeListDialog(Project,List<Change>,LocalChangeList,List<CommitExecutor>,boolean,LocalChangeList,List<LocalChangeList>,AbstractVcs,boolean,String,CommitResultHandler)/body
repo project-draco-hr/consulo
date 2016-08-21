@@ -2,25 +2,25 @@
   super(project,true);
   myCommitContext=new CommitContext();
   myProject=project;
+  myVcsConfiguration=ObjectUtils.assertNotNull(VcsConfiguration.getInstance(myProject));
   myExecutors=executors;
   myShowVcsCommit=showVcsCommit;
   myVcs=singleVcs;
   myResultHandler=customResultHandler;
-  myListComments=new HashMap<String,String>();
-  myAdditionalData=new PseudoMap<Object,Object>();
+  myListComments=new HashMap<>();
+  myAdditionalData=new PseudoMap<>();
   myDiffDetails=new MyChangeProcessor(myProject);
-  if (!myShowVcsCommit && ((myExecutors == null) || myExecutors.size() == 0)) {
+  if (!myShowVcsCommit && ContainerUtil.isEmpty(myExecutors)) {
     throw new IllegalArgumentException("nothing found to execute commit with");
   }
-  myAllOfDefaultChangeListChangesIncluded=new HashSet<Change>(changes).containsAll(new HashSet<Change>(defaultChangeList.getChanges()));
+  myAllOfDefaultChangeListChangesIncluded=ContainerUtil.newHashSet(changes).containsAll(ContainerUtil.newHashSet(defaultChangeList.getChanges()));
   myIsAlien=isAlien;
   if (isAlien) {
-    AlienChangeListBrowser browser=new AlienChangeListBrowser(project,changeLists,changes,initialSelection,true,true,singleVcs);
-    myBrowser=browser;
-    myBrowserExtender=browser;
+    myBrowser=new AlienChangeListBrowser(project,changeLists,changes,initialSelection,true,true,singleVcs);
   }
  else {
-    MultipleChangeListBrowser browser=new MultipleChangeListBrowser(project,changeLists,changes,getDisposable(),initialSelection,true,true,new Runnable(){
+    boolean unversionedFilesEnabled=myShowVcsCommit && Registry.is("vcs.unversioned.files.in.commit");
+    MultipleChangeListBrowser browser=new MultipleChangeListBrowser(project,changeLists,(List)changes,initialSelection,true,true,new Runnable(){
       @Override public void run(){
         updateWarning();
       }
@@ -32,7 +32,7 @@
         }
       }
     }
-){
+,unversionedFilesEnabled){
       @Override protected void afterDiffRefresh(){
         myBrowser.rebuildList();
         myBrowser.setDataIsDirty(false);
@@ -45,9 +45,14 @@
       }
     }
 ;
+    browser.addSelectedListChangeListener(new SelectedListChangeListener(){
+      @Override public void selectedListChanged(){
+        updateOnListSelection();
+      }
+    }
+);
     myBrowser=browser;
     myBrowser.setAlwayExpandList(false);
-    myBrowserExtender=browser.getExtender();
   }
   myBrowser.getViewer().addSelectionListener(new Runnable(){
     @Override public void run(){
@@ -60,32 +65,22 @@
     }
   }
 );
-  myBrowserExtender.addToolbarActions(this);
-  myBrowserExtender.addSelectedListChangeListener(new SelectedListChangeListener(){
-    @Override public void selectedListChanged(){
-      updateOnListSelection();
-    }
-  }
-);
   myCommitMessageArea=new CommitMessage(project);
-  if (!VcsConfiguration.getInstance(project).CLEAR_INITIAL_COMMIT_MESSAGE) {
-    setComment(project,initialSelection,comment);
+  if (!myVcsConfiguration.CLEAR_INITIAL_COMMIT_MESSAGE) {
+    setComment(initialSelection,comment);
   }
   myBrowser.setDiffBottomComponent(new DiffCommitMessageEditor(this));
   myActionName=VcsBundle.message("commit.dialog.title");
-  myAdditionalOptionsPanel=new JPanel();
-  myAdditionalOptionsPanel.setLayout(new BorderLayout());
   Box optionsBox=Box.createVerticalBox();
   boolean hasVcsOptions=false;
   Box vcsCommitOptions=Box.createVerticalBox();
-  final List<AbstractVcs> vcses=new ArrayList<AbstractVcs>(getAffectedVcses());
-  Collections.sort(vcses,new Comparator<AbstractVcs>(){
-    @Override public int compare(    AbstractVcs o1,    AbstractVcs o2){
+  final List<AbstractVcs> vcses=ContainerUtil.sorted(getAffectedVcses(),new Comparator<AbstractVcs>(){
+    @Override public int compare(    @NotNull AbstractVcs o1,    @NotNull AbstractVcs o2){
       return o1.getKeyInstanceMethod().getName().compareToIgnoreCase(o2.getKeyInstanceMethod().getName());
     }
   }
 );
-  myCheckinChangeListSpecificComponents=new HashMap<String,CheckinChangeListSpecificComponent>();
+  myCheckinChangeListSpecificComponents=ContainerUtil.newHashMap();
   for (  AbstractVcs vcs : vcses) {
     final CheckinEnvironment checkinEnvironment=vcs.getCheckinEnvironment();
     if (checkinEnvironment != null) {
@@ -147,9 +142,13 @@
   }
   if (hasVcsOptions || beforeVisible || afterVisible) {
     optionsBox.add(Box.createVerticalGlue());
+    myAdditionalOptionsPanel=new JPanel(new BorderLayout());
     myAdditionalOptionsPanel.add(optionsBox,BorderLayout.NORTH);
   }
-  myOkActionText=actionName.replace(BundleBase.MNEMONIC,'&');
+ else {
+    myAdditionalOptionsPanel=null;
+  }
+  myOkActionText=actionName;
   if (myShowVcsCommit) {
     setTitle(myActionName);
   }
@@ -169,7 +168,7 @@
   }
   myWarningLabel=new JLabel();
   myWarningLabel.setUI(new MultiLineLabelUI());
-  myWarningLabel.setForeground(Color.red);
+  myWarningLabel.setForeground(JBColor.RED);
   updateWarning();
   init();
   updateButtons();

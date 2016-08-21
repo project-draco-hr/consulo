@@ -1,27 +1,44 @@
 {
-  final VirtualFile[] files=PlatformDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
+  final VirtualFile[] files=CommonDataKeys.VIRTUAL_FILE_ARRAY.getData(dataContext);
   if (files == null || files.length == 0)   return;
   Project project=CommonDataKeys.PROJECT.getData(dataContext);
   String message=createConfirmationMessage(files);
   int returnValue=Messages.showOkCancelDialog(message,UIBundle.message("delete.dialog.title"),ApplicationBundle.message("button.delete"),CommonBundle.getCancelButtonText(),Messages.getQuestionIcon());
-  if (returnValue != 0)   return;
+  if (returnValue != Messages.OK)   return;
   Arrays.sort(files,FileComparator.getInstance());
   final List<String> problems=ContainerUtil.newLinkedList();
-  new WriteCommandAction.Simple(project){
-    @Override protected void run() throws Throwable {
-      for (      final VirtualFile file : files) {
-        try {
-          file.delete(this);
+  new Task.Modal(project,"Deleting Files...",true){
+    @Override public void run(    @NotNull ProgressIndicator indicator){
+      indicator.setIndeterminate(false);
+      int i=0;
+      for (      VirtualFile file : files) {
+        indicator.checkCanceled();
+        indicator.setText2(file.getPresentableUrl());
+        indicator.setFraction((double)i / files.length);
+        i++;
+        RunResult result=new WriteCommandAction.Simple(project){
+          @Override protected void run() throws Throwable {
+            file.delete(this);
+          }
         }
- catch (        IOException e) {
-          LOG.info(e);
+.execute();
+        if (result.hasException()) {
+          LOG.info("Error when deleting " + file,result.getThrowable());
           problems.add(file.getName());
         }
       }
     }
+    @Override public void onSuccess(){
+      reportProblems();
+    }
+    @Override public void onCancel(){
+      reportProblems();
+    }
+    private void reportProblems(){
+      if (!problems.isEmpty()) {
+        reportDeletionProblem(problems);
+      }
+    }
   }
-.execute();
-  if (!problems.isEmpty()) {
-    reportDeletionProblem(problems);
-  }
+.queue();
 }

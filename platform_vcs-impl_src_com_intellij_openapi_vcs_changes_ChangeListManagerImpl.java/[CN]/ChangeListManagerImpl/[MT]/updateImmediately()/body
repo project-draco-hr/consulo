@@ -2,12 +2,16 @@
   final ProjectLevelVcsManager vcsManager=ProjectLevelVcsManager.getInstance(myProject);
   if (!vcsManager.hasActiveVcss())   return;
   final VcsInvalidated invalidated=myDirtyScopeManager.retrieveScopes();
-  if (checkScopeIsEmpty(invalidated))   return;
+  if (checkScopeIsEmpty(invalidated)) {
+    myDirtyScopeManager.changesProcessed();
+    return;
+  }
   final boolean wasEverythingDirty=invalidated.isEverythingDirty();
   final List<VcsDirtyScope> scopes=invalidated.getScopes();
   try {
     checkIfDisposed();
     final DataHolder dataHolder;
+    ProgressIndicator indicator=createProgressIndicator();
 synchronized (myDataLock) {
       dataHolder=new DataHolder((FileHolderComposite)myComposite.copy(),myWorker.copy(),wasEverythingDirty);
       myModifier.enterUpdate();
@@ -15,19 +19,26 @@ synchronized (myDataLock) {
         myUpdateException=null;
         myAdditionalInfo=null;
       }
+      myUpdateChangesProgressIndicator=indicator;
     }
-    final String scopeInString=(!LOG.isDebugEnabled()) ? "" : StringUtil.join(scopes,new Function<VcsDirtyScope,String>(){
-      @Override public String fun(      VcsDirtyScope scope){
-        return scope.toString();
+    if (LOG.isDebugEnabled()) {
+      String scopeInString=StringUtil.join(scopes,new Function<VcsDirtyScope,String>(){
+        @Override public String fun(        VcsDirtyScope scope){
+          return scope.toString();
+        }
       }
-    }
 ,"->\n");
-    LOG.debug("refresh procedure started, everything = " + wasEverythingDirty + " dirty scope: "+ scopeInString);
+      LOG.debug("refresh procedure started, everything: " + wasEverythingDirty + " dirty scope: "+ scopeInString+ "\ncurrent changes: "+ myWorker);
+    }
     dataHolder.notifyStart();
     myChangesViewManager.scheduleRefresh();
-    myUpdateChangesProgressIndicator=createProgressIndicator();
-    iterateScopes(dataHolder,scopes,wasEverythingDirty);
-    final boolean takeChanges=(myUpdateException == null);
+    ProgressManager.getInstance().runProcess(new Runnable(){
+      @Override public void run(){
+        iterateScopes(dataHolder,scopes,wasEverythingDirty);
+      }
+    }
+,indicator);
+    final boolean takeChanges=myUpdateException == null;
     if (takeChanges) {
       updateIgnoredFiles(dataHolder.getComposite());
     }
@@ -45,7 +56,9 @@ synchronized (myDataLock) {
             myWorker=dataHolder.getChangeListWorker();
             myWorker.onAfterWorkerSwitch(oldWorker);
             myModifier.setWorker(myWorker);
-            LOG.debug("refresh procedure finished, unversioned size: " + dataHolder.getComposite().getVFHolder(FileHolder.HolderType.UNVERSIONED).getSize() + "\n changes: "+ myWorker);
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("refresh procedure finished, unversioned size: " + dataHolder.getComposite().getVFHolder(FileHolder.HolderType.UNVERSIONED).getSize() + "\nchanges: "+ myWorker);
+            }
             final boolean statusChanged=!myComposite.equals(dataHolder.getComposite());
             myComposite=dataHolder.getComposite();
             if (statusChanged) {
@@ -74,8 +87,6 @@ synchronized (myDataLock) {
  catch (  DisposedException e) {
   }
 catch (  ProcessCanceledException e) {
-  }
-catch (  RuntimeInterruptedException ignore) {
   }
 catch (  Exception ex) {
     LOG.error(ex);
