@@ -1,12 +1,11 @@
 {
-  int n=tab.length;
-  int stride;
-  if ((stride=NCPU > 1 ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) {
+  int n=tab.length, stride;
+  if ((stride=(NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE) {
     stride=MIN_TRANSFER_STRIDE;
   }
   if (nextTab == null) {
     try {
-      @SuppressWarnings({"rawtypes","unchecked"}) Node<K,V>[] nt=(Node<K,V>[])new Node[n << 1];
+      @SuppressWarnings("unchecked") Node<K,V>[] nt=(Node<K,V>[])new Node<?,?>[n << 1];
       nextTab=nt;
     }
  catch (    Throwable ex) {
@@ -14,67 +13,48 @@
       return;
     }
     nextTable=nextTab;
-    transferOrigin=n;
     transferIndex=n;
-    ForwardingNode<K,V> rev=new ForwardingNode<K,V>(tab,myHashingStrategy);
-    for (int k=n; k > 0; ) {
-      int nextk=k > stride ? k - stride : 0;
-      for (int m=nextk; m < k; ++m) {
-        nextTab[m]=rev;
-      }
-      for (int m=n + nextk; m < n + k; ++m) {
-        nextTab[m]=rev;
-      }
-      U.putOrderedInt(this,TRANSFERORIGIN,k=nextk);
-    }
   }
   int nextn=nextTab.length;
   ForwardingNode<K,V> fwd=new ForwardingNode<K,V>(nextTab,myHashingStrategy);
   boolean advance=true;
   boolean finishing=false;
   for (int i=0, bound=0; ; ) {
+    Node<K,V> f;
+    int fh;
     while (advance) {
-      int nextIndex;
-      int nextBound;
+      int nextIndex, nextBound;
       if (--i >= bound || finishing) {
         advance=false;
       }
- else       if ((nextIndex=transferIndex) <= transferOrigin) {
+ else       if ((nextIndex=transferIndex) <= 0) {
         i=-1;
         advance=false;
       }
- else       if (U.compareAndSwapInt(this,TRANSFERINDEX,nextIndex,nextBound=nextIndex > stride ? nextIndex - stride : 0)) {
+ else       if (U.compareAndSwapInt(this,TRANSFERINDEX,nextIndex,nextBound=(nextIndex > stride ? nextIndex - stride : 0))) {
         bound=nextBound;
         i=nextIndex - 1;
         advance=false;
       }
     }
-    int fh;
-    Node<K,V> f;
     if (i < 0 || i >= n || i + n >= nextn) {
+      int sc;
       if (finishing) {
         nextTable=null;
         table=nextTab;
         sizeCtl=(n << 1) - (n >>> 1);
         return;
       }
-      for (int sc; ; ) {
-        if (U.compareAndSwapInt(this,SIZECTL,sc=sizeCtl,++sc)) {
-          if (sc != -1) {
-            return;
-          }
-          finishing=advance=true;
-          i=n;
-          break;
+      if (U.compareAndSwapInt(this,SIZECTL,sc=sizeCtl,sc - 1)) {
+        if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT) {
+          return;
         }
+        finishing=advance=true;
+        i=n;
       }
     }
  else     if ((f=tabAt(tab,i)) == null) {
-      if (casTabAt(tab,i,null,fwd)) {
-        setTabAt(nextTab,i,null);
-        setTabAt(nextTab,i + n,null);
-        advance=true;
-      }
+      advance=casTabAt(tab,i,null,fwd);
     }
  else     if ((fh=f.hash) == MOVED) {
       advance=true;
@@ -82,8 +62,7 @@
  else {
 synchronized (f) {
         if (tabAt(tab,i) == f) {
-          Node<K,V> ln;
-          Node<K,V> hn;
+          Node<K,V> ln, hn;
           if (fh >= 0) {
             int runBit=fh & n;
             Node<K,V> lastRun=f;
@@ -120,12 +99,9 @@ synchronized (f) {
           }
  else           if (f instanceof TreeBin) {
             TreeBin<K,V> t=(TreeBin<K,V>)f;
-            TreeNode<K,V> lo=null;
-            TreeNode<K,V> loTail=null;
-            TreeNode<K,V> hi=null;
-            TreeNode<K,V> hiTail=null;
-            int lc=0;
-            int hc=0;
+            TreeNode<K,V> lo=null, loTail=null;
+            TreeNode<K,V> hi=null, hiTail=null;
+            int lc=0, hc=0;
             for (Node<K,V> e=t.first; e != null; e=e.next) {
               int h=e.hash;
               TreeNode<K,V> p=new TreeNode<K,V>(h,e.key,e.val,null,null,myHashingStrategy);
@@ -150,8 +126,8 @@ synchronized (f) {
                 ++hc;
               }
             }
-            ln=lc <= UNTREEIFY_THRESHOLD ? untreeify(lo) : hc != 0 ? new TreeBin<K,V>(lo,myHashingStrategy) : t;
-            hn=hc <= UNTREEIFY_THRESHOLD ? untreeify(hi) : lc != 0 ? new TreeBin<K,V>(hi,myHashingStrategy) : t;
+            ln=(lc <= UNTREEIFY_THRESHOLD) ? untreeify(lo) : (hc != 0) ? new TreeBin<K,V>(lo,myHashingStrategy) : t;
+            hn=(hc <= UNTREEIFY_THRESHOLD) ? untreeify(hi) : (lc != 0) ? new TreeBin<K,V>(hi,myHashingStrategy) : t;
             setTabAt(nextTab,i,ln);
             setTabAt(nextTab,i + n,hn);
             setTabAt(tab,i,fwd);
