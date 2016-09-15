@@ -1,27 +1,48 @@
 {
-  final List<FileReference> referencesList=new ArrayList<FileReference>();
-  String separatorString=getSeparatorString();
-  int sepLen=separatorString.length();
-  int currentSlash=-sepLen;
-  while (currentSlash + sepLen < str.length() && Character.isWhitespace(str.charAt(currentSlash + sepLen))) {
-    currentSlash++;
+  int wsHead=0;
+  int wsTail=0;
+  LiteralTextEscaper<? extends PsiLanguageInjectionHost> escaper;
+  TextRange valueRange;
+  CharSequence decoded;
+  if (myElement instanceof PsiLanguageInjectionHost && !StringUtil.startsWith(myElement.getText(),startInElement,str)) {
+    escaper=((PsiLanguageInjectionHost)myElement).createLiteralTextEscaper();
+    valueRange=ElementManipulators.getValueTextRange(myElement);
+    StringBuilder sb=new StringBuilder();
+    escaper.decode(valueRange,sb);
+    decoded=sb;
+    wsHead+=Math.max(0,startInElement - valueRange.getStartOffset());
   }
-  if (currentSlash + sepLen + sepLen < str.length() && str.substring(currentSlash + sepLen,currentSlash + sepLen + sepLen).equals(separatorString)) {
-    currentSlash+=sepLen;
+ else {
+    escaper=null;
+    decoded=str;
+    valueRange=TextRange.from(startInElement,decoded.length());
+  }
+  List<FileReference> referencesList=ContainerUtil.newArrayList();
+  for (int i=wsHead; i < decoded.length() && Character.isWhitespace(decoded.charAt(i)); i++) {
+    wsHead++;
+  }
+  for (int i=decoded.length() - 1; i >= 0 && Character.isWhitespace(decoded.charAt(i)); i--) {
+    wsTail++;
   }
   int index=0;
-  if (str.equals(separatorString)) {
-    final FileReference fileReference=createFileReference(new TextRange(startInElement,startInElement + sepLen),index++,separatorString);
-    referencesList.add(fileReference);
+  int curSep=findSeparatorOffset(decoded,wsHead);
+  int sepLen=curSep >= wsHead ? findSeparatorLength(decoded,curSep) : 0;
+  if (curSep >= 0 && decoded.length() == wsHead + sepLen + wsTail) {
+    TextRange r=TextRange.create(startInElement,offset(curSep + Math.max(0,sepLen - 1),escaper,valueRange) + 1);
+    referencesList.add(createFileReference(r,index++,decoded.subSequence(curSep,curSep + sepLen).toString()));
   }
-  while (true) {
-    final int nextSlash=str.indexOf(separatorString,currentSlash + sepLen);
-    final String subreferenceText=nextSlash > 0 ? str.substring(currentSlash + sepLen,nextSlash) : str.substring(currentSlash + sepLen);
-    final FileReference ref=createFileReference(new TextRange(startInElement + currentSlash + sepLen,startInElement + (nextSlash > 0 ? nextSlash : str.length())),index++,subreferenceText);
-    referencesList.add(ref);
-    if ((currentSlash=nextSlash) < 0) {
-      break;
-    }
+  curSep=curSep == wsHead ? curSep + sepLen : wsHead;
+  sepLen=0;
+  while (curSep >= 0) {
+    int nextSep=findSeparatorOffset(decoded,curSep + sepLen);
+    int start=curSep + sepLen;
+    int endTrimmed=nextSep > 0 ? nextSep : Math.max(start,decoded.length() - wsTail);
+    int endInclusive=nextSep > 0 ? nextSep : Math.max(start,decoded.length() - 1 - wsTail);
+    String refText=index == 0 && nextSep < 0 && !StringUtil.contains(decoded,str) ? str : decoded.subSequence(start,endTrimmed).toString();
+    TextRange r=new TextRange(offset(start,escaper,valueRange),offset(endInclusive,escaper,valueRange) + (nextSep < 0 && refText.length() > 0 ? 1 : 0));
+    referencesList.add(createFileReference(r,index++,refText));
+    curSep=nextSep;
+    sepLen=curSep > 0 ? findSeparatorLength(decoded,curSep) : 0;
   }
   return referencesList;
 }
