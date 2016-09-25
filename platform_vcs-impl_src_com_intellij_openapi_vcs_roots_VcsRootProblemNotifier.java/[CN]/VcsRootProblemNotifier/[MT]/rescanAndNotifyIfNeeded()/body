@@ -1,7 +1,4 @@
 {
-  if (!mySettings.SHOW_VCS_ERROR_NOTIFICATIONS) {
-    return;
-  }
   Collection<VcsRootError> errors=scan();
   if (errors.isEmpty()) {
 synchronized (NOTIFICATION_LOCK) {
@@ -9,15 +6,19 @@ synchronized (NOTIFICATION_LOCK) {
     }
     return;
   }
-  Collection<VcsRootError> unregisteredRoots=getUnregisteredRoots(errors);
+  Collection<VcsRootError> importantUnregisteredRoots=getImportantUnregisteredMappings(errors);
   Collection<VcsRootError> invalidRoots=getInvalidRoots(errors);
-  String title=makeTitle(unregisteredRoots,invalidRoots);
-  String description=makeDescription(unregisteredRoots,invalidRoots);
+  List<String> unregRootPaths=ContainerUtil.map(importantUnregisteredRoots,PATH_FROM_ROOT_ERROR);
+  if (invalidRoots.isEmpty() && (importantUnregisteredRoots.isEmpty() || myReportedUnregisteredRoots.containsAll(unregRootPaths))) {
+    return;
+  }
+  myReportedUnregisteredRoots.addAll(unregRootPaths);
+  String title=makeTitle(importantUnregisteredRoots,invalidRoots);
+  String description=makeDescription(importantUnregisteredRoots,invalidRoots);
 synchronized (NOTIFICATION_LOCK) {
     expireNotification();
-    NotificationGroup notificationGroup=invalidRoots.isEmpty() ? MINOR_NOTIFICATION : IMPORTANT_ERROR_NOTIFICATION;
-    NotificationType notificationType=invalidRoots.isEmpty() ? INFORMATION : ERROR;
-    myNotification=notificationGroup.createNotification(title,description,notificationType,new MyNotificationListener(myProject,mySettings));
-    myNotification.notify(myProject);
+    NotificationListener listener=new MyNotificationListener(myProject,mySettings,myVcsManager,importantUnregisteredRoots);
+    VcsNotifier notifier=VcsNotifier.getInstance(myProject);
+    myNotification=invalidRoots.isEmpty() ? notifier.notifyMinorInfo(title,description,listener) : notifier.notifyError(title,description,listener);
   }
 }
