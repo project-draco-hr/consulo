@@ -1,2 +1,39 @@
 {
+  Application app=ApplicationManager.getApplication();
+  if (app.isDispatchThread()) {
+    Transaction transaction=new Transaction(runnable,getContextTransaction(),app);
+    if (!canRunTransactionNow(transaction,true)) {
+      String message="Cannot run synchronous submitTransactionAndWait from invokeLater. " + "Please use asynchronous submit*Transaction. " + "See TransactionGuard FAQ for details.\nTransaction: "+ runnable;
+      if (!isWriteSafeModality(ModalityState.current())) {
+        message+="\nUnsafe modality: " + ModalityState.current();
+      }
+      LOG.error(message);
+    }
+    runSyncTransaction(transaction);
+    return;
+  }
+  if (app.isReadAccessAllowed()) {
+    throw new IllegalStateException("submitTransactionAndWait should not be invoked from a read action");
+  }
+  final Semaphore semaphore=new Semaphore();
+  semaphore.down();
+  final Throwable[] exception={null};
+  submitTransaction(Disposer.newDisposable("never disposed"),getContextTransaction(),new Runnable(){
+    @Override public void run(){
+      try {
+        runnable.run();
+      }
+ catch (      Throwable e) {
+        exception[0]=e;
+      }
+ finally {
+        semaphore.up();
+      }
+    }
+  }
+);
+  semaphore.waitFor();
+  if (exception[0] != null) {
+    throw new RuntimeException(exception[0]);
+  }
 }
