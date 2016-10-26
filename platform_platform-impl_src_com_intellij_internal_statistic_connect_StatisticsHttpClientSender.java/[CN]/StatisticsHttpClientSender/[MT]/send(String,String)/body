@@ -1,28 +1,27 @@
 {
-  PostMethod post=null;
-  try {
-    HttpClient httpclient=new HttpClient();
-    post=new PostMethod(url);
-    post.setRequestBody(new NameValuePair[]{new NameValuePair("content",content),new NameValuePair("uuid",UpdateChecker.getInstallationUID(PropertiesComponent.getInstance()))});
-    httpclient.executeMethod(post);
-    if (post.getStatusCode() != HttpStatus.SC_OK) {
-      throw new StatServiceException("Error during data sending... Code: " + post.getStatusCode());
+  try (CloseableHttpClient httpClient=HttpClients.createDefault()){
+    HttpPost post=new HttpPost(url);
+    List<NameValuePair> pairs=new ArrayList<>(2);
+    pairs.add(new BasicNameValuePair("content",content));
+    pairs.add(new BasicNameValuePair("uuid",PermanentInstallationID.get()));
+    post.setEntity(new UrlEncodedFormEntity(pairs));
+    httpClient.execute(post,new ResponseHandler<Object>(){
+      @Override public Object handleResponse(      HttpResponse response) throws ClientProtocolException, IOException {
+        int statusCode=response.getStatusLine().getStatusCode();
+        if (statusCode != HttpStatus.SC_OK) {
+          throw new StatServiceException("Error during data sending... Code: " + statusCode);
+        }
+        final Header errors=response.getFirstHeader("errors");
+        if (errors != null) {
+          final String value=errors.getValue();
+          throw new StatServiceException("Error during updating statistics " + (!StringUtil.isEmptyOrSpaces(value) ? " : " + value : ""));
+        }
+        return null;
+      }
     }
-    final Header errors=post.getResponseHeader("errors");
-    if (errors != null) {
-      final String value=errors.getValue();
-      throw new StatServiceException("Error during updating statistics " + (!StringUtil.isEmptyOrSpaces(value) ? " : " + value : ""));
-    }
+);
   }
- catch (  StatServiceException e) {
-    throw e;
-  }
-catch (  Exception e) {
+ catch (  Exception e) {
     throw new StatServiceException("Error during data sending...",e);
-  }
- finally {
-    if (post != null) {
-      post.releaseConnection();
-    }
   }
 }
