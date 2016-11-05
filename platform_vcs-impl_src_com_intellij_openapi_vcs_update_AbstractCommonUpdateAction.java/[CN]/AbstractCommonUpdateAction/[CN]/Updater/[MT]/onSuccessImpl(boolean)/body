@@ -1,6 +1,7 @@
 {
-  if ((!myProject.isOpen()) || myProject.isDisposed()) {
+  if (!myProject.isOpen() || myProject.isDisposed()) {
     ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
+    LocalHistory.getInstance().putSystemLabel(myProject,LOCAL_HISTORY_ACTION);
     return;
   }
   boolean continueChain=false;
@@ -12,14 +13,17 @@
   for (  final UpdateSession updateSession : myUpdateSessions) {
     updateSession.onRefreshFilesCompleted();
   }
+  if (myLocalHistoryAction != null) {
+    myLocalHistoryAction.finish();
+  }
   myAfter=LocalHistory.getInstance().putSystemLabel(myProject,"After update");
   if (myActionInfo.canChangeFileStatus()) {
-    final List<VirtualFile> files=new ArrayList<VirtualFile>();
+    final List<VirtualFile> files=new ArrayList<>();
     final RemoteRevisionsCache revisionsCache=RemoteRevisionsCache.getInstance(myProject);
     revisionsCache.invalidate(myUpdatedFiles);
     UpdateFilesHelper.iterateFileGroupFiles(myUpdatedFiles,new UpdateFilesHelper.Callback(){
-      public void onFile(      final String filePath,      final String groupId){
-        @NonNls final String path=VfsUtil.pathToUrl(filePath.replace(File.separatorChar,'/'));
+      @Override public void onFile(      final String filePath,      final String groupId){
+        @NonNls final String path=VfsUtilCore.pathToUrl(filePath.replace(File.separatorChar,'/'));
         final VirtualFile file=VirtualFileManager.getInstance().findFileByUrl(path);
         if (file != null) {
           files.add(file);
@@ -29,9 +33,9 @@
 );
     myDirtyScopeManager.filesDirty(files,null);
   }
-  final boolean updateSuccess=(!someSessionWasCancelled) && (myGroupedExceptions.isEmpty());
+  final boolean updateSuccess=!someSessionWasCancelled && myGroupedExceptions.isEmpty();
   WaitForProgressToShow.runOrInvokeLaterAboveProgress(new Runnable(){
-    public void run(){
+    @Override public void run(){
       if (myProject.isDisposed()) {
         ProjectManagerEx.getInstanceEx().unblockReloadingProjectOnExternalChanges();
         return;
@@ -58,9 +62,14 @@
         }
       }
  else       if (!myUpdatedFiles.isEmpty()) {
-        showUpdateTree(continueChainFinal && updateSuccess && noMerged,someSessionWasCancelled);
+        final UpdateInfoTree tree=showUpdateTree(continueChainFinal && updateSuccess && noMerged,someSessionWasCancelled);
         final CommittedChangesCache cache=CommittedChangesCache.getInstance(myProject);
-        cache.processUpdatedFiles(myUpdatedFiles);
+        cache.processUpdatedFiles(myUpdatedFiles,new Consumer<List<CommittedChangeList>>(){
+          @Override public void consume(          List<CommittedChangeList> incomingChangeLists){
+            tree.setChangeLists(incomingChangeLists);
+          }
+        }
+);
         if (someSessionWasCancelled) {
           VcsBalloonProblemNotifier.showOverChangesView(myProject,"VCS Update Incomplete" + prepareNotificationWithUpdateInfo(),MessageType.WARNING);
         }

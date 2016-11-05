@@ -1,34 +1,21 @@
 {
   try {
-    final ArrayList<FilePathUnderVcs> filesConverted=filesDirty == null ? null : new ArrayList<FilePathUnderVcs>(filesDirty.size());
-    final ArrayList<FilePathUnderVcs> dirsConverted=dirsRecursivelyDirty == null ? null : new ArrayList<FilePathUnderVcs>(dirsRecursivelyDirty.size());
-    ApplicationManager.getApplication().runReadAction(new Runnable(){
-      public void run(){
-        convertPaths(filesDirty,filesConverted);
-        convertPaths(dirsRecursivelyDirty,dirsConverted);
-      }
-    }
-);
-    final boolean haveStuff=filesConverted != null && !filesConverted.isEmpty() || dirsConverted != null && !dirsConverted.isEmpty();
-    if (!haveStuff)     return;
+    final MultiMap<AbstractVcs,FilePath> filesConverted=groupByVcs(filesDirty);
+    final MultiMap<AbstractVcs,FilePath> dirsConverted=groupByVcs(dirsRecursivelyDirty);
+    if (filesConverted.isEmpty() && dirsConverted.isEmpty())     return;
     if (LOG.isDebugEnabled()) {
-      LOG.debug("paths dirty: " + filesConverted + "; "+ dirsConverted+ "; "+ ReflectionUtil.findCallerClass(2));
+      LOG.debug("dirty files: " + toString(filesConverted) + "; dirty dirs: "+ toString(dirsConverted)+ "; "+ findFirstInterestingCallerClass());
     }
-    takeDirt(new Consumer<DirtBuilder>(){
-      public void consume(      final DirtBuilder dirt){
-        if (filesConverted != null) {
-          for (          FilePathUnderVcs root : filesConverted) {
-            dirt.addDirtyFile(root);
-          }
-        }
-        if (dirsConverted != null) {
-          for (          FilePathUnderVcs root : dirsConverted) {
-            dirt.addDirtyDirRecursively(root);
-          }
-        }
-      }
+    boolean hasSomethingDirty;
+synchronized (LOCK) {
+      if (!myReady)       return;
+      markDirty(myDirtBuilder,filesConverted,false);
+      markDirty(myDirtBuilder,dirsConverted,true);
+      hasSomethingDirty=!myDirtBuilder.isEmpty();
     }
-);
+    if (hasSomethingDirty) {
+      myChangeListManager.scheduleUpdate();
+    }
   }
  catch (  ProcessCanceledException ignore) {
   }
